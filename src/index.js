@@ -1,7 +1,15 @@
-import { validateProperty, logger, getVersion, getGitInfo } from './utils.js'
+import {
+  validateProperty,
+  logger,
+  getVersion,
+  getGitInfo,
+  parseClient,
+  verifyDiscordID
+} from './utils.js'
 import requestHandler from './api/index.js'
 import config from '../config.js'
 import WebSocketServer from '@performanc/pwsl-server'
+import sessionManager from './managers/sessionManager.js'
 import http from 'node:http'
 
 class NodelinkServer {
@@ -11,7 +19,7 @@ class NodelinkServer {
     this.options = options
     this.server = null
     this.socket = null
-    this.sessions = new Map()
+    this.sessions = new sessionManager()
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     logger('info', 'Server', `version ${this.version}`)
@@ -36,16 +44,91 @@ class NodelinkServer {
   _createServer() {
     this.server = http.createServer((req, res) => requestHandler(this, req, res))
     this.socket = new WebSocketServer({ noServer: true })
-    //this.socket.on('/v4/websocket', ...)
+    this.socket.on('/v4/websocket', (socket, request, clientInfo) => {
+      const sessionId = this.sessions.create(request, socket, clientInfo)
+      socket.on('close', (code, reason) => {
+        if (!this.sessions.has(sessionId)) return
+        logger(
+          'info',
+          'Server',
+          `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m disconnected with code ${code} and reason: ${reason || 'without reason'}`
+        )
+        this.sessions.delete(sessionId)
+      })
+
+      socket.send(
+        JSON.stringify({
+          op: 'ready',
+          resumed: false,
+          sessionId
+        })
+      )
+    })
     this.server.on('upgrade', (request, socket, head) => {
+      const { remoteAddress, remotePort } = request.socket
+      const isInternal =
+        /^(::1|localhost|127\.0\.0\.1)/.test(remoteAddress) ||
+        /^::ffff:127\.0\.0\.1/.test(remoteAddress)
+      const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort})`
       const { headers } = request
-      if (headers.authorization !== this.options.password) {
+
+      if (headers.authorization !== this.options.server.password) {
         logger(
           'warn',
           'Server',
-          `Unauthorized connection attempt from ${request.socket.remoteAddress} - Invalid password provided`
+          `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
         )
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+        return socket.destroy()
+      }
+
+      const clientInfo = parseClient(headers['user-agent'])
+      if (!clientInfo) {
+        logger(
+          'warn',
+          'Server',
+          `Unauthorized connection attempt from ${clientAddress} - Invalid user agent provided`
+        )
+        socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
+        return socket.destroy()
+      }
+
+      const { pathname } = new URL(request.url, `http://${request.headers.host}`)
+      if (pathname === '/v4/websocket') {
+        if (!request.headers['user-id']) {
+          logger(
+            'warn',
+            'Server',
+            `Unauthorized connection attempt from ${clientAddress} - Missing user ID`
+          )
+          socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
+          return socket.destroy()
+        }
+        if (!verifyDiscordID(request.headers['user-id'])) {
+          logger(
+            'warn',
+            'Server',
+            `Unauthorized connection attempt from ${clientAddress} - Invalid user ID provided`
+          )
+          socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
+          return socket.destroy()
+        }
+        logger(
+          'info',
+          'Server',
+          `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
+        )
+
+        this.socket.handleUpgrade(request, socket, head, {}, ws =>
+          this.socket.emit('/v4/websocket', ws, request, clientInfo)
+        )
+      } else {
+        logger(
+          'warn',
+          'Server',
+          `Unauthorized connection attempt from ${clientAddress} - Invalid path provided`
+        )
+        socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
         return socket.destroy()
       }
     })

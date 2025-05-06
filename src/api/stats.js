@@ -47,6 +47,5 @@ function handler(nodelink, req, res, sendResponse) {
 }
 
 export default {
-  handler,
-  methods: ['GET']
+  handler
 }

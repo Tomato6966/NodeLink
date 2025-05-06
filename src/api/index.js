@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { logger, sendResponse, verifyMethod } from '../utils.js'
+import { PATH_VERSION } from '../constants.js'
 import fs from 'node:fs/promises'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -12,7 +13,7 @@ async function loadRoutes() {
 
   for (const file of routeFiles) {
     if (file !== 'index.js' && file.endsWith('.js')) {
-      const routeName = file.replace('.js', '')
+      const routeName = file.replace('.js', '').toLowerCase()
       let pathname
 
       if (routeName === 'version') {
@@ -20,10 +21,10 @@ async function loadRoutes() {
       } else if (routeName.includes('.')) {
         const parts = routeName.split('.')
         pathname = new RegExp(
-          `^/v4/${parts.map(part => (part === 'id' ? '[A-Za-z0-9]+' : part)).join('/')}$`
+          `^/${PATH_VERSION}/${parts.map(part => (part === 'id' ? '[A-Za-z0-9]+' : part)).join('/')}$`
         )
       } else {
-        pathname = `/v4/${routeName}`
+        pathname = `/${PATH_VERSION}/${routeName}`
       }
 
       const filePath = join(__dirname, file)
@@ -59,10 +60,40 @@ async function requestHandler(nodelink, req, res) {
     return
   }
 
+  let body = ''
+  if (req.method !== 'GET') {
+    await new Promise(resolve => {
+      req.on('data', chunk => {
+        body += chunk.toString()
+      })
+      req.on('end', () => {
+        try {
+          if (req.headers['content-type']?.includes('application/json')) {
+            body = JSON.parse(body)
+          }
+        } catch (error) {
+          logger('error', 'Server', `Failed to parse JSON body: ${error.message}`)
+          // biome-ignore format: off
+          sendResponse(req, res, {
+            timestamp: Date.now(),
+            status: 400,
+            error: 'Invalid JSON',
+            message: error.message || 'Failed to parse JSON body',
+            trace: new Error().stack,
+            path: parsedUrl.pathname
+          }, 400)
+          return
+        }
+        resolve()
+      })
+    })
+  }
+  req.body = body
+
   logger(
     'info',
     'Request',
-    `${req.method} | ${clientAddress} [${req.headers['user-agent']}] - ${parsedUrl.pathname} ${JSON.stringify(req.headers)}`
+    `${req.method} | ${clientAddress} [${req.headers['user-agent']}] - ${parsedUrl.pathname} ${JSON.stringify(req.headers)}${req.body ? `\nBody: ${JSON.stringify(req.body)}` : ''}`
   )
 
   const routeMap = await routeMapPromise
@@ -70,20 +101,24 @@ async function requestHandler(nodelink, req, res) {
   const route = routeMap.get(parsedUrl.pathname)
 
   if (route) {
-    if (!verifyMethod(req, res, route.methods)) return
-    route.handler(nodelink, req, res, sendResponse)
+    if (!verifyMethod(parsedUrl, req, res, route.methods, clientAddress)) return
+    route.handler(nodelink, req, res, sendResponse, parsedUrl)
     return
   }
 
   for (const [pathname, route] of routeMap) {
     if (pathname instanceof RegExp && pathname.test(parsedUrl.pathname)) {
-      if (!verifyMethod(parsedUrl, req, res, route.methods, sendResponse)) return
-      route.handler(nodelink, req, res, sendResponse)
+      if (!verifyMethod(parsedUrl, req, res, route.methods, sendResponse, clientAddress)) return
+      route.handler(nodelink, req, res, sendResponse, parsedUrl)
       return
     }
   }
 
-  logger('warn', 'Server', `Route not found: ${parsedUrl.pathname}`)
+  logger(
+    'warn',
+    'Request',
+    `${req.method} | ${clientAddress} - ${parsedUrl.pathname} not found (response 404)`
+  )
   // biome-ignore format: off
   sendResponse(req, res, {
     timestamp: Date.now(),

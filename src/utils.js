@@ -1,10 +1,11 @@
 import util from 'node:util'
 import zlib from 'node:zlib'
+import crypto from 'node:crypto'
 import { execSync } from 'node:child_process'
+import { SEMVER_PATTERN, DISCORD_ID_REGEX } from './constants.js'
 import packageJson from '../package.json' with { type: 'json' }
 
-const semverPattern =
-  /^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-(?<prerelease>(?:[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)))?(?:\+(?<build>[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/
+const verifyDiscordID = id => DISCORD_ID_REGEX.test(String(id))
 
 function validateProperty(property, validator, errorMessage) {
   if (!validator(property)) {
@@ -30,7 +31,7 @@ function logger(level, ...args) {
 }
 
 function parseSemver(version) {
-  const match = semverPattern.exec(version)
+  const match = SEMVER_PATTERN.exec(version)
   if (!match) return null
   const { major, minor, patch, prerelease, build } = match.groups
   return {
@@ -112,19 +113,181 @@ function getGitInfo() {
   }
 }
 
-function verifyMethod(req, res, expected) {
+function verifyMethod(parsedUrl, req, res, expected, clientAddress) {
   const methods = Array.isArray(expected) ? expected : [expected]
   // biome-ignore format: off
   if (!methods.includes(req.method)) {
+    logger(
+      'warn',
+      'Server',
+      `Method not allowed: ${req.method} ${parsedUrl.pathname} from ${clientAddress}`
+    )
     sendResponse(req, res, {
         timestamp: Date.now(),
         status: 405,
         error: 'Method Not Allowed',
-        message: `Method must be one of ${methods.join(', ')}`
+        message: `Method must be one of ${methods.join(', ')}`,
+        path: parsedUrl.pathname,
       }, 405)
     return false
   }
   return true
 }
 
-export { validateProperty, logger, getVersion, parseSemver, getGitInfo, verifyMethod }
+function decodeTrack(encoded) {
+  const buffer = Buffer.from(encoded, 'base64')
+  let position = 0
+
+  const read = {
+    byte: () => buffer[position++],
+    ushort: () => {
+      const value = buffer.readUInt16BE(position)
+      position += 2
+      return value
+    },
+    int: () => {
+      const value = buffer.readInt32BE(position)
+      position += 4
+      return value
+    },
+    long: () => {
+      const value = buffer.readBigInt64BE(position)
+      position += 8
+      return value
+    },
+    utf: () => {
+      const length = read.ushort()
+      const value = buffer.toString('utf8', position, position + length)
+      position += length
+      return value
+    }
+  }
+
+  const firstInt = read.int()
+  const isVersioned = ((firstInt & 0xc0000000) >> 30) & 1
+  const version = isVersioned ? read.byte() : 1
+
+  return {
+    encoded: encoded,
+    info: {
+      title: read.utf(),
+      author: read.utf(),
+      length: Number(read.long()),
+      identifier: read.utf(),
+      isSeekable: true,
+      isStream: !!read.byte(),
+      uri: version >= 2 && read.byte() ? read.utf() : null,
+      artworkUrl: version === 3 && read.byte() ? read.utf() : null,
+      isrc: version === 3 && read.byte() ? read.utf() : null,
+      sourceName: read.utf(),
+      position: Number(read.long())
+    },
+    pluginInfo: {},
+    userData: {}
+  }
+}
+
+function encodeTrack(track) {
+  const bufferArray = []
+
+  function write(type, value) {
+    if (type === 'byte') bufferArray.push(Buffer.from([value]))
+    if (type === 'ushort') {
+      const buf = Buffer.alloc(2)
+      buf.writeUInt16BE(value)
+      bufferArray.push(buf)
+    }
+    if (type === 'int') {
+      const buf = Buffer.alloc(4)
+      buf.writeInt32BE(value)
+      bufferArray.push(buf)
+    }
+    if (type === 'long') {
+      const buf = Buffer.alloc(8)
+      buf.writeBigInt64BE(BigInt(value))
+      bufferArray.push(buf)
+    }
+    if (type === 'utf') {
+      const strBuf = Buffer.from(value, 'utf8')
+      write('ushort', strBuf.length)
+      bufferArray.push(strBuf)
+    }
+  }
+
+  const version = track.artworkUrl || track.isrc ? 3 : track.uri ? 2 : 1
+
+  const isVersioned = version > 1 ? 1 : 0
+  const firstInt = isVersioned << 30
+  write('int', firstInt)
+
+  if (isVersioned) {
+    write('byte', version)
+  }
+
+  write('utf', track.title)
+  write('utf', track.author)
+  write('long', track.length)
+  write('utf', track.identifier)
+  write('byte', track.isStream ? 1 : 0)
+
+  if (version >= 2) {
+    write('byte', track.uri ? 1 : 0)
+    if (track.uri) write('utf', track.uri)
+  }
+
+  if (version === 3) {
+    write('byte', track.artworkUrl ? 1 : 0)
+    if (track.artworkUrl) write('utf', track.artworkUrl)
+
+    write('byte', track.isrc ? 1 : 0)
+    if (track.isrc) write('utf', track.isrc)
+  }
+
+  write('utf', track.sourceName)
+  write('long', track.position)
+
+  return Buffer.concat(bufferArray).toString('base64')
+}
+
+const generateRandomLetters = l =>
+  Array.from(crypto.randomBytes(l), b =>
+    String.fromCharCode((b % 52) + (b % 52 < 26 ? 65 : 71))
+  ).join('')
+
+function parseClient(agent) {
+  if (typeof agent !== 'string' || !agent.trim()) return null
+
+  const [core, metaPart] = agent.trim().split(' ', 2)
+  const [name, version] = core.split('/')
+  if (!name) return null
+
+  const info = { name }
+  if (version) info.version = version
+  // biome-ignore lint: uses-unsafe-optional-chaining
+  if (metaPart && metaPart.startsWith('(') && metaPart.endsWith(')')) {
+    const meta = metaPart.slice(1, -1)
+    if (meta.startsWith('http')) {
+      info.url = meta
+    } else {
+      const [tag, date] = meta.split('/')
+      if (tag) info.codename = tag
+      if (date) info.releaseDate = date
+    }
+  }
+
+  return info
+}
+
+export {
+  validateProperty,
+  logger,
+  getVersion,
+  parseSemver,
+  getGitInfo,
+  verifyMethod,
+  decodeTrack,
+  encodeTrack,
+  generateRandomLetters,
+  parseClient,
+  verifyDiscordID
+}

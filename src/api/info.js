@@ -1,3 +1,4 @@
+import process from 'node:process'
 import { getVersion } from '../utils.js'
 
 function handler(nodelink, req, res, sendResponse) {
@@ -18,6 +19,5 @@ function handler(nodelink, req, res, sendResponse) {
 }
 
 export default {
-  handler,
-  methods: ['GET']
+  handler
 }

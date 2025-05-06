@@ -5,6 +5,5 @@ function handler(nodelink, req, res) {
 }
 
 export default {
-  handler,
-  methods: ['GET']
+  handler
 }
