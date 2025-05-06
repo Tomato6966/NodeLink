@@ -1,0 +1,16 @@
+{
+  "name": "nodelink",
+  "version": "3.0.0-dev.1",
+  "scripts": {
+    "start": "node --dns-result-order=ipv4first --openssl-legacy-provider src/index.js"
+  },
+  "type": "module",
+  "main": "src/index.js",
+  "dependencies": {
+    "@performanc/pwsl-server": "github:performanc/internals#PWSL-server",
+    "@performanc/voice": "^2.1.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.4"
+  }
+}
