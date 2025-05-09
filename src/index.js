@@ -10,6 +10,7 @@ import requestHandler from './api/index.js'
 import config from '../config.js'
 import WebSocketServer from '@performanc/pwsl-server'
 import sessionManager from './managers/sessionManager.js'
+import sourceManager from './managers/sourceManager.js'
 import http from 'node:http'
 
 class NodelinkServer {
@@ -20,6 +21,7 @@ class NodelinkServer {
     this.server = null
     this.socket = null
     this.sessions = new sessionManager()
+    this.sources = new sourceManager(this)
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     logger('info', 'Server', `version ${this.version}`)
@@ -136,11 +138,12 @@ class NodelinkServer {
   _listen() {
     const port = this.options.server.port
     this.server.listen(port, () => {
-      logger('info', 'Server', `running at host ${this.options.server.host} on port ${port}`)
+      logger('started', 'Server', `running at host ${this.options.server.host} on port ${port}`)
     })
   }
-  start() {
+  async start() {
     this._validateConfig()
+    await this.sources.loadFolder()
     this._createServer()
     this._listen()
     return this

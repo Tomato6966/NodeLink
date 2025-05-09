@@ -1,5 +1,9 @@
 import util from 'node:util'
+import http from 'node:http'
+import https from 'node:https'
+import http2 from 'node:http2'
 import zlib from 'node:zlib'
+import { URL } from 'node:url'
 import crypto from 'node:crypto'
 import { execSync } from 'node:child_process'
 import { SEMVER_PATTERN, DISCORD_ID_REGEX } from './constants.js'
@@ -15,11 +19,14 @@ function validateProperty(property, validator, errorMessage) {
 
 function logger(level, ...args) {
   const levels = {
-    info: { label: 'INFO', color: '\x1b[1m\x1b[32m' },
-    warn: { label: 'WARN', color: '\x1b[1m\x1b[33m' },
-    error: { label: 'ERROR', color: '\x1b[1m\x1b[31m' },
-    debug: { label: 'DEBUG', color: '\x1b[1m\x1b[34m' }
+    info: { label: 'INFO', color: '\x1b[1m\x1b[3;42m' },
+    warn: { label: 'WARN', color: '\x1b[1m\x1b[3;43m' },
+    error: { label: 'ERROR', color: '\x1b[1m\x1b[3;41m' },
+    debug: { label: 'DEBUG', color: '\x1b[1m\x1b[3;45m' },
+    sources: { label: 'SOURCES', color: '\x1b[1m\x1b[3;46m' },
+    started: { label: 'STARTED', color: '\x1b[1m\x1b[3;44m' }
   }
+
   const resetColor = '\x1b[0m'
   const time = new Date().toISOString().slice(11, 23)
   const lvl = levels[level] || levels.info
@@ -53,7 +60,7 @@ function getVersion(type = 'string') {
 }
 
 export function sendResponse(req, res, data, status) {
-  const headers = { 'Nodelink-Api-Version': '4' }
+  const headers = {}
 
   if (!data) {
     res.writeHead(status, headers)
@@ -76,7 +83,7 @@ export function sendResponse(req, res, data, status) {
       headers['Content-Encoding'] = type
       method(jsonData, (err, result) => {
         if (err) {
-          res.writeHead(500, { 'Nodelink-Api-Version': '4' })
+          res.writeHead(500, {})
           res.end()
           return
         }
@@ -278,6 +285,209 @@ function parseClient(agent) {
   return info
 }
 
+const httpAgent = new http.Agent({ keepAlive: true })
+const httpsAgent = new https.Agent({ keepAlive: true })
+
+async function http1makeRequest(url, options = {}) {
+  const {
+    method = 'GET',
+    headers: customHeaders = {},
+    body,
+    timeout = 30000, // Timeout padrão de 30s
+    streamOnly = false,
+    disableBodyCompression = false
+  } = options
+
+  return new Promise((resolve, reject) => {
+    const lib = url.startsWith('https') ? https : http
+    const agent = url.startsWith('https') ? httpsAgent : httpAgent
+    const headers = {
+      'Accept-Encoding': 'br, gzip, deflate',
+      'User-Agent': 'Mozilla/5.0',
+      DNT: '1',
+      ...customHeaders,
+      ...(body
+        ? {
+            'Content-Type': 'application/json',
+            ...(!disableBodyCompression && { 'Content-Encoding': 'gzip' })
+          }
+        : {})
+    }
+
+    const reqOptions = { method, headers, agent, timeout }
+    const req = lib.request(url, reqOptions, async res => {
+      let stream = res
+      const enc = res.headers['content-encoding']
+
+      try {
+        if (enc === 'br') stream = res.pipe(zlib.createBrotliDecompress())
+        else if (enc === 'gzip') stream = res.pipe(zlib.createGunzip())
+        else if (enc === 'deflate') stream = res.pipe(zlib.createInflate())
+
+        if (streamOnly) {
+          return resolve({ statusCode: res.statusCode, headers: res.headers, stream })
+        }
+
+        const chunks = []
+        for await (const chunk of stream) {
+          chunks.push(chunk)
+        }
+        const text = Buffer.concat(chunks).toString()
+        const isJson = (res.headers['content-type'] || '').startsWith('application/json')
+        resolve({
+          statusCode: res.statusCode,
+          headers: res.headers,
+          body: isJson ? JSON.parse(text) : text
+        })
+      } catch (err) {
+        resolve({ error: err.message })
+      }
+    })
+
+    req.on('error', err => reject(new Error(`Request error: ${err.message}`)))
+    req.on('timeout', () => {
+      req.destroy()
+      reject(new Error('Request timeout'))
+    })
+
+    if (body) {
+      const payload = JSON.stringify(body)
+      if (disableBodyCompression) {
+        req.end(payload)
+      } else {
+        zlib.gzip(payload, (err, data) => {
+          if (err) return reject(new Error(`Gzip error: ${err.message}`))
+          req.end(data)
+        })
+      }
+    } else {
+      req.end()
+    }
+  })
+}
+
+async function makeRequest(url, options = {}) {
+  if (process.isBun || process.versions.deno) {
+    return http1makeRequest(url, options)
+  }
+
+  const {
+    method = 'GET',
+    headers: customHeaders = {},
+    body,
+    timeout = 30000, // Timeout padrão de 30s
+    streamOnly = false,
+    disableBodyCompression = false
+  } = options
+
+  return new Promise((resolve, reject) => {
+    let session
+    try {
+      const parsed = new URL(url)
+      session = http2.connect(parsed.origin)
+
+      session.on('error', err => {
+        session.close()
+        reject(new Error(`HTTP/2 session error: ${err.message}`))
+      })
+
+      const headers = {
+        ':method': method,
+        ':path': parsed.pathname + parsed.search,
+        'Accept-Encoding': 'br, gzip, deflate',
+        'User-Agent': 'Mozilla/5.0',
+        DNT: '1',
+        ...customHeaders,
+        ...(body
+          ? {
+              'Content-Type': 'application/json',
+              ...(!disableBodyCompression && { 'Content-Encoding': 'gzip' })
+            }
+          : {})
+      }
+
+      const req = session.request(headers)
+
+      if (timeout) {
+        req.setTimeout(timeout, () => {
+          req.close()
+          session.close()
+          reject(new Error('Request timeout'))
+        })
+      }
+
+      req.on('error', err => {
+        session.close()
+        reject(new Error(`HTTP/2 request error: ${err.message}`))
+      })
+
+      req.on('response', async responseHeaders => {
+        let stream = req
+        const enc = responseHeaders['content-encoding']
+
+        try {
+          if (enc === 'br') stream = req.pipe(zlib.createBrotliDecompress())
+          else if (enc === 'gzip') stream = req.pipe(zlib.createGunzip())
+          else if (enc === 'deflate') stream = req.pipe(zlib.createInflate())
+
+          if (method === 'HEAD') {
+            session.close()
+            return resolve({
+              statusCode: responseHeaders[':status'],
+              headers: responseHeaders
+            })
+          }
+
+          if (streamOnly) {
+            stream.on('end', () => session.close())
+            return resolve({
+              statusCode: responseHeaders[':status'],
+              headers: responseHeaders,
+              stream
+            })
+          }
+
+          const chunks = []
+          for await (const chunk of stream) {
+            chunks.push(chunk)
+          }
+          const text = Buffer.concat(chunks).toString()
+          const isJson = (responseHeaders['content-type'] || '').startsWith('application/json')
+          resolve({
+            statusCode: responseHeaders[':status'],
+            headers: responseHeaders,
+            body: isJson ? JSON.parse(text) : text
+          })
+        } catch (err) {
+          resolve({ error: err.message })
+        } finally {
+          session.close()
+        }
+      })
+
+      if (body) {
+        const payload = JSON.stringify(body)
+        if (disableBodyCompression) {
+          req.end(payload)
+        } else {
+          zlib.gzip(payload, (err, data) => {
+            if (err) {
+              session.close()
+              return reject(new Error(`Gzip error: ${err.message}`))
+            }
+            req.end(data)
+          })
+        }
+      } else {
+        req.end()
+      }
+    } catch (err) {
+      if (session) session.close()
+      reject(new Error(`Setup error: ${err.message}`))
+    }
+  })
+}
+
 export {
   validateProperty,
   logger,
@@ -289,5 +499,7 @@ export {
   encodeTrack,
   generateRandomLetters,
   parseClient,
-  verifyDiscordID
+  verifyDiscordID,
+  makeRequest,
+  http1makeRequest
 }

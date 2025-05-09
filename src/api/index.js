@@ -30,7 +30,6 @@ async function loadRoutes() {
       const filePath = join(__dirname, file)
       const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
       const routeModule = await import(fileUrl)
-
       routeMap.set(pathname, {
         handler: routeModule.default.handler,
         methods: routeModule.default.methods || ['GET']
@@ -55,7 +54,7 @@ async function requestHandler(nodelink, req, res) {
       'Server',
       `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
     )
-    res.writeHead(401, { 'Content-Type': 'text/plain', 'Nodelink-Api-Version': '4' })
+    res.writeHead(401, { 'Content-Type': 'text/plain' })
     res.end('Unauthorized')
     return
   }

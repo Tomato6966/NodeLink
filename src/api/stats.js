@@ -40,7 +40,7 @@ function handler(nodelink, req, res, sendResponse) {
   const cpu = {
     cores,
     systemLoad: load,
-    lavalinkLoad: (load / cores).toFixed(2)
+    NodelinkLoad: (load / cores).toFixed(2)
   }
 
   sendResponse(req, res, { players, playingPlayers, uptime, memory, cpu, frameStats }, 200)
