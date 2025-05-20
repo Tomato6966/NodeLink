@@ -9,6 +9,12 @@ export default {
   sources: {
     soundcloud: {
       enabled: true
+    },
+    local: {
+      enabled: true
     }
+  },
+  audio: {
+    encryption: 'aead_aes256_gcm_rtpsize'
   }
 }

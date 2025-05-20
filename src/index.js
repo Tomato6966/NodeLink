@@ -20,10 +20,14 @@ class NodelinkServer {
     this.options = options
     this.server = null
     this.socket = null
-    this.sessions = new sessionManager()
+    this.sessions = new sessionManager(this)
     this.sources = new sourceManager(this)
     this.version = getVersion()
     this.gitInfo = getGitInfo()
+    this.statistics = {
+      players: 0,
+      playingPlayers: 0
+    }
     logger('info', 'Server', `version ${this.version}`)
     logger(
       'info',
@@ -83,13 +87,12 @@ class NodelinkServer {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
         return socket.destroy()
       }
-
-      const clientInfo = parseClient(headers['user-agent'])
+      const clientInfo = parseClient(headers['client-name'])
       if (!clientInfo) {
         logger(
           'warn',
           'Server',
-          `Unauthorized connection attempt from ${clientAddress} - Invalid user agent provided`
+          `Unauthorized connection attempt from ${clientAddress} - Invalid client-name provided`
         )
         socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
         return socket.destroy()

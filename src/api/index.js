@@ -20,9 +20,8 @@ async function loadRoutes() {
         pathname = '/version'
       } else if (routeName.includes('.')) {
         const parts = routeName.split('.')
-        pathname = new RegExp(
-          `^/${PATH_VERSION}/${parts.map(part => (part === 'id' ? '[A-Za-z0-9]+' : part)).join('/')}$`
-        )
+        const basePattern = parts.map(part => (part === 'id' ? '[A-Za-z0-9]+' : part)).join('/')
+        pathname = new RegExp(`^/${PATH_VERSION}/${basePattern}(?:/[A-Za-z0-9]+)?/?$`)
       } else {
         pathname = `/${PATH_VERSION}/${routeName}`
       }
@@ -79,8 +78,8 @@ async function requestHandler(nodelink, req, res) {
             error: 'Invalid JSON',
             message: error.message || 'Failed to parse JSON body',
             trace: new Error().stack,
-            path: parsedUrl.pathname
-          }, 400)
+            path: parsedUrl.pathname,
+          }, 400);
           return
         }
         resolve()
@@ -89,6 +88,8 @@ async function requestHandler(nodelink, req, res) {
   }
   req.body = body
 
+  req.headers.authorization = '[REDACTED]'
+  req.headers.host = '[REDACTED]'
   logger(
     'info',
     'Request',
@@ -96,7 +97,6 @@ async function requestHandler(nodelink, req, res) {
   )
 
   const routeMap = await routeMapPromise
-
   const route = routeMap.get(parsedUrl.pathname)
 
   if (route) {
@@ -125,8 +125,8 @@ async function requestHandler(nodelink, req, res) {
     error: 'Not Found',
     trace: new Error().stack,
     message: 'The requested route was not found.',
-    path: parsedUrl.pathname
-  }, 404)
+    path: parsedUrl.pathname,
+  }, 404);
 }
 
 export default requestHandler

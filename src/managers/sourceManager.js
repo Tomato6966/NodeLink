@@ -100,6 +100,16 @@ export default class SourcesManager {
     await this.loadFolder()
   }
 
+  async getTrackUrl(track) {
+    const instance = this.sources.get(track.sourceName)
+    return instance.getTrackUrl(track)
+  }
+
+  async getTrackStream(track, url, protocol, additionalData) {
+    const instance = this.sources.get(track.sourceName)
+    return instance.loadStream(track, url, protocol, additionalData)
+  }
+
   getAllSources() {
     return Array.from(this.sources.values())
   }

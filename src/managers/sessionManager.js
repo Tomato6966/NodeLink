@@ -13,7 +13,7 @@ export default class SessionManager {
       userId: request.headers['user-id'],
       request,
       socket,
-      players: new PlayerManager(this.nodelink)
+      players: new PlayerManager(this.nodelink, sessionId)
     })
     return sessionId
   }
@@ -29,5 +29,8 @@ export default class SessionManager {
       connection.socket.destroy()
       this.connections.delete(sessionId)
     }
+  }
+  values() {
+    return this.connections.values()
   }
 }
