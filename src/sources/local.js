@@ -63,7 +63,7 @@ export default class {
       identifier: filePath,
       isSeekable: true,
       author: 'unknown',
-      length: stats.size > 0 ? stats.size : -1,
+      length: -1,
       isStream: false,
       position: 0,
       title: path.basename(filePath),

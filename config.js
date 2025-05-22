@@ -4,7 +4,7 @@ export default {
     port: 3000,
     password: '123'
   },
-  maxSearchResults: 20,
+  maxSearchResults: 10,
   maxAlbumPlaylistLength: 100,
   sources: {
     soundcloud: {

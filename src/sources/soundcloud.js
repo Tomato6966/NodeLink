@@ -1,4 +1,5 @@
-import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
+import { PassThrough } from 'node:stream'
+import { encodeTrack, http1makeRequest, logger, makeRequest, loadHLS } from '../utils.js'
 
 export default class {
   constructor(nodelink) {
@@ -213,5 +214,58 @@ export default class {
       info,
       pluginInfo: {}
     }
+  }
+
+  async getTrackUrl(info) {
+    const req = await http1makeRequest(
+      `https://api-v2.soundcloud.com/resolve?url=https://api.soundcloud.com/tracks/${info.identifier}&client_id=${this.clientId}`
+    )
+    const body = req.body
+    if (req.error || req.statusCode !== 200) {
+      logger('sources', 'error', `SoundCloud getTrackUrl error: ${req.error?.message}`)
+      return {
+        exception: {
+          message:
+            req.error?.message || `SoundCloud returned invalid status code: ${req.statusCode}`,
+          severity: 'fault',
+          cause: 'Unknown'
+        }
+      }
+    }
+    if (body.errors) {
+      logger('sources', 'error', `SoundCloud getTrackUrl error: ${body.errors[0].error_message}`)
+      return {
+        exception: {
+          message: body.errors[0].error_message,
+          severity: 'fault',
+          cause: 'Unknown'
+        }
+      }
+    }
+    const oggOpus = body.media.transcodings.find(
+      transcoding => transcoding.format.mime_type === 'audio/ogg; codecs="opus"'
+    )
+    const transcoding = oggOpus || body.media.transcodings[0]
+    let url = `${transcoding.url}?client_id=${this.clientId}`
+
+    if (transcoding.format.protocol === 'hls') {
+      url = await http1makeRequest(url)
+      url = url.body.url
+    }
+
+    // In previous versions, there was a parameter for automatic fallback if the track was "snipped", searching in another configured source (e.g., YouTube) if `config.search.sources.soundcloud.fallbackIfSnipped` was enabled.
+    // The code would perform a new search by the track title using the default source and return the alternative URL.
+    // Since there is currently no other source implemented for alternative search, this functionality will not be implemented at this time.
+
+    return {
+      url,
+      protocol: transcoding.format.protocol,
+      format: oggOpus ? 'ogg/opus' : 'arbitrary'
+    }
+  }
+  async loadStream(track, url, protocol, additionalData) {
+    const stream = PassThrough()
+    await loadHLS(url, stream, false, true)
+    return { stream }
   }
 }

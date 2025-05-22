@@ -488,6 +488,125 @@ async function makeRequest(url, options = {}) {
   })
 }
 
+export function loadHLS(url, stream, onceEnded, shouldEnd) {
+  //biome-ignore lint: no-async-promises
+  return new Promise(async resolve => {
+    try {
+      const response = await http1makeRequest(url, { method: 'GET' })
+      const body = response.body
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line !== '')
+
+      if (!onceEnded) {
+        resolve(true)
+      }
+
+      const baseUrl = new URL(url)
+      const segments = body.map(line => {
+        try {
+          return new URL(line, baseUrl).toString()
+        } catch {
+          return line
+        }
+      })
+      let processed = 0
+
+      for (const line of body) {
+        if (stream.destroyed) {
+          if (shouldEnd) stream.emit('finishBuffering')
+          resolve(false)
+          return
+        }
+
+        if (line.startsWith('#')) {
+          const tag = line.split(':')[0]
+          if (tag === '#EXT-X-ENDLIST') {
+            if (shouldEnd) stream.emit('finishBuffering')
+            resolve(false)
+            return
+          }
+          continue
+        }
+
+        let segmentUrl
+        try {
+          segmentUrl = new URL(line, baseUrl).toString()
+        } catch {
+          segmentUrl = line
+        }
+
+        const segment = await http1makeRequest(segmentUrl, { method: 'GET', streamOnly: true })
+        await new Promise((segmentResolve, segmentReject) => {
+          segment.stream.on('data', chunk => {
+            if (!stream.write(chunk)) {
+              segment.stream.pause()
+              stream.once('drain', () => segment.stream.resume())
+            }
+          })
+          segment.stream.on('end', () => {
+            processed++
+            if (processed === segments.length) {
+              if (shouldEnd) stream.emit('finishBuffering')
+              if (onceEnded) resolve(true)
+            }
+            segmentResolve()
+          })
+          segment.stream.on('error', err => {
+            if (shouldEnd) stream.emit('finishBuffering')
+            resolve(false)
+            segmentReject(err)
+          })
+        })
+      }
+    } catch (error) {
+      resolve(false)
+    }
+  })
+}
+
+export function loadHLSPlaylist(url, stream) {
+  //biome-ignore lint: no-async-promises
+  return new Promise(async resolve => {
+    try {
+      const response = await http1makeRequest(url, { method: 'GET' })
+      const body = response.body.split('\n').filter(line => line.trim() !== '')
+
+      for (const line of body) {
+        if (stream.destroyed) {
+          resolve(stream)
+          return
+        }
+
+        if (line.startsWith('#')) {
+          const tag = line.split(':')[0]
+          if (tag === '#EXT-X-ENDLIST') {
+            stream.emit('finishBuffering')
+            resolve(stream)
+            return
+          }
+          continue
+        }
+
+        if (!line.startsWith('#')) {
+          const result = await loadHLS(line, stream, true, false)
+          if (result === false) {
+            resolve(stream)
+            return
+          }
+        } else {
+          await loadHLSPlaylist(line, stream)
+        }
+      }
+
+      loadHLSPlaylist(url, stream).then(resolve)
+    } catch (error) {
+      console.error('Error in loadHLSPlaylist:', error)
+      resolve(stream)
+    }
+  })
+}
+
 export {
   validateProperty,
   logger,
