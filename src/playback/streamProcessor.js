@@ -40,9 +40,7 @@ class streamProcessor {
     this.pipes = [stream, ffmpeg, volume, opus]
     this.stream = opus
 
-    stream.on('finishBuffering', () => {
-      this.stream.emit('finishBuffering')
-    })
+    stream.on('finishBuffering', () => this.stream.emit('finishBuffering'))
   }
   _end() {
     if (!this.pipes) return

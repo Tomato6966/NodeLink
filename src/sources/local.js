@@ -125,12 +125,16 @@ export default class {
       const bps = (typeof info.bitrateKbps === 'number' ? info.bitrateKbps : 128) * 1000
       const offset =
         info.durationMs > 0 ? Math.floor((bps * (additional.startTime ?? 0)) / 8000) : 0
-      const stream = fs.createReadStream(decoded.uri, { start: offset })
+      const stream = fs.createReadStream(decoded.uri, {
+        start: offset
+      })
 
+      stream.once('close', () => stream.emit('finishBuffering'))
       return { stream, type: 'arbitrary' }
     }
 
     const stream = fs.createReadStream(decoded.uri)
+    stream.once('close', () => stream.emit('finishBuffering'))
     stream.on('error', err => logger('sources', 'error', `Stream error: ${err.message}`))
     return { stream, type: 'arbitrary' }
   }

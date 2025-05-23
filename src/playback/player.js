@@ -44,6 +44,8 @@ export class Player {
         this.connection.on(event, handler)
       })
 
+    this._lastPosition = null
+    this._stuckCount = 0
     this._initConnection()
   }
 
@@ -97,7 +99,6 @@ export class Player {
     } else if (state.status === 'paused') {
       this.isPaused = true
     }
-    this._sendUpdate()
   }
 
   _onError(error) {
@@ -113,7 +114,6 @@ export class Player {
       this.emitEvent(GatewayEvents.TRACK_END, { track: this.track, reason: EndReasons.LOAD_FAILED })
       this._resetTrack()
     }
-    this._sendUpdate()
   }
 
   _resetTrack() {
@@ -145,7 +145,7 @@ export class Player {
     if (this._updater) return
     this._updater = setInterval(() => {
       if (!this.track || this.isPaused) return
-      this._sendUpdate()
+      if (!this._sendUpdate()) this._stopUpdater()
     }, this.nodelink.options?.playerUpdateInterval ?? 2000)
   }
 
@@ -157,8 +157,42 @@ export class Player {
   }
 
   _sendUpdate() {
-    if (!this.connection) return
-    this.position = this.connection.statistics?.playbackDuration ?? this._realPosition()
+    if (!this.connection || this.isPaused) return false
+
+    const position = this._realPosition()
+
+    if (this._lastPosition === position) {
+      this._stuckCount++
+    } else {
+      this._stuckCount = 0
+    }
+    this._lastPosition = position
+
+    const maxLength = this.track?.info?.length ?? 0
+
+    if (this.track && !this.track.info.isStream && maxLength > 0) {
+      if (position >= maxLength) {
+        this.connection.audioStream?.emit('finishBuffering')
+        this.connection.stop(EndReasons.FINISHED)
+        this._stopUpdater()
+        return false
+      }
+    }
+    if (this._stuckCount >= 2 && maxLength > 0 && position >= maxLength - 1000) {
+      this.connection.audioStream?.emit('finishBuffering')
+      this.connection.stop(EndReasons.FINISHED)
+      this._stopUpdater()
+      return false
+    }
+    if (this._stuckCount >= 3 && maxLength > 0) {
+      this.emitEvent('TrackStuckEvent', {
+        track: this.track,
+        thresholdMs: maxLength - position
+      })
+      this.connection.audioStream?.destroy()
+      this._stuckCount = 0
+      return false
+    }
 
     this.session.socket.send(
       JSON.stringify({
@@ -166,26 +200,26 @@ export class Player {
         guildId: this.guildId,
         state: {
           time: Date.now(),
-          position: this.position,
+          position,
           connected: this.connStatus === 'connected',
           ping: this.connection.ping ?? 0
         }
       })
     )
+    return true
   }
 
   async play({ encoded, info, noReplace = false, startTime = 0, isSeek = false }) {
-    if (noReplace && this.track) {
+    if (noReplace && this.track && !isSeek) {
       return false
     }
 
-    if (this.track) {
+    if (this.track && !isSeek) {
       this.emitEvent(GatewayEvents.TRACK_END, { track: this.track, reason: EndReasons.REPLACED })
       this._resetTrack()
     }
 
     this.track = { encoded, info }
-    this.position = startTime
 
     const urlData = await this.nodelink.sources.getTrackUrl(info)
     if (urlData.exception) {
@@ -223,7 +257,7 @@ export class Player {
     }
 
     if (this.connection.audioStream) {
-      this.connection.audioStream.destroy()
+      this.connection.audioStream?.destroy()
     }
 
     const resource = fetched.stream
