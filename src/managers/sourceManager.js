@@ -81,7 +81,12 @@ export default class SourcesManager {
 
   async resolve(url) {
     const sourceName = this.patternMap.find(({ regex }) => regex.test(url))?.sourceName
-    if (!sourceName) {
+    if (!sourceName && (url.startsWith('https://') || url.includes('http://'))) {
+      const instance = this.sources.get('http')
+      logger('info', 'Resolve', `Resolving HTTP for ${url}`)
+      return instance.resolve(url)
+      //biome-ignore lint: no-use-else-if
+    } else if (!sourceName) {
       return {
         loadType: 'error',
         data: {

@@ -160,7 +160,7 @@ export class Player {
       this._resetTrack()
     }
 
-    this.track = { encoded, info, userData }
+    this.track = { encoded, info }
     this.isPaused = false
     this.position = startTime
 
@@ -238,9 +238,13 @@ export class Player {
 
   destroy(emitClose = true) {
     if (this.connection) {
-      this.connection.stop(EndReasons.CLEANUP)
-      this.connection.destroy()
-      this.connection = null
+      try {
+        this.connection.stop(EndReasons.CLEANUP)
+        this.connection.destroy()
+        this.connection = null
+      } catch (err) {
+        logger('error', 'internal', `Failed to destroy connection: ${err.message}`)
+      }
     }
     if (emitClose) {
       this.emitEvent(GatewayEvents.WEBSOCKET_CLOSED, {

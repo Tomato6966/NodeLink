@@ -242,9 +242,11 @@ export default class {
         }
       }
     }
+
     const oggOpus = body.media.transcodings.find(
       transcoding => transcoding.format.mime_type === 'audio/ogg; codecs="opus"'
     )
+
     const transcoding = oggOpus || body.media.transcodings[0]
     let url = `${transcoding.url}?client_id=${this.clientId}`
 

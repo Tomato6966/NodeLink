@@ -12,6 +12,9 @@ export default {
     },
     local: {
       enabled: true
+    },
+    http: {
+      enabled: true
     }
   },
   audio: {

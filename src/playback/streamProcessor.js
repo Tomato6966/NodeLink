@@ -3,6 +3,10 @@ import { Readable } from 'node:stream'
 
 class streamProcessor {
   constructor(stream, type) {
+    if (!stream || !(stream instanceof Readable)) {
+      throw new Error('Invalid stream provided')
+    }
+
     const ffmpeg = new prism.FFmpeg({
       args: [
         '-hide_banner',
@@ -32,10 +36,8 @@ class streamProcessor {
     const volume = new prism.VolumeTransformer({ type: 's16le' })
     const opus = new prism.opus.Encoder({ rate: 48000, channels: 2, frameSize: 960 })
 
-    const sourceStream = stream instanceof Readable ? stream : Readable.from(stream)
-
-    sourceStream.pipe(ffmpeg).pipe(volume).pipe(opus)
-    this.pipes = [sourceStream, ffmpeg, volume, opus]
+    stream.pipe(ffmpeg).pipe(volume).pipe(opus)
+    this.pipes = [stream, ffmpeg, volume, opus]
     this.stream = opus
 
     stream.on('finishBuffering', () => {
