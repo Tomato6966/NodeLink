@@ -1,6 +1,7 @@
 import discordVoice from '@performanc/voice'
 import { createAudioResource } from './streamProcessor.js'
 import { GatewayEvents, EndReasons } from '../constants.js'
+import { logger } from '../utils.js'
 
 export class Player {
   constructor(options) {
@@ -19,7 +20,6 @@ export class Player {
     this.track = null
     this.isPaused = false
     this.volumePercent = this.nodelink.options?.defaultVolume ?? 100
-    this.streamInfo = { url: null, protocol: null, format: null }
     this.position = 0
     this.connStatus = 'idle'
     this.connection = null
@@ -27,7 +27,9 @@ export class Player {
 
     this.emitEvent = (type, payload = {}) => {
       try {
-        session.socket.send(JSON.stringify({ op: 'event', type, guildId, ...payload }))
+        this.session.socket.send(
+          JSON.stringify({ op: 'event', type, guildId: this.guildId, ...payload })
+        )
       } catch {}
     }
 
@@ -117,7 +119,6 @@ export class Player {
   _resetTrack() {
     this.track = null
     this.isPaused = false
-    this.streamInfo = { url: null, protocol: null, format: null }
     this.position = 0
   }
 
@@ -127,7 +128,8 @@ export class Player {
       : 0
   }
 
-  async _fetchResource(info, urlData, seekMs) {
+  async _fetchResource(info, urlData, startTime) {
+    if (startTime) urlData.additionalData = { startTime }
     const fetched = await this.nodelink.sources.getTrackStream(
       info,
       urlData.url,
@@ -136,95 +138,156 @@ export class Player {
     )
     if (fetched.exception) return fetched
     const resource = createAudioResource(fetched.stream, urlData.format)
-    this.streamInfo = { url: urlData.url, protocol: urlData.protocol, format: urlData.format }
     return { stream: resource }
+  }
+
+  _startUpdater() {
+    if (this._updater) return
+    this._updater = setInterval(() => {
+      if (!this.track || this.isPaused) return
+      this._sendUpdate()
+    }, this.nodelink.options?.playerUpdateInterval ?? 2000)
+  }
+
+  _stopUpdater() {
+    if (this._updater) {
+      clearInterval(this._updater)
+      this._updater = null
+    }
   }
 
   _sendUpdate() {
     if (!this.connection) return
-    const pos = this.connection.statistics?.playbackDuration ?? this._realPosition()
-    this.emitEvent(GatewayEvents.PLAYER_UPDATE, {
-      state: {
-        time: Date.now(),
-        position: pos,
-        connected: this.connStatus === 'connected',
-        ping: this.connection.ping ?? 0
-      }
-    })
+    this.position = this.connection.statistics?.playbackDuration ?? this._realPosition()
+
+    this.session.socket.send(
+      JSON.stringify({
+        op: GatewayEvents.PLAYER_UPDATE,
+        guildId: this.guildId,
+        state: {
+          time: Date.now(),
+          position: this.position,
+          connected: this.connStatus === 'connected',
+          ping: this.connection.ping ?? 0
+        }
+      })
+    )
   }
 
-  async play({ encoded, info, noReplace = false, startTime = 0, userData = {} }) {
-    if (noReplace && this.track) return this.toJSON()
+  async play({ encoded, info, noReplace = false, startTime = 0, isSeek = false }) {
+    if (noReplace && this.track) {
+      return false
+    }
+
     if (this.track) {
       this.emitEvent(GatewayEvents.TRACK_END, { track: this.track, reason: EndReasons.REPLACED })
       this._resetTrack()
     }
 
     this.track = { encoded, info }
-    this.isPaused = false
     this.position = startTime
 
     const urlData = await this.nodelink.sources.getTrackUrl(info)
     if (urlData.exception) {
-      this._onError(new Error(urlData.exception.message))
-      this.connection?.stop(EndReasons.LOAD_FAILED)
-      return this.toJSON()
+      const err = new Error(urlData.exception.message)
+      if (!isSeek) {
+        this._onError(err)
+        this.connection?.stop(EndReasons.LOAD_FAILED)
+      } else {
+        logger('player', 'error', `Seek failed: ${err.message}`)
+      }
+      return false
     }
 
-    if (!this.connection) this._initConnection()
+    if (!this.connection) {
+      this._initConnection()
+    }
 
-    if (!this.connection.udpInfo?.secretKey)
+    if (!this.connection.udpInfo?.secretKey) {
       await this.waitEvent(
         'stateChange',
         s => s.status === 'connected' && this.connection.udpInfo?.secretKey
       )
+    }
 
     const fetched = await this._fetchResource(info, urlData, startTime)
     if (fetched.exception) {
-      this._onError(new Error(fetched.exception.message))
-      this.connection.stop(EndReasons.LOAD_FAILED)
-      return this.toJSON()
+      const err = new Error(fetched.exception.message)
+      if (!isSeek) {
+        this._onError(err)
+        this.connection.stop(EndReasons.LOAD_FAILED)
+      } else {
+        logger('player', 'error', `Seek fetch failed: ${err.message}`)
+      }
+      return false
     }
 
-    if (this.connection.audioStream) this.connection.audioStream.destroy()
+    if (this.connection.audioStream) {
+      this.connection.audioStream.destroy()
+    }
 
     const resource = fetched.stream
-    if (this.volumePercent !== 100) resource.setVolume(this.volumePercent / 100)
+    if (this.volumePercent !== 100) {
+      resource.setVolume(this.volumePercent / 100)
+    }
+
     this.connection.play(resource)
-
     await this.waitEvent('playerStateChange', s => s.status === 'playing')
-
-    return this.toJSON()
+    this._startUpdater()
+    return true
   }
 
-  seek(position) {
-    // wait filters
+  async seek(position) {
+    if (!this.track) return false
+    if (!this.track.info.isSeekable && !this.track.info.isStream) return false
+    if (position < 0 || position > this.track.info.length) return false
+    if (this.position === position) return false
+
+    logger('player', 'info', `Seeking to ${position}ms`)
+
+    this.position = position
+
+    await this.play({
+      encoded: this.track.encoded,
+      info: this.track.info,
+      startTime: position,
+      isSeek: true
+    })
+
+    return false
   }
 
   stop() {
-    if (!this.track) return this.toJSON()
+    if (!this.track) return false
     if (this.connection?.audioStream) {
       this.connection.stop(EndReasons.STOPPED)
     } else {
       this.emitEvent(GatewayEvents.TRACK_END, { track: this.track, reason: EndReasons.STOPPED })
       this._resetTrack()
     }
-    return this.toJSON()
+    this._stopUpdater()
+    return true
   }
 
   pause(shouldPause) {
-    if (this.isPaused === shouldPause) return this.toJSON()
+    if (this.isPaused === shouldPause) return false
     this.isPaused = shouldPause
     if (this.connection?.audioStream) {
-      shouldPause ? this.connection.pause('requested') : this.connection.unpause('requested')
+      if (shouldPause) {
+        this.connection.pause('requested')
+        this._stopUpdater()
+      } else {
+        this.connection.unpause('requested')
+        this._startUpdater()
+      }
     }
-    return this.toJSON()
+    return true
   }
 
   volume(level) {
     this.volumePercent = Math.max(0, Math.min(100, level))
     this.connection?.audioStream?.setVolume(this.volumePercent / 100)
-    return this.toJSON()
+    return true
   }
 
   updateVoice({ sessionId, token, endpoint } = {}) {
@@ -254,6 +317,7 @@ export class Player {
       })
     }
     this._resetTrack()
+    this._stopUpdater()
     this.connStatus = 'destroyed'
     this.volumePercent = this.nodelink.options?.defaultVolume ?? 100
   }

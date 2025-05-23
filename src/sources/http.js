@@ -42,7 +42,7 @@ export default class HttpSource {
       identifier: url,
       isSeekable: !isStream,
       author: description || 'unknown',
-      length: isStream ? -1 : 0,
+      length: -1,
       isStream,
       position: 0,
       title,
@@ -55,7 +55,13 @@ export default class HttpSource {
     return {
       encoded: encodeTrack(track),
       info: track,
-      pluginInfo: {}
+      pluginInfo: {
+        bitrate,
+        genre,
+        stationUrl,
+        icyBr,
+        audioInfo
+      }
     }
   }
 

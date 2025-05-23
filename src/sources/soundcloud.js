@@ -13,9 +13,10 @@ export default class {
       /^https?:\/\/m\.soundcloud\.com\/[^/\s]+\/sets\/[^/\s]+$/
     ]
 
-    this.clientId = null
+    this.clientId = this.nodelink.options?.sources?.clientId ?? null
   }
   async setup() {
+    if (this.clientId) return true
     const mainPageRequest = await makeRequest('https://soundcloud.com', { method: 'GET' })
     if (!mainPageRequest) {
       logger('sources', 'error', 'Failed to load SoundCloud main page')

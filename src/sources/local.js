@@ -2,6 +2,70 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { encodeTrack, logger } from '../utils.js'
 
+function parseMP3Header(buffer) {
+  //biome-ignore lint: declare-variable-separate
+  const b1 = buffer[0],
+    b2 = buffer[1],
+    b3 = buffer[2]
+
+  if (b1 !== 0xff || (b2 & 0xe0) !== 0xe0) return null
+
+  const versionBits = (b2 & 0x18) >> 3
+  const bitrateIndex = (b3 & 0xf0) >> 4
+  if (bitrateIndex < 1 || bitrateIndex > 14) return null
+
+  const versions = ['2.5', 'x', '2', '1']
+  const version = versions[versionBits] || 'unknown'
+
+  const table = {
+    1: [null, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320],
+    2: [null, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160],
+    2.5: [null, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160]
+  }
+
+  return { bitrateKbps: table[version]?.[bitrateIndex] || null }
+}
+
+function detectID3v2Size(fd) {
+  const header = Buffer.alloc(10)
+  fs.readSync(fd, header, 0, 10, 0)
+
+  if (header[0] === 0x49 && header[1] === 0x44 && header[2] === 0x33) {
+    const size =
+      ((header[6] & 0x7f) << 21) |
+      ((header[7] & 0x7f) << 14) |
+      ((header[8] & 0x7f) << 7) |
+      (header[9] & 0x7f)
+
+    return size + 10
+  }
+
+  return 0
+}
+
+function readFileInfo(filePath) {
+  const ext = path.extname(filePath).slice(1)
+  const stats = fs.statSync(filePath)
+  const info = { fileType: ext, bitrateKbps: 'unknown', durationMs: -1 }
+
+  if (ext === 'mp3') {
+    const fd = fs.openSync(filePath, 'r')
+    const skip = detectID3v2Size(fd)
+    const buf = Buffer.alloc(4096)
+
+    fs.readSync(fd, buf, 0, buf.length, skip)
+    fs.closeSync(fd)
+
+    const header = parseMP3Header(buf)
+    info.bitrateKbps = header?.bitrateKbps || 'unknown'
+
+    const bps = (typeof info.bitrateKbps === 'number' ? info.bitrateKbps : 128) * 1000
+    info.durationMs = bps ? Math.floor(((stats.size * 8) / bps) * 1000) : 0
+  }
+
+  return info
+}
+
 export default class {
   constructor(nodelink) {
     this.nodelink = nodelink
@@ -13,107 +77,61 @@ export default class {
   }
 
   async search(query) {
+    const file = path.resolve(query)
+    logger('sources', 'info', `Searching file: ${file}`)
+
     try {
-      const absolutePath = path.resolve(query)
-      logger('sources', 'info', `Searching local track: ${absolutePath}`)
-      await fs.promises.access(absolutePath, fs.constants.R_OK)
-      const stats = await fs.promises.stat(absolutePath)
-      const track = this.buildTrack(absolutePath, stats)
-      logger('sources', 'info', `Local track found: ${track.info.title}`)
-      return {
-        loadType: 'search',
-        data: [track]
-      }
+      await fs.promises.access(file, fs.constants.R_OK)
+
+      const meta = readFileInfo(file)
+      const track = this.buildTrack(file, meta)
+
+      logger('sources', 'info', `Track found: ${track.info.title} [${meta.fileType}]`)
+      return { loadType: 'search', data: [track] }
     } catch (err) {
-      logger('sources', 'error', `Failed to search local track: ${err.message}`)
-      return {
-        loadType: 'empty',
-        data: {}
-      }
+      logger('sources', 'warn', `File not found or unreadable: ${file} — ${err.message}`)
+      return { loadType: 'empty', data: {} }
     }
   }
 
-  async resolve(filePath) {
-    try {
-      const absolutePath = path.resolve(filePath)
-      logger('sources', 'info', `Resolving local track: ${absolutePath}`)
-      await fs.promises.access(absolutePath, fs.constants.R_OK)
-      const stats = await fs.promises.stat(absolutePath)
-      const track = this.buildTrack(absolutePath, stats)
-      logger('sources', 'info', `Local track resolved: ${track.info.title}`)
-      return {
-        loadType: 'track',
-        data: track
-      }
-    } catch (err) {
-      logger('sources', 'error', `Failed to resolve local track: ${err.message}`)
-      return {
-        loadType: 'error',
-        data: {
-          message: `Failed to load track. (${err.message})`,
-          severity: 'common',
-          cause: 'No permission to access file or it does not exist'
-        }
-      }
-    }
+  async resolve(file) {
+    return this.search(file)
   }
 
-  buildTrack(filePath, stats) {
-    const track = {
+  buildTrack(filePath, meta) {
+    const info = {
       identifier: filePath,
-      isSeekable: true,
+      isSeekable: meta.durationMs > 0,
       author: 'unknown',
-      length: -1,
+      length: meta.durationMs,
       isStream: false,
       position: 0,
       title: path.basename(filePath),
       uri: filePath,
-      artworkUrl: null,
-      isrc: null,
+      artworkUrl: meta.artwork || null,
       sourceName: 'local'
     }
-    return {
-      encoded: encodeTrack(track),
-      info: track,
-      pluginInfo: {}
-    }
+
+    return { encoded: encodeTrack(info), info, pluginInfo: meta }
   }
+
   getTrackUrl(track) {
-    const filePath = track.uri
-    logger('sources', 'info', `Getting URL for local track: ${filePath}`)
-    return {
-      url: filePath,
-      protocol: 'local',
-      format: null,
-      additionalData: null
-    }
+    return { url: track.uri, protocol: 'local', format: null, additionalData: null }
   }
-  async loadStream(decodedTrack, url, protocol, additionalData) {
-    try {
-      const filePath = decodedTrack.uri
-      logger('sources', 'info', `Loading stream for local track: ${filePath}`)
-      await fs.promises.access(filePath, fs.constants.R_OK)
-      const fileStream = fs.createReadStream(filePath, { autoClose: true })
-      fileStream.on('error', err => {
-        logger('sources', 'error', `Failed to create stream for local track: ${err.message}`)
-        fileStream.destroy()
-      })
-      fileStream.once('close', () => fileStream.emit('finishBuffering'))
-      logger('sources', 'info', `Stream loaded for local track: ${filePath}`)
-      return {
-        stream: fileStream,
-        type: 'arbitrary'
-      }
-    } catch (err) {
-      logger('sources', 'error', `Failed to load stream for local track: ${err.message}`)
-      return {
-        status: 1,
-        exception: {
-          message: `Failed to load stream. (${err.message})`,
-          severity: 'common',
-          cause: 'No permission to access file or it does not exist'
-        }
-      }
+
+  async loadStream(decoded, url, protocol, additional) {
+    if (additional?.startTime && decoded.isSeekable) {
+      const info = readFileInfo(decoded.uri)
+      const bps = (typeof info.bitrateKbps === 'number' ? info.bitrateKbps : 128) * 1000
+      const offset =
+        info.durationMs > 0 ? Math.floor((bps * (additional.startTime ?? 0)) / 8000) : 0
+      const stream = fs.createReadStream(decoded.uri, { start: offset })
+
+      return { stream, type: 'arbitrary' }
     }
+
+    const stream = fs.createReadStream(decoded.uri)
+    stream.on('error', err => logger('sources', 'error', `Stream error: ${err.message}`))
+    return { stream, type: 'arbitrary' }
   }
 }

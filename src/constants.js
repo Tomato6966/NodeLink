@@ -8,7 +8,7 @@ export const GatewayEvents = {
   TRACK_END: 'TrackEndEvent',
   TRACK_START: 'TrackStartEvent',
   TRACK_EXCEPTION: 'TrackExceptionEvent',
-  PLAYER_UPDATE: 'PlayerUpdateEvent'
+  PLAYER_UPDATE: 'playerUpdate'
 }
 export const EndReasons = {
   STOPPED: 'stopped',

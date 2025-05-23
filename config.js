@@ -6,6 +6,7 @@ export default {
   },
   maxSearchResults: 10,
   maxAlbumPlaylistLength: 100,
+  playerUpdateInterval: 2000,
   sources: {
     soundcloud: {
       enabled: true
