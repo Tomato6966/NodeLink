@@ -323,7 +323,7 @@ async function http1makeRequest(urlString, options = {}) {
 
   let payloadBuffer = null
   if (body != null && !['GET', 'HEAD'].includes(method)) {
-    reqHeaders['Content-Type'] = typeof body === 'object' ? 'application/json' : 'text/plain'
+    reqHeaders['Content-Type'] = reqHeaders['Content-Type'] || 'application/json'
     const rawPayload = typeof body === 'string' ? body : JSON.stringify(body)
 
     if (disableBodyCompression) {

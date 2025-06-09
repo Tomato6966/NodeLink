@@ -19,6 +19,9 @@ export default {
     },
     youtube: {
       enabled: true
+    },
+    instagram: {
+      enabled: true
     }
   },
   audio: {
