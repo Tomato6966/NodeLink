@@ -225,10 +225,14 @@ export class Player {
     if (urlData.exception) {
       const err = new Error(urlData.exception.message)
       if (!isSeek) {
+        logger(
+          'player',
+          'error',
+          `Load failed for track from source "${info.sourceName}": ${err.message}`
+        )
         this._onError(err)
-        this.connection?.stop(EndReasons.LOAD_FAILED)
       } else {
-        logger('player', 'error', `Seek failed: ${err.message}`)
+        logger('player', 'error', `Seek failed on getTrackUrl: ${err.message}`)
       }
       return false
     }
@@ -248,8 +252,12 @@ export class Player {
     if (fetched.exception) {
       const err = new Error(fetched.exception.message)
       if (!isSeek) {
+        logger(
+          'player',
+          'error',
+          `Load failed while fetching resource from source "${info.sourceName}": ${err.message}`
+        )
         this._onError(err)
-        this.connection.stop(EndReasons.LOAD_FAILED)
       } else {
         logger('player', 'error', `Seek fetch failed: ${err.message}`)
       }
@@ -264,7 +272,6 @@ export class Player {
     if (this.volumePercent !== 100) {
       resource.setVolume(this.volumePercent / 100)
     }
-
     this.connection.play(resource)
     await this.waitEvent('playerStateChange', s => s.status === 'playing')
     this._startUpdater()

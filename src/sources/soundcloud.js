@@ -263,12 +263,12 @@ export default class {
     return {
       url,
       protocol: transcoding.format.protocol,
-      format: oggOpus ? 'ogg/opus' : 'arbitrary'
+      format: 'arbitrary'
     }
   }
   async loadStream(track, url, protocol, additionalData) {
     const stream = PassThrough()
-    await loadHLS(url, stream, false, true)
+    loadHLS(url, stream, false, true)
     return { stream }
   }
 }

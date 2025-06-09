@@ -139,10 +139,15 @@ class NodelinkServer {
     })
   }
   _listen() {
-    const port = this.options.server.port
-    this.server.listen(port, () => {
-      logger('started', 'Server', `running at host ${this.options.server.host} on port ${port}`)
-    })
+    try {
+      const port = this.options.server.port
+      this.server.listen(port, () => {
+        logger('started', 'Server', `running at host ${this.options.server.host} on port ${port}`)
+      })
+    } catch (error) {
+      logger('error', 'Server', `Failed to start server: ${error.message}`)
+      process.exit(1)
+    }
   }
   async start() {
     this._validateConfig()

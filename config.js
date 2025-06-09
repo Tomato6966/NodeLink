@@ -16,6 +16,9 @@ export default {
     },
     http: {
       enabled: true
+    },
+    youtube: {
+      enabled: true
     }
   },
   audio: {

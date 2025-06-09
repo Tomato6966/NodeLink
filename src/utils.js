@@ -6,9 +6,14 @@ import zlib from 'node:zlib'
 import { URL } from 'node:url'
 import crypto from 'node:crypto'
 import { execSync } from 'node:child_process'
-import { SEMVER_PATTERN, DISCORD_ID_REGEX } from './constants.js'
+import {
+  SEMVER_PATTERN,
+  DISCORD_ID_REGEX,
+  DEFAULT_MAX_REDIRECTS,
+  REDIRECT_STATUS_CODES,
+  HLS_SEGMENT_DOWNLOAD_CONCURRENCY_LIMIT
+} from './constants.js'
 import packageJson from '../package.json' with { type: 'json' }
-
 const verifyDiscordID = id => DISCORD_ID_REGEX.test(String(id))
 
 function validateProperty(property, validator, errorMessage) {
@@ -288,192 +293,286 @@ function parseClient(agent) {
 const httpAgent = new http.Agent({ keepAlive: true })
 const httpsAgent = new https.Agent({ keepAlive: true })
 
-async function http1makeRequest(url, options = {}) {
+async function http1makeRequest(urlString, options = {}) {
   const {
     method = 'GET',
     headers: customHeaders = {},
     body,
-    timeout = 30000, // Timeout padrão de 30s
+    timeout = 30000,
     streamOnly = false,
-    disableBodyCompression = false
+    disableBodyCompression = false,
+    maxRedirects = DEFAULT_MAX_REDIRECTS,
+    _redirectsFollowed = 0
   } = options
 
-  return new Promise((resolve, reject) => {
-    const lib = url.startsWith('https') ? https : http
-    const agent = url.startsWith('https') ? httpsAgent : httpAgent
-    const headers = {
-      'Accept-Encoding': 'br, gzip, deflate',
-      'User-Agent': 'Mozilla/5.0',
-      DNT: '1',
-      ...customHeaders,
-      ...(body
-        ? {
-            'Content-Type': 'application/json',
-            ...(!disableBodyCompression && { 'Content-Encoding': 'gzip' })
-          }
-        : {})
+  if (_redirectsFollowed >= maxRedirects) {
+    throw new Error(`Too many redirects (${maxRedirects}) for ${urlString}`)
+  }
+
+  const currentUrl = new URL(urlString)
+  const isHttps = currentUrl.protocol === 'https:'
+  const lib = isHttps ? https : http
+  const agent = isHttps ? httpsAgent : httpAgent
+
+  const reqHeaders = {
+    'Accept-Encoding': 'br, gzip, deflate',
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+    ...customHeaders
+  }
+
+  let payloadBuffer = null
+  if (body != null && !['GET', 'HEAD'].includes(method)) {
+    reqHeaders['Content-Type'] = typeof body === 'object' ? 'application/json' : 'text/plain'
+    const rawPayload = typeof body === 'string' ? body : JSON.stringify(body)
+
+    if (disableBodyCompression) {
+      payloadBuffer = Buffer.from(rawPayload)
+    } else {
+      reqHeaders['Content-Encoding'] = 'gzip'
+      payloadBuffer = zlib.gzipSync(rawPayload)
     }
+  }
 
-    const reqOptions = { method, headers, agent, timeout }
-    const req = lib.request(url, reqOptions, async res => {
-      let stream = res
-      const enc = res.headers['content-encoding']
+  const reqOptions = {
+    method,
+    agent,
+    timeout,
+    hostname: currentUrl.hostname,
+    port: currentUrl.port || (isHttps ? 443 : 80),
+    path: currentUrl.pathname + currentUrl.search,
+    headers: reqHeaders
+  }
 
-      try {
-        if (enc === 'br') stream = res.pipe(zlib.createBrotliDecompress())
-        else if (enc === 'gzip') stream = res.pipe(zlib.createGunzip())
-        else if (enc === 'deflate') stream = res.pipe(zlib.createInflate())
+  return new Promise((resolve, reject) => {
+    const req = lib.request(reqOptions, res => {
+      const { statusCode, headers: respHeaders } = res
 
-        if (streamOnly) {
-          return resolve({ statusCode: res.statusCode, headers: res.headers, stream })
+      if (REDIRECT_STATUS_CODES.includes(statusCode) && respHeaders.location) {
+        res.resume()
+        const nextUrl = new URL(respHeaders.location, currentUrl).href
+        const isGetRedirect = [301, 302, 303].includes(statusCode)
+        const nextOptions = {
+          ...options,
+          _redirectsFollowed: _redirectsFollowed + 1,
+          method: isGetRedirect ? 'GET' : method,
+          body: isGetRedirect ? undefined : body
         }
-
-        const chunks = []
-        for await (const chunk of stream) {
-          chunks.push(chunk)
-        }
-        const text = Buffer.concat(chunks).toString()
-        const isJson = (res.headers['content-type'] || '').startsWith('application/json')
-        resolve({
-          statusCode: res.statusCode,
-          headers: res.headers,
-          body: isJson ? JSON.parse(text) : text
-        })
-      } catch (err) {
-        resolve({ error: err.message })
+        resolve(http1makeRequest(nextUrl, nextOptions))
+        return
       }
+
+      let finalStream = res
+      const encoding = (respHeaders['content-encoding'] || '').toLowerCase()
+      if (encoding === 'br') {
+        finalStream = res.pipe(zlib.createBrotliDecompress())
+      } else if (encoding === 'gzip') {
+        finalStream = res.pipe(zlib.createGunzip())
+      } else if (encoding === 'deflate') {
+        finalStream = res.pipe(zlib.createInflate())
+      }
+
+      res.on('error', err => reject(new Error(`Response error for ${urlString}: ${err.message}`)))
+      if (finalStream !== res) {
+        finalStream.on('error', err =>
+          reject(new Error(`Decompression error for ${urlString}: ${err.message}`))
+        )
+      }
+
+      if (streamOnly) {
+        resolve({ statusCode, headers: respHeaders, stream: finalStream })
+        return
+      }
+
+      const chunks = []
+      finalStream.on('data', chunk => chunks.push(chunk))
+      finalStream.on('end', () => {
+        try {
+          const responseBuffer = Buffer.concat(chunks)
+          const text = responseBuffer.toString('utf8')
+          const isJson = (respHeaders['content-type'] || '')
+            .toLowerCase()
+            .startsWith('application/json')
+          const responseBody = isJson && text ? JSON.parse(text) : text
+          resolve({ statusCode, headers: respHeaders, body: responseBody })
+        } catch (err) {
+          reject(new Error(`Error processing response body for ${urlString}: ${err.message}`))
+        }
+      })
     })
 
-    req.on('error', err => reject(new Error(`Request error: ${err.message}`)))
-    req.on('timeout', () => {
-      req.destroy()
-      reject(new Error('Request timeout'))
-    })
+    req.on('error', err => reject(new Error(`Request error for ${urlString}: ${err.message}`)))
+    req.on('timeout', () =>
+      req.destroy(new Error(`Request timed out after ${timeout}ms for ${urlString}`))
+    )
 
-    if (body) {
-      const payload = JSON.stringify(body)
-      if (disableBodyCompression) {
-        req.end(payload)
-      } else {
-        zlib.gzip(payload, (err, data) => {
-          if (err) return reject(new Error(`Gzip error: ${err.message}`))
-          req.end(data)
-        })
-      }
+    if (payloadBuffer) {
+      req.end(payloadBuffer)
     } else {
       req.end()
     }
   })
 }
-
-async function makeRequest(url, options = {}) {
-  if (process.isBun || process.versions.deno) {
-    return http1makeRequest(url, options)
-  }
-
+async function makeRequest(urlString, options = {}) {
   const {
     method = 'GET',
     headers: customHeaders = {},
     body,
-    timeout = 30000, // Timeout padrão de 30s
+    timeout = 30000,
     streamOnly = false,
-    disableBodyCompression = false
+    disableBodyCompression = false,
+    maxRedirects = DEFAULT_MAX_REDIRECTS,
+    _redirectsFollowed = 0
   } = options
+  if (_redirectsFollowed >= maxRedirects) {
+    return Promise.reject(new Error(`Too many redirects (${maxRedirects}) for ${urlString}`))
+  }
 
   return new Promise((resolve, reject) => {
     let session
-    try {
-      const parsed = new URL(url)
-      session = http2.connect(parsed.origin)
+    let sessionClosed = false
+    let currentUrl
 
-      session.on('error', err => {
+    const fallbackToHttp1 = () => {
+      if (!sessionClosed && session) {
+        sessionClosed = true
         session.close()
-        reject(new Error(`HTTP/2 session error: ${err.message}`))
-      })
+      }
+      resolve(http1makeRequest(urlString, options))
+    }
 
-      const headers = {
-        ':method': method,
-        ':path': parsed.pathname + parsed.search,
-        'Accept-Encoding': 'br, gzip, deflate',
-        'User-Agent': 'Mozilla/5.0',
-        DNT: '1',
-        ...customHeaders,
-        ...(body
-          ? {
-              'Content-Type': 'application/json',
-              ...(!disableBodyCompression && { 'Content-Encoding': 'gzip' })
-            }
-          : {})
+    try {
+      currentUrl = new URL(urlString)
+      session = http2.connect(currentUrl.origin)
+
+      const closeSessionGracefully = () => {
+        if (session && !session.closed && !session.destroyed && !sessionClosed) {
+          sessionClosed = true
+          session.close()
+        }
       }
 
-      const req = session.request(headers)
+      session.on('error', fallbackToHttp1)
+      session.on('goaway', closeSessionGracefully)
+
+      const h2Headers = {
+        ':method': method,
+        ':path': currentUrl.pathname + currentUrl.search,
+        ':scheme': currentUrl.protocol.slice(0, -1),
+        ':authority': currentUrl.host,
+        'accept-encoding': 'br, gzip, deflate',
+        'user-agent': 'Mozilla/5.0 (Node.js Http2Client)',
+        dnt: '1',
+        ...customHeaders
+      }
+
+      if (body && !['GET', 'HEAD'].includes(method)) {
+        headers['Content-Type'] =
+          typeof body === 'object' ? 'application/json' : headers['Content-Type']
+        if (!disableBodyCompression) h2Headers['content-encoding'] = 'gzip'
+      }
+
+      const req = session.request(h2Headers)
+      let reqClosed = false
 
       if (timeout) {
         req.setTimeout(timeout, () => {
-          req.close()
-          session.close()
-          reject(new Error('Request timeout'))
+          if (!reqClosed) {
+            reqClosed = true
+            req.close(http2.constants.NGHTTP2_CANCEL)
+          }
+          closeSessionGracefully()
+          reject(new Error(`HTTP/2 request timeout for ${urlString}`))
         })
       }
 
       req.on('error', err => {
-        session.close()
-        reject(new Error(`HTTP/2 request error: ${err.message}`))
+        if (!reqClosed) reqClosed = true
+        closeSessionGracefully()
+        reject(new Error(`HTTP/2 request error for ${urlString}: ${err.message}`))
       })
 
-      req.on('response', async responseHeaders => {
-        let stream = req
-        const enc = responseHeaders['content-encoding']
+      req.on('response', async headers => {
+        const statusCode = headers[':status']
+
+        if (REDIRECT_STATUS_CODES.includes(statusCode) && headers.location) {
+          const newLocation = new URL(headers.location, urlString).href
+          let nextMethod = method
+          let nextBody = body
+          if (
+            (statusCode === 301 || statusCode === 302) &&
+            ['POST', 'PUT', 'DELETE'].includes(method)
+          ) {
+            nextMethod = 'GET'
+            nextBody = undefined
+          } else if (statusCode === 303) {
+            nextMethod = 'GET'
+            nextBody = undefined
+          }
+
+          if (!reqClosed) {
+            reqClosed = true
+            req.close(http2.constants.NGHTTP2_NO_ERROR)
+          }
+          closeSessionGracefully()
+          return resolve(
+            makeRequest(newLocation, {
+              ...options,
+              method: nextMethod,
+              body: nextBody,
+              _redirectsFollowed: _redirectsFollowed + 1,
+              disableBodyCompression: nextBody ? disableBodyCompression : undefined
+            })
+          )
+        }
+
+        let responseStream = req
+        const encoding = headers['content-encoding']
+        if (encoding === 'br') responseStream = req.pipe(zlib.createBrotliDecompress())
+        else if (encoding === 'gzip') responseStream = req.pipe(zlib.createGunzip())
+        else if (encoding === 'deflate') responseStream = req.pipe(zlib.createInflate())
+
+        if (method === 'HEAD') {
+          closeSessionGracefully()
+          return resolve({ statusCode, headers })
+        }
+
+        if (streamOnly) {
+          responseStream.on('end', closeSessionGracefully)
+          responseStream.on('error', closeSessionGracefully)
+          responseStream.on('close', closeSessionGracefully)
+          return resolve({ statusCode, headers, stream: responseStream })
+        }
 
         try {
-          if (enc === 'br') stream = req.pipe(zlib.createBrotliDecompress())
-          else if (enc === 'gzip') stream = req.pipe(zlib.createGunzip())
-          else if (enc === 'deflate') stream = req.pipe(zlib.createInflate())
-
-          if (method === 'HEAD') {
-            session.close()
-            return resolve({
-              statusCode: responseHeaders[':status'],
-              headers: responseHeaders
-            })
-          }
-
-          if (streamOnly) {
-            stream.on('end', () => session.close())
-            return resolve({
-              statusCode: responseHeaders[':status'],
-              headers: responseHeaders,
-              stream
-            })
-          }
-
           const chunks = []
-          for await (const chunk of stream) {
-            chunks.push(chunk)
-          }
+          for await (const chunk of responseStream) chunks.push(chunk)
           const text = Buffer.concat(chunks).toString()
-          const isJson = (responseHeaders['content-type'] || '').startsWith('application/json')
+          const isJson = (headers['content-type'] || '')
+            .toLowerCase()
+            .startsWith('application/json')
           resolve({
-            statusCode: responseHeaders[':status'],
-            headers: responseHeaders,
-            body: isJson ? JSON.parse(text) : text
+            statusCode,
+            headers,
+            body: isJson && text ? JSON.parse(text) : text
           })
         } catch (err) {
-          resolve({ error: err.message })
+          resolve({ statusCode, headers, error: err.message })
         } finally {
-          session.close()
+          if (!streamOnly) closeSessionGracefully()
         }
       })
 
-      if (body) {
+      if (body && !['GET', 'HEAD'].includes(method)) {
         const payload = JSON.stringify(body)
-        if (disableBodyCompression) {
+        if (disableBodyCompression || h2Headers['content-encoding'] !== 'gzip') {
           req.end(payload)
         } else {
           zlib.gzip(payload, (err, data) => {
             if (err) {
-              session.close()
-              return reject(new Error(`Gzip error: ${err.message}`))
+              req.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
+              closeSessionGracefully()
+              return reject(new Error(`Gzip error for ${urlString}: ${err.message}`))
             }
             req.end(data)
           })
@@ -482,129 +581,145 @@ async function makeRequest(url, options = {}) {
         req.end()
       }
     } catch (err) {
-      if (session) session.close()
-      reject(new Error(`Setup error: ${err.message}`))
+      if (session && !session.closed && !session.destroyed && !sessionClosed) {
+        session.close()
+      }
+      fallbackToHttp1()
     }
   })
 }
-
-export function loadHLS(url, stream, onceEnded, shouldEnd) {
-  //biome-ignore lint: no-async-promises
+function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
+  //biome-ignore lint: no-promise-executor-return
   return new Promise(async resolve => {
     try {
-      const response = await http1makeRequest(url, { method: 'GET' })
-      const body = response.body
+      const res = await http1makeRequest(url, { method: 'GET' })
+      const lines = res.body
         .split('\n')
-        .map(line => line.trim())
-        .filter(line => line !== '')
+        .map(l => l.trim())
+        .filter(Boolean)
 
-      if (!onceEnded) {
-        resolve(true)
+      if (!lines.some(l => l.startsWith('#EXTINF'))) {
+        const seg = await http1makeRequest(url, { method: 'GET', streamOnly: true })
+        seg.stream.pipe(stream, { end: shouldEnd })
+        return resolve(!shouldEnd)
       }
 
-      const baseUrl = new URL(url)
-      const segments = body.map(line => {
-        try {
-          return new URL(line, baseUrl).toString()
-        } catch {
-          return line
-        }
-      })
-      let processed = 0
+      const base = new URL(url)
+      const segs = []
+      let sawEnd = false
 
-      for (const line of body) {
-        if (stream.destroyed) {
-          if (shouldEnd) stream.emit('finishBuffering')
-          resolve(false)
-          return
-        }
-
-        if (line.startsWith('#')) {
-          const tag = line.split(':')[0]
-          if (tag === '#EXT-X-ENDLIST') {
-            if (shouldEnd) stream.emit('finishBuffering')
-            resolve(false)
-            return
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('#EXTINF')) {
+          const uri = lines[i + 1]
+          if (uri && !uri.startsWith('#')) {
+            segs.push(new URL(uri, base).toString())
           }
-          continue
         }
-
-        let segmentUrl
-        try {
-          segmentUrl = new URL(line, baseUrl).toString()
-        } catch {
-          segmentUrl = line
-        }
-
-        const segment = await http1makeRequest(segmentUrl, { method: 'GET', streamOnly: true })
-        await new Promise((segmentResolve, segmentReject) => {
-          segment.stream.on('data', chunk => {
-            if (!stream.write(chunk)) {
-              segment.stream.pause()
-              stream.once('drain', () => segment.stream.resume())
-            }
-          })
-          segment.stream.on('end', () => {
-            processed++
-            if (processed === segments.length) {
-              if (shouldEnd) stream.emit('finishBuffering')
-              if (onceEnded) resolve(true)
-            }
-            segmentResolve()
-          })
-          segment.stream.on('error', err => {
-            if (shouldEnd) stream.emit('finishBuffering')
-            resolve(false)
-            segmentReject(err)
-          })
-        })
+        if (lines[i].startsWith('#EXT-X-ENDLIST')) sawEnd = true
       }
-    } catch (error) {
+
+      const downloadPromises = []
+
+      const writeChunksToStream = async chunks => {
+        for (const chunk of chunks) {
+          if (!stream.write(chunk)) {
+            await new Promise(ok => stream.once('drain', ok))
+          }
+        }
+      }
+
+      for (const segUrl of segs) {
+        if (stream.destroyed) break
+
+        const downloadPromise = http1makeRequest(segUrl, { method: 'GET', streamOnly: true })
+          .then(s => {
+            return new Promise((res, rej) => {
+              const chunks = []
+              s.stream.on('data', chunk => chunks.push(chunk))
+              s.stream.on('end', () => res(chunks))
+              s.stream.on('error', rej)
+            })
+          })
+          .catch(err => {
+            if (!stream.destroyed) {
+              console.error('[HLS] Error downloading segment', err.code || err.message)
+              stream.destroy(err)
+            }
+            return Promise.reject(err)
+          })
+
+        downloadPromises.push(downloadPromise)
+
+        if (downloadPromises.length >= HLS_SEGMENT_DOWNLOAD_CONCURRENCY_LIMIT) {
+          if (stream.destroyed) break
+          try {
+            const chunks = await downloadPromises.shift()
+            await writeChunksToStream(chunks)
+          } catch (e) {
+            break
+          }
+        }
+      }
+
+      while (downloadPromises.length > 0) {
+        if (stream.destroyed) break
+        try {
+          const chunks = await downloadPromises.shift()
+          await writeChunksToStream(chunks)
+        } catch (e) {
+          break
+        }
+      }
+
+      if (stream.destroyed) {
+        return resolve(false)
+      }
+
+      if (!sawEnd) {
+        resolve(true)
+      } else {
+        shouldEnd && stream.emit('finishBuffering')
+        resolve(false)
+      }
+    } catch (e) {
+      console.error('[HLS] ERR →', e.code || e.message)
+      if (!stream.destroyed) {
+        shouldEnd && stream.emit('finishBuffering')
+      }
       resolve(false)
     }
   })
 }
 
-export function loadHLSPlaylist(url, stream) {
-  //biome-ignore lint: no-async-promises
-  return new Promise(async resolve => {
-    try {
-      const response = await http1makeRequest(url, { method: 'GET' })
-      const body = response.body.split('\n').filter(line => line.trim() !== '')
+async function loadHLSPlaylist(url, stream) {
+  try {
+    const res = await http1makeRequest(url, { method: 'GET' })
+    const lines = res.body
+      .split('\n')
+      .map(l => l.trim())
+      .filter(Boolean)
 
-      for (const line of body) {
-        if (stream.destroyed) {
-          resolve(stream)
-          return
-        }
-
-        if (line.startsWith('#')) {
-          const tag = line.split(':')[0]
-          if (tag === '#EXT-X-ENDLIST') {
-            stream.emit('finishBuffering')
-            resolve(stream)
-            return
-          }
-          continue
-        }
-
-        if (!line.startsWith('#')) {
-          const result = await loadHLS(line, stream, true, false)
-          if (result === false) {
-            resolve(stream)
-            return
-          }
-        } else {
-          await loadHLSPlaylist(line, stream)
-        }
-      }
-
-      loadHLSPlaylist(url, stream).then(resolve)
-    } catch (error) {
-      console.error('Error in loadHLSPlaylist:', error)
-      resolve(stream)
+    if (lines.some(l => l.startsWith('#EXTINF'))) {
+      return loadHLS(url, stream, false, true)
     }
-  })
+
+    const audioTags = lines.filter(
+      l => l.startsWith('#EXT-X-MEDIA') && l.includes('TYPE=AUDIO') && l.includes('URI="')
+    )
+    if (audioTags.length) {
+      const defaultTag = audioTags.find(l => /DEFAULT=YES/.test(l))
+      const pickTag = defaultTag || audioTags[audioTags.length - 1]
+      const uri = pickTag.match(/URI="([^"]+)"/)[1]
+      const audioUrl = new URL(uri, url).toString()
+      return loadHLS(audioUrl, stream, false, true)
+    }
+
+    return loadHLS(url, stream, false, true)
+  } catch (e) {
+    console.error('[HLS-AUDIO] ERR →', e.code || e.message)
+    stream.emit('finishBuffering')
+    return stream
+  }
 }
 
 export {
@@ -620,5 +735,7 @@ export {
   parseClient,
   verifyDiscordID,
   makeRequest,
-  http1makeRequest
+  http1makeRequest,
+  loadHLSPlaylist,
+  loadHLS
 }

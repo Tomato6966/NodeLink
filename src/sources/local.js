@@ -66,7 +66,7 @@ function readFileInfo(filePath) {
   return info
 }
 
-export default class {
+export default class LocalSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.searchTerms = ['local', 'file']

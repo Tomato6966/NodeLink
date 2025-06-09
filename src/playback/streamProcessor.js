@@ -1,5 +1,5 @@
 import prism from 'prism-media'
-import { Readable } from 'node:stream'
+import { Readable, Transform } from 'node:stream'
 
 class streamProcessor {
   constructor(stream, type) {
@@ -7,41 +7,62 @@ class streamProcessor {
       throw new Error('Invalid stream provided')
     }
 
-    const ffmpeg = new prism.FFmpeg({
-      args: [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-analyzeduration',
-        '0',
-        '-probesize',
-        '32',
-        '-fflags',
-        'nobuffer',
-        '-flags',
-        'low_delay',
-        '-thread_queue_size',
-        '4096',
-        '-i',
-        '-',
-        '-f',
-        's16le',
-        '-ar',
-        '48000',
-        '-ac',
-        '2'
-      ]
-    })
+    const lowerType = (type || '').toLowerCase()
+    let pipeline = []
+    let audioStream
 
-    const volume = new prism.VolumeTransformer({ type: 's16le' })
-    const opus = new prism.opus.Encoder({ rate: 48000, channels: 2, frameSize: 960 })
+    if (['webm/opus', 'ogg/opus'].includes(lowerType)) {
+      const DemuxerClass =
+        lowerType === 'webm/opus' ? prism.opus.WebmDemuxer : prism.opus.OggDemuxer
 
-    stream.pipe(ffmpeg).pipe(volume).pipe(opus)
-    this.pipes = [stream, ffmpeg, volume, opus]
-    this.stream = opus
+      const demuxer = new DemuxerClass()
+      const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 })
+      const volume = new prism.VolumeTransformer({ type: 's16le' })
+      const opus = new prism.opus.Encoder({ rate: 48000, channels: 2, frameSize: 960 })
+
+      stream.pipe(demuxer).pipe(decoder).pipe(volume).pipe(opus)
+
+      pipeline = [stream, demuxer, decoder, volume, opus]
+      audioStream = opus
+    } else {
+      const ffmpeg = new prism.FFmpeg({
+        args: [
+          '-re',
+          '-hide_banner',
+          '-loglevel',
+          'error',
+          '-analyzeduration',
+          '0',
+          '-probesize',
+          '32',
+          '-thread_queue_size',
+          '4096',
+          '-i',
+          '-',
+          '-f',
+          's16le',
+          '-ar',
+          '48000',
+          '-ac',
+          '2'
+        ]
+      })
+
+      const volume = new prism.VolumeTransformer({ type: 's16le' })
+      const opus = new prism.opus.Encoder({ rate: 48000, channels: 2, frameSize: 960 })
+
+      stream.pipe(ffmpeg).pipe(volume).pipe(opus)
+
+      pipeline = [stream, ffmpeg, volume, opus]
+      audioStream = opus
+    }
+
+    this.pipes = pipeline
+    this.stream = audioStream
 
     stream.on('finishBuffering', () => this.stream.emit('finishBuffering'))
   }
+
   _end() {
     if (!this.pipes) return
 
@@ -71,15 +92,15 @@ class streamProcessor {
     this.stream.removeListener(event, listener)
   }
   removeAllListeners() {
-    const stream = this.stream
-    if (!stream?.eventNames) return
+    if (!this.stream?.eventNames) return
 
-    for (const eventName of stream.eventNames()) {
-      for (const listener of stream.listeners(eventName)) {
-        stream.removeListener(eventName, listener)
+    for (const eventName of this.stream.eventNames()) {
+      for (const listener of this.stream.listeners(eventName)) {
+        this.stream.removeListener(eventName, listener)
       }
     }
   }
+
   read() {
     return this.stream?.read()
   }
@@ -89,9 +110,15 @@ class streamProcessor {
   destroy() {
     this._end()
   }
-
   setVolume(volume) {
-    this.pipes[2].setVolume(volume)
+    if (!this.pipes) return
+
+    const volumeTransformer = this.pipes.find(pipe => pipe instanceof prism.VolumeTransformer)
+    if (volumeTransformer) {
+      volumeTransformer.setVolume(volume)
+    } else {
+      throw new Error('VolumeTransformer not found in the pipeline.')
+    }
   }
 }
 
