@@ -8,6 +8,9 @@ export default {
   maxAlbumPlaylistLength: 100,
   playerUpdateInterval: 2000,
   sources: {
+    bandcamp: {
+      enabled: true
+    },
     soundcloud: {
       enabled: true
     },
