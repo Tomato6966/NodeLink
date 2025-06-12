@@ -74,7 +74,6 @@ export class Player {
         reason: state.closeReason,
         byRemote: true
       })
-      this.destroy(false)
     } else if (state.status === 'destroyed') {
       this.connection = null
     }
@@ -299,7 +298,6 @@ export class Player {
   }
 
   stop() {
-    console.log('Stopping player')
     if (!this.track) return false
     if (this.connection?.audioStream) {
       this.connection.stop(EndReasons.STOPPED)
@@ -337,7 +335,12 @@ export class Player {
     if (!this.connection) this._initConnection()
     this.connection.voiceStateUpdate({ session_id: sessionId })
     this.connection.voiceServerUpdate({ token, endpoint })
-    this.connection.connect()
+    this.connection.connect(() => {
+      if (this.connection.audioStream && !this.isPaused) {
+        this.connection.unpause('reconnected')
+      }
+    })
+
     this.voice = { sessionId, token, endpoint }
   }
 
