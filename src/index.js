@@ -51,7 +51,6 @@ class NodelinkServer {
     this.server = http.createServer((req, res) => requestHandler(this, req, res))
     this.socket = new WebSocketServer({ noServer: true })
     this.socket.on('/v4/websocket', (socket, request, clientInfo, oldSessionId) => {
-      console.log(oldSessionId)
       if (oldSessionId) {
         const session = this.sessions.get(oldSessionId)
         if (session) {
@@ -69,6 +68,11 @@ class NodelinkServer {
             })
           )
           session.resumed = true
+
+          if (session.interval) {
+            clearTimeout(session.interval)
+            session.interval = null
+          }
         }
       } else {
         const sessionId = this.sessions.create(request, socket, clientInfo)
@@ -147,7 +151,6 @@ class NodelinkServer {
       }
 
       let sessionId = headers['session-id']
-      console.log(sessionId, headers)
       if (sessionId && !this.sessions.has(sessionId)) {
         logger(
           'warn',
