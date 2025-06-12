@@ -1,4 +1,4 @@
-import { generateRandomLetters } from '../utils.js'
+import { generateRandomLetters, logger } from '../utils.js'
 import PlayerManager from './playerManager.js'
 
 export default class SessionManager {
@@ -26,8 +26,16 @@ export default class SessionManager {
   delete(sessionId) {
     const connection = this.connections.get(sessionId)
     if (connection) {
-      connection.socket.destroy()
+      for (const player of connection.players.players.values()) {
+        player?.destroy()
+      }
+      connection?.socket?.destroy()
       this.connections.delete(sessionId)
+      logger(
+        'info',
+        'SessionManager',
+        `Session ${sessionId} deleted, destroyed all players and socket`
+      )
     }
   }
   values() {

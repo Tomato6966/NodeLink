@@ -50,25 +50,73 @@ class NodelinkServer {
   _createServer() {
     this.server = http.createServer((req, res) => requestHandler(this, req, res))
     this.socket = new WebSocketServer({ noServer: true })
-    this.socket.on('/v4/websocket', (socket, request, clientInfo) => {
-      const sessionId = this.sessions.create(request, socket, clientInfo)
-      socket.on('close', (code, reason) => {
-        if (!this.sessions.has(sessionId)) return
-        logger(
-          'info',
-          'Server',
-          `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m disconnected with code ${code} and reason: ${reason || 'without reason'}`
-        )
-        this.sessions.delete(sessionId)
-      })
+    this.socket.on('/v4/websocket', (socket, request, clientInfo, oldSessionId) => {
+      console.log(oldSessionId)
+      if (oldSessionId) {
+        const session = this.sessions.get(oldSessionId)
+        if (session) {
+          logger(
+            'info',
+            'Server',
+            `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m resumed session with ID: ${oldSessionId}`
+          )
+          session.socket = socket
+          socket.send(
+            JSON.stringify({
+              op: 'ready',
+              resumed: true,
+              sessionId: oldSessionId
+            })
+          )
+          session.resumed = true
+        }
+      } else {
+        const sessionId = this.sessions.create(request, socket, clientInfo)
+        socket.on('close', (code, reason) => {
+          if (!this.sessions.has(sessionId)) return
+          const session = this.sessions.get(sessionId)
+          logger(
+            'info',
+            'Server',
+            `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m disconnected with code ${code} and reason: ${reason || 'without reason'}`
+          )
+          if (!session.resuming) this.sessions.delete(sessionId)
+          else {
+            logger(
+              'info',
+              'Server',
+              `Session with ID: ${sessionId} is resuming, waiting for reconnection in ${session.timeout || 60} seconds`
+            )
 
-      socket.send(
-        JSON.stringify({
-          op: 'ready',
-          resumed: false,
-          sessionId
+            socket.interval = setTimeout(
+              () => {
+                if (this.sessions.get(sessionId)?.resumed !== true) {
+                  logger(
+                    'info',
+                    'Server',
+                    `Session with ID: ${sessionId} has not been resumed, deleting session`
+                  )
+                  this.sessions.delete(sessionId)
+                } else
+                  logger(
+                    'info',
+                    'Server',
+                    `Session with ID: ${sessionId} has been resumed, keeping session alive`
+                  )
+              },
+              (session.timeout || 60) * 1000
+            )
+          }
         })
-      )
+
+        socket.send(
+          JSON.stringify({
+            op: 'ready',
+            resumed: false,
+            sessionId
+          })
+        )
+      }
     })
     this.server.on('upgrade', (request, socket, head) => {
       const { remoteAddress, remotePort } = request.socket
@@ -98,6 +146,17 @@ class NodelinkServer {
         return socket.destroy()
       }
 
+      let sessionId = headers['session-id']
+      console.log(sessionId, headers)
+      if (sessionId && !this.sessions.has(sessionId)) {
+        logger(
+          'warn',
+          'Server',
+          `Session-ID provided by ${clientAddress} does not exist: ${sessionId}, creating a new session`
+        )
+        sessionId = undefined
+      }
+
       const { pathname } = new URL(request.url, `http://${request.headers.host}`)
       if (pathname === '/v4/websocket') {
         if (!request.headers['user-id']) {
@@ -125,7 +184,7 @@ class NodelinkServer {
         )
 
         this.socket.handleUpgrade(request, socket, head, {}, ws =>
-          this.socket.emit('/v4/websocket', ws, request, clientInfo)
+          this.socket.emit('/v4/websocket', ws, request, clientInfo, sessionId)
         )
       } else {
         logger(

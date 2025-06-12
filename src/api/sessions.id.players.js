@@ -84,8 +84,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         }
         player.updateVoice(payload.voice)
       }
+      if (payload.encodedTrack)
+        console.log('deprecated: encodedTrack is deprecated, use track.encoded instead')
 
-      const encodedTrack = payload.track?.encoded ?? payload.encodedTrack
+      const encodedTrack = payload.track?.encoded
       if (encodedTrack !== undefined) {
         if (encodedTrack === null) {
           if (!player.track) {

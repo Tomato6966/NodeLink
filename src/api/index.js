@@ -21,7 +21,9 @@ async function loadRoutes() {
         pathname = '/version'
       } else if (routeName.includes('.')) {
         const parts = routeName.split('.')
-        const basePattern = parts.map(part => (part === 'id' ? '[A-Za-z0-9]+' : part)).join('/')
+        const basePattern = parts
+          .map(part => (part === 'id' ? '(?:id|[A-Za-z0-9]+)' : part))
+          .join('/')
         pathname = new RegExp(`^/${PATH_VERSION}/${basePattern}(?:/[A-Za-z0-9]+)?/?$`)
       } else {
         pathname = `/${PATH_VERSION}/${routeName}`

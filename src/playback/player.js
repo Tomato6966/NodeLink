@@ -299,6 +299,7 @@ export class Player {
   }
 
   stop() {
+    console.log('Stopping player')
     if (!this.track) return false
     if (this.connection?.audioStream) {
       this.connection.stop(EndReasons.STOPPED)
