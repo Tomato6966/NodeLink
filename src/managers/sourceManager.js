@@ -79,12 +79,21 @@ export default class SourcesManager {
     return instance.search(query)
   }
 
+  async searchWithDefault(query) {
+    const instance = this.sources.get(
+      this.nodelink.options.defaultSearchSource ??
+        this.searchTermMap.get(this.nodelink.options.defaultSearchSource)
+    )
+    return instance.search(query)
+  }
+
   async resolve(url) {
     const sourceName = this.patternMap.find(({ regex }) => regex.test(url))?.sourceName
     if (!sourceName && (url.startsWith('https://') || url.includes('http://'))) {
       const instance = this.sources.get('http')
       logger('info', 'Resolve', `Resolving HTTP for ${url}`)
-      return instance.resolve(url)
+      const result = await instance.resolve(url)
+      return result
       //biome-ignore lint: no-use-else-if
     } else if (!sourceName) {
       return {
@@ -107,12 +116,12 @@ export default class SourcesManager {
 
   async getTrackUrl(track) {
     const instance = this.sources.get(track.sourceName)
-    return instance.getTrackUrl(track)
+    return await instance.getTrackUrl(track)
   }
 
   async getTrackStream(track, url, protocol, additionalData) {
     const instance = this.sources.get(track.sourceName)
-    return instance.loadStream(track, url, protocol, additionalData)
+    return await instance.loadStream(track, url, protocol, additionalData)
   }
 
   getAllSources() {

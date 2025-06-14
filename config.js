@@ -7,6 +7,7 @@ export default {
   maxSearchResults: 10,
   maxAlbumPlaylistLength: 100,
   playerUpdateInterval: 2000,
+  defaultSearchSource: 'youtube',
   sources: {
     deezer: {
       // arl: '',
@@ -30,6 +31,11 @@ export default {
     },
     instagram: {
       enabled: true
+    },
+    spotify: {
+      enabled: true
+      // clientId: '',
+      // clientSecret: '',
     }
   },
   audio: {

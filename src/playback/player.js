@@ -129,8 +129,10 @@ export class Player {
 
   async _fetchResource(info, urlData, startTime) {
     if (startTime) urlData.additionalData = { startTime, ...urlData.additionalData }
+    // biome-ignore lint:
+    const track = urlData?.newTrack ? urlData?.newTrack?.info : info
     const fetched = await this.nodelink.sources.getTrackStream(
-      info,
+      track,
       urlData.url,
       urlData.protocol,
       urlData.additionalData
