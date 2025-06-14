@@ -588,6 +588,7 @@ async function makeRequest(urlString, options = {}) {
     }
   })
 }
+
 function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
   //biome-ignore lint: no-promise-executor-return
   return new Promise(async resolve => {

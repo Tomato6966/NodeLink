@@ -8,6 +8,11 @@ export default {
   maxAlbumPlaylistLength: 100,
   playerUpdateInterval: 2000,
   sources: {
+    deezer: {
+      // arl: '',
+      // decryptionKey: '',
+      enabled: true
+    },
     bandcamp: {
       enabled: true
     },

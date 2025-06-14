@@ -128,7 +128,7 @@ export class Player {
   }
 
   async _fetchResource(info, urlData, startTime) {
-    if (startTime) urlData.additionalData = { startTime }
+    if (startTime) urlData.additionalData = { startTime, ...urlData.additionalData }
     const fetched = await this.nodelink.sources.getTrackStream(
       info,
       urlData.url,
