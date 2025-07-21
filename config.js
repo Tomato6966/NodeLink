@@ -38,6 +38,27 @@ export default {
       // clientSecret: '',
     }
   },
+  lyrics: {
+    fallbackSource: 'genius',
+    youtube: {
+      enabled: true
+    },
+    genius: {
+      enabled: true
+    },
+    spotify: {
+      enabled: true
+      // spDc: ''
+    },
+    deezer: {
+      enabled: true
+      // arl: ''
+    },
+    musixmatch: {
+      enabled: true
+      // signatureSecret: ''
+    }
+  },
   audio: {
     encryption: 'aead_aes256_gcm_rtpsize'
   }

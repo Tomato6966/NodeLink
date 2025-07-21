@@ -11,6 +11,7 @@ import config from '../config.js'
 import WebSocketServer from '@performanc/pwsl-server'
 import sessionManager from './managers/sessionManager.js'
 import sourceManager from './managers/sourceManager.js'
+import lyricsManager from './managers/lyricsManager.js'
 import http from 'node:http'
 
 class NodelinkServer {
@@ -22,6 +23,7 @@ class NodelinkServer {
     this.socket = null
     this.sessions = new sessionManager(this)
     this.sources = new sourceManager(this)
+    this.lyrics = new lyricsManager(this)
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     this.statistics = {
@@ -214,6 +216,7 @@ class NodelinkServer {
   async start() {
     this._validateConfig()
     await this.sources.loadFolder()
+    await this.lyrics.loadFolder()
     this._createServer()
     this._listen()
     return this

@@ -223,7 +223,7 @@ export default class YouTubeSource {
     }
     return YOUTUBE_CONSTANTS.UNKNOWN
   }
-  buildTrack(itemData, itemType, sourceNameOverride = null) {
+  buildTrack(itemData, itemType, sourceNameOverride = null, fullApiResponse = null) {
     // biome-ignore lint: declare-separate-vars
     let videoId,
       title,
@@ -364,7 +364,9 @@ export default class YouTubeSource {
     return {
       encoded: encodeTrack(trackInfo),
       info: trackInfo,
-      pluginInfo: {}
+      pluginInfo: {
+        captions: fullApiResponse?.captions
+      }
     }
   }
 
@@ -548,7 +550,7 @@ export default class YouTubeSource {
             data: { message, severity: 'common', cause: 'UpstreamPlayability' }
           }
         }
-        const track = this.buildTrack(playerResponse.videoDetails, type, sourceName)
+        const track = this.buildTrack(playerResponse.videoDetails, type, sourceName, playerResponse)
         if (!track) {
           logger('error', 'youtube', `Failed to build track for video/short ${videoId}`)
           return {
