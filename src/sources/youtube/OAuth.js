@@ -1,0 +1,204 @@
+import { logger, makeRequest } from '../../utils.js'
+
+const CLIENT_ID =
+  '861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com'
+const CLIENT_SECRET = 'SboVhoG9s0rNafixCSGGKXAT'
+const SCOPES =
+  'http://gdata.youtube.com https://www.googleapis.com/auth/youtube'
+
+export default class OAuth {
+  constructor(nodelink) {
+    this.nodelink = nodelink
+    this.refreshToken =
+      this.nodelink.options.sources.youtube.clients.settings.TV.refreshToken
+    this.accessToken = null
+    this.tokenExpiry = 0
+  }
+
+  async getAccessToken() {
+    if (!this.refreshToken) {
+      return null
+    }
+
+    if (this.accessToken && Date.now() < this.tokenExpiry) {
+      return this.accessToken
+    }
+
+    logger('info', 'youtube-oauth', 'Refreshing access token...')
+
+    const { body, error, statusCode } = await makeRequest(
+      'https://www.youtube.com/o/oauth2/token',
+      {
+        method: 'POST',
+        body: {
+          client_id: CLIENT_ID,
+          client_secret: CLIENT_SECRET,
+          refresh_token: this.refreshToken,
+          grant_type: 'refresh_token'
+        }
+      }
+    )
+
+    if (error || statusCode !== 200 || !body.access_token) {
+      logger(
+        'error',
+        'youtube-oauth',
+        `Failed to refresh access token: ${error?.message || body.error_description || 'Invalid response'}`
+      )
+      this.accessToken = null
+      this.tokenExpiry = 0
+      return null
+    }
+
+    this.accessToken = body.access_token
+    this.tokenExpiry = Date.now() + body.expires_in * 1000 - 30000
+
+    logger('info', 'youtube-oauth', 'Successfully refreshed access token.')
+
+    return this.accessToken
+  }
+
+  async getAuthHeaders() {
+    const token = await this.getAccessToken()
+    if (!token) return {}
+
+    return {
+      Authorization: `Bearer ${token}`
+    }
+  }
+
+  static async acquireRefreshToken() {
+    logger(
+      'info',
+      'youtube-oauth',
+      'Step 1: Requesting device code from Google...'
+    )
+    const data = {
+      client_id: CLIENT_ID,
+      scope: SCOPES
+    }
+
+    try {
+      const {
+        body: response,
+        error,
+        statusCode
+      } = await makeRequest('https://www.youtube.com/o/oauth2/device/code', {
+        method: 'POST',
+        body: data
+      })
+
+      if (error || statusCode !== 200 || response.error) {
+        throw new Error(
+          `Error obtaining device code: ${error?.message || response.error_description || 'Invalid response'}`
+        )
+      }
+
+      console.log(
+        '=================================================================='
+      )
+      console.log(
+        '🚨 ALERT: DO NOT USE YOUR MAIN GOOGLE ACCOUNT! USE A SECONDARY OR BURNER ACCOUNT ONLY!'
+      )
+      console.log('To authorize, visit the following URL in your browser:')
+      console.log(`URL: ${response.verification_url}`)
+      console.log(`And enter the code: ${response.user_code}`)
+      console.log(
+        '=================================================================='
+      )
+      console.log('Waiting for authorization...')
+
+      const refreshToken = await OAuth.pollForToken(
+        response.device_code,
+        response.interval
+      )
+
+      console.log(
+        '=================================================================='
+      )
+      console.log('Authorization granted successfully!')
+      console.log(
+        '=================================================================='
+      )
+      console.log(
+        'Refresh Token (use this to obtain new Access Tokens in the future):'
+      )
+      console.log(refreshToken)
+      console.log('Save your Refresh Token in a secure place!')
+      console.log(
+        '=================================================================='
+      )
+
+      return refreshToken
+    } catch (error) {
+      logger('error', 'youtube-oauth', `Failed in Step 1: ${error.message}`)
+      throw error
+    }
+  }
+
+  static async pollForToken(deviceCode, interval) {
+    const data = {
+      client_id: CLIENT_ID,
+      client_secret: CLIENT_SECRET,
+      code: deviceCode,
+      grant_type: 'http://oauth.net/grant_type/device/1.0'
+    }
+
+    return new Promise((resolve, reject) => {
+      const poll = async () => {
+        try {
+          const {
+            body: response,
+            error,
+            statusCode
+          } = await makeRequest('https://www.youtube.com/o/oauth2/token', {
+            method: 'POST',
+            body: data
+          })
+
+          if (error || statusCode !== 200 || response.error) {
+            if (response.error === 'authorization_pending') {
+              setTimeout(poll, interval * 1000)
+            } else if (response.error === 'slow_down') {
+              setTimeout(poll, (interval + 5) * 1000)
+            } else if (response.error === 'expired_token') {
+              logger(
+                'error',
+                'youtube-oauth',
+                'Authorization code expired. Please run the script again.'
+              )
+              reject(new Error('Authorization code expired.'))
+            } else if (response.error === 'access_denied') {
+              logger(
+                'error',
+                'youtube-oauth',
+                'Access denied. Authorization was cancelled.'
+              )
+              reject(new Error('Access denied.'))
+            } else {
+              logger(
+                'error',
+                'youtube-oauth',
+                `Error during polling: ${response.error_description}`
+              )
+              reject(
+                new Error(`Error during polling: ${response.error_description}`)
+              )
+            }
+          } else {
+            resolve(response.refresh_token)
+          }
+        } catch (error) {
+          logger(
+            'error',
+            'youtube-oauth',
+            `Failed in Step 2 (Polling): ${error.message}`
+          )
+          setTimeout(poll, interval * 1000)
+        }
+      }
+
+      setTimeout(poll, interval * 1000)
+    })
+  }
+}

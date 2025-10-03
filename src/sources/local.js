@@ -59,7 +59,8 @@ function readFileInfo(filePath) {
     const header = parseMP3Header(buf)
     info.bitrateKbps = header?.bitrateKbps || 'unknown'
 
-    const bps = (typeof info.bitrateKbps === 'number' ? info.bitrateKbps : 128) * 1000
+    const bps =
+      (typeof info.bitrateKbps === 'number' ? info.bitrateKbps : 128) * 1000
     info.durationMs = bps ? Math.floor(((stats.size * 8) / bps) * 1000) : 0
   }
 
@@ -86,10 +87,18 @@ export default class LocalSource {
       const meta = readFileInfo(file)
       const track = this.buildTrack(file, meta)
 
-      logger('sources', 'info', `Track found: ${track.info.title} [${meta.fileType}]`)
+      logger(
+        'sources',
+        'info',
+        `Track found: ${track.info.title} [${meta.fileType}]`
+      )
       return { loadType: 'search', data: [track] }
     } catch (err) {
-      logger('sources', 'warn', `File not found or unreadable: ${file} — ${err.message}`)
+      logger(
+        'sources',
+        'warn',
+        `File not found or unreadable: ${file} — ${err.message}`
+      )
       return { loadType: 'empty', data: {} }
     }
   }
@@ -116,15 +125,23 @@ export default class LocalSource {
   }
 
   getTrackUrl(track) {
-    return { url: track.uri, protocol: 'local', format: null, additionalData: null }
+    return {
+      url: track.uri,
+      protocol: 'local',
+      format: null,
+      additionalData: null
+    }
   }
 
   async loadStream(decoded, url, protocol, additional) {
     if (additional?.startTime && decoded.isSeekable) {
       const info = readFileInfo(decoded.uri)
-      const bps = (typeof info.bitrateKbps === 'number' ? info.bitrateKbps : 128) * 1000
+      const bps =
+        (typeof info.bitrateKbps === 'number' ? info.bitrateKbps : 128) * 1000
       const offset =
-        info.durationMs > 0 ? Math.floor((bps * (additional.startTime ?? 0)) / 8000) : 0
+        info.durationMs > 0
+          ? Math.floor((bps * (additional.startTime ?? 0)) / 8000)
+          : 0
       const stream = fs.createReadStream(decoded.uri, {
         start: offset
       })
@@ -135,7 +152,9 @@ export default class LocalSource {
 
     const stream = fs.createReadStream(decoded.uri)
     stream.once('close', () => stream.emit('finishBuffering'))
-    stream.on('error', err => logger('sources', 'error', `Stream error: ${err.message}`))
+    stream.on('error', (err) =>
+      logger('sources', 'error', `Stream error: ${err.message}`)
+    )
     return { stream, type: 'arbitrary' }
   }
 }

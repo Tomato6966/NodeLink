@@ -1,4 +1,4 @@
-import { makeRequest, logger } from '../utils.js'
+import { logger, makeRequest } from '../utils.js'
 
 export default class GeniusLyrics {
   constructor(nodelink) {
@@ -14,17 +14,24 @@ export default class GeniusLyrics {
     logger('lyrics', 'debug', `Searching Genius for: ${query}`)
 
     try {
-      const { body: searchData } = await makeRequest(`https://genius.com/api/search/multi?q=${encodeURIComponent(query)}`, {
-        method: 'GET'
-      })
+      const { body: searchData } = await makeRequest(
+        `https://genius.com/api/search/multi?q=${encodeURIComponent(query)}`,
+        {
+          method: 'GET'
+        }
+      )
 
-      const song = searchData.response.sections.find(s => s.type === 'song')?.hits[0]?.result
+      const song = searchData.response.sections.find((s) => s.type === 'song')
+        ?.hits[0]?.result
 
       if (!song) {
         return { loadType: 'empty', data: {} }
       }
 
-      const { body: songPage } = await makeRequest(`https://genius.com${song.path}`, { method: 'GET' })
+      const { body: songPage } = await makeRequest(
+        `https://genius.com${song.path}`,
+        { method: 'GET' }
+      )
 
       const lyricsData = songPage.match(/JSON.parse\('(.*)'\);/)
       if (!lyricsData || !lyricsData[1]) {
@@ -38,20 +45,27 @@ export default class GeniusLyrics {
         .replace(/<br>/g, '\n')
         .replace(/<[^>]*>/g, '')
         .split('\n')
-        .map(line => line.trim())
-        .filter(line => line)
+        .map((line) => line.trim())
+        .filter((line) => line)
 
       return {
         loadType: 'lyrics',
         data: {
           name: 'original',
           synced: false,
-          lines: lines.map(text => ({ text, time: 0, duration: 0 }))
+          lines: lines.map((text) => ({ text, time: 0, duration: 0 }))
         }
       }
     } catch (e) {
-      logger('lyrics', 'error', `Failed to fetch lyrics from Genius: ${e.message}`)
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      logger(
+        'lyrics',
+        'error',
+        `Failed to fetch lyrics from Genius: ${e.message}`
+      )
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 }

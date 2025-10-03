@@ -21,7 +21,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  if (parsedUrl.pathname === `/v4/sessions/${sessionId}` && req.method === 'PATCH') {
+  if (
+    parsedUrl.pathname === `/v4/sessions/${sessionId}` &&
+    req.method === 'PATCH'
+  ) {
     const payload = req.body
     const { resuming, timeout } = payload
 
@@ -61,7 +64,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       session.timeout = timeout
     }
 
-    return sendResponse(req, res, { resuming: session.resuming, timeout: session.timeout }, 200)
+    return sendResponse(
+      req,
+      res,
+      { resuming: session.resuming, timeout: session.timeout },
+      200
+    )
   }
 }
 

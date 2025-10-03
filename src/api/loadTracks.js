@@ -13,13 +13,22 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
   const identifier = parsedUrl.searchParams.get('identifier')
   if (!identifier) {
-    return sendError(400, 'missing identifier parameter', 'identifier parameter is required')
+    return sendError(
+      400,
+      'missing identifier parameter',
+      'identifier parameter is required'
+    )
   }
 
-  const re = /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>[A-Za-z0-9]+):(?<query>[^/\s].*))$/i
+  const re =
+    /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>[A-Za-z0-9]+):(?<query>[^/\s].*))$/i
   const match = re.exec(identifier)
   if (!match) {
-    return sendError(400, 'invalid identifier parameter', 'identifier parameter is invalid')
+    return sendError(
+      400,
+      'invalid identifier parameter',
+      'identifier parameter is invalid'
+    )
   }
 
   const { url, source, query } = match.groups
@@ -33,7 +42,11 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     const tracks = await nodelink.sources.search(source, query)
     return sendResponse(req, res, tracks, 200)
   } catch (err) {
-    return sendError(500, 'failed to load track', err.message || 'Failed to load track')
+    return sendError(
+      500,
+      'failed to load track',
+      err.message || 'Failed to load track'
+    )
   }
 }
 

@@ -21,13 +21,17 @@ export default class MusixmatchLyrics {
 
   signUrl(url) {
     const secret = this.nodelink.options.lyrics?.musixmatch?.signatureSecret
-    if (!secret) throw new Error('Musixmatch signatureSecret is not configured.')
+    if (!secret)
+      throw new Error('Musixmatch signatureSecret is not configured.')
 
     const dt = new Date()
     const timestamp = `${dt.getUTCFullYear()}${String(dt.getUTCMonth() + 1).padStart(2, '0')}${String(
       dt.getUTCDate()
     ).padStart(2, '0')}`
-    const signature = crypto.createHmac('sha1', secret).update(url + timestamp).digest('base64')
+    const signature = crypto
+      .createHmac('sha1', secret)
+      .update(url + timestamp)
+      .digest('base64')
 
     return `${url}&signature=${encodeURIComponent(signature)}&signature_protocol=sha1`
   }
@@ -43,7 +47,8 @@ export default class MusixmatchLyrics {
 
       const { body: searchResult } = await makeRequest(searchUrl)
 
-      const track = searchResult.message.body.macro_result_list.track_list[0]?.track
+      const track =
+        searchResult.message.body.macro_result_list.track_list[0]?.track
       if (!track) return { loadType: 'empty', data: {} }
 
       const lyricsUrl = this.signUrl(
@@ -54,7 +59,9 @@ export default class MusixmatchLyrics {
       const lyricsBody = lyricsResult.message.body.lyrics?.lyrics_body
       if (!lyricsBody) return { loadType: 'empty', data: {} }
 
-      const lines = lyricsBody.split('\n').map((line) => ({ text: line, time: 0, duration: 0 }))
+      const lines = lyricsBody
+        .split('\n')
+        .map((line) => ({ text: line, time: 0, duration: 0 }))
 
       return {
         loadType: 'lyrics',
@@ -65,8 +72,15 @@ export default class MusixmatchLyrics {
         }
       }
     } catch (e) {
-      logger('lyrics', 'error', `Failed to fetch lyrics from Musixmatch: ${e.message}`)
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      logger(
+        'lyrics',
+        'error',
+        `Failed to fetch lyrics from Musixmatch: ${e.message}`
+      )
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 }

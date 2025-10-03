@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { encodeTrack, logger, http1makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
 export default class SpotifySource {
   constructor(nodelink) {
@@ -15,8 +15,8 @@ export default class SpotifySource {
   }
 
   static TOTP_SECRET = new Uint8Array([
-    53, 53, 48, 55, 49, 52, 53, 56, 53, 51, 52, 56, 55, 52, 57, 57, 53, 57, 50, 50, 52, 56, 54, 51,
-    48, 51, 50, 57, 51, 52, 55
+    53, 53, 48, 55, 49, 52, 53, 56, 53, 51, 52, 56, 55, 52, 57, 57, 53, 57, 50,
+    50, 52, 56, 54, 51, 48, 51, 50, 57, 51, 52, 55
   ])
 
   async setup() {
@@ -39,19 +39,30 @@ export default class SpotifySource {
       }
     )
     if (!tokenData || !tokenData?.accessToken || !tokenData?.clientId) {
-      logger('error', 'spotify', 'Failed to fetch access token: Invalid response')
+      logger(
+        'error',
+        'spotify',
+        'Failed to fetch access token: Invalid response'
+      )
       return false
     }
 
     if (tokenData?.error) {
-      logger('error', 'spotify', `Failed to fetch access token: ${tokenData.error.message}`)
+      logger(
+        'error',
+        'spotify',
+        `Failed to fetch access token: ${tokenData.error.message}`
+      )
       return false
     }
     const { body: clientTokenData } = await http1makeRequest(
       'https://clienttoken.spotify.com/v1/clienttoken',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', accept: 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          accept: 'application/json'
+        },
         body: {
           client_data: {
             client_version: '1.2.9.2269',
@@ -69,11 +80,19 @@ export default class SpotifySource {
       !clientTokenData?.granted_token ||
       !clientTokenData?.granted_token?.token
     ) {
-      logger('error', 'spotify', 'Failed to fetch client token: Invalid response')
+      logger(
+        'error',
+        'spotify',
+        'Failed to fetch client token: Invalid response'
+      )
       return false
     }
     if (clientTokenData.response_type !== 'RESPONSE_GRANTED_TOKEN_RESPONSE') {
-      logger('error', 'spotify', `Failed to fetch client token: ${JSON.stringify(clientTokenData)}`)
+      logger(
+        'error',
+        'spotify',
+        `Failed to fetch client token: ${JSON.stringify(clientTokenData)}`
+      )
       return false
     }
 
@@ -91,18 +110,24 @@ export default class SpotifySource {
       )
 
       if (body.error) {
-        return { loadType: 'error', data: { message: body.error.message, severity: 'common' } }
+        return {
+          loadType: 'error',
+          data: { message: body.error.message, severity: 'common' }
+        }
       }
 
       if (!body.tracks || body.tracks.items.length === 0) {
         return { loadType: 'empty', data: {} }
       }
 
-      const tracks = body.tracks.items.map(item => this.buildTrack(item))
+      const tracks = body.tracks.items.map((item) => this.buildTrack(item))
 
       return { loadType: 'search', data: tracks }
     } catch (e) {
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 
@@ -120,7 +145,9 @@ export default class SpotifySource {
         }
         case 'album': {
           const { body } = await this._apiRequest(`/albums/${id}`)
-          const tracks = body.tracks.items.map(item => this.buildTrack(item, body.images[0]?.url))
+          const tracks = body.tracks.items.map((item) =>
+            this.buildTrack(item, body.images[0]?.url)
+          )
           return {
             loadType: 'playlist',
             data: { info: { name: body.name, selectedTrack: 0 }, tracks }
@@ -128,7 +155,9 @@ export default class SpotifySource {
         }
         case 'playlist': {
           const { body } = await this._apiRequest(`/playlists/${id}`)
-          const tracks = body.tracks.items.map(item => this.buildTrack(item.track))
+          const tracks = body.tracks.items.map((item) =>
+            this.buildTrack(item.track)
+          )
           return {
             loadType: 'playlist',
             data: { info: { name: body.name, selectedTrack: 0 }, tracks }
@@ -136,11 +165,18 @@ export default class SpotifySource {
         }
         case 'artist': {
           const { body: artist } = await this._apiRequest(`/artists/${id}`)
-          const { body: topTracks } = await this._apiRequest(`/artists/${id}/top-tracks?market=US`)
-          const tracks = topTracks.tracks.map(item => this.buildTrack(item, artist.images[0]?.url))
+          const { body: topTracks } = await this._apiRequest(
+            `/artists/${id}/top-tracks?market=US`
+          )
+          const tracks = topTracks.tracks.map((item) =>
+            this.buildTrack(item, artist.images[0]?.url)
+          )
           return {
             loadType: 'playlist',
-            data: { info: { name: `${artist.name}'s Top Tracks`, selectedTrack: 0 }, tracks }
+            data: {
+              info: { name: `${artist.name}'s Top Tracks`, selectedTrack: 0 },
+              tracks
+            }
           }
         }
         case 'episode':
@@ -157,7 +193,10 @@ export default class SpotifySource {
           return { loadType: 'empty', data: {} }
       }
     } catch (e) {
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 
@@ -165,7 +204,7 @@ export default class SpotifySource {
     const trackInfo = {
       identifier: item.id,
       isSeekable: true,
-      author: item.artists?.map(a => a.name).join(', ') || 'Unknown',
+      author: item.artists?.map((a) => a.name).join(', ') || 'Unknown',
       length: item.duration_ms,
       isStream: false,
       position: 0,
@@ -188,7 +227,10 @@ export default class SpotifySource {
 
     try {
       const searchResult = await this.nodelink.sources.searchWithDefault(query)
-      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+      if (
+        searchResult.loadType !== 'search' ||
+        searchResult.data.length === 0
+      ) {
         throw new Error('No alternative stream found via default search.')
       }
 
@@ -203,7 +245,8 @@ export default class SpotifySource {
   async _apiRequest(endpoint) {
     if (!this.accessToken) {
       const success = await this.setup()
-      if (!success) throw new Error('Failed to initialize Spotify for API request.')
+      if (!success)
+        throw new Error('Failed to initialize Spotify for API request.')
     }
 
     const headers = {
@@ -211,16 +254,23 @@ export default class SpotifySource {
       Accept: 'application/json'
     }
 
-    let { body, statusCode } = await http1makeRequest(`https://api.spotify.com/v1${endpoint}`, {
-      headers
-    })
+    let { body, statusCode } = await http1makeRequest(
+      `https://api.spotify.com/v1${endpoint}`,
+      {
+        headers
+      }
+    )
 
     if (statusCode === 401) {
       const success = await this.setup()
-      if (!success) throw new Error('Failed to re-initialize Spotify after 401.')
+      if (!success)
+        throw new Error('Failed to re-initialize Spotify after 401.')
 
       headers.Authorization = `Bearer ${this.accessToken}`
-      const res = await http1makeRequest(`https://api.spotify.com/v1${endpoint}`, { headers })
+      const res = await http1makeRequest(
+        `https://api.spotify.com/v1${endpoint}`,
+        { headers }
+      )
       body = res.body
     }
 
@@ -231,7 +281,10 @@ export default class SpotifySource {
     const counter = Math.floor(Date.now() / 30000)
     const buf = Buffer.alloc(8)
     buf.writeBigInt64BE(BigInt(counter))
-    const hmac = crypto.createHmac('sha1', SpotifySource.TOTP_SECRET).update(buf).digest()
+    const hmac = crypto
+      .createHmac('sha1', SpotifySource.TOTP_SECRET)
+      .update(buf)
+      .digest()
     const offset = hmac[hmac.length - 1] & 0x0f
     const bin =
       ((hmac[offset] & 0x7f) << 24) |

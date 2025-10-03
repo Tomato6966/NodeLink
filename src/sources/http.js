@@ -17,15 +17,22 @@ export default class HttpSource {
   async resolve(url) {
     const data = await makeRequest(url, { method: 'HEAD' })
     if (data.error) {
-      return { loadType: 'error', data: { message: data.error.message, severity: 'common' } }
+      return {
+        loadType: 'error',
+        data: { message: data.error.message, severity: 'common' }
+      }
     }
 
     const headers = data.headers || {}
     if (!headers['content-type']?.startsWith('audio/')) {
-      return { loadType: 'error', data: { message: 'Not an audio file', severity: 'common' } }
+      return {
+        loadType: 'error',
+        data: { message: 'Not an audio file', severity: 'common' }
+      }
     }
 
-    const isStream = Boolean(headers['icy-metaint']) || !('content-length' in headers)
+    const isStream =
+      Boolean(headers['icy-metaint']) || !('content-length' in headers)
     return { loadType: 'track', data: this.buildTrack(url, headers, isStream) }
   }
 
@@ -36,7 +43,10 @@ export default class HttpSource {
     const stationUrl = headers['icy-url'] || url
     const icyBr = headers['icy-br']
     const audioInfo = headers['ice-audio-info']
-    const bitrate = Number.parseInt(icyBr || audioInfo?.split(';')?.[0]?.split('=')?.[1] || 0, 10)
+    const bitrate = Number.parseInt(
+      icyBr || audioInfo?.split(';')?.[0]?.split('=')?.[1] || 0,
+      10
+    )
 
     const track = {
       identifier: url,

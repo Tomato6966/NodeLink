@@ -1,5 +1,11 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger, makeRequest, loadHLS } from '../utils.js'
+import {
+  encodeTrack,
+  http1makeRequest,
+  loadHLS,
+  logger,
+  makeRequest
+} from '../utils.js'
 
 export default class {
   constructor(nodelink) {
@@ -17,13 +23,19 @@ export default class {
   }
   async setup() {
     if (this.clientId) return true
-    const mainPageRequest = await makeRequest('https://soundcloud.com', { method: 'GET' })
+    const mainPageRequest = await makeRequest('https://soundcloud.com', {
+      method: 'GET'
+    })
     if (!mainPageRequest) {
       logger('sources', 'error', 'Failed to load SoundCloud main page')
       return false
     }
     if (mainPageRequest.error) {
-      logger('sources', 'error', `Failed to fetch clientId: ${mainPageRequest.error.message}`)
+      logger(
+        'sources',
+        'error',
+        `Failed to fetch clientId: ${mainPageRequest.error.message}`
+      )
       return false
     }
     const assetId = mainPageRequest.body.match(
@@ -35,7 +47,11 @@ export default class {
       return false
     }
     if (assetRequest.error) {
-      logger('sources', 'error', `Failed to fetch assets: ${assetRequest.error.message}`)
+      logger(
+        'sources',
+        'error',
+        `Failed to fetch assets: ${assetRequest.error.message}`
+      )
       return false
     }
     const clientId = assetRequest.body.match(/client_id=([a-zA-Z0-9]{32})/)[1]
@@ -76,7 +92,9 @@ export default class {
     const tracks = []
     if (body.collection > this.nodelink.options.maxSearchResults)
       body.collection = body.collection.filter(
-        (item, index) => index < this.nodelink.options.maxSearchResults || item.kind === 'track'
+        (item, index) =>
+          index < this.nodelink.options.maxSearchResults ||
+          item.kind === 'track'
       )
     for (const item of body.collection) {
       if (item.kind !== 'track') continue
@@ -84,7 +102,11 @@ export default class {
       tracks.push(track)
     }
 
-    logger('info', 'Search', `Found ${tracks.length} tracks on SoundCloud for ${query}`)
+    logger(
+      'info',
+      'Search',
+      `Found ${tracks.length} tracks on SoundCloud for ${query}`
+    )
     return {
       loadType: 'search',
       data: tracks
@@ -101,7 +123,9 @@ export default class {
       return {
         loadType: 'error',
         data: {
-          message: request.error?.message || `Invalid status code: ${request.statusCode}`,
+          message:
+            request.error?.message ||
+            `Invalid status code: ${request.statusCode}`,
           severity: 'fault',
           cause: 'Unknown'
         }
@@ -158,7 +182,7 @@ export default class {
       if (completeTracks.length > this.nodelink.options.maxAlbumPlaylistLength)
         completeTracks.length = this.nodelink.options.maxAlbumPlaylistLength
 
-      const tracks = completeTracks.map(item => {
+      const tracks = completeTracks.map((item) => {
         const info = {
           identifier: item.id.toString(),
           isSeekable: true,
@@ -223,18 +247,27 @@ export default class {
     )
     const body = req.body
     if (req.error || req.statusCode !== 200) {
-      logger('sources', 'error', `SoundCloud getTrackUrl error: ${req.error?.message}`)
+      logger(
+        'sources',
+        'error',
+        `SoundCloud getTrackUrl error: ${req.error?.message}`
+      )
       return {
         exception: {
           message:
-            req.error?.message || `SoundCloud returned invalid status code: ${req.statusCode}`,
+            req.error?.message ||
+            `SoundCloud returned invalid status code: ${req.statusCode}`,
           severity: 'fault',
           cause: 'Unknown'
         }
       }
     }
     if (body.errors) {
-      logger('sources', 'error', `SoundCloud getTrackUrl error: ${body.errors[0].error_message}`)
+      logger(
+        'sources',
+        'error',
+        `SoundCloud getTrackUrl error: ${body.errors[0].error_message}`
+      )
       return {
         exception: {
           message: body.errors[0].error_message,
@@ -245,7 +278,8 @@ export default class {
     }
 
     const oggOpus = body.media.transcodings.find(
-      transcoding => transcoding.format.mime_type === 'audio/ogg; codecs="opus"'
+      (transcoding) =>
+        transcoding.format.mime_type === 'audio/ogg; codecs="opus"'
     )
 
     const transcoding = oggOpus || body.media.transcodings[0]

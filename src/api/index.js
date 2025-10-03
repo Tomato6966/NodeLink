@@ -1,8 +1,8 @@
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
-import { logger, sendResponse, verifyMethod } from '../utils.js'
-import { PATH_VERSION } from '../constants.js'
 import fs from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { PATH_VERSION } from '../constants.js'
+import { logger, sendResponse, verifyMethod } from '../utils.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -22,9 +22,11 @@ async function loadRoutes() {
       } else if (routeName.includes('.')) {
         const parts = routeName.split('.')
         const basePattern = parts
-          .map(part => (part === 'id' ? '(?:id|[A-Za-z0-9]+)' : part))
+          .map((part) => (part === 'id' ? '(?:id|[A-Za-z0-9]+)' : part))
           .join('/')
-        pathname = new RegExp(`^/${PATH_VERSION}/${basePattern}(?:/[A-Za-z0-9]+)?/?$`)
+        pathname = new RegExp(
+          `^/${PATH_VERSION}/${basePattern}(?:/[A-Za-z0-9]+)?/?$`
+        )
       } else {
         pathname = `/${PATH_VERSION}/${routeName}`
       }
@@ -56,7 +58,10 @@ async function requestHandler(nodelink, req, res) {
   const isInternal = ['127.0.0.1', '::1', 'localhost'].includes(remoteAddress)
   const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${req.socket.remotePort})`
 
-  if (!req.headers || req.headers.authorization !== nodelink.options.server.password) {
+  if (
+    !req.headers ||
+    req.headers.authorization !== nodelink.options.server.password
+  ) {
     logger(
       'warn',
       'Server',
@@ -69,8 +74,8 @@ async function requestHandler(nodelink, req, res) {
 
   let body = ''
   if (req.method !== 'GET') {
-    await new Promise(resolve => {
-      req.on('data', chunk => {
+    await new Promise((resolve) => {
+      req.on('data', (chunk) => {
         body += chunk.toString()
       })
       req.on('end', () => {
@@ -79,7 +84,11 @@ async function requestHandler(nodelink, req, res) {
             body = JSON.parse(body)
           }
         } catch (error) {
-          logger('error', 'Server', `Failed to parse JSON body: ${error.message}`)
+          logger(
+            'error',
+            'Server',
+            `Failed to parse JSON body: ${error.message}`
+          )
           sendResponse(
             req,
             res,
@@ -113,14 +122,25 @@ async function requestHandler(nodelink, req, res) {
 
   const staticRoute = staticRoutes.get(parsedUrl.pathname)
   if (staticRoute) {
-    if (!verifyMethod(parsedUrl, req, res, staticRoute.methods, clientAddress)) return
+    if (!verifyMethod(parsedUrl, req, res, staticRoute.methods, clientAddress))
+      return
     staticRoute.handler(nodelink, req, res, sendResponse, parsedUrl)
     return
   }
 
   for (const [regex, route] of dynamicRoutes) {
     if (regex.test(parsedUrl.pathname)) {
-      if (!verifyMethod(parsedUrl, req, res, route.methods, sendResponse, clientAddress)) return
+      if (
+        !verifyMethod(
+          parsedUrl,
+          req,
+          res,
+          route.methods,
+          sendResponse,
+          clientAddress
+        )
+      )
+        return
       route.handler(nodelink, req, res, sendResponse, parsedUrl)
       return
     }

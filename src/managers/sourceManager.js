@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { logger } from '../utils.js'
 import { fileURLToPath } from 'node:url'
+import { logger } from '../utils.js'
 
 export default class SourcesManager {
   constructor(nodelink) {
@@ -23,27 +23,71 @@ export default class SourcesManager {
     }
 
     const files = await fs.readdir(sourcesDir)
-    const jsFiles = files.filter(f => f.endsWith('.js'))
-    const toLoad = jsFiles.filter(f => {
+    const jsFiles = files.filter((f) => f.endsWith('.js'))
+    const toLoad = jsFiles.filter((f) => {
       const name = path.basename(f, '.js')
-      return !!this.nodelink.options.sources[name]?.enabled
+      return (
+        name !== 'youtube' && !!this.nodelink.options.sources[name]?.enabled
+      )
     })
 
     this.sources.clear()
     this.searchTermMap.clear()
+    this.patternMap = []
+
+    if (this.nodelink.options.sources.youtube?.enabled) {
+      const name = 'youtube'
+      const filePath = path.join(sourcesDir, 'youtube', 'YouTube.js')
+      const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
+      const Mod = (await import(fileUrl)).default
+
+      const instance = new Mod(this.nodelink)
+      if (await instance.setup()) {
+        this.sources.set(name, instance)
+
+        if (Array.isArray(instance.searchTerms)) {
+          for (const term of instance.searchTerms) {
+            this.searchTermMap.set(term, name)
+          }
+        }
+
+        if (Array.isArray(instance.patterns)) {
+          for (const regex of instance.patterns) {
+            if (regex instanceof RegExp) {
+              this.patternMap.push({ regex, sourceName: name })
+            }
+          }
+        }
+        logger(
+          'sources',
+          'info',
+          `Loaded source: ${name} ${instance.searchTerms?.length ? `(terms: ${instance.searchTerms.join(', ')})` : ''}`
+        )
+      } else {
+        logger(
+          'sources',
+          'error',
+          `Failed setup source: ${name}; source not available for use`
+        )
+      }
+    }
 
     await Promise.all(
-      toLoad.map(async file => {
+      toLoad.map(async (file) => {
         const name = path.basename(file, '.js')
         const filePath = path.join(sourcesDir, file)
-        const fileUrl = new URL(`file://${filePath}`)
+        const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
         const Mod = (await import(fileUrl)).default
 
         const instance = new Mod(this.nodelink)
         if (await instance.setup()) {
           this.sources.set(name, instance)
         } else {
-          logger('sources', 'error', `Failed setup source: ${name}; source not available for use`)
+          logger(
+            'sources',
+            'error',
+            `Failed setup source: ${name}; source not available for use`
+          )
           return
         }
 
@@ -88,8 +132,13 @@ export default class SourcesManager {
   }
 
   async resolve(url) {
-    const sourceName = this.patternMap.find(({ regex }) => regex.test(url))?.sourceName
-    if (!sourceName && (url.startsWith('https://') || url.includes('http://'))) {
+    const sourceName = this.patternMap.find(({ regex }) =>
+      regex.test(url)
+    )?.sourceName
+    if (
+      !sourceName &&
+      (url.startsWith('https://') || url.includes('http://'))
+    ) {
       const instance = this.sources.get('http')
       logger('info', 'Resolve', `Resolving HTTP for ${url}`)
       const result = await instance.resolve(url)

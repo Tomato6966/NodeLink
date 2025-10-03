@@ -1,20 +1,20 @@
-import util from 'node:util'
-import http from 'node:http'
-import https from 'node:https'
-import http2 from 'node:http2'
-import zlib from 'node:zlib'
-import { URL } from 'node:url'
-import crypto from 'node:crypto'
 import { execSync } from 'node:child_process'
-import {
-  SEMVER_PATTERN,
-  DISCORD_ID_REGEX,
-  DEFAULT_MAX_REDIRECTS,
-  REDIRECT_STATUS_CODES,
-  HLS_SEGMENT_DOWNLOAD_CONCURRENCY_LIMIT
-} from './constants.js'
+import crypto from 'node:crypto'
+import http from 'node:http'
+import http2 from 'node:http2'
+import https from 'node:https'
+import { URL } from 'node:url'
+import util from 'node:util'
+import zlib from 'node:zlib'
 import packageJson from '../package.json' with { type: 'json' }
-const verifyDiscordID = id => DISCORD_ID_REGEX.test(String(id))
+import {
+  DEFAULT_MAX_REDIRECTS,
+  DISCORD_ID_REGEX,
+  HLS_SEGMENT_DOWNLOAD_CONCURRENCY_LIMIT,
+  REDIRECT_STATUS_CODES,
+  SEMVER_PATTERN
+} from './constants.js'
+const verifyDiscordID = (id) => DISCORD_ID_REGEX.test(String(id))
 
 function validateProperty(property, validator, errorMessage) {
   if (!validator(property)) {
@@ -37,9 +37,12 @@ function logger(level, ...args) {
   const lvl = levels[level] || levels.info
   // biome-ignore lint: no-unused-vars
   const prefix = args.length > 1 ? args[0] + ':' : ''
-  const msg = args.length > 1 ? util.format(...args.slice(1)) : util.format(...args)
+  const msg =
+    args.length > 1 ? util.format(...args.slice(1)) : util.format(...args)
 
-  console.log(`[${time}] ${lvl.color}[${lvl.label}]${resetColor} ${prefix} ${msg}`)
+  console.log(
+    `[${time}] ${lvl.color}[${lvl.label}]${resetColor} ${prefix} ${msg}`
+  )
 }
 
 function parseSemver(version) {
@@ -105,10 +108,17 @@ export function sendResponse(req, res, data, status) {
 
 function getGitInfo() {
   try {
-    const branch = execSync('git rev-parse --abbrev-ref HEAD', { encoding: 'utf8' }).trim()
-    const commit = execSync('git rev-parse --short HEAD', { encoding: 'utf8' }).trim()
+    const branch = execSync('git rev-parse --abbrev-ref HEAD', {
+      encoding: 'utf8'
+    }).trim()
+    const commit = execSync('git rev-parse --short HEAD', {
+      encoding: 'utf8'
+    }).trim()
     const commitTime =
-      Number.parseInt(execSync('git log -1 --format=%ct', { encoding: 'utf8' }).trim(), 10) * 1000
+      Number.parseInt(
+        execSync('git log -1 --format=%ct', { encoding: 'utf8' }).trim(),
+        10
+      ) * 1000
 
     return {
       branch,
@@ -116,7 +126,12 @@ function getGitInfo() {
       commitTime
     }
   } catch (error) {
-    logger('warn', 'Git', 'Unable to retrieve git information. %s', error.message)
+    logger(
+      'warn',
+      'Git',
+      'Unable to retrieve git information. %s',
+      error.message
+    )
     return {
       branch: 'unknown',
       commit: 'unknown',
@@ -261,8 +276,8 @@ function encodeTrack(track) {
   return Buffer.concat(bufferArray).toString('base64')
 }
 
-const generateRandomLetters = l =>
-  Array.from(crypto.randomBytes(l), b =>
+const generateRandomLetters = (l) =>
+  Array.from(crypto.randomBytes(l), (b) =>
     String.fromCharCode((b % 52) + (b % 52 < 26 ? 65 : 71))
   ).join('')
 
@@ -323,7 +338,8 @@ async function http1makeRequest(urlString, options = {}) {
 
   let payloadBuffer = null
   if (body != null && !['GET', 'HEAD'].includes(method)) {
-    reqHeaders['Content-Type'] = reqHeaders['Content-Type'] || 'application/json'
+    reqHeaders['Content-Type'] =
+      reqHeaders['Content-Type'] || 'application/json'
     const rawPayload = typeof body === 'string' ? body : JSON.stringify(body)
 
     if (disableBodyCompression) {
@@ -345,7 +361,7 @@ async function http1makeRequest(urlString, options = {}) {
   }
 
   return new Promise((resolve, reject) => {
-    const req = lib.request(reqOptions, res => {
+    const req = lib.request(reqOptions, (res) => {
       const { statusCode, headers: respHeaders } = res
 
       if (REDIRECT_STATUS_CODES.includes(statusCode) && respHeaders.location) {
@@ -372,10 +388,14 @@ async function http1makeRequest(urlString, options = {}) {
         finalStream = res.pipe(zlib.createInflate())
       }
 
-      res.on('error', err => reject(new Error(`Response error for ${urlString}: ${err.message}`)))
+      res.on('error', (err) =>
+        reject(new Error(`Response error for ${urlString}: ${err.message}`))
+      )
       if (finalStream !== res) {
-        finalStream.on('error', err =>
-          reject(new Error(`Decompression error for ${urlString}: ${err.message}`))
+        finalStream.on('error', (err) =>
+          reject(
+            new Error(`Decompression error for ${urlString}: ${err.message}`)
+          )
         )
       }
 
@@ -385,7 +405,7 @@ async function http1makeRequest(urlString, options = {}) {
       }
 
       const chunks = []
-      finalStream.on('data', chunk => chunks.push(chunk))
+      finalStream.on('data', (chunk) => chunks.push(chunk))
       finalStream.on('end', () => {
         try {
           const responseBuffer = Buffer.concat(chunks)
@@ -396,14 +416,22 @@ async function http1makeRequest(urlString, options = {}) {
           const responseBody = isJson && text ? JSON.parse(text) : text
           resolve({ statusCode, headers: respHeaders, body: responseBody })
         } catch (err) {
-          reject(new Error(`Error processing response body for ${urlString}: ${err.message}`))
+          reject(
+            new Error(
+              `Error processing response body for ${urlString}: ${err.message}`
+            )
+          )
         }
       })
     })
 
-    req.on('error', err => reject(new Error(`Request error for ${urlString}: ${err.message}`)))
+    req.on('error', (err) =>
+      reject(new Error(`Request error for ${urlString}: ${err.message}`))
+    )
     req.on('timeout', () =>
-      req.destroy(new Error(`Request timed out after ${timeout}ms for ${urlString}`))
+      req.destroy(
+        new Error(`Request timed out after ${timeout}ms for ${urlString}`)
+      )
     )
 
     if (payloadBuffer) {
@@ -425,7 +453,9 @@ async function makeRequest(urlString, options = {}) {
     _redirectsFollowed = 0
   } = options
   if (_redirectsFollowed >= maxRedirects) {
-    return Promise.reject(new Error(`Too many redirects (${maxRedirects}) for ${urlString}`))
+    return Promise.reject(
+      new Error(`Too many redirects (${maxRedirects}) for ${urlString}`)
+    )
   }
 
   return new Promise((resolve, reject) => {
@@ -446,7 +476,12 @@ async function makeRequest(urlString, options = {}) {
       session = http2.connect(currentUrl.origin)
 
       const closeSessionGracefully = () => {
-        if (session && !session.closed && !session.destroyed && !sessionClosed) {
+        if (
+          session &&
+          !session.closed &&
+          !session.destroyed &&
+          !sessionClosed
+        ) {
           sessionClosed = true
           session.close()
         }
@@ -468,7 +503,9 @@ async function makeRequest(urlString, options = {}) {
 
       if (body && !['GET', 'HEAD'].includes(method)) {
         headers['Content-Type'] =
-          typeof body === 'object' ? 'application/json' : headers['Content-Type']
+          typeof body === 'object'
+            ? 'application/json'
+            : headers['Content-Type']
         if (!disableBodyCompression) h2Headers['content-encoding'] = 'gzip'
       }
 
@@ -486,13 +523,15 @@ async function makeRequest(urlString, options = {}) {
         })
       }
 
-      req.on('error', err => {
+      req.on('error', (err) => {
         if (!reqClosed) reqClosed = true
         closeSessionGracefully()
-        reject(new Error(`HTTP/2 request error for ${urlString}: ${err.message}`))
+        reject(
+          new Error(`HTTP/2 request error for ${urlString}: ${err.message}`)
+        )
       })
 
-      req.on('response', async headers => {
+      req.on('response', async (headers) => {
         const statusCode = headers[':status']
 
         if (REDIRECT_STATUS_CODES.includes(statusCode) && headers.location) {
@@ -521,16 +560,21 @@ async function makeRequest(urlString, options = {}) {
               method: nextMethod,
               body: nextBody,
               _redirectsFollowed: _redirectsFollowed + 1,
-              disableBodyCompression: nextBody ? disableBodyCompression : undefined
+              disableBodyCompression: nextBody
+                ? disableBodyCompression
+                : undefined
             })
           )
         }
 
         let responseStream = req
         const encoding = headers['content-encoding']
-        if (encoding === 'br') responseStream = req.pipe(zlib.createBrotliDecompress())
-        else if (encoding === 'gzip') responseStream = req.pipe(zlib.createGunzip())
-        else if (encoding === 'deflate') responseStream = req.pipe(zlib.createInflate())
+        if (encoding === 'br')
+          responseStream = req.pipe(zlib.createBrotliDecompress())
+        else if (encoding === 'gzip')
+          responseStream = req.pipe(zlib.createGunzip())
+        else if (encoding === 'deflate')
+          responseStream = req.pipe(zlib.createInflate())
 
         if (method === 'HEAD') {
           closeSessionGracefully()
@@ -565,14 +609,19 @@ async function makeRequest(urlString, options = {}) {
 
       if (body && !['GET', 'HEAD'].includes(method)) {
         const payload = JSON.stringify(body)
-        if (disableBodyCompression || h2Headers['content-encoding'] !== 'gzip') {
+        if (
+          disableBodyCompression ||
+          h2Headers['content-encoding'] !== 'gzip'
+        ) {
           req.end(payload)
         } else {
           zlib.gzip(payload, (err, data) => {
             if (err) {
               req.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
               closeSessionGracefully()
-              return reject(new Error(`Gzip error for ${urlString}: ${err.message}`))
+              return reject(
+                new Error(`Gzip error for ${urlString}: ${err.message}`)
+              )
             }
             req.end(data)
           })
@@ -591,16 +640,19 @@ async function makeRequest(urlString, options = {}) {
 
 function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
   //biome-ignore lint: no-promise-executor-return
-  return new Promise(async resolve => {
+  return new Promise(async (resolve) => {
     try {
       const res = await http1makeRequest(url, { method: 'GET' })
       const lines = res.body
         .split('\n')
-        .map(l => l.trim())
+        .map((l) => l.trim())
         .filter(Boolean)
 
-      if (!lines.some(l => l.startsWith('#EXTINF'))) {
-        const seg = await http1makeRequest(url, { method: 'GET', streamOnly: true })
+      if (!lines.some((l) => l.startsWith('#EXTINF'))) {
+        const seg = await http1makeRequest(url, {
+          method: 'GET',
+          streamOnly: true
+        })
         seg.stream.pipe(stream, { end: shouldEnd })
         return resolve(!shouldEnd)
       }
@@ -621,10 +673,10 @@ function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
 
       const downloadPromises = []
 
-      const writeChunksToStream = async chunks => {
+      const writeChunksToStream = async (chunks) => {
         for (const chunk of chunks) {
           if (!stream.write(chunk)) {
-            await new Promise(ok => stream.once('drain', ok))
+            await new Promise((ok) => stream.once('drain', ok))
           }
         }
       }
@@ -632,18 +684,24 @@ function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
       for (const segUrl of segs) {
         if (stream.destroyed) break
 
-        const downloadPromise = http1makeRequest(segUrl, { method: 'GET', streamOnly: true })
-          .then(s => {
+        const downloadPromise = http1makeRequest(segUrl, {
+          method: 'GET',
+          streamOnly: true
+        })
+          .then((s) => {
             return new Promise((res, rej) => {
               const chunks = []
-              s.stream.on('data', chunk => chunks.push(chunk))
+              s.stream.on('data', (chunk) => chunks.push(chunk))
               s.stream.on('end', () => res(chunks))
               s.stream.on('error', rej)
             })
           })
-          .catch(err => {
+          .catch((err) => {
             if (!stream.destroyed) {
-              console.error('[HLS] Error downloading segment', err.code || err.message)
+              console.error(
+                '[HLS] Error downloading segment',
+                err.code || err.message
+              )
               stream.destroy(err)
             }
             return Promise.reject(err)
@@ -697,18 +755,21 @@ async function loadHLSPlaylist(url, stream) {
     const res = await http1makeRequest(url, { method: 'GET' })
     const lines = res.body
       .split('\n')
-      .map(l => l.trim())
+      .map((l) => l.trim())
       .filter(Boolean)
 
-    if (lines.some(l => l.startsWith('#EXTINF'))) {
+    if (lines.some((l) => l.startsWith('#EXTINF'))) {
       return loadHLS(url, stream, false, true)
     }
 
     const audioTags = lines.filter(
-      l => l.startsWith('#EXT-X-MEDIA') && l.includes('TYPE=AUDIO') && l.includes('URI="')
+      (l) =>
+        l.startsWith('#EXT-X-MEDIA') &&
+        l.includes('TYPE=AUDIO') &&
+        l.includes('URI="')
     )
     if (audioTags.length) {
-      const defaultTag = audioTags.find(l => /DEFAULT=YES/.test(l))
+      const defaultTag = audioTags.find((l) => /DEFAULT=YES/.test(l))
       const pickTag = defaultTag || audioTags[audioTags.length - 1]
       const uri = pickTag.match(/URI="([^"]+)"/)[1]
       const audioUrl = new URL(uri, url).toString()

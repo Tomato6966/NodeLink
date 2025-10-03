@@ -47,8 +47,11 @@ export default class DeezerSource {
         )
       }
 
-      const responseCookies = userDataRes.headers['set-cookie']?.join('; ') || ''
-      this.cookie = initialCookie ? `${initialCookie}; ${responseCookies}` : responseCookies
+      const responseCookies =
+        userDataRes.headers['set-cookie']?.join('; ') || ''
+      this.cookie = initialCookie
+        ? `${initialCookie}; ${responseCookies}`
+        : responseCookies
 
       this.csrfToken = userDataRes.body.results.checkForm
       this.licenseToken = userDataRes.body.results.USER.OPTIONS.license_token
@@ -76,7 +79,10 @@ export default class DeezerSource {
     if (error || body.error) {
       return {
         loadType: 'error',
-        data: { message: error?.message || body.error.message, severity: 'common' }
+        data: {
+          message: error?.message || body.error.message,
+          severity: 'common'
+        }
       }
     }
 
@@ -85,9 +91,9 @@ export default class DeezerSource {
     }
 
     const tracks = body.data
-      .filter(item => item.type === 'track')
+      .filter((item) => item.type === 'track')
       .slice(0, this.config.maxSearchResults || 10)
-      .map(item => this.buildTrack(item))
+      .map((item) => this.buildTrack(item))
 
     return { loadType: 'search', data: tracks }
   }
@@ -99,15 +105,21 @@ export default class DeezerSource {
     const [, type, id] = match
     logger('debug', 'deezer', `Resolving URL of type '${type}' with ID '${id}'`)
 
-    const { body, error } = await makeRequest(`https://api.deezer.com/2.0/${type}/${id}`, {
-      method: 'GET'
-    })
+    const { body, error } = await makeRequest(
+      `https://api.deezer.com/2.0/${type}/${id}`,
+      {
+        method: 'GET'
+      }
+    )
 
     if (error || body.error) {
       if (body.error?.code === 800) return { loadType: 'empty', data: {} }
       return {
         loadType: 'error',
-        data: { message: error?.message || body.error.message, severity: 'fault' }
+        data: {
+          message: error?.message || body.error.message,
+          severity: 'fault'
+        }
       }
     }
 
@@ -132,8 +144,11 @@ export default class DeezerSource {
           }
         }
 
-        const tracks = tracksRes.body.data.map(item =>
-          this.buildTrack(item, playlistData.cover_xl || playlistData.picture_xl)
+        const tracks = tracksRes.body.data.map((item) =>
+          this.buildTrack(
+            item,
+            playlistData.cover_xl || playlistData.picture_xl
+          )
         )
 
         return {
@@ -158,13 +173,14 @@ export default class DeezerSource {
           return {
             loadType: 'error',
             data: {
-              message: topTracksRes.error?.message || topTracksRes.body.error.message,
+              message:
+                topTracksRes.error?.message || topTracksRes.body.error.message,
               severity: 'common'
             }
           }
         }
 
-        const tracks = topTracksRes.body.data.map(item => {
+        const tracks = topTracksRes.body.data.map((item) => {
           if (!item.album) item.album = {}
           item.album.cover_xl = artistData.picture_xl
           return this.buildTrack(item)
@@ -227,28 +243,33 @@ export default class DeezerSource {
 
     const trackInfo = trackData.results.data[0]
 
-    const { body: streamData } = await makeRequest('https://media.deezer.com/v1/get_url', {
-      method: 'POST',
-      body: {
-        license_token: this.licenseToken,
-        media: [
-          {
-            type: 'FULL',
-            formats: [
-              { cipher: 'BF_CBC_STRIPE', format: 'FLAC' },
-              { cipher: 'BF_CBC_STRIPE', format: 'MP3_256' },
-              { cipher: 'BF_CBC_STRIPE', format: 'MP3_128' },
-              { cipher: 'BF_CBC_STRIPE', format: 'MP3_MISC' }
-            ]
-          }
-        ],
-        track_tokens: [trackInfo.TRACK_TOKEN]
-      },
-      disableBodyCompression: true
-    })
+    const { body: streamData } = await makeRequest(
+      'https://media.deezer.com/v1/get_url',
+      {
+        method: 'POST',
+        body: {
+          license_token: this.licenseToken,
+          media: [
+            {
+              type: 'FULL',
+              formats: [
+                { cipher: 'BF_CBC_STRIPE', format: 'FLAC' },
+                { cipher: 'BF_CBC_STRIPE', format: 'MP3_256' },
+                { cipher: 'BF_CBC_STRIPE', format: 'MP3_128' },
+                { cipher: 'BF_CBC_STRIPE', format: 'MP3_MISC' }
+              ]
+            }
+          ],
+          track_tokens: [trackInfo.TRACK_TOKEN]
+        },
+        disableBodyCompression: true
+      }
+    )
 
     if (streamData.error || !streamData?.data[0]?.media[0]?.sources[0]?.url) {
-      return { exception: { message: 'Could not get stream URL.', severity: 'common' } }
+      return {
+        exception: { message: 'Could not get stream URL.', severity: 'common' }
+      }
     }
 
     const streamInfo = streamData.data[0].media[0]
@@ -261,7 +282,7 @@ export default class DeezerSource {
   }
 
   loadStream(decodedTrack, url, format, additionalData) {
-    return new Promise(async resolve => {
+    return new Promise(async (resolve) => {
       try {
         const outputStream = new PassThrough()
         const trackKey = this._calculateKey(additionalData.SNG_ID)
@@ -275,23 +296,33 @@ export default class DeezerSource {
         })
 
         if (res.error || res.statusCode !== 200) {
-          const error = res.error || new Error(`Request failed with status ${res.statusCode}`)
+          const error =
+            res.error ||
+            new Error(`Request failed with status ${res.statusCode}`)
           logger('error', 'deezer', `Error fetching stream: ${error.message}`)
           return resolve({
-            exception: { message: error.message, severity: 'fault', cause: 'Upstream' }
+            exception: {
+              message: error.message,
+              severity: 'fault',
+              cause: 'Upstream'
+            }
           })
         }
 
         res.stream.on('end', () => outputStream.emit('finishBuffering'))
 
-        res.stream.on('error', error => {
+        res.stream.on('error', (error) => {
           logger(
             'error',
             'deezer',
             `Error in source stream for track ${decodedTrack.title}: ${error.message}`
           )
           resolve({
-            exception: { message: error.message, severity: 'fault', cause: 'Unknown' }
+            exception: {
+              message: error.message,
+              severity: 'fault',
+              cause: 'Unknown'
+            }
           })
         })
 
@@ -349,11 +380,17 @@ export default class DeezerSource {
       )
     }
 
-    const songIdHash = crypto.createHash('md5').update(songId.toString(), 'ascii').digest('hex')
+    const songIdHash = crypto
+      .createHash('md5')
+      .update(songId.toString(), 'ascii')
+      .digest('hex')
     const trackKey = Buffer.alloc(16)
 
     for (let i = 0; i < 16; i++) {
-      trackKey[i] = songIdHash.charCodeAt(i) ^ songIdHash.charCodeAt(i + 16) ^ key.charCodeAt(i)
+      trackKey[i] =
+        songIdHash.charCodeAt(i) ^
+        songIdHash.charCodeAt(i + 16) ^
+        key.charCodeAt(i)
     }
 
     return trackKey

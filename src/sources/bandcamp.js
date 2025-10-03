@@ -1,11 +1,13 @@
-import { encodeTrack, makeRequest, logger } from '../utils.js'
 import { PassThrough } from 'node:stream'
+import { encodeTrack, logger, makeRequest } from '../utils.js'
 
 export default class BandCampSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.baseUrl = 'https://bandcamp.com'
-    this.patterns = [/^https?:\/\/([^/]+)\.bandcamp\.com\/(track|album)\/([^/?]+)/]
+    this.patterns = [
+      /^https?:\/\/([^/]+)\.bandcamp\.com\/(track|album)\/([^/?]+)/
+    ]
     this.searchTerms = ['bcsearch']
   }
 
@@ -15,7 +17,7 @@ export default class BandCampSource {
   }
 
   isLinkMatch(link) {
-    return this.patterns.some(pattern => pattern.test(link))
+    return this.patterns.some((pattern) => pattern.test(link))
   }
 
   async search(query) {
@@ -38,7 +40,9 @@ export default class BandCampSource {
       }
 
       const { body } = request
-      const resultBlocks = body.match(/<li class="searchresult data-search"[\s\S]*?<\/li>/g)
+      const resultBlocks = body.match(
+        /<li class="searchresult data-search"[\s\S]*?<\/li>/g
+      )
 
       if (!resultBlocks || resultBlocks.length === 0) {
         logger('info', 'BandCamp', `No results found for: "${query}"`)
@@ -52,9 +56,15 @@ export default class BandCampSource {
         if (tracks.length >= maxResults) break
 
         const urlMatch = block.match(/<a class="artcont" href="([^"]+)">/)
-        const titleMatch = block.match(/<div class="heading">\s*<a[^>]*>\s*(.+?)\s*<\/a>/)
-        const subheadMatch = block.match(/<div class="subhead">([\s\S]*?)<\/div>/)
-        const artworkMatch = block.match(/<div class="art">\s*<img src="([^"]+)"/)
+        const titleMatch = block.match(
+          /<div class="heading">\s*<a[^>]*>\s*(.+?)\s*<\/a>/
+        )
+        const subheadMatch = block.match(
+          /<div class="subhead">([\s\S]*?)<\/div>/
+        )
+        const artworkMatch = block.match(
+          /<div class="art">\s*<img src="([^"]+)"/
+        )
 
         if (titleMatch && subheadMatch && urlMatch) {
           const fullSubhead = subheadMatch[1].trim()
@@ -72,11 +82,19 @@ export default class BandCampSource {
       }
 
       if (tracks.length === 0) {
-        logger('warn', 'BandCamp', 'Search results found, but no tracks could be parsed.')
+        logger(
+          'warn',
+          'BandCamp',
+          'Search results found, but no tracks could be parsed.'
+        )
         return { loadType: 'empty', data: {} }
       }
 
-      logger('info', 'BandCamp', `Found ${tracks.length} tracks for: "${query}"`)
+      logger(
+        'info',
+        'BandCamp',
+        `Found ${tracks.length} tracks for: "${query}"`
+      )
       return {
         loadType: 'search',
         data: tracks
@@ -99,7 +117,7 @@ export default class BandCampSource {
 
       if (tralbumData.trackinfo && tralbumData.trackinfo.length > 1) {
         const tracks = tralbumData.trackinfo
-          .map(item => {
+          .map((item) => {
             if (!item.title_link) return null
 
             const trackUrl = new URL(item.title_link, url).href
@@ -117,7 +135,7 @@ export default class BandCampSource {
                 : null
             })
           })
-          .filter(track => track !== null)
+          .filter((track) => track !== null)
 
         return {
           loadType: 'playlist',
@@ -137,7 +155,9 @@ export default class BandCampSource {
           identifier: String(trackData.track_id || trackData.id),
           isSeekable: true,
           author: tralbumData.artist,
-          length: trackData.duration ? Math.round(trackData.duration * 1000) : -1,
+          length: trackData.duration
+            ? Math.round(trackData.duration * 1000)
+            : -1,
           isStream: false,
           title: trackData.title,
           uri: url,
@@ -157,10 +177,14 @@ export default class BandCampSource {
 
   async getTrackUrl(track) {
     try {
-      const { body, error, statusCode } = await makeRequest(track.uri, { method: 'GET' })
+      const { body, error, statusCode } = await makeRequest(track.uri, {
+        method: 'GET'
+      })
 
       if (error || statusCode !== 200) {
-        throw new Error(`Failed to fetch track page: ${error?.message || statusCode}`)
+        throw new Error(
+          `Failed to fetch track page: ${error?.message || statusCode}`
+        )
       }
 
       const streamUrlMatch = body.match(
@@ -180,7 +204,11 @@ export default class BandCampSource {
       }
     } catch (e) {
       return {
-        exception: { message: e.message, severity: 'fault', cause: 'Stream Extraction Failed' }
+        exception: {
+          message: e.message,
+          severity: 'fault',
+          cause: 'Stream Extraction Failed'
+        }
       }
     }
   }
@@ -194,7 +222,10 @@ export default class BandCampSource {
       })
 
       if (response.error || !response.stream) {
-        throw response.error || new Error('Failed to get stream, no stream object returned.')
+        throw (
+          response.error ||
+          new Error('Failed to get stream, no stream object returned.')
+        )
       }
 
       const stream = new PassThrough()
@@ -203,14 +234,26 @@ export default class BandCampSource {
       return { stream }
     } catch (err) {
       logger('error', 'BandCamp', `Failed to load stream: ${err.message}`)
-      return { exception: { message: err.message, severity: 'common', cause: 'Upstream' } }
+      return {
+        exception: {
+          message: err.message,
+          severity: 'common',
+          cause: 'Upstream'
+        }
+      }
     }
   }
 
   async extractTralbumData(url) {
-    const { body, error, statusCode } = await makeRequest(url, { method: 'GET' })
+    const { body, error, statusCode } = await makeRequest(url, {
+      method: 'GET'
+    })
     if (error || statusCode !== 200) {
-      logger('error', 'BandCamp', `Failed to fetch page: ${error?.message || statusCode}`)
+      logger(
+        'error',
+        'BandCamp',
+        `Failed to fetch page: ${error?.message || statusCode}`
+      )
       return null
     }
 
@@ -223,7 +266,9 @@ export default class BandCampSource {
 
   buildTrack(partialInfo, complete = true) {
     const track = {
-      identifier: complete ? partialInfo.identifier : this.getIdentifierFromUrl(partialInfo.uri),
+      identifier: complete
+        ? partialInfo.identifier
+        : this.getIdentifierFromUrl(partialInfo.uri),
       isSeekable: complete ? partialInfo.isSeekable : true,
       author: partialInfo.author || 'Unknown Artist',
       length: complete ? partialInfo.length : -1,
@@ -245,7 +290,9 @@ export default class BandCampSource {
 
   getIdentifierFromUrl(url) {
     if (!url) return null
-    const match = url.match(/^https?:\/\/([^/]+)\.bandcamp\.com\/(?:track|album)\/([^/?]+)/)
+    const match = url.match(
+      /^https?:\/\/([^/]+)\.bandcamp\.com\/(?:track|album)\/([^/?]+)/
+    )
     return match ? `${match[1]}:${match[2]}` : url
   }
 }

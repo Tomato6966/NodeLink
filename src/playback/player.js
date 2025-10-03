@@ -1,7 +1,7 @@
 import discordVoice from '@performanc/voice'
-import { createAudioResource } from './streamProcessor.js'
-import { GatewayEvents, EndReasons } from '../constants.js'
+import { EndReasons, GatewayEvents } from '../constants.js'
 import { logger } from '../utils.js'
+import { createAudioResource } from './streamProcessor.js'
 
 export class Player {
   constructor(options) {
@@ -28,13 +28,18 @@ export class Player {
     this.emitEvent = (type, payload = {}) => {
       try {
         this.session.socket.send(
-          JSON.stringify({ op: 'event', type, guildId: this.guildId, ...payload })
+          JSON.stringify({
+            op: 'event',
+            type,
+            guildId: this.guildId,
+            ...payload
+          })
         )
       } catch {}
     }
 
     this.waitEvent = (event, filter) =>
-      new Promise(resolve => {
+      new Promise((resolve) => {
         const handler = (_, payload) => {
           if (!filter || filter(payload)) {
             this.connection.off(event, handler)
@@ -58,7 +63,7 @@ export class Player {
     })
     this.connection.on('stateChange', (_, s) => this._onConn(s))
     this.connection.on('playerStateChange', (_, s) => this._onPlay(s))
-    this.connection.on('error', err => this._onError(err))
+    this.connection.on('error', (err) => this._onError(err))
   }
 
   _onConn(state) {
@@ -84,9 +89,16 @@ export class Player {
     if (
       state.status === 'idle' &&
       this.track &&
-      [EndReasons.STOPPED, EndReasons.FINISHED, EndReasons.LOAD_FAILED].includes(state.reason)
+      [
+        EndReasons.STOPPED,
+        EndReasons.FINISHED,
+        EndReasons.LOAD_FAILED
+      ].includes(state.reason)
     ) {
-      this.emitEvent(GatewayEvents.TRACK_END, { track: this.track, reason: state.reason })
+      this.emitEvent(GatewayEvents.TRACK_END, {
+        track: this.track,
+        reason: state.reason
+      })
       this._resetTrack()
     } else if (
       state.status === 'playing' &&
@@ -110,7 +122,10 @@ export class Player {
           cause: `${error.name}: ${error.message}`
         }
       })
-      this.emitEvent(GatewayEvents.TRACK_END, { track: this.track, reason: EndReasons.LOAD_FAILED })
+      this.emitEvent(GatewayEvents.TRACK_END, {
+        track: this.track,
+        reason: EndReasons.LOAD_FAILED
+      })
       this._resetTrack()
     }
   }
@@ -128,8 +143,9 @@ export class Player {
   }
 
   async _fetchResource(info, urlData, startTime) {
-    if (startTime) urlData.additionalData = { startTime, ...urlData.additionalData }
-    // biome-ignore lint:
+    if (startTime)
+      urlData.additionalData = { startTime, ...urlData.additionalData }
+
     const track = urlData?.newTrack ? urlData?.newTrack?.info : info
     const fetched = await this.nodelink.sources.getTrackStream(
       track,
@@ -179,7 +195,11 @@ export class Player {
         return false
       }
     }
-    if (this._stuckCount >= 2 && maxLength > 0 && position >= maxLength - 1000) {
+    if (
+      this._stuckCount >= 2 &&
+      maxLength > 0 &&
+      position >= maxLength - 1000
+    ) {
       this.connection.audioStream?.emit('finishBuffering')
       this.connection.stop(EndReasons.FINISHED)
       this._stopUpdater()
@@ -210,13 +230,22 @@ export class Player {
     return true
   }
 
-  async play({ encoded, info, noReplace = false, startTime = 0, isSeek = false }) {
+  async play({
+    encoded,
+    info,
+    noReplace = false,
+    startTime = 0,
+    isSeek = false
+  }) {
     if (noReplace && this.track && !isSeek) {
       return false
     }
 
     if (this.track && !isSeek) {
-      this.emitEvent(GatewayEvents.TRACK_END, { track: this.track, reason: EndReasons.REPLACED })
+      this.emitEvent(GatewayEvents.TRACK_END, {
+        track: this.track,
+        reason: EndReasons.REPLACED
+      })
       this._resetTrack()
     }
 
@@ -245,7 +274,7 @@ export class Player {
     if (!this.connection.udpInfo?.secretKey) {
       await this.waitEvent(
         'stateChange',
-        s => s.status === 'connected' && this.connection.udpInfo?.secretKey
+        (s) => s.status === 'connected' && this.connection.udpInfo?.secretKey
       )
     }
 
@@ -274,7 +303,7 @@ export class Player {
       resource.setVolume(this.volumePercent / 100)
     }
     this.connection.play(resource)
-    await this.waitEvent('playerStateChange', s => s.status === 'playing')
+    await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
     this._startUpdater()
     return true
   }
@@ -304,7 +333,10 @@ export class Player {
     if (this.connection?.audioStream) {
       this.connection.stop(EndReasons.STOPPED)
     } else {
-      this.emitEvent(GatewayEvents.TRACK_END, { track: this.track, reason: EndReasons.STOPPED })
+      this.emitEvent(GatewayEvents.TRACK_END, {
+        track: this.track,
+        reason: EndReasons.STOPPED
+      })
       this._resetTrack()
     }
     this._stopUpdater()
@@ -353,7 +385,11 @@ export class Player {
         this.connection.destroy()
         this.connection = null
       } catch (err) {
-        logger('error', 'internal', `Failed to destroy connection: ${err.message}`)
+        logger(
+          'error',
+          'internal',
+          `Failed to destroy connection: ${err.message}`
+        )
       }
     }
     if (emitClose) {

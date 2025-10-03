@@ -1,5 +1,5 @@
-import prism from 'prism-media'
 import { Readable, Transform } from 'node:stream'
+import prism from 'prism-media'
 
 class streamProcessor {
   constructor(stream, type) {
@@ -13,12 +13,22 @@ class streamProcessor {
 
     if (['webm/opus', 'ogg/opus'].includes(lowerType)) {
       const DemuxerClass =
-        lowerType === 'webm/opus' ? prism.opus.WebmDemuxer : prism.opus.OggDemuxer
+        lowerType === 'webm/opus'
+          ? prism.opus.WebmDemuxer
+          : prism.opus.OggDemuxer
 
       const demuxer = new DemuxerClass()
-      const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 })
+      const decoder = new prism.opus.Decoder({
+        rate: 48000,
+        channels: 2,
+        frameSize: 960
+      })
       const volume = new prism.VolumeTransformer({ type: 's16le' })
-      const opus = new prism.opus.Encoder({ rate: 48000, channels: 2, frameSize: 960 })
+      const opus = new prism.opus.Encoder({
+        rate: 48000,
+        channels: 2,
+        frameSize: 960
+      })
 
       stream.pipe(demuxer).pipe(decoder).pipe(volume).pipe(opus)
 
@@ -49,7 +59,11 @@ class streamProcessor {
       })
 
       const volume = new prism.VolumeTransformer({ type: 's16le' })
-      const opus = new prism.opus.Encoder({ rate: 48000, channels: 2, frameSize: 960 })
+      const opus = new prism.opus.Encoder({
+        rate: 48000,
+        channels: 2,
+        frameSize: 960
+      })
 
       stream.pipe(ffmpeg).pipe(volume).pipe(opus)
 
@@ -113,7 +127,9 @@ class streamProcessor {
   setVolume(volume) {
     if (!this.pipes) return
 
-    const volumeTransformer = this.pipes.find(pipe => pipe instanceof prism.VolumeTransformer)
+    const volumeTransformer = this.pipes.find(
+      (pipe) => pipe instanceof prism.VolumeTransformer
+    )
     if (volumeTransformer) {
       volumeTransformer.setVolume(volume)
     } else {
@@ -122,4 +138,5 @@ class streamProcessor {
   }
 }
 
-export const createAudioResource = (stream, type) => new streamProcessor(stream, type)
+export const createAudioResource = (stream, type) =>
+  new streamProcessor(stream, type)

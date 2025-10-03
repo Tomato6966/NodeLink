@@ -27,7 +27,23 @@ export default {
       enabled: true
     },
     youtube: {
-      enabled: true
+      enabled: true,
+      getOAuthToken: false,
+      hl: 'en',
+      gl: 'US',
+      clients: {
+        search: ['Android'],
+        playback: ['TVEmbedded', 'IOS', 'TV'],
+        settings: {
+          TV: {
+            refreshToken: ''
+          }
+        }
+      },
+      cipher: {
+        url: 'http://0.0.0.0:8001',
+        token: 'KEY'
+      }
     },
     instagram: {
       enabled: true

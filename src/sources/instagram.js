@@ -33,7 +33,9 @@ export default class InstagramSource {
       const body = response.body
 
       if (typeof body !== 'string' || response.statusCode !== 200) {
-        throw new Error(`Failed to fetch Instagram homepage (Status: ${response.statusCode})`)
+        throw new Error(
+          `Failed to fetch Instagram homepage (Status: ${response.statusCode})`
+        )
       }
 
       const csrfToken = body.match(/"csrf_token":"(.*?)"/)?.[1]
@@ -60,18 +62,26 @@ export default class InstagramSource {
       logger('info', 'Instagram', 'Successfully fetched API parameters.')
       return true
     } catch (e) {
-      logger('error', 'Instagram', `Setup failed: ${e.message}. Source will be unavailable.`)
+      logger(
+        'error',
+        'Instagram',
+        `Setup failed: ${e.message}. Source will be unavailable.`
+      )
       return false
     }
   }
 
   isLinkMatch(link) {
-    return this.patterns.some(pattern => pattern.test(link))
+    return this.patterns.some((pattern) => pattern.test(link))
   }
 
   _getPostId(url) {
     if (!url) {
-      return { id: null, error: 'Instagram URL not provided', pathSegment: null }
+      return {
+        id: null,
+        error: 'Instagram URL not provided',
+        pathSegment: null
+      }
     }
     for (const pattern of this.patterns) {
       const match = url.match(pattern)
@@ -84,11 +94,16 @@ export default class InstagramSource {
         return { id: match[1], error: null, pathSegment: pathSegment }
       }
     }
-    return { id: null, error: 'Instagram post/reel ID not found in URL', pathSegment: null }
+    return {
+      id: null,
+      error: 'Instagram post/reel ID not found in URL',
+      pathSegment: null
+    }
   }
 
   _getShortcodeFromMediaId(mediaId) {
-    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    const alphabet =
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
     let shortcode = ''
     if (String(mediaId).includes('_')) {
       //biome-ignore lint: reassign
@@ -152,7 +167,10 @@ export default class InstagramSource {
 
   async _fetchFromGraphQL(postId, pathSegment) {
     if (!postId) {
-      return { data: null, error: { message: 'Post ID not provided', severity: 'common' } }
+      return {
+        data: null,
+        error: { message: 'Post ID not provided', severity: 'common' }
+      }
     }
 
     const headers = {
@@ -189,16 +207,24 @@ export default class InstagramSource {
       )
       return {
         data: null,
-        error: { message: `Internal error during GraphQL request: ${e.message}`, severity: 'fault' }
+        error: {
+          message: `Internal error during GraphQL request: ${e.message}`,
+          severity: 'fault'
+        }
       }
     }
 
     if (response.error || response.statusCode !== 200) {
       const errorMsg =
-        response.error?.message || `GraphQL request failed with code ${response.statusCode}`
+        response.error?.message ||
+        `GraphQL request failed with code ${response.statusCode}`
       return {
         data: null,
-        error: { message: errorMsg, severity: 'fault', cause: `Status: ${response.statusCode}` }
+        error: {
+          message: errorMsg,
+          severity: 'fault',
+          cause: `Status: ${response.statusCode}`
+        }
       }
     }
 
@@ -209,7 +235,10 @@ export default class InstagramSource {
       } catch (e) {
         return {
           data: null,
-          error: { message: 'Invalid JSON response from GraphQL', severity: 'fault' }
+          error: {
+            message: 'Invalid JSON response from GraphQL',
+            severity: 'fault'
+          }
         }
       }
     }
@@ -217,7 +246,10 @@ export default class InstagramSource {
     if (!responseData || !responseData.data) {
       return {
         data: null,
-        error: { message: 'Invalid data structure in GraphQL JSON response', severity: 'fault' }
+        error: {
+          message: 'Invalid data structure in GraphQL JSON response',
+          severity: 'fault'
+        }
       }
     }
 
@@ -226,20 +258,30 @@ export default class InstagramSource {
     if (media === null) {
       return {
         data: null,
-        error: { message: 'Media not found or unavailable (private/deleted?).', severity: 'common' }
+        error: {
+          message: 'Media not found or unavailable (private/deleted?).',
+          severity: 'common'
+        }
       }
     }
     if (!media.is_video) {
-      return { data: null, error: { message: 'This post is not a video.', severity: 'common' } }
+      return {
+        data: null,
+        error: { message: 'This post is not a video.', severity: 'common' }
+      }
     }
     const videoUrl = media.video_url
     if (!videoUrl) {
       return {
         data: null,
-        error: { message: 'Video URL not found in API response.', severity: 'common' }
+        error: {
+          message: 'Video URL not found in API response.',
+          severity: 'common'
+        }
       }
     }
-    const title = media?.edge_media_to_caption?.edges[0]?.node?.text || 'Instagram Video'
+    const title =
+      media?.edge_media_to_caption?.edges[0]?.node?.text || 'Instagram Video'
 
     return {
       data: {
@@ -256,7 +298,11 @@ export default class InstagramSource {
   }
 
   async resolve(queryUrl) {
-    const { id: postId, error: idError, pathSegment } = this._getPostId(queryUrl)
+    const {
+      id: postId,
+      error: idError,
+      pathSegment
+    } = this._getPostId(queryUrl)
     if (idError) {
       return {
         loadType: 'error',
@@ -264,7 +310,10 @@ export default class InstagramSource {
       }
     }
 
-    const { data: videoData, error: fetchError } = await this._fetchFromGraphQL(postId, pathSegment)
+    const { data: videoData, error: fetchError } = await this._fetchFromGraphQL(
+      postId,
+      pathSegment
+    )
     if (fetchError) {
       if (fetchError.message?.includes('Media not found')) {
         return { loadType: 'empty', data: {} }
@@ -298,19 +347,30 @@ export default class InstagramSource {
   }
 
   async getTrackUrl(track) {
-    const { id: postId, error: idError, pathSegment } = this._getPostId(track.uri)
+    const {
+      id: postId,
+      error: idError,
+      pathSegment
+    } = this._getPostId(track.uri)
     if (idError) {
-      return { exception: { message: idError, severity: 'common', cause: 'URLParsing' } }
+      return {
+        exception: { message: idError, severity: 'common', cause: 'URLParsing' }
+      }
     }
 
-    const { data: videoData, error: fetchError_graphql } = await this._fetchFromGraphQL(
-      postId,
-      pathSegment
-    )
+    const { data: videoData, error: fetchError_graphql } =
+      await this._fetchFromGraphQL(postId, pathSegment)
 
     if (fetchError_graphql || !videoData?.videoUrl) {
-      const errorMessage = fetchError_graphql?.message || 'Could not retrieve video stream URL.'
-      return { exception: { message: errorMessage, severity: 'fault', cause: 'StreamLink' } }
+      const errorMessage =
+        fetchError_graphql?.message || 'Could not retrieve video stream URL.'
+      return {
+        exception: {
+          message: errorMessage,
+          severity: 'fault',
+          cause: 'StreamLink'
+        }
+      }
     }
 
     return {
@@ -335,12 +395,21 @@ export default class InstagramSource {
       const response = await http1makeRequest(url, options)
 
       if (response.error || !response.stream) {
-        throw response.error || new Error('Failed to get stream, no stream object returned.')
+        throw (
+          response.error ||
+          new Error('Failed to get stream, no stream object returned.')
+        )
       }
 
       return { stream: response.stream }
     } catch (err) {
-      return { exception: { message: err.message, severity: 'fault', cause: 'StreamLoadFailed' } }
+      return {
+        exception: {
+          message: err.message,
+          severity: 'fault',
+          cause: 'StreamLoadFailed'
+        }
+      }
     }
   }
 

@@ -24,7 +24,9 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
   if (!guildId && parsedUrl.pathname === `/v4/sessions/${sessionId}/players`) {
     if (req.method === 'GET') {
-      const players = Array.from(session.players.players.values()).map(player => player.toJSON())
+      const players = Array.from(session.players.players.values()).map(
+        (player) => player.toJSON()
+      )
       return sendResponse(req, res, players, 200)
     }
   }
@@ -93,7 +95,9 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         }
       }
       if (payload.encodedTrack)
-        console.log('deprecated: encodedTrack is deprecated, use track.encoded instead')
+        console.log(
+          'deprecated: encodedTrack is deprecated, use track.encoded instead'
+        )
 
       const encodedTrack = payload.track?.encoded
       if (encodedTrack !== undefined) {
@@ -130,7 +134,11 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               400
             )
           }
-          await player.play({ encoded: encodedTrack, info: decodedTrack.info, noReplace })
+          await player.play({
+            encoded: encodedTrack,
+            info: decodedTrack.info,
+            noReplace
+          })
         }
       }
 
