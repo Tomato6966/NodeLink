@@ -1,4 +1,5 @@
-import { Readable, Transform } from 'node:stream'
+import { Filters } from './Filters.js'
+import { Readable } from 'node:stream'
 import prism from 'prism-media'
 
 class streamProcessor {
@@ -24,15 +25,16 @@ class streamProcessor {
         frameSize: 960
       })
       const volume = new prism.VolumeTransformer({ type: 's16le' })
+      const filters = new Filters()
       const opus = new prism.opus.Encoder({
         rate: 48000,
         channels: 2,
         frameSize: 960
       })
 
-      stream.pipe(demuxer).pipe(decoder).pipe(volume).pipe(opus)
+      stream.pipe(demuxer).pipe(decoder).pipe(volume).pipe(filters).pipe(opus)
 
-      pipeline = [stream, demuxer, decoder, volume, opus]
+      pipeline = [stream, demuxer, decoder, volume, filters, opus]
       audioStream = opus
     } else {
       const ffmpeg = new prism.FFmpeg({
@@ -59,15 +61,16 @@ class streamProcessor {
       })
 
       const volume = new prism.VolumeTransformer({ type: 's16le' })
+      const filters = new Filters()
       const opus = new prism.opus.Encoder({
         rate: 48000,
         channels: 2,
         frameSize: 960
       })
 
-      stream.pipe(ffmpeg).pipe(volume).pipe(opus)
+      stream.pipe(ffmpeg).pipe(volume).pipe(filters).pipe(opus)
 
-      pipeline = [stream, ffmpeg, volume, opus]
+      pipeline = [stream, ffmpeg, volume, filters, opus]
       audioStream = opus
     }
 
@@ -134,6 +137,19 @@ class streamProcessor {
       volumeTransformer.setVolume(volume)
     } else {
       throw new Error('VolumeTransformer not found in the pipeline.')
+    }
+  }
+  setFilters(filters) {
+    if (!this.pipes) return
+
+    const filterTransformer = this.pipes.find(
+      (pipe) => pipe instanceof Filters
+    )
+
+    if (filterTransformer) {
+      filterTransformer.update(filters)
+    } else {
+      throw new Error('Filters not found in the pipeline.')
     }
   }
 }

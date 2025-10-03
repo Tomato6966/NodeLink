@@ -15,10 +15,10 @@ export const YOUTUBE_CONSTANTS = {
 export function checkURLType(url, type) {
   const source = type === 'ytmusic' ? 'music' : 'www'
   const videoRegex = new RegExp(
-    `^https?://${source === 'music' ? 'music' : '(?:www\\.)?'}youtube\.com/watch\?v=[\\w-]+`
+    `^https?://${source === 'music' ? 'music' : '(?:www\\.)?'}youtube\.com/watch\\?v=[\\w-]+`
   )
   const playlistRegex = new RegExp(
-    `^https?://${source === 'music' ? 'music' : '(?:www\\.)?'}youtube\.com/playlist\?list=[\\w-]+`
+    `^https?://${source === 'music' ? 'music' : '(?:www\\.)?'}youtube\.com/playlist\\?list=[\\w-]+`
   )
   const shortUrlRegex = /^https?:\/\/youtu\.be\/[\w-]+/
   const shortsRegex = /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+/
@@ -209,10 +209,11 @@ export function buildTrack(
 }
 
 export class BaseClient {
-  constructor(nodelink, name) {
+  constructor(nodelink, name, oauth) {
     this.nodelink = nodelink
     this.config = nodelink.options
     this.name = name
+    this.oauth = oauth
   }
 
   getClient() {
@@ -276,7 +277,7 @@ export class BaseClient {
         )
       }
     }
-    console.log(JSON.stringify(requestBody))
+
     const response = await makeRequest(`${apiEndpoint}/youtubei/v1/player`, {
       method: 'POST',
       headers: {
@@ -291,7 +292,7 @@ export class BaseClient {
       body: requestBody,
       disableBodyCompression: true
     })
-
+    console.log(JSON.stringify(response, null, 2))
     if (response.statusCode !== 200) {
       const message = `Failed to get player data for stream. Status: ${response.statusCode}`
       logger('error', `youtube-${this.name}`, message)
@@ -490,9 +491,8 @@ export class BaseClient {
 
     if (audioFormat?.url && !decodedTrack.isStream) {
       let streamUrl = audioFormat.url
-      if (!this.requirePlayerScript()) {
-        streamUrl += `&rn=1&cpn=${generateRandomLetters(16)}&ratebypass=yes&range=0-`
-      }
+      streamUrl += `&rn=1&cpn=${generateRandomLetters(16)}&ratebypass=yes&range=0-`
+
       logger(
         'debug',
         `youtube-${this.name}`,

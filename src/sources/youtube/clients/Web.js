@@ -122,7 +122,7 @@ export default class Web extends BaseClient {
     return { loadType: 'search', data: tracks }
   }
 
-  async resolve(url, type, context) {
+  async resolve(url, type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()

@@ -38,7 +38,7 @@ export default class IOS extends BaseClient {
     return { loadType: 'empty', data: {} }
   }
 
-  async resolve(url, type, context) {
+  async resolve(url, type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = 'https://youtubei.googleapis.com'

@@ -9,8 +9,19 @@ const SCOPES =
 export default class OAuth {
   constructor(nodelink) {
     this.nodelink = nodelink
-    this.refreshToken =
-      this.nodelink.options.sources.youtube.clients.settings.TV.refreshToken
+
+    const clientSettings = this.nodelink.options.sources.youtube.clients.settings
+    let foundToken = null
+    if (clientSettings) {
+      for (const clientName in clientSettings) {
+        if (clientSettings[clientName].refreshToken) {
+          foundToken = clientSettings[clientName].refreshToken
+          break;
+        }
+      }
+    }
+
+    this.refreshToken = foundToken
     this.accessToken = null
     this.tokenExpiry = 0
   }

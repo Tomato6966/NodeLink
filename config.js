@@ -36,7 +36,7 @@ export default {
         playback: ['TVEmbedded', 'IOS', 'TV'],
         settings: {
           TV: {
-            refreshToken: ''
+            refreshToken: process.env.REFRESH_TOKEN,
           }
         }
       },

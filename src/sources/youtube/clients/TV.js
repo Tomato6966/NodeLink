@@ -24,7 +24,19 @@ export default class TV extends BaseClient {
     return true
   }
 
-  async resolve(url, type, context) {
+  async getAuthHeaders() {
+    if (this.oauth) {
+      const accessToken = await this.oauth.getAccessToken()
+      if (accessToken) {
+        return {
+          Authorization: `Bearer ${accessToken}`
+        }
+      }
+    }
+    return {}
+  }
+
+  async resolve(url, type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()

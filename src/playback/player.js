@@ -20,6 +20,7 @@ export class Player {
     this.track = null
     this.isPaused = false
     this.volumePercent = this.nodelink.options?.defaultVolume ?? 100
+    this.filters = {}
     this.position = 0
     this.connStatus = 'idle'
     this.connection = null
@@ -205,15 +206,6 @@ export class Player {
       this._stopUpdater()
       return false
     }
-    if (this._stuckCount >= 3 && maxLength > 0) {
-      this.emitEvent('TrackStuckEvent', {
-        track: this.track,
-        thresholdMs: maxLength - position
-      })
-      this.connection.audioStream?.destroy()
-      this._stuckCount = 0
-      return false
-    }
 
     this.session.socket.send(
       JSON.stringify({
@@ -364,6 +356,15 @@ export class Player {
     return true
   }
 
+  setFilters(filters) {
+    if (!this.track || !this.connection?.audioStream) return false
+
+    this.filters = filters
+    this.connection.audioStream.setFilters(filters)
+
+    return true
+  }
+
   updateVoice({ sessionId, token, endpoint } = {}) {
     if (!sessionId || !token || !endpoint) return
     if (!this.connection) this._initConnection()
@@ -411,6 +412,7 @@ export class Player {
       track: this.track,
       volume: this.volumePercent,
       paused: this.isPaused,
+      filters: this.filters,
       state: {
         time: Date.now(),
         position: this._realPosition(),

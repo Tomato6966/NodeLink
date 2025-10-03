@@ -28,11 +28,27 @@ export default class TVEmbedded extends BaseClient {
     return '2AMB'
   }
 
+  isEmbedded() {
+    return true
+  }
+
   requirePlayerScript() {
     return true
   }
 
-  async resolve(url, type, context) {
+  async getAuthHeaders() {
+    if (this.oauth) {
+      const accessToken = await this.oauth.getAccessToken()
+      if (accessToken) {
+        return {
+          Authorization: `Bearer ${accessToken}`
+        }
+      }
+    }
+    return {}
+  }
+
+  async resolve(url, type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()
@@ -60,13 +76,12 @@ export default class TVEmbedded extends BaseClient {
         const videoId = videoIdMatch[1]
 
         const headers = await this.getAuthHeaders()
-        const { body: playerResponse, statusCode } =
-          await this._makePlayerRequest(
-            videoId,
-            context,
-            headers,
-            cipherManager
-          )
+        const { body: playerResponse, statusCode } = await this._makePlayerRequest(
+          videoId,
+          context,
+          headers,
+          cipherManager
+        )
 
         if (statusCode !== 200) {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
@@ -98,7 +113,7 @@ export default class TVEmbedded extends BaseClient {
     )
 
     const headers = await this.getAuthHeaders()
-    console.log(context)
+
     const { body: playerResponse, statusCode } = await this._makePlayerRequest(
       decodedTrack.identifier,
       context,

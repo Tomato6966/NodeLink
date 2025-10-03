@@ -151,16 +151,21 @@ export default class YouTubeSource {
 
   async search(query, type) {
     const clientList = this.config.clients.search
+    const clientErrors = []
+
     for (const clientName of clientList) {
       const client = this.clients[clientName]
-      if (client) {
+      if (!client) continue
+
+      try {
         logger(
           'debug',
           'youtube',
           `Attempting search with client: ${clientName}`
         )
         const result = await client.search(query, type, this.ytContext)
-        if (result && result.loadType !== 'empty') {
+
+        if (result && result.loadType === 'search') {
           logger(
             'debug',
             'youtube',
@@ -168,32 +173,49 @@ export default class YouTubeSource {
           )
           return result
         }
+
+        const errorMessage = result?.data?.message || 'Client returned empty or failed.'
+        clientErrors.push({ client: clientName, message: errorMessage })
         logger(
           'debug',
           'youtube',
           `Client ${clientName} returned empty or failed search.`
         )
-      } else {
+      } catch (e) {
+        clientErrors.push({ client: clientName, message: e.message })
         logger(
           'warn',
           'youtube',
-          `Client ${clientName} not found in initialized clients.`
+          `Client ${clientName} threw an exception during search: ${e.message}`
         )
       }
     }
+
     logger(
-      'info',
+      'error',
       'youtube',
       'No search results found from any configured client.'
     )
-    return { loadType: 'empty', data: {} }
+    return {
+      loadType: 'error',
+      data: {
+        message: 'No search results found from any configured client.',
+        severity: 'fault',
+        cause: 'All clients failed.',
+        errors: clientErrors
+      }
+    }
   }
 
   async resolve(url, type) {
     const clientList = this.config.clients.playback
+    const clientErrors = []
+
     for (const clientName of clientList) {
       const client = this.clients[clientName]
-      if (client) {
+      if (!client) continue
+
+      try {
         logger(
           'debug',
           'youtube',
@@ -205,7 +227,8 @@ export default class YouTubeSource {
           this.ytContext,
           this.cipherManager
         )
-        if (result && result.loadType !== 'empty') {
+
+        if (result && (result.loadType === 'track' || result.loadType === 'playlist')) {
           logger(
             'debug',
             'youtube',
@@ -213,61 +236,102 @@ export default class YouTubeSource {
           )
           return result
         }
+
+        const errorMessage = result?.data?.message || 'Client returned empty or failed.'
+        clientErrors.push({ client: clientName, message: errorMessage })
         logger(
           'debug',
           'youtube',
           `Client ${clientName} returned empty or failed to resolve URL.`
         )
-      } else {
+      } catch (e) {
+        clientErrors.push({ client: clientName, message: e.message })
         logger(
           'warn',
           'youtube',
-          `Client ${clientName} not found in initialized clients.`
+          `Client ${clientName} threw an exception during resolve: ${e.message}`
         )
       }
     }
-    logger('info', 'youtube', 'No client could resolve the URL.')
-    return { loadType: 'empty', data: {} }
+
+    logger('error', 'youtube', 'All clients failed to resolve the URL.')
+    return {
+      loadType: 'error',
+      data: {
+        message: 'All clients failed to resolve the URL.',
+        severity: 'fault',
+        cause: 'All clients failed.',
+        errors: clientErrors
+      }
+    }
   }
 
   async getTrackUrl(decodedTrack) {
     const clientList = this.config.clients.playback
     for (const clientName of clientList) {
       const client = this.clients[clientName]
-      if (client) {
-        logger(
-          'debug',
-          'youtube',
-          `Attempting to get track URL for ${decodedTrack.title} with client: ${clientName}`
-        )
-        const result = await client.getTrackUrl(
-          decodedTrack,
-          this.ytContext,
-          this.cipherManager
-        )
-        if (result && !result.exception) {
+      if (!client) continue
+
+      logger(
+        'debug',
+        'youtube',
+        `Attempting to get track URL for ${decodedTrack.title} with client: ${clientName}`
+      )
+      const urlData = await client.getTrackUrl(
+        decodedTrack,
+        this.ytContext,
+        this.cipherManager
+      )
+
+      if (urlData && !urlData.exception && urlData.url) {
+        const getCheck = await http1makeRequest(urlData.url, {
+          method: 'GET',
+          headers: { Range: 'bytes=0-0' },
+          streamOnly: true
+        })
+
+        if (getCheck.stream) {
+          getCheck.stream.destroy()
+        }
+
+        if (
+          !getCheck.error &&
+          (getCheck.statusCode === 200 || getCheck.statusCode === 206)
+        ) {
           logger(
             'debug',
             'youtube',
-            `Successfully obtained stream URL for ${decodedTrack.title} using ${clientName} client.`
+            `URL pre-flight GET check successful for client ${clientName}.`
           )
-          return result
+          return urlData
+        } else {
+          logger(
+            'warn',
+            'youtube',
+            `URL pre-flight GET check failed for client ${clientName}. Status: ${
+              getCheck.statusCode
+            }, Error: ${getCheck.error?.message}`
+          )
         }
+      } else {
         logger(
           'debug',
           'youtube',
-          `Client ${clientName} failed to get track URL for ${decodedTrack.title}.`
+          `Client ${clientName} failed to get track URL for ${
+            decodedTrack.title
+          }.`
         )
       }
     }
+
     logger(
       'error',
       'youtube',
-      `Failed to get track URL for ${decodedTrack.title} from any configured client.`
+      `Failed to get a working track URL for ${decodedTrack.title} from any configured client.`
     )
     return {
       exception: {
-        message: 'Failed to get track URL from any client.',
+        message: 'Failed to get a working track URL from any client.',
         severity: 'fault'
       }
     }
@@ -287,8 +351,6 @@ export default class YouTubeSource {
       }
 
       if (!url) throw new Error('No direct URL')
-
-      const clientReferer = `https://www.youtube.com/watch?v=${decodedTrack.identifier}` // Default Referer
 
       const response = await http1makeRequest(url, {
         method: 'GET',
