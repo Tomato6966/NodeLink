@@ -1,7 +1,10 @@
 import discordVoice from '@performanc/voice'
 import { EndReasons, GatewayEvents } from '../constants.js'
 import { logger } from '../utils.js'
-import { createAudioResource } from './streamProcessor.js'
+import {
+  createAudioResource,
+  createFFmpegAudioResource
+} from './streamProcessor.js'
 
 export class Player {
   constructor(options) {
@@ -25,6 +28,7 @@ export class Player {
     this.connStatus = 'idle'
     this.connection = null
     this.voice = { sessionId: null, token: null, endpoint: null }
+    this.streamInfo = null
 
     this.emitEvent = (type, payload = {}) => {
       try {
@@ -244,6 +248,8 @@ export class Player {
     this.track = { encoded, info }
 
     const urlData = await this.nodelink.sources.getTrackUrl(info)
+    this.streamInfo = { ...urlData, trackInfo: info }
+
     if (urlData.exception) {
       const err = new Error(urlData.exception.message)
       if (!isSeek) {
@@ -304,7 +310,49 @@ export class Player {
     if (!this.track) return false
     if (!this.track.info.isSeekable && !this.track.info.isStream) return false
     if (position < 0 || position > this.track.info.length) return false
-    if (this.position === position) return false
+
+    const sourceName = this.track.info.sourceName
+    const unsupportedSources = ['deezer', 'local']
+
+    if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
+      return this._ffmpegSeek(position)
+    } else {
+      return this._legacySeek(position)
+    }
+  }
+
+  async _ffmpegSeek(position) {
+    logger('player', 'info', `Seeking with FFmpeg to ${position}ms`)
+    this.position = position
+
+    try {
+      const url = this.streamInfo.url
+      const format = this.streamInfo.format
+
+      const resource = createFFmpegAudioResource(url, format, position)
+
+      if (this.volumePercent !== 100) {
+        resource.setVolume(this.volumePercent / 100)
+      }
+      resource.setFilters(this.filters)
+
+      this.connection.play(resource)
+
+      this._startUpdater()
+      return true
+    } catch (e) {
+      logger(
+        'player',
+        'error',
+        `FFmpeg seek failed: ${e.message}. Falling back to old method.`
+      )
+      return this._legacySeek(position)
+    }
+  }
+
+  async _legacySeek(position) {
+    if (!this.track) return false
+    if (position < 0 || position > this.track.info.length) return false
 
     logger('player', 'info', `Seeking to ${position}ms`)
 
@@ -317,7 +365,7 @@ export class Player {
       isSeek: true
     })
 
-    return false
+    return true
   }
 
   stop() {
