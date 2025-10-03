@@ -28,6 +28,7 @@ export default class OAuth {
 
   async getAccessToken() {
     if (!this.refreshToken) {
+      logger('debug', 'youtube-oauth', 'No refresh token configured. Skipping authentication.')
       return null
     }
 

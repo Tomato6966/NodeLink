@@ -15,9 +15,9 @@ export default class Music extends BaseClient {
     return {
       ...context.client,
       clientName: 'ANDROID_MUSIC',
-      clientVersion: '6.37.50',
+      clientVersion: '7.27.52',
       userAgent:
-        'com.google.android.apps.youtube.music/6.37.50 (Linux; U; Android 14 gzip)',
+        'com.google.android.apps.youtube.music/7.27.52 (Linux; U; Android 14 gzip)',
       deviceMake: 'Google',
       deviceModel: 'Pixel 6',
       osName: 'Android',

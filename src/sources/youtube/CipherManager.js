@@ -134,57 +134,80 @@ export default class CipherManager {
     return sts
   }
 
-  async resolveFormatUrl(playerScript, format) {
-    if (!this.config.url) {
-      throw new Error('Remote cipher URL is not configured.')
+  async _decipherN(playerScript, n) {
+    const requestBody = {
+      player_url: playerScript.url,
+      n_param: n
     }
 
-    let encryptedSignature = null
-    let n_param = null
-    let sp = 'sig'
-    let baseUrl = null
-
-    if (format.signatureCipher) {
-      const cipherData = new URLSearchParams(format.signatureCipher)
-      encryptedSignature = cipherData.get('s')
-      baseUrl = cipherData.get('url')
-      sp = cipherData.get('sp') || 'sig'
-      const tempUrl = new URL(baseUrl)
-      n_param = tempUrl.searchParams.get('n')
-    } else if (format.url) {
-      const tempUrl = new URL(format.url)
-      n_param = tempUrl.searchParams.get('n')
-      baseUrl = format.url
-    }
-
-    if (!baseUrl) {
-      throw new Error('No valid URL found in format for deciphering.')
-    }
-
-    const headers = {
-      'Content-Type': 'application/json'
-    }
-
+    const headers = { 'Content-Type': 'application/json' }
     if (this.config.token) {
       headers.Authorization = this.config.token
-    }
-
-    const requestBody = {
-      player_url: playerScript.url
-    }
-
-    if (encryptedSignature) {
-      requestBody.encrypted_signature = encryptedSignature
-      requestBody.signature_key = sp
-    }
-    if (n_param) {
-      requestBody.n_param = n_param
     }
 
     logger(
       'debug',
       'CipherManager',
-      `Sending to remote cipher: encryptedSignature=${encryptedSignature}, n_param=${n_param}, player_url=${playerScript.url}, requestBody=${JSON.stringify(requestBody)}`
+      `Deciphering N param: ${n} with script: ${playerScript.url}`
+    )
+
+    const { body, error, statusCode } = await makeRequest(
+      `${this.config.url}/decrypt_signature`,
+      {
+        method: 'POST',
+        headers,
+        body: requestBody,
+        disableBodyCompression: true
+      }
+    )
+    console.log(body, error, statusCode)
+    if (error || statusCode !== 200) {
+      throw new Error(
+        `Failed to decrypt n-parameter: ${error?.message || body?.message || 'Invalid response'}`
+      )
+    }
+
+    const decryptedN = body.decrypted_n_sig
+    if (!decryptedN) {
+      throw new Error('Proxy did not return a decrypted n-parameter.')
+    }
+
+    logger('debug', 'CipherManager', `Received decrypted N: ${decryptedN}`)
+    return decryptedN
+  }
+
+  async _getUriWithSignature(playerScript, format) {
+      console.log(format)
+    const cipherData = new URLSearchParams(format.signatureCipher)
+    const encryptedSignature = cipherData.get('s')
+    const baseUrl = cipherData.get('url')
+    const sp = cipherData.get('sp') || 'sig'
+
+    if (!encryptedSignature) {
+      throw new Error(
+        `Could not extract signature from signatureCipher: ${format.signatureCipher}`
+      )
+    }
+
+    const tempUrl = new URL(baseUrl)
+    const n_param = tempUrl.searchParams.get('n')
+
+    const requestBody = {
+      player_url: playerScript.url,
+      encrypted_signature: encryptedSignature,
+      signature_key: sp,
+      n_param: n_param
+    }
+
+    const headers = { 'Content-Type': 'application/json' }
+    if (this.config.token) {
+      headers.Authorization = this.config.token
+    }
+
+    logger(
+      'debug',
+      'CipherManager',
+      `Sending to remote cipher: encryptedSignature=${encryptedSignature}, n_param=${n_param}, sp=${sp}, player_url=${playerScript.url}`
     )
 
     const { body, error, statusCode } = await makeRequest(
@@ -198,11 +221,6 @@ export default class CipherManager {
     )
 
     if (error || statusCode !== 200) {
-      logger(
-        'error',
-        'CipherManager',
-        `Remote cipher server error: ${error?.message || body?.message || 'Invalid response'}`
-      )
       throw new Error(
         `Failed to decrypt signature: ${error?.message || body?.message || 'Invalid response'}`
       )
@@ -211,22 +229,49 @@ export default class CipherManager {
     logger(
       'debug',
       'CipherManager',
-      `Received from remote cipher: decrypted_signature=${body.decrypted_signature}, decrypted_n_sig=${body.decrypted_n_sig}. Using signature parameter name: ${sp}. Original n_param: ${n_param}`
+      `Received from remote cipher: decrypted_signature=${body.decrypted_signature}, decrypted_n_sig=${body.decrypted_n_sig}`
     )
 
     const finalUrl = new URL(baseUrl)
+
     if (body.decrypted_signature) {
       finalUrl.searchParams.set(sp, body.decrypted_signature)
+    } else {
+      logger(
+        'warn',
+        'CipherManager',
+        'Proxy did not return a decrypted signature, the URL will likely be invalid.'
+      )
     }
+
     if (body.decrypted_n_sig) {
       finalUrl.searchParams.set('n', body.decrypted_n_sig)
     }
 
-    logger(
-      'debug',
-      'CipherManager',
-      `Final deciphered URL: ${finalUrl.toString()}`
-    )
     return finalUrl.toString()
+  }
+
+  async resolveFormatUrl(playerScript, format) {
+    if (!this.config.url) {
+      throw new Error('Remote cipher URL is not configured.')
+    }
+
+    if (format.signatureCipher) {
+      return this._getUriWithSignature(playerScript, format)
+    }
+
+    if (format.url && new URL(format.url).searchParams.has('n')) {
+      const initialUrl = new URL(format.url)
+      const nParameter = initialUrl.searchParams.get('n')
+      const newN = await this._decipherN(playerScript, nParameter)
+      initialUrl.searchParams.set('n', newN)
+
+      const finalUrl = initialUrl.toString()
+      logger('debug', 'CipherManager', `Final N-transformed URL: ${finalUrl}`)
+      return finalUrl
+    }
+
+    // This path should not be reached if called from common.js correctly
+    return format.url
   }
 }

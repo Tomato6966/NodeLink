@@ -14,6 +14,7 @@ import {
   validateProperty,
   verifyDiscordID
 } from './utils.js'
+import 'dotenv/config'
 
 class NodelinkServer {
   constructor(options) {

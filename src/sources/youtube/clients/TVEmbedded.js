@@ -40,11 +40,13 @@ export default class TVEmbedded extends BaseClient {
     if (this.oauth) {
       const accessToken = await this.oauth.getAccessToken()
       if (accessToken) {
+        logger('debug', 'youtube-tvembedded', 'Successfully acquired access token for authentication.')
         return {
           Authorization: `Bearer ${accessToken}`
         }
       }
     }
+    logger('debug', 'youtube-tvembedded', 'No access token available. Proceeding without authentication.')
     return {}
   }
 

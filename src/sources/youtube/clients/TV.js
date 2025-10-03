@@ -28,11 +28,13 @@ export default class TV extends BaseClient {
     if (this.oauth) {
       const accessToken = await this.oauth.getAccessToken()
       if (accessToken) {
+        logger('debug', 'youtube-tv', 'Successfully acquired access token for authentication.')
         return {
           Authorization: `Bearer ${accessToken}`
         }
       }
     }
+    logger('debug', 'youtube-tv', 'No access token available. Proceeding without authentication.')
     return {}
   }
 
@@ -64,7 +66,6 @@ export default class TV extends BaseClient {
         const videoId = videoIdMatch[1]
 
         const headers = await this.getAuthHeaders()
-        console.log(context)
         const { body: playerResponse, statusCode } =
           await this._makePlayerRequest(
             videoId,
@@ -103,14 +104,13 @@ export default class TV extends BaseClient {
     )
 
     const headers = await this.getAuthHeaders()
-    console.log(context)
     const { body: playerResponse, statusCode } = await this._makePlayerRequest(
       decodedTrack.identifier,
       context,
       headers,
       cipherManager
     )
-
+    console.log(headers, context, playerResponse)
     if (statusCode !== 200) {
       const message = `Failed to get player data for stream. Status: ${statusCode}`
       logger('error', 'youtube-tv', message)

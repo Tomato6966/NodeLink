@@ -277,7 +277,6 @@ export class BaseClient {
         )
       }
     }
-
     const response = await makeRequest(`${apiEndpoint}/youtubei/v1/player`, {
       method: 'POST',
       headers: {
@@ -285,14 +284,12 @@ export class BaseClient {
         ...(context.client.visitorData
           ? { 'X-Goog-Visitor-Id': context.client.visitorData }
           : {}),
-        Cookie: 'CONSENT=YES+cb.20210328-17-p0.en+FX+471',
         ...(this.isEmbedded() ? { Referer: 'https://www.youtube.com' } : {}),
         ...headers
       },
       body: requestBody,
       disableBodyCompression: true
     })
-    console.log(JSON.stringify(response, null, 2))
     if (response.statusCode !== 200) {
       const message = `Failed to get player data for stream. Status: ${response.statusCode}`
       logger('error', `youtube-${this.name}`, message)
@@ -478,21 +475,22 @@ export class BaseClient {
     if (streamingData.adaptiveFormats) {
       for (const itag of targetItags) {
         audioFormat = streamingData.adaptiveFormats.find(
-          (f) => f.itag === itag && f.url
+          (f) => f.itag === itag
         )
         if (audioFormat) break
       }
       if (!audioFormat) {
         audioFormat = streamingData.adaptiveFormats.find(
-          (f) => f.mimeType?.startsWith('audio/') && f.url
+          (f) => f.mimeType?.startsWith('audio/')
         )
       }
     }
 
     if (audioFormat?.url && !decodedTrack.isStream) {
       let streamUrl = audioFormat.url
-      streamUrl += `&rn=1&cpn=${generateRandomLetters(16)}&ratebypass=yes&range=0-`
-
+        if (!this.requirePlayerScript()) {
+            streamUrl += `&rn=1&cpn=${generateRandomLetters(16)}&ratebypass=yes&range=0-`
+        }
       logger(
         'debug',
         `youtube-${this.name}`,

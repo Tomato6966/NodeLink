@@ -36,12 +36,12 @@ export default {
         playback: ['TVEmbedded', 'IOS', 'TV'],
         settings: {
           TV: {
-            refreshToken: process.env.REFRESH_TOKEN,
+            refreshToken: '',
           }
         }
       },
       cipher: {
-        url: 'http://0.0.0.0:8001',
+        url: 'http://127.0.0.1:8001',
         token: 'KEY'
       }
     },

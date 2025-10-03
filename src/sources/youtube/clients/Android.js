@@ -17,7 +17,7 @@ export default class Android extends BaseClient {
       clientName: 'ANDROID',
       clientVersion: '20.38.37',
       userAgent:
-        'com.google.android.youtube/20.28.27 (Linux; U; Android 14) gzip',
+        'com.google.android.youtube/20.38.37 (Linux; U; Android 14) gzip',
       deviceMake: 'Google',
       deviceModel: 'Pixel 6',
       osName: 'Android',
@@ -95,7 +95,7 @@ export default class Android extends BaseClient {
       let videos = allSections?.[lastIdx]?.itemSectionRenderer?.contents
 
       if (!videos || videos.length === 0) {
-        this.nodelink.sources.logger(
+        logger(
           'info',
           'youtube-android',
           `No matches found on ${sourceName} for: ${query}`
@@ -124,7 +124,7 @@ export default class Android extends BaseClient {
       }
 
       if (tracks.length === 0) {
-        this.nodelink.sources.logger(
+        logger(
           'info',
           'youtube-android',
           `No processable tracks found on ${sourceName} for: ${query}`
@@ -134,7 +134,7 @@ export default class Android extends BaseClient {
 
       return { loadType: 'search', data: tracks }
     } catch (e) {
-      this.nodelink.sources.logger(
+      logger(
         'error',
         'youtube-android',
         `Exception during search for '${query}': ${e.message}`

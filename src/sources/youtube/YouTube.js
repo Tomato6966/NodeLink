@@ -268,58 +268,64 @@ export default class YouTubeSource {
 
   async getTrackUrl(decodedTrack) {
     const clientList = this.config.clients.playback
+    const clientErrors = []
+
     for (const clientName of clientList) {
       const client = this.clients[clientName]
       if (!client) continue
 
-      logger(
-        'debug',
-        'youtube',
-        `Attempting to get track URL for ${decodedTrack.title} with client: ${clientName}`
-      )
-      const urlData = await client.getTrackUrl(
-        decodedTrack,
-        this.ytContext,
-        this.cipherManager
-      )
-
-      if (urlData && !urlData.exception && urlData.url) {
-        const getCheck = await http1makeRequest(urlData.url, {
-          method: 'GET',
-          headers: { Range: 'bytes=0-0' },
-          streamOnly: true
-        })
-
-        if (getCheck.stream) {
-          getCheck.stream.destroy()
-        }
-
-        if (
-          !getCheck.error &&
-          (getCheck.statusCode === 200 || getCheck.statusCode === 206)
-        ) {
-          logger(
-            'debug',
-            'youtube',
-            `URL pre-flight GET check successful for client ${clientName}.`
-          )
-          return urlData
-        } else {
-          logger(
-            'warn',
-            'youtube',
-            `URL pre-flight GET check failed for client ${clientName}. Status: ${
-              getCheck.statusCode
-            }, Error: ${getCheck.error?.message}`
-          )
-        }
-      } else {
+      try {
         logger(
           'debug',
           'youtube',
-          `Client ${clientName} failed to get track URL for ${
-            decodedTrack.title
-          }.`
+          `Attempting to get track URL for ${decodedTrack.title} with client: ${clientName}`
+        )
+        const urlData = await client.getTrackUrl(
+          decodedTrack,
+          this.ytContext,
+          this.cipherManager
+        )
+
+        if (urlData && !urlData.exception && urlData.url) {
+          const getCheck = await http1makeRequest(urlData.url, {
+            method: 'GET',
+            headers: { Range: 'bytes=0-0' },
+            streamOnly: true
+          })
+
+          if (getCheck.stream) {
+            getCheck.stream.destroy()
+          }
+
+          if (
+            !getCheck.error &&
+            (getCheck.statusCode === 200 || getCheck.statusCode === 206)
+          ) {
+            logger(
+              'debug',
+              'youtube',
+              `URL pre-flight GET check successful for client ${clientName}.`
+            )
+            return urlData
+          } else {
+            const errorMessage = `URL pre-flight GET check failed. Status: ${
+              getCheck.statusCode
+            }, Error: ${getCheck.error?.message}`
+            clientErrors.push({ client: clientName, message: errorMessage })
+            logger('warn', 'youtube', `Client ${clientName}: ${errorMessage}`)
+          }
+        } else {
+          const errorMessage =
+            urlData?.exception?.message || 'Client failed to get track URL.'
+          clientErrors.push({ client: clientName, message: errorMessage })
+          logger('debug', 'youtube', `Client ${clientName} failed: ${errorMessage}`)
+        }
+      } catch (e) {
+        clientErrors.push({ client: clientName, message: e.message })
+        logger(
+          'warn',
+          'youtube',
+          `Client ${clientName} threw an exception in getTrackUrl: ${e.message}`
         )
       }
     }
@@ -327,12 +333,14 @@ export default class YouTubeSource {
     logger(
       'error',
       'youtube',
-      `Failed to get a working track URL for ${decodedTrack.title} from any configured client.`
+      'Failed to get a working track URL from any configured client.'
     )
     return {
       exception: {
         message: 'Failed to get a working track URL from any client.',
-        severity: 'fault'
+        severity: 'fault',
+        cause: 'All clients failed.',
+        errors: clientErrors
       }
     }
   }
@@ -355,15 +363,23 @@ export default class YouTubeSource {
       const response = await http1makeRequest(url, {
         method: 'GET',
         streamOnly: true,
-        headers: {}
+        headers: {
+          Range: 'bytes=0-'
+        }
       })
-      if (response.statusCode !== 200)
+
+      if (response.statusCode !== 200 && response.statusCode !== 206)
         throw new Error(`HTTP status ${response.statusCode}`)
 
       const stream = new PassThrough()
-      response.stream.pipe(stream)
+
+      response.stream.on('data', (chunk) => stream.write(chunk))
       response.stream.on('end', () => stream.emit('finishBuffering'))
-      response.stream.on('error', () => stream.emit('finishBuffering'))
+      response.stream.on('error', (error) => {
+        logger('error', 'youtube-stream', `Upstream error: ${error.message}`)
+        stream.emit('error', error)
+        stream.emit('finishBuffering')
+      })
 
       return { stream }
     } catch (e) {
