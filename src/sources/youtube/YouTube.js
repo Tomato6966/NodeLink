@@ -9,6 +9,7 @@ import {
 import CipherManager from './CipherManager.js'
 import OAuth from './OAuth.js'
 import Android from './clients/Android.js'
+import AndroidVR from './clients/AndroidVR.js'
 import IOS from './clients/IOS.js'
 import Music from './clients/Music.js'
 import TV from './clients/TV.js'
@@ -48,7 +49,7 @@ export default class YouTubeSource {
 
     this.oauth = new OAuth(this.nodelink)
 
-    const clientClasses = { Android, IOS, Music, TV, TVEmbedded, Web }
+    const clientClasses = { Android, AndroidVR, IOS, Music, TV, TVEmbedded, Web }
     for (const clientName in clientClasses) {
       this.clients[clientName] = new clientClasses[clientName](
         this.nodelink,
@@ -286,39 +287,74 @@ export default class YouTubeSource {
           this.cipherManager
         )
 
-        if (urlData && !urlData.exception && urlData.url) {
+        if (urlData.exception) {
+          clientErrors.push({ client: clientName, message: urlData.exception.message })
+          logger('debug', 'youtube', `Client ${clientName} failed: ${urlData.exception.message}`)
+          continue
+        }
+
+        if (urlData.url) {
           const getCheck = await http1makeRequest(urlData.url, {
             method: 'GET',
             headers: { Range: 'bytes=0-0' },
             streamOnly: true
           })
 
-          if (getCheck.stream) {
-            getCheck.stream.destroy()
+          if (getCheck.stream) getCheck.stream.destroy()
+
+          if (!getCheck.error && (getCheck.statusCode === 200 || getCheck.statusCode === 206)) {
+            logger('debug', 'youtube', `URL pre-flight GET check successful for client ${clientName}.`)
+            return urlData
+          } 
+
+          const errorMessage = `URL pre-flight GET check failed. Status: ${getCheck.statusCode}, Error: ${getCheck.error?.message}`
+          clientErrors.push({ client: clientName, message: `Direct URL: ${errorMessage}` })
+          logger('warn', 'youtube', `Client ${clientName}: ${errorMessage}`)
+
+          if (getCheck.statusCode === 403 && urlData.hlsUrl) {
+            logger('warn', 'youtube', `Direct URL failed with 403, attempting HLS fallback for client ${clientName}.`)
+            const hlsCheck = await http1makeRequest(urlData.hlsUrl, {
+              method: 'GET',
+              headers: { Range: 'bytes=0-0' },
+              streamOnly: true
+            })
+
+            if (hlsCheck.stream) hlsCheck.stream.destroy()
+
+            if (!hlsCheck.error && (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)) {
+              logger('debug', 'youtube', `HLS fallback URL pre-flight GET check successful for client ${clientName}.`)
+              return {
+                url: urlData.hlsUrl,
+                protocol: 'hls',
+                format: 'arbitrary'
+              }
+            }
+
+            const hlsError = `HLS fallback URL pre-flight GET check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
+            clientErrors.push({ client: clientName, message: hlsError })
+            logger('warn', 'youtube', `Client ${clientName}: ${hlsError}`)
+          }
+        } else if (urlData.hlsUrl) {
+          const hlsCheck = await http1makeRequest(urlData.hlsUrl, {
+            method: 'GET',
+            headers: { Range: 'bytes=0-0' },
+            streamOnly: true
+          })
+
+          if (hlsCheck.stream) hlsCheck.stream.destroy()
+
+          if (!hlsCheck.error && (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)) {
+            logger('debug', 'youtube', `HLS-only URL pre-flight GET check successful for client ${clientName}.`)
+            return {
+              url: urlData.hlsUrl,
+              protocol: 'hls',
+              format: 'arbitrary'
+            }
           }
 
-          if (
-            !getCheck.error &&
-            (getCheck.statusCode === 200 || getCheck.statusCode === 206)
-          ) {
-            logger(
-              'debug',
-              'youtube',
-              `URL pre-flight GET check successful for client ${clientName}.`
-            )
-            return urlData
-          } else {
-            const errorMessage = `URL pre-flight GET check failed. Status: ${
-              getCheck.statusCode
-            }, Error: ${getCheck.error?.message}`
-            clientErrors.push({ client: clientName, message: errorMessage })
-            logger('warn', 'youtube', `Client ${clientName}: ${errorMessage}`)
-          }
-        } else {
-          const errorMessage =
-            urlData?.exception?.message || 'Client failed to get track URL.'
-          clientErrors.push({ client: clientName, message: errorMessage })
-          logger('debug', 'youtube', `Client ${clientName} failed: ${errorMessage}`)
+          const hlsError = `HLS-only URL pre-flight GET check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
+          clientErrors.push({ client: clientName, message: hlsError })
+          logger('warn', 'youtube', `Client ${clientName}: ${hlsError}`)
         }
       } catch (e) {
         clientErrors.push({ client: clientName, message: e.message })

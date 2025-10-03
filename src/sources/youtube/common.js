@@ -425,6 +425,7 @@ export class BaseClient {
     cipherManager
   ) {
     const streamingData = playerResponse.streamingData
+
     if (!streamingData) {
       logger(
         'error',
@@ -486,44 +487,23 @@ export class BaseClient {
       }
     }
 
-    if (audioFormat?.url && !decodedTrack.isStream) {
-      let streamUrl = audioFormat.url
-        if (!this.requirePlayerScript()) {
-            streamUrl += `&rn=1&cpn=${generateRandomLetters(16)}&ratebypass=yes&range=0-`
-        }
-      logger(
-        'debug',
-        `youtube-${this.name}`,
-        `Obtained stream URL for ${decodedTrack.title} from ${this.name} client: ${streamUrl}`
-      )
-      return {
-        url: streamUrl,
-        protocol: 'http',
-        format: audioFormat.mimeType.includes('opus')
-          ? 'webm/opus'
-          : 'arbitrary'
-      }
-    }
+    const directUrl = audioFormat?.url && !decodedTrack.isStream ? audioFormat.url : null
 
-    if (streamingData.hlsManifestUrl) {
-      logger(
-        'debug',
-        `youtube-${this.name}`,
-        `Obtained HLS manifest URL for ${decodedTrack.title} from ${this.name} client: ${streamingData.hlsManifestUrl}`
-      )
-      return {
-        url: streamingData.hlsManifestUrl,
-        protocol: 'hls',
-        format: 'arbitrary'
+    if (!directUrl && !streamingData.hlsManifestUrl) {
+        return {
+        exception: {
+          message: 'No suitable audio stream found.',
+          severity: 'common',
+          cause: 'Upstream'
+        }
       }
     }
 
     return {
-      exception: {
-        message: 'No suitable audio stream found.',
-        severity: 'common',
-        cause: 'Upstream'
-      }
+      url: directUrl,
+      protocol: directUrl ? 'http' : null,
+      format: directUrl ? (audioFormat.mimeType.includes('opus') ? 'webm/opus' : 'arbitrary') : null,
+      hlsUrl: streamingData.hlsManifestUrl || null
     }
   }
 

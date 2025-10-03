@@ -33,7 +33,7 @@ export default {
       gl: 'US',
       clients: {
         search: ['Android'],
-        playback: ['TVEmbedded', 'IOS', 'TV'],
+        playback: ['AndroidVR', 'TV', 'TVEmbedded', 'IOS'],
         settings: {
           TV: {
             refreshToken: '',

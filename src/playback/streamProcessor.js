@@ -1,4 +1,4 @@
-import { Filters } from './Filters.js'
+import { FiltersManager } from './filtersManager.js'
 import { Readable } from 'node:stream'
 import prism from 'prism-media'
 
@@ -25,7 +25,7 @@ class streamProcessor {
         frameSize: 960
       })
       const volume = new prism.VolumeTransformer({ type: 's16le' })
-      const filters = new Filters()
+      const filters = new FiltersManager()
       const opus = new prism.opus.Encoder({
         rate: 48000,
         channels: 2,
@@ -61,7 +61,7 @@ class streamProcessor {
       })
 
       const volume = new prism.VolumeTransformer({ type: 's16le' })
-      const filters = new Filters()
+      const filters = new FiltersManager()
       const opus = new prism.opus.Encoder({
         rate: 48000,
         channels: 2,
@@ -143,7 +143,7 @@ class streamProcessor {
     if (!this.pipes) return
 
     const filterTransformer = this.pipes.find(
-      (pipe) => pipe instanceof Filters
+      (pipe) => pipe instanceof FiltersManager
     )
 
     if (filterTransformer) {
