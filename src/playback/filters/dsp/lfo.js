@@ -18,19 +18,23 @@ export default class LFO {
     this.depth = depth;
   }
 
-  process() {
-    if (this.depth === 0 || this.frequency === 0) {
-      return 1.0;
+  getValue() {
+    if (this.frequency === 0) {
+      return 0;
     }
-
-    const lfoValue = this.waveform(this.phase);
-    const multiplier = 1.0 - (lfoValue * this.depth);
-
+    const value = this.waveform(this.phase);
     this.phase += (2 * Math.PI * this.frequency) / SAMPLE_RATE;
     if (this.phase > 2 * Math.PI) {
       this.phase -= 2 * Math.PI;
     }
-
-    return multiplier;
+    return value;
+  }
+  
+  process() {
+    if (this.depth === 0 || this.frequency === 0) {
+      return 1.0;
+    }
+    const lfoValue = this.getValue();
+    return 1.0 - (lfoValue * this.depth);
   }
 }
