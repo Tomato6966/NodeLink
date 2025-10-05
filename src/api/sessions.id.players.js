@@ -196,6 +196,25 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         await player.seek(payload.position)
       }
 
+      if (payload.filters !== undefined) {
+        if (typeof payload.filters !== 'object') {
+          return sendResponse(
+            req,
+            res,
+            {
+              timestamp: Date.now(),
+              status: 400,
+              error: 'Bad Request',
+              message: 'The filters value must be an object.',
+              path: parsedUrl.pathname
+            },
+            400
+          )
+        }
+        console.log('Applying filters:', payload.filters)
+        player.setFilters(payload)
+      }
+
       return sendResponse(req, res, player.toJSON(), 200)
     }
   }

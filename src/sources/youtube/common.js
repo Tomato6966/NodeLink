@@ -475,22 +475,21 @@ export class BaseClient {
     let audioFormat = null
     if (streamingData.adaptiveFormats) {
       for (const itag of targetItags) {
-        audioFormat = streamingData.adaptiveFormats.find(
-          (f) => f.itag === itag
-        )
+        audioFormat = streamingData.adaptiveFormats.find((f) => f.itag === itag)
         if (audioFormat) break
       }
       if (!audioFormat) {
-        audioFormat = streamingData.adaptiveFormats.find(
-          (f) => f.mimeType?.startsWith('audio/')
+        audioFormat = streamingData.adaptiveFormats.find((f) =>
+          f.mimeType?.startsWith('audio/')
         )
       }
     }
 
-    const directUrl = audioFormat?.url && !decodedTrack.isStream ? audioFormat.url : null
+    const directUrl =
+      audioFormat?.url && !decodedTrack.isStream ? audioFormat.url : null
 
     if (!directUrl && !streamingData.hlsManifestUrl) {
-        return {
+      return {
         exception: {
           message: 'No suitable audio stream found.',
           severity: 'common',
@@ -502,7 +501,11 @@ export class BaseClient {
     return {
       url: directUrl,
       protocol: directUrl ? 'http' : null,
-      format: directUrl ? (audioFormat.mimeType.includes('opus') ? 'webm/opus' : 'arbitrary') : null,
+      format: directUrl
+        ? audioFormat.mimeType.includes('opus')
+          ? 'webm/opus'
+          : 'arbitrary'
+        : null,
       hlsUrl: streamingData.hlsManifestUrl || null
     }
   }

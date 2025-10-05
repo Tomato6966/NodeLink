@@ -7,6 +7,24 @@ export default {
   maxSearchResults: 10,
   maxAlbumPlaylistLength: 100,
   playerUpdateInterval: 2000,
+  filters: {
+    enabled: {
+      tremolo: true,
+      vibrato: true,
+      lowpass: true,
+      highpass: true,
+      rotation: true,
+      karaoke: true,
+      distortion: true,
+      channelMix: true,
+      equalizer: true,
+      chorus: true,
+      compressor: true,
+      echo: true,
+      phaser: true,
+      timescale: true
+    }
+  },
   defaultSearchSource: 'youtube',
   sources: {
     deezer: {
@@ -36,7 +54,7 @@ export default {
         playback: ['AndroidVR', 'TV', 'TVEmbedded', 'IOS'],
         settings: {
           TV: {
-            refreshToken: '',
+            refreshToken: ''
           }
         }
       },

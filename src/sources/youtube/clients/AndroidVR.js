@@ -67,7 +67,11 @@ export default class AndroidVR extends BaseClient {
       }
 
       if (!searchResult) {
-        logger('info', 'youtube-android-vr', `Empty search result for '${query}'.`)
+        logger(
+          'info',
+          'youtube-android-vr',
+          `Empty search result for '${query}'.`
+        )
         return { loadType: 'empty', data: {} }
       }
 

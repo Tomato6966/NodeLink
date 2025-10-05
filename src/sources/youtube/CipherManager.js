@@ -177,7 +177,7 @@ export default class CipherManager {
   }
 
   async _getUriWithSignature(playerScript, format) {
-      console.log(format)
+    console.log(format)
     const cipherData = new URLSearchParams(format.signatureCipher)
     const encryptedSignature = cipherData.get('s')
     const baseUrl = cipherData.get('url')

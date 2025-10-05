@@ -28,13 +28,21 @@ export default class TV extends BaseClient {
     if (this.oauth) {
       const accessToken = await this.oauth.getAccessToken()
       if (accessToken) {
-        logger('debug', 'youtube-tv', 'Successfully acquired access token for authentication.')
+        logger(
+          'debug',
+          'youtube-tv',
+          'Successfully acquired access token for authentication.'
+        )
         return {
           Authorization: `Bearer ${accessToken}`
         }
       }
     }
-    logger('debug', 'youtube-tv', 'No access token available. Proceeding without authentication.')
+    logger(
+      'debug',
+      'youtube-tv',
+      'No access token available. Proceeding without authentication.'
+    )
     return {}
   }
 

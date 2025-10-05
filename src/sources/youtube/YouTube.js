@@ -49,7 +49,15 @@ export default class YouTubeSource {
 
     this.oauth = new OAuth(this.nodelink)
 
-    const clientClasses = { Android, AndroidVR, IOS, Music, TV, TVEmbedded, Web }
+    const clientClasses = {
+      Android,
+      AndroidVR,
+      IOS,
+      Music,
+      TV,
+      TVEmbedded,
+      Web
+    }
     for (const clientName in clientClasses) {
       this.clients[clientName] = new clientClasses[clientName](
         this.nodelink,
@@ -175,7 +183,8 @@ export default class YouTubeSource {
           return result
         }
 
-        const errorMessage = result?.data?.message || 'Client returned empty or failed.'
+        const errorMessage =
+          result?.data?.message || 'Client returned empty or failed.'
         clientErrors.push({ client: clientName, message: errorMessage })
         logger(
           'debug',
@@ -229,7 +238,10 @@ export default class YouTubeSource {
           this.cipherManager
         )
 
-        if (result && (result.loadType === 'track' || result.loadType === 'playlist')) {
+        if (
+          result &&
+          (result.loadType === 'track' || result.loadType === 'playlist')
+        ) {
           logger(
             'debug',
             'youtube',
@@ -238,7 +250,8 @@ export default class YouTubeSource {
           return result
         }
 
-        const errorMessage = result?.data?.message || 'Client returned empty or failed.'
+        const errorMessage =
+          result?.data?.message || 'Client returned empty or failed.'
         clientErrors.push({ client: clientName, message: errorMessage })
         logger(
           'debug',
@@ -288,8 +301,15 @@ export default class YouTubeSource {
         )
 
         if (urlData.exception) {
-          clientErrors.push({ client: clientName, message: urlData.exception.message })
-          logger('debug', 'youtube', `Client ${clientName} failed: ${urlData.exception.message}`)
+          clientErrors.push({
+            client: clientName,
+            message: urlData.exception.message
+          })
+          logger(
+            'debug',
+            'youtube',
+            `Client ${clientName} failed: ${urlData.exception.message}`
+          )
           continue
         }
 
@@ -302,17 +322,31 @@ export default class YouTubeSource {
 
           if (getCheck.stream) getCheck.stream.destroy()
 
-          if (!getCheck.error && (getCheck.statusCode === 200 || getCheck.statusCode === 206)) {
-            logger('debug', 'youtube', `URL pre-flight GET check successful for client ${clientName}.`)
+          if (
+            !getCheck.error &&
+            (getCheck.statusCode === 200 || getCheck.statusCode === 206)
+          ) {
+            logger(
+              'debug',
+              'youtube',
+              `URL pre-flight GET check successful for client ${clientName}.`
+            )
             return urlData
-          } 
+          }
 
           const errorMessage = `URL pre-flight GET check failed. Status: ${getCheck.statusCode}, Error: ${getCheck.error?.message}`
-          clientErrors.push({ client: clientName, message: `Direct URL: ${errorMessage}` })
+          clientErrors.push({
+            client: clientName,
+            message: `Direct URL: ${errorMessage}`
+          })
           logger('warn', 'youtube', `Client ${clientName}: ${errorMessage}`)
 
           if (getCheck.statusCode === 403 && urlData.hlsUrl) {
-            logger('warn', 'youtube', `Direct URL failed with 403, attempting HLS fallback for client ${clientName}.`)
+            logger(
+              'warn',
+              'youtube',
+              `Direct URL failed with 403, attempting HLS fallback for client ${clientName}.`
+            )
             const hlsCheck = await http1makeRequest(urlData.hlsUrl, {
               method: 'GET',
               headers: { Range: 'bytes=0-0' },
@@ -321,8 +355,15 @@ export default class YouTubeSource {
 
             if (hlsCheck.stream) hlsCheck.stream.destroy()
 
-            if (!hlsCheck.error && (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)) {
-              logger('debug', 'youtube', `HLS fallback URL pre-flight GET check successful for client ${clientName}.`)
+            if (
+              !hlsCheck.error &&
+              (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)
+            ) {
+              logger(
+                'debug',
+                'youtube',
+                `HLS fallback URL pre-flight GET check successful for client ${clientName}.`
+              )
               return {
                 url: urlData.hlsUrl,
                 protocol: 'hls',
@@ -343,8 +384,15 @@ export default class YouTubeSource {
 
           if (hlsCheck.stream) hlsCheck.stream.destroy()
 
-          if (!hlsCheck.error && (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)) {
-            logger('debug', 'youtube', `HLS-only URL pre-flight GET check successful for client ${clientName}.`)
+          if (
+            !hlsCheck.error &&
+            (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)
+          ) {
+            logger(
+              'debug',
+              'youtube',
+              `HLS-only URL pre-flight GET check successful for client ${clientName}.`
+            )
             return {
               url: urlData.hlsUrl,
               protocol: 'hls',

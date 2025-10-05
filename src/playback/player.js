@@ -100,6 +100,7 @@ export class Player {
         EndReasons.LOAD_FAILED
       ].includes(state.reason)
     ) {
+      this._stopUpdater()
       this.emitEvent(GatewayEvents.TRACK_END, {
         track: this.track,
         reason: state.reason
@@ -142,8 +143,15 @@ export class Player {
   }
 
   _realPosition() {
+    const timescale = this.filters.filters?.timescale || {
+      speed: 1.0,
+      rate: 1.0
+    }
+    const playbackSpeed = (timescale.speed || 1.0) * (timescale.rate || 1.0)
+
     return this.connection?.statistics
-      ? this.position + this.connection.statistics.packetsExpected * 20
+      ? this.position +
+          this.connection.statistics.packetsExpected * 20 * playbackSpeed
       : 0
   }
 
@@ -159,7 +167,12 @@ export class Player {
       urlData.additionalData
     )
     if (fetched.exception) return fetched
-    const resource = createAudioResource(fetched.stream, urlData.format)
+    const resource = createAudioResource(
+      fetched.stream,
+      urlData.format,
+      this.nodelink,
+      this.filters
+    )
     return { stream: resource }
   }
 
@@ -183,33 +196,7 @@ export class Player {
 
     const position = this._realPosition()
 
-    if (this._lastPosition === position) {
-      this._stuckCount++
-    } else {
-      this._stuckCount = 0
-    }
     this._lastPosition = position
-
-    const maxLength = this.track?.info?.length ?? 0
-
-    if (this.track && !this.track.info.isStream && maxLength > 0) {
-      if (position >= maxLength) {
-        this.connection.audioStream?.emit('finishBuffering')
-        this.connection.stop(EndReasons.FINISHED)
-        this._stopUpdater()
-        return false
-      }
-    }
-    if (
-      this._stuckCount >= 2 &&
-      maxLength > 0 &&
-      position >= maxLength - 1000
-    ) {
-      this.connection.audioStream?.emit('finishBuffering')
-      this.connection.stop(EndReasons.FINISHED)
-      this._stopUpdater()
-      return false
-    }
 
     this.session.socket.send(
       JSON.stringify({
@@ -300,6 +287,9 @@ export class Player {
     if (this.volumePercent !== 100) {
       resource.setVolume(this.volumePercent / 100)
     }
+
+    this.setFilters(this.filters)
+
     this.connection.play(resource)
     await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
     this._startUpdater()
@@ -309,7 +299,12 @@ export class Player {
   async seek(position) {
     if (!this.track) return false
     if (!this.track.info.isSeekable && !this.track.info.isStream) return false
-    if (position < 0 || position > this.track.info.length) return false
+    if (
+      position < 0 ||
+      position > this.track.info.length ||
+      (position == 0 && position == this.position)
+    )
+      return false
 
     const sourceName = this.track.info.sourceName
     const unsupportedSources = ['deezer', 'local']
@@ -329,7 +324,13 @@ export class Player {
       const url = this.streamInfo.url
       const format = this.streamInfo.format
 
-      const resource = createFFmpegAudioResource(url, format, position)
+      const resource = createFFmpegAudioResource(
+        url,
+        format,
+        position,
+        this.nodelink,
+        this.filters
+      )
 
       if (this.volumePercent !== 100) {
         resource.setVolume(this.volumePercent / 100)
@@ -405,10 +406,23 @@ export class Player {
   }
 
   setFilters(filters) {
-    if (!this.track || !this.connection?.audioStream) return false
+    if (!this.track) return false
 
-    this.filters = filters
-    this.connection.audioStream.setFilters(filters)
+    const newFilterSettings = JSON.parse(
+      JSON.stringify(this.filters.filters || {})
+    )
+    for (const key in filters.filters) {
+      newFilterSettings[key] = {
+        ...(newFilterSettings[key] || {}),
+        ...filters.filters[key]
+      }
+    }
+
+    this.filters = { ...this.filters, filters: newFilterSettings }
+
+    if (this.connection?.audioStream) {
+      this.connection.audioStream.setFilters(this.filters)
+    }
 
     return true
   }

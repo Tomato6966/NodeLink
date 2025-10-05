@@ -40,13 +40,21 @@ export default class TVEmbedded extends BaseClient {
     if (this.oauth) {
       const accessToken = await this.oauth.getAccessToken()
       if (accessToken) {
-        logger('debug', 'youtube-tvembedded', 'Successfully acquired access token for authentication.')
+        logger(
+          'debug',
+          'youtube-tvembedded',
+          'Successfully acquired access token for authentication.'
+        )
         return {
           Authorization: `Bearer ${accessToken}`
         }
       }
     }
-    logger('debug', 'youtube-tvembedded', 'No access token available. Proceeding without authentication.')
+    logger(
+      'debug',
+      'youtube-tvembedded',
+      'No access token available. Proceeding without authentication.'
+    )
     return {}
   }
 
@@ -78,12 +86,13 @@ export default class TVEmbedded extends BaseClient {
         const videoId = videoIdMatch[1]
 
         const headers = await this.getAuthHeaders()
-        const { body: playerResponse, statusCode } = await this._makePlayerRequest(
-          videoId,
-          context,
-          headers,
-          cipherManager
-        )
+        const { body: playerResponse, statusCode } =
+          await this._makePlayerRequest(
+            videoId,
+            context,
+            headers,
+            cipherManager
+          )
 
         if (statusCode !== 200) {
           const message = `Failed to load video/short player data. Status: ${statusCode}`

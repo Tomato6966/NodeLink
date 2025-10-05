@@ -10,13 +10,14 @@ export default class OAuth {
   constructor(nodelink) {
     this.nodelink = nodelink
 
-    const clientSettings = this.nodelink.options.sources.youtube.clients.settings
+    const clientSettings =
+      this.nodelink.options.sources.youtube.clients.settings
     let foundToken = null
     if (clientSettings) {
       for (const clientName in clientSettings) {
         if (clientSettings[clientName].refreshToken) {
           foundToken = clientSettings[clientName].refreshToken
-          break;
+          break
         }
       }
     }
@@ -28,7 +29,11 @@ export default class OAuth {
 
   async getAccessToken() {
     if (!this.refreshToken) {
-      logger('debug', 'youtube-oauth', 'No refresh token configured. Skipping authentication.')
+      logger(
+        'debug',
+        'youtube-oauth',
+        'No refresh token configured. Skipping authentication.'
+      )
       return null
     }
 
