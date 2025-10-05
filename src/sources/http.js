@@ -89,7 +89,7 @@ export default class HttpSource {
       if (response.error) throw response.error
       return { stream: response.stream }
     } catch (err) {
-      logger('sources', 'error', `Failed to load stream: ${err.message}`)
+      logger('error', 'Sources', `Failed to load http stream: ${err.message}`)
       return { exception: { message: err.message, severity: 'common' } }
     }
   }

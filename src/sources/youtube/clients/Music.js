@@ -53,7 +53,7 @@ export default class Music extends BaseClient {
       const message =
         error?.message ||
         `Failed to load results from ${sourceName}. Status: ${statusCode}`
-      logger('error', 'youtube-music', message)
+      logger('error', 'YouTube-Music', message)
       return {
         loadType: 'error',
         data: { message, severity: 'common', cause: 'Upstream' }
@@ -63,7 +63,7 @@ export default class Music extends BaseClient {
     if (searchResult.error) {
       logger(
         'error',
-        'youtube-music',
+        'YouTube-Music',
         `Error from ${sourceName} search API: ${searchResult.error.message}`
       )
       return {
@@ -84,8 +84,8 @@ export default class Music extends BaseClient {
 
     if (!videos || videos.length === 0) {
       logger(
-        'info',
-        'youtube-music',
+        'debug',
+        'YouTube-Music',
         `No matches found on ${sourceName} for: ${query}`
       )
       return { loadType: 'empty', data: {} }
@@ -113,8 +113,8 @@ export default class Music extends BaseClient {
 
     if (tracks.length === 0) {
       logger(
-        'info',
-        'youtube-music',
+        'debug',
+        'YouTube-Music',
         `No processable tracks found on ${sourceName} for: ${query}`
       )
       return { loadType: 'empty', data: {} }

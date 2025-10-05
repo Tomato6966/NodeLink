@@ -61,7 +61,7 @@ export default class Android extends BaseClient {
         const message =
           error?.message ||
           `Failed to load results from ${sourceName}. Status: ${statusCode}`
-        logger('error', 'youtube-android', message)
+        logger('error', 'YouTube-Android', message)
         return {
           loadType: 'error',
           data: { message, severity: 'common', cause: 'Upstream' }
@@ -69,14 +69,18 @@ export default class Android extends BaseClient {
       }
 
       if (!searchResult) {
-        logger('info', 'youtube-android', `Empty search result for '${query}'.`)
+        logger(
+          'debug',
+          'YouTube-Android',
+          `Empty search result for '${query}'.`
+        )
         return { loadType: 'empty', data: {} }
       }
 
       if (searchResult.error) {
         logger(
           'error',
-          'youtube-android',
+          'YouTube-Android',
           `Error from ${sourceName} search API: ${searchResult.error.message}`
         )
         return {
@@ -96,8 +100,8 @@ export default class Android extends BaseClient {
 
       if (!videos || videos.length === 0) {
         logger(
-          'info',
-          'youtube-android',
+          'debug',
+          'YouTube-Android',
           `No matches found on ${sourceName} for: ${query}`
         )
         return { loadType: 'empty', data: {} }
@@ -125,8 +129,8 @@ export default class Android extends BaseClient {
 
       if (tracks.length === 0) {
         logger(
-          'info',
-          'youtube-android',
+          'debug',
+          'YouTube-Android',
           `No processable tracks found on ${sourceName} for: ${query}`
         )
         return { loadType: 'empty', data: {} }
@@ -136,7 +140,7 @@ export default class Android extends BaseClient {
     } catch (e) {
       logger(
         'error',
-        'youtube-android',
+        'YouTube-Android',
         `Exception during search for '${query}': ${e.message}`
       )
       return {

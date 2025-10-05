@@ -73,8 +73,8 @@ export default class MusixmatchLyrics {
       }
     } catch (e) {
       logger(
-        'lyrics',
         'error',
+        'Lyrics',
         `Failed to fetch lyrics from Musixmatch: ${e.message}`
       )
       return {

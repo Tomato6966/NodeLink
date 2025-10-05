@@ -59,14 +59,14 @@ export default class SourcesManager {
           }
         }
         logger(
-          'sources',
           'info',
+          'Sources',
           `Loaded source: ${name} ${instance.searchTerms?.length ? `(terms: ${instance.searchTerms.join(', ')})` : ''}`
         )
       } else {
         logger(
-          'sources',
           'error',
+          'Sources',
           `Failed setup source: ${name}; source not available for use`
         )
       }
@@ -84,8 +84,8 @@ export default class SourcesManager {
           this.sources.set(name, instance)
         } else {
           logger(
-            'sources',
             'error',
+            'Sources',
             `Failed setup source: ${name}; source not available for use`
           )
           return
@@ -105,8 +105,8 @@ export default class SourcesManager {
           }
         }
         logger(
-          'sources',
           'info',
+          'Sources',
           `Loaded source: ${name} ${instance.searchTerms?.length ? `(terms: ${instance.searchTerms.join(', ')})` : ''}`
         )
       })
@@ -119,14 +119,18 @@ export default class SourcesManager {
       throw new Error(`Source not found for term: ${sourceTerm}`)
     }
     const instance = this.sources.get(sourceName)
-    logger('info', 'Search', `Searching ${sourceName} for ${query}`)
+    logger('debug', 'Sources', `Searching on ${sourceName} for: "${query}"`)
     return instance.search(query)
   }
 
   async searchWithDefault(query) {
-    const instance = this.sources.get(
-      this.nodelink.options.defaultSearchSource ??
-        this.searchTermMap.get(this.nodelink.options.defaultSearchSource)
+    const defaultSource = this.nodelink.options.defaultSearchSource
+    const sourceName = this.searchTermMap.get(defaultSource) || defaultSource
+    const instance = this.sources.get(sourceName)
+    logger(
+      'debug',
+      'Sources',
+      `Searching on default source "${sourceName}" for: "${query}"`
     )
     return instance.search(query)
   }
@@ -140,11 +144,11 @@ export default class SourcesManager {
       (url.startsWith('https://') || url.includes('http://'))
     ) {
       const instance = this.sources.get('http')
-      logger('info', 'Resolve', `Resolving HTTP for ${url}`)
+      logger('debug', 'Sources', `Resolving with http source for: ${url}`)
       const result = await instance.resolve(url)
       return result
-      //biome-ignore lint: no-use-else-if
     } else if (!sourceName) {
+      logger('warn', 'Sources', `No source found for URL: ${url}`)
       return {
         loadType: 'error',
         data: {
@@ -155,7 +159,7 @@ export default class SourcesManager {
       }
     }
     const instance = this.sources.get(sourceName)
-    logger('info', 'Resolve', `Resolving ${sourceName} for ${url}`)
+    logger('debug', 'Sources', `Resolving with ${sourceName} for: ${url}`)
     return instance.resolve(url)
   }
 

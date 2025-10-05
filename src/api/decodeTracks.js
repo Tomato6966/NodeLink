@@ -1,4 +1,4 @@
-import { decodeTrack } from '../utils.js'
+import { decodeTrack, logger } from '../utils.js'
 
 function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const encodedTracks = req.body // ["encodedTrack1", "encodedTrack2"]
@@ -14,11 +14,18 @@ function handler(nodelink, req, res, sendResponse, parsedUrl) {
     return
   }
   const decodedTracks = []
+  logger('debug', 'Tracks', `Decoding ${encodedTracks.length} tracks.`)
   for (const encodedTrack of encodedTracks) {
     try {
       const decodedTrack = decodeTrack(encodedTrack)
       decodedTracks.push(decodedTrack)
     } catch (error) {
+      logger(
+        'error',
+        'Tracks',
+        `Failed to decode track ${encodedTrack}:`,
+        error
+      )
       // biome-ignore format: off
       sendResponse(req, res, {
           timestamp: Date.now(),

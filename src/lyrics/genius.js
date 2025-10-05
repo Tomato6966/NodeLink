@@ -11,7 +11,7 @@ export default class GeniusLyrics {
 
   async getLyrics(trackInfo) {
     const query = `${trackInfo.title} ${trackInfo.author}`
-    logger('lyrics', 'debug', `Searching Genius for: ${query}`)
+    logger('debug', 'Lyrics', `Searching Genius for: ${query}`)
 
     try {
       const { body: searchData } = await makeRequest(
@@ -58,8 +58,8 @@ export default class GeniusLyrics {
       }
     } catch (e) {
       logger(
-        'lyrics',
         'error',
+        'Lyrics',
         `Failed to fetch lyrics from Genius: ${e.message}`
       )
       return {

@@ -45,7 +45,7 @@ export default class YouTubeSource {
   }
 
   async setup() {
-    logger('info', 'youtube', 'Setting up YouTube source...')
+    logger('info', 'YouTube', 'Setting up YouTube source...')
 
     this.oauth = new OAuth(this.nodelink)
 
@@ -66,7 +66,7 @@ export default class YouTubeSource {
     }
     logger(
       'debug',
-      'youtube',
+      'YouTube',
       `Initialized clients: ${Object.keys(this.clients).join(', ')}`
     )
 
@@ -81,12 +81,12 @@ export default class YouTubeSource {
       3600000
     )
 
-    logger('info', 'youtube', 'YouTube source setup complete.')
+    logger('info', 'YouTube', 'YouTube source setup complete.')
     return true
   }
 
   cleanup() {
-    logger('info', 'youtube', 'Cleaning up YouTube source...')
+    logger('info', 'YouTube', 'Cleaning up YouTube source...')
     if (this.visitorDataInterval) {
       clearInterval(this.visitorDataInterval)
       this.visitorDataInterval = null
@@ -94,7 +94,7 @@ export default class YouTubeSource {
   }
 
   async _fetchVisitorData() {
-    logger('debug', 'youtube', 'Fetching visitor data...')
+    logger('debug', 'YouTube', 'Fetching visitor data...')
     let playerScriptUrl = null
     try {
       const {
@@ -119,7 +119,7 @@ export default class YouTubeSource {
           )
           logger(
             'debug',
-            'youtube',
+            'YouTube',
             `Extracted and standardized player script URL from main page: ${playerScriptUrl}`
           )
         }
@@ -128,7 +128,7 @@ export default class YouTubeSource {
       if (!visitorFound) {
         logger(
           'warn',
-          'youtube',
+          'YouTube',
           `Failed to fetch initial page for visitor data: ${error?.message || `Status ${statusCode}`}`
         )
         const {
@@ -151,7 +151,7 @@ export default class YouTubeSource {
         }
       }
     } catch (e) {
-      logger('error', 'youtube', `Error fetching visitor data: ${e.message}`)
+      logger('error', 'YouTube', `Error fetching visitor data: ${e.message}`)
     }
     if (playerScriptUrl) {
       this.cipherManager.setPlayerScriptUrl(playerScriptUrl)
@@ -169,7 +169,7 @@ export default class YouTubeSource {
       try {
         logger(
           'debug',
-          'youtube',
+          'YouTube',
           `Attempting search with client: ${clientName}`
         )
         const result = await client.search(query, type, this.ytContext)
@@ -177,7 +177,7 @@ export default class YouTubeSource {
         if (result && result.loadType === 'search') {
           logger(
             'debug',
-            'youtube',
+            'YouTube',
             `Search successful with client: ${clientName}`
           )
           return result
@@ -188,14 +188,14 @@ export default class YouTubeSource {
         clientErrors.push({ client: clientName, message: errorMessage })
         logger(
           'debug',
-          'youtube',
+          'YouTube',
           `Client ${clientName} returned empty or failed search.`
         )
       } catch (e) {
         clientErrors.push({ client: clientName, message: e.message })
         logger(
           'warn',
-          'youtube',
+          'YouTube',
           `Client ${clientName} threw an exception during search: ${e.message}`
         )
       }
@@ -203,7 +203,7 @@ export default class YouTubeSource {
 
     logger(
       'error',
-      'youtube',
+      'YouTube',
       'No search results found from any configured client.'
     )
     return {
@@ -228,7 +228,7 @@ export default class YouTubeSource {
       try {
         logger(
           'debug',
-          'youtube',
+          'YouTube',
           `Attempting to resolve URL with client: ${clientName}`
         )
         const result = await client.resolve(
@@ -244,7 +244,7 @@ export default class YouTubeSource {
         ) {
           logger(
             'debug',
-            'youtube',
+            'YouTube',
             `Successfully resolved URL with client: ${clientName}`
           )
           return result
@@ -255,20 +255,20 @@ export default class YouTubeSource {
         clientErrors.push({ client: clientName, message: errorMessage })
         logger(
           'debug',
-          'youtube',
+          'YouTube',
           `Client ${clientName} returned empty or failed to resolve URL.`
         )
       } catch (e) {
         clientErrors.push({ client: clientName, message: e.message })
         logger(
           'warn',
-          'youtube',
+          'YouTube',
           `Client ${clientName} threw an exception during resolve: ${e.message}`
         )
       }
     }
 
-    logger('error', 'youtube', 'All clients failed to resolve the URL.')
+    logger('error', 'YouTube', 'All clients failed to resolve the URL.')
     return {
       loadType: 'error',
       data: {
@@ -291,7 +291,7 @@ export default class YouTubeSource {
       try {
         logger(
           'debug',
-          'youtube',
+          'YouTube',
           `Attempting to get track URL for ${decodedTrack.title} with client: ${clientName}`
         )
         const urlData = await client.getTrackUrl(
@@ -307,7 +307,7 @@ export default class YouTubeSource {
           })
           logger(
             'debug',
-            'youtube',
+            'YouTube',
             `Client ${clientName} failed: ${urlData.exception.message}`
           )
           continue
@@ -328,7 +328,7 @@ export default class YouTubeSource {
           ) {
             logger(
               'debug',
-              'youtube',
+              'YouTube',
               `URL pre-flight GET check successful for client ${clientName}.`
             )
             return urlData
@@ -339,12 +339,12 @@ export default class YouTubeSource {
             client: clientName,
             message: `Direct URL: ${errorMessage}`
           })
-          logger('warn', 'youtube', `Client ${clientName}: ${errorMessage}`)
+          logger('warn', 'YouTube', `Client ${clientName}: ${errorMessage}`)
 
           if (getCheck.statusCode === 403 && urlData.hlsUrl) {
             logger(
               'warn',
-              'youtube',
+              'YouTube',
               `Direct URL failed with 403, attempting HLS fallback for client ${clientName}.`
             )
             const hlsCheck = await http1makeRequest(urlData.hlsUrl, {
@@ -361,7 +361,7 @@ export default class YouTubeSource {
             ) {
               logger(
                 'debug',
-                'youtube',
+                'YouTube',
                 `HLS fallback URL pre-flight GET check successful for client ${clientName}.`
               )
               return {
@@ -373,7 +373,7 @@ export default class YouTubeSource {
 
             const hlsError = `HLS fallback URL pre-flight GET check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
             clientErrors.push({ client: clientName, message: hlsError })
-            logger('warn', 'youtube', `Client ${clientName}: ${hlsError}`)
+            logger('warn', 'YouTube', `Client ${clientName}: ${hlsError}`)
           }
         } else if (urlData.hlsUrl) {
           const hlsCheck = await http1makeRequest(urlData.hlsUrl, {
@@ -390,7 +390,7 @@ export default class YouTubeSource {
           ) {
             logger(
               'debug',
-              'youtube',
+              'YouTube',
               `HLS-only URL pre-flight GET check successful for client ${clientName}.`
             )
             return {
@@ -402,13 +402,13 @@ export default class YouTubeSource {
 
           const hlsError = `HLS-only URL pre-flight GET check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
           clientErrors.push({ client: clientName, message: hlsError })
-          logger('warn', 'youtube', `Client ${clientName}: ${hlsError}`)
+          logger('warn', 'YouTube', `Client ${clientName}: ${hlsError}`)
         }
       } catch (e) {
         clientErrors.push({ client: clientName, message: e.message })
         logger(
           'warn',
-          'youtube',
+          'YouTube',
           `Client ${clientName} threw an exception in getTrackUrl: ${e.message}`
         )
       }
@@ -416,7 +416,7 @@ export default class YouTubeSource {
 
     logger(
       'error',
-      'youtube',
+      'YouTube',
       'Failed to get a working track URL from any configured client.'
     )
     return {
@@ -432,7 +432,7 @@ export default class YouTubeSource {
   async loadStream(decodedTrack, url, protocol, additionalData) {
     logger(
       'debug',
-      'youtube',
+      'YouTube',
       `Loading stream for "${decodedTrack.title}" with protocol ${protocol}`
     )
     try {
@@ -460,7 +460,7 @@ export default class YouTubeSource {
       response.stream.on('data', (chunk) => stream.write(chunk))
       response.stream.on('end', () => stream.emit('finishBuffering'))
       response.stream.on('error', (error) => {
-        logger('error', 'youtube-stream', `Upstream error: ${error.message}`)
+        logger('error', 'YouTube', `Upstream stream error: ${error.message}`)
         stream.emit('error', error)
         stream.emit('finishBuffering')
       })
@@ -469,7 +469,7 @@ export default class YouTubeSource {
     } catch (e) {
       logger(
         'error',
-        'youtube',
+        'YouTube',
         `Error loading stream for ${decodedTrack.identifier}: ${e.message}`
       )
       return {

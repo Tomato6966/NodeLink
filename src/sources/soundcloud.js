@@ -27,14 +27,14 @@ export default class {
       method: 'GET'
     })
     if (!mainPageRequest) {
-      logger('sources', 'error', 'Failed to load SoundCloud main page')
+      logger('error', 'Sources', 'Failed to load SoundCloud main page')
       return false
     }
     if (mainPageRequest.error) {
       logger(
-        'sources',
         'error',
-        `Failed to fetch clientId: ${mainPageRequest.error.message}`
+        'Sources',
+        `Failed to fetch SoundCloud clientId: ${mainPageRequest.error.message}`
       )
       return false
     }
@@ -43,23 +43,27 @@ export default class {
     )[5]
     const assetRequest = await http1makeRequest(assetId)
     if (!assetRequest) {
-      logger('sources', 'error', 'Failed to load SoundCloud asset')
+      logger('error', 'Sources', 'Failed to load SoundCloud asset')
       return false
     }
     if (assetRequest.error) {
       logger(
-        'sources',
         'error',
-        `Failed to fetch assets: ${assetRequest.error.message}`
+        'Sources',
+        `Failed to fetch SoundCloud assets: ${assetRequest.error.message}`
       )
       return false
     }
     const clientId = assetRequest.body.match(/client_id=([a-zA-Z0-9]{32})/)[1]
     if (!clientId) {
-      logger('sources', 'error', 'Failed to fetch clientId')
+      logger('error', 'Sources', 'Failed to fetch SoundCloud clientId')
       return false
     }
-    logger('sources', 'info', `SoundCloud clientId: ${clientId}`)
+    logger(
+      'info',
+      'Sources',
+      `Loaded SoundCloud source (clientId: ${clientId})`
+    )
     this.clientId = clientId
     return true
   }
@@ -82,7 +86,11 @@ export default class {
     }
     const { body } = req
     if (body.total_results === 0) {
-      logger('sources', 'info', `SoundCloud search: ${query} - No results`)
+      logger(
+        'debug',
+        'Sources',
+        `No results found on SoundCloud for: "${query}"`
+      )
       return {
         loadType: 'empty',
         data: {}
@@ -103,9 +111,9 @@ export default class {
     }
 
     logger(
-      'info',
-      'Search',
-      `Found ${tracks.length} tracks on SoundCloud for ${query}`
+      'debug',
+      'Sources',
+      `Found ${tracks.length} tracks on SoundCloud for "${query}"`
     )
     return {
       loadType: 'search',
@@ -248,8 +256,8 @@ export default class {
     const body = req.body
     if (req.error || req.statusCode !== 200) {
       logger(
-        'sources',
         'error',
+        'Sources',
         `SoundCloud getTrackUrl error: ${req.error?.message}`
       )
       return {
@@ -264,8 +272,8 @@ export default class {
     }
     if (body.errors) {
       logger(
-        'sources',
         'error',
+        'Sources',
         `SoundCloud getTrackUrl error: ${body.errors[0].error_message}`
       )
       return {

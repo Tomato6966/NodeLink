@@ -1,8 +1,9 @@
-import { decodeTrack, sendResponse } from '../utils.js'
+import { decodeTrack, logger, sendResponse } from '../utils.js'
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const encodedTrack = parsedUrl.searchParams.get('encodedTrack')
   if (!encodedTrack) {
+    logger('warn', 'Lyrics', 'Missing encodedTrack parameter')
     return sendResponse(
       req,
       res,
@@ -20,6 +21,11 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   try {
     const decodedTrack = decodeTrack(encodedTrack)
     if (!decodedTrack) {
+      logger(
+        'warn',
+        'Lyrics',
+        `Invalid encoded track received: ${encodedTrack}`
+      )
       return sendResponse(
         req,
         res,
@@ -34,10 +40,16 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       )
     }
 
+    logger(
+      'debug',
+      'Lyrics',
+      `Request to load lyrics for: ${decodedTrack.info.title}`
+    )
     const lyricsData = await nodelink.lyrics.loadLyrics(decodedTrack)
 
     sendResponse(req, res, lyricsData, 200)
   } catch (error) {
+    logger('error', 'Lyrics', 'Failed to load lyrics:', error)
     sendResponse(
       req,
       res,

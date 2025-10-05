@@ -48,7 +48,7 @@ export class FiltersManager extends Transform {
       const filter = this.availableFilters[filterName]
 
       if (filters.filters?.[filterName]) {
-        console.log(`Enabling filter: ${filterName}`)
+        logger('debug', 'Filters', `Enabling filter: ${filterName}`)
         this.activeFilters.push(filter)
       }
 

@@ -42,7 +42,7 @@ export default class TVEmbedded extends BaseClient {
       if (accessToken) {
         logger(
           'debug',
-          'youtube-tvembedded',
+          'YouTube-TVEmbedded',
           'Successfully acquired access token for authentication.'
         )
         return {
@@ -52,7 +52,7 @@ export default class TVEmbedded extends BaseClient {
     }
     logger(
       'debug',
-      'youtube-tvembedded',
+      'YouTube-TVEmbedded',
       'No access token available. Proceeding without authentication.'
     )
     return {}
@@ -71,7 +71,7 @@ export default class TVEmbedded extends BaseClient {
         if (!videoIdMatch || !videoIdMatch[1]) {
           logger(
             'error',
-            'youtube-tvembedded',
+            'YouTube-TVEmbedded',
             `Could not parse video ID from URL: ${url}`
           )
           return {
@@ -96,7 +96,7 @@ export default class TVEmbedded extends BaseClient {
 
         if (statusCode !== 200) {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
-          logger('error', 'youtube-tvembedded', message)
+          logger('error', 'YouTube-TVEmbedded', message)
           return {
             loadType: 'error',
             data: { message, severity: 'common', cause: 'Upstream' }
@@ -119,7 +119,7 @@ export default class TVEmbedded extends BaseClient {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',
-      'youtube-tvembedded',
+      'YouTube-TVEmbedded',
       `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`
     )
 
@@ -134,7 +134,7 @@ export default class TVEmbedded extends BaseClient {
 
     if (statusCode !== 200) {
       const message = `Failed to get player data for stream. Status: ${statusCode}`
-      logger('error', 'youtube-tvembedded', message)
+      logger('error', 'YouTube-TVEmbedded', message)
       return { exception: { message, severity: 'common', cause: 'Upstream' } }
     }
 

@@ -19,6 +19,7 @@ export class Player {
     this.nodelink = options.nodelink
     this.session = options.session
     this.guildId = options.guildId
+    this.logger = this.nodelink.logger
 
     this.track = null
     this.isPaused = false
@@ -29,6 +30,12 @@ export class Player {
     this.connection = null
     this.voice = { sessionId: null, token: null, endpoint: null }
     this.streamInfo = null
+
+    logger(
+      'debug',
+      'Player',
+      `New player created for guild ${this.guildId} in session ${this.session.id}`
+    )
 
     this.emitEvent = (type, payload = {}) => {
       try {
@@ -66,17 +73,42 @@ export class Player {
       userId: this.session.userId,
       encryption: this.nodelink.options?.audio.encryption
     })
-    this.connection.on('stateChange', (_, s) => this._onConn(s))
+    this.connection.on('stateChange', (_, s) => {
+      logger(
+        'debug',
+        'Player',
+        `Voice connection state change for guild ${this.guildId} in session ${this.session.id}: ${s.status}`
+      )
+      this._onConn(s)
+    })
     this.connection.on('playerStateChange', (_, s) => this._onPlay(s))
-    this.connection.on('error', (err) => this._onError(err))
+    this.connection.on('error', (err) => {
+      logger(
+        'error',
+        'Player',
+        `Voice connection error for guild ${this.guildId} in session ${this.session.id}:`,
+        err
+      )
+      this._onError(err)
+    })
   }
 
   _onConn(state) {
     this.connStatus = state.status
     if (state.status === 'connected') {
+      logger(
+        'info',
+        'Player',
+        `Voice connection established for guild ${this.guildId} in session ${this.session.id}`
+      )
       if (this.track && this.isPaused && this.connection.audioStream) {
         this.isPaused = false
         this.connection.unpause('reconnected')
+        logger(
+          'debug',
+          'Player',
+          `Unpaused track on reconnection for guild ${this.guildId}`
+        )
       }
     } else if (state.status === 'disconnected') {
       this.emitEvent(GatewayEvents.WEBSOCKET_CLOSED, {
@@ -91,6 +123,11 @@ export class Player {
   }
 
   _onPlay(state) {
+    logger(
+      'debug',
+      'Player',
+      `Player state change for guild ${this.guildId} in session ${this.session.id}: ${state.status} (reason: ${state.reason})`
+    )
     if (
       state.status === 'idle' &&
       this.track &&
@@ -220,7 +257,20 @@ export class Player {
     startTime = 0,
     isSeek = false
   }) {
+    logger('debug', 'Player', `play() called for guild ${this.guildId}`, {
+      encoded,
+      noReplace,
+      startTime,
+      isSeek,
+      track: info
+    })
+
     if (noReplace && this.track && !isSeek) {
+      logger(
+        'debug',
+        'Player',
+        `play() aborted for guild ${this.guildId} due to noReplace=true`
+      )
       return false
     }
 
@@ -236,18 +286,25 @@ export class Player {
 
     const urlData = await this.nodelink.sources.getTrackUrl(info)
     this.streamInfo = { ...urlData, trackInfo: info }
+    logger('debug', 'Player', `Got track URL for guild ${this.guildId}`, {
+      urlData
+    })
 
     if (urlData.exception) {
       const err = new Error(urlData.exception.message)
       if (!isSeek) {
         logger(
-          'player',
           'error',
-          `Load failed for track from source "${info.sourceName}": ${err.message}`
+          'Player',
+          `Load failed on getTrackUrl for source "${info.sourceName}" on guild ${this.guildId}: ${err.message}`
         )
         this._onError(err)
       } else {
-        logger('player', 'error', `Seek failed on getTrackUrl: ${err.message}`)
+        logger(
+          'error',
+          'Player',
+          `Seek failed on getTrackUrl for guild ${this.guildId}: ${err.message}`
+        )
       }
       return false
     }
@@ -257,6 +314,11 @@ export class Player {
     }
 
     if (!this.connection.udpInfo?.secretKey) {
+      logger(
+        'debug',
+        'Player',
+        `Waiting for voice connection to be ready for guild ${this.guildId}`
+      )
       await this.waitEvent(
         'stateChange',
         (s) => s.status === 'connected' && this.connection.udpInfo?.secretKey
@@ -268,13 +330,17 @@ export class Player {
       const err = new Error(fetched.exception.message)
       if (!isSeek) {
         logger(
-          'player',
           'error',
-          `Load failed while fetching resource from source "${info.sourceName}": ${err.message}`
+          'Player',
+          `Load failed while fetching resource from source "${info.sourceName}" on guild ${this.guildId}: ${err.message}`
         )
         this._onError(err)
       } else {
-        logger('player', 'error', `Seek fetch failed: ${err.message}`)
+        logger(
+          'error',
+          'Player',
+          `Seek fetch failed for guild ${this.guildId}: ${err.message}`
+        )
       }
       return false
     }
@@ -290,6 +356,7 @@ export class Player {
 
     this.setFilters(this.filters)
 
+    logger('debug', 'Player', `Playing resource for guild ${this.guildId}`)
     this.connection.play(resource)
     await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
     this._startUpdater()
@@ -317,7 +384,11 @@ export class Player {
   }
 
   async _ffmpegSeek(position) {
-    logger('player', 'info', `Seeking with FFmpeg to ${position}ms`)
+    logger(
+      'debug',
+      'Player',
+      `Seeking with FFmpeg to ${position}ms for guild ${this.guildId}`
+    )
     this.position = position
 
     try {
@@ -343,9 +414,9 @@ export class Player {
       return true
     } catch (e) {
       logger(
-        'player',
         'error',
-        `FFmpeg seek failed: ${e.message}. Falling back to old method.`
+        'Player',
+        `FFmpeg seek failed for guild ${this.guildId}: ${e.message}. Falling back to old method.`
       )
       return this._legacySeek(position)
     }
@@ -355,7 +426,11 @@ export class Player {
     if (!this.track) return false
     if (position < 0 || position > this.track.info.length) return false
 
-    logger('player', 'info', `Seeking to ${position}ms`)
+    logger(
+      'debug',
+      'Player',
+      `Seeking with legacy method to ${position}ms for guild ${this.guildId}`
+    )
 
     this.position = position
 
@@ -371,6 +446,7 @@ export class Player {
 
   stop() {
     if (!this.track) return false
+    logger('debug', 'Player', `Stopping player for guild ${this.guildId}`)
     if (this.connection?.audioStream) {
       this.connection.stop(EndReasons.STOPPED)
     } else {
@@ -386,6 +462,11 @@ export class Player {
 
   pause(shouldPause) {
     if (this.isPaused === shouldPause) return false
+    logger(
+      'debug',
+      'Player',
+      `Setting pause to ${shouldPause} for guild ${this.guildId}`
+    )
     this.isPaused = shouldPause
     if (this.connection?.audioStream) {
       if (shouldPause) {
@@ -400,13 +481,24 @@ export class Player {
   }
 
   volume(level) {
-    this.volumePercent = Math.max(0, Math.min(100, level))
+    logger(
+      'debug',
+      'Player',
+      `Setting volume to ${level} for guild ${this.guildId}`
+    )
+    this.volumePercent = Math.max(0, Math.min(1000, level))
     this.connection?.audioStream?.setVolume(this.volumePercent / 100)
     return true
   }
 
   setFilters(filters) {
     if (!this.track) return false
+    logger(
+      'debug',
+      'Player',
+      `Applying filters for guild ${this.guildId}:`,
+      filters
+    )
 
     const newFilterSettings = JSON.parse(
       JSON.stringify(this.filters.filters || {})
@@ -429,6 +521,7 @@ export class Player {
 
   updateVoice({ sessionId, token, endpoint } = {}) {
     if (!sessionId || !token || !endpoint) return
+    logger('debug', 'Player', `Updating voice state for guild ${this.guildId}`)
     if (!this.connection) this._initConnection()
     this.connection.voiceStateUpdate({ session_id: sessionId })
     this.connection.voiceServerUpdate({ token, endpoint })
@@ -442,6 +535,7 @@ export class Player {
   }
 
   destroy(emitClose = true) {
+    logger('debug', 'Player', `Destroying player for guild ${this.guildId}`)
     if (this.connection) {
       try {
         this.connection.stop(EndReasons.CLEANUP)
@@ -451,7 +545,7 @@ export class Player {
         logger(
           'error',
           'internal',
-          `Failed to destroy connection: ${err.message}`
+          `Failed to destroy connection for guild ${this.guildId}: ${err.message}`
         )
       }
     }

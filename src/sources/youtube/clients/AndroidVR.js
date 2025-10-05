@@ -59,7 +59,7 @@ export default class AndroidVR extends BaseClient {
         const message =
           error?.message ||
           `Failed to load results from ${sourceName}. Status: ${statusCode}`
-        logger('error', 'youtube-android-vr', message)
+        logger('error', 'YouTube-AndroidVR', message)
         return {
           loadType: 'error',
           data: { message, severity: 'common', cause: 'Upstream' }
@@ -68,8 +68,8 @@ export default class AndroidVR extends BaseClient {
 
       if (!searchResult) {
         logger(
-          'info',
-          'youtube-android-vr',
+          'debug',
+          'YouTube-AndroidVR',
           `Empty search result for '${query}'.`
         )
         return { loadType: 'empty', data: {} }
@@ -78,7 +78,7 @@ export default class AndroidVR extends BaseClient {
       if (searchResult.error) {
         logger(
           'error',
-          'youtube-android-vr',
+          'YouTube-AndroidVR',
           `Error from ${sourceName} search API: ${searchResult.error.message}`
         )
         return {
@@ -98,8 +98,8 @@ export default class AndroidVR extends BaseClient {
 
       if (!videos || videos.length === 0) {
         logger(
-          'info',
-          'youtube-android-vr',
+          'debug',
+          'YouTube-AndroidVR',
           `No matches found on ${sourceName} for: ${query}`
         )
         return { loadType: 'empty', data: {} }
@@ -127,8 +127,8 @@ export default class AndroidVR extends BaseClient {
 
       if (tracks.length === 0) {
         logger(
-          'info',
-          'youtube-android-vr',
+          'debug',
+          'YouTube-AndroidVR',
           `No processable tracks found on ${sourceName} for: ${query}`
         )
         return { loadType: 'empty', data: {} }
@@ -138,7 +138,7 @@ export default class AndroidVR extends BaseClient {
     } catch (e) {
       logger(
         'error',
-        'youtube-android-vr',
+        'YouTube-AndroidVR',
         `Exception during search for '${query}': ${e.message}`
       )
       return {
@@ -161,7 +161,7 @@ export default class AndroidVR extends BaseClient {
         if (!videoIdMatch || !videoIdMatch[1]) {
           logger(
             'error',
-            'youtube-android-vr',
+            'YouTube-AndroidVR',
             `Could not parse video ID from URL: ${url}`
           )
           return {
@@ -180,7 +180,7 @@ export default class AndroidVR extends BaseClient {
 
         if (statusCode !== 200) {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
-          logger('error', 'youtube-android-vr', message)
+          logger('error', 'YouTube-AndroidVR', message)
           return {
             loadType: 'error',
             data: { message, severity: 'common', cause: 'Upstream' }
@@ -200,7 +200,7 @@ export default class AndroidVR extends BaseClient {
         if (!playlistIdMatch || !playlistIdMatch[1]) {
           logger(
             'error',
-            'youtube-android-vr',
+            'YouTube-AndroidVR',
             `Could not parse playlist ID from URL: ${url}`
           )
           return {
@@ -237,7 +237,7 @@ export default class AndroidVR extends BaseClient {
           const errMsg = `Failed to fetch playlist. Status: ${statusCode}`
           logger(
             'error',
-            'youtube-android-vr',
+            'YouTube-AndroidVR',
             `Error loading playlist ${playlistId}: ${errMsg}`
           )
           return {
@@ -263,7 +263,7 @@ export default class AndroidVR extends BaseClient {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',
-      'youtube-android-vr',
+      'YouTube-AndroidVR',
       `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`
     )
 
@@ -276,7 +276,7 @@ export default class AndroidVR extends BaseClient {
 
     if (statusCode !== 200) {
       const message = `Failed to get player data for stream. Status: ${statusCode}`
-      logger('error', 'youtube-android-vr', message)
+      logger('error', 'YouTube-AndroidVR', message)
       return { exception: { message, severity: 'common', cause: 'Upstream' } }
     }
 

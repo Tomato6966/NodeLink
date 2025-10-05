@@ -18,8 +18,8 @@ export default class LyricsManager {
       await fs.access(lyricsDir)
     } catch {
       logger(
-        'lyrics',
         'info',
+        'Lyrics',
         `Lyrics directory not found, creating at: ${lyricsDir}`
       )
       await fs.mkdir(lyricsDir)
@@ -44,11 +44,11 @@ export default class LyricsManager {
         const instance = new Mod(this.nodelink)
         if (await instance.setup()) {
           this.lyricsSources.set(name, instance)
-          logger('lyrics', 'info', `Loaded lyrics source: ${name}`)
+          logger('info', 'Lyrics', `Loaded lyrics source: ${name}`)
         } else {
           logger(
-            'lyrics',
             'error',
+            'Lyrics',
             `Failed setup for lyrics source: ${name}; source not available.`
           )
         }
@@ -62,17 +62,34 @@ export default class LyricsManager {
       !decodedTrack.info?.sourceName ||
       !decodedTrack.info?.uri
     ) {
+      logger(
+        'warn',
+        'Lyrics',
+        'Invalid track object provided to loadLyrics',
+        decodedTrack
+      )
       return {
         loadType: 'error',
         data: { message: 'Invalid track object provided.', severity: 'common' }
       }
     }
 
+    logger(
+      'debug',
+      'Lyrics',
+      `Loading lyrics for track: ${decodedTrack.info.title}`
+    )
+
     const reliableTrackData = await this.nodelink.sources.resolve(
       decodedTrack.info.uri
     )
 
     if (reliableTrackData.loadType !== 'track') {
+      logger(
+        'warn',
+        'Lyrics',
+        `Could not re-fetch track information for ${decodedTrack.info.title}`
+      )
       return {
         loadType: 'error',
         data: {
@@ -98,14 +115,19 @@ export default class LyricsManager {
       const fallbackSource = this.lyricsSources.get(fallbackSourceName)
       if (fallbackSource) {
         logger(
-          'lyrics',
-          'info',
-          `No lyrics found on ${sourceName}, trying fallback ${fallbackSourceName}.`
+          'debug',
+          'Lyrics',
+          `No lyrics found on ${sourceName}, trying fallback ${fallbackSourceName} for ${reliableTrackData.data.info.title}.`
         )
         return fallbackSource.getLyrics(reliableTrackData.data.info)
       }
     }
 
+    logger(
+      'debug',
+      'Lyrics',
+      `No lyrics found for ${reliableTrackData.data.info.title}`
+    )
     return { loadType: 'empty', data: {} }
   }
 }

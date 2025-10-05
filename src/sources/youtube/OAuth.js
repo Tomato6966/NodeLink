@@ -31,7 +31,7 @@ export default class OAuth {
     if (!this.refreshToken) {
       logger(
         'debug',
-        'youtube-oauth',
+        'YouTube-OAuth',
         'No refresh token configured. Skipping authentication.'
       )
       return null
@@ -41,7 +41,7 @@ export default class OAuth {
       return this.accessToken
     }
 
-    logger('info', 'youtube-oauth', 'Refreshing access token...')
+    logger('info', 'YouTube-OAuth', 'Refreshing access token...')
 
     const { body, error, statusCode } = await makeRequest(
       'https://www.youtube.com/o/oauth2/token',
@@ -59,7 +59,7 @@ export default class OAuth {
     if (error || statusCode !== 200 || !body.access_token) {
       logger(
         'error',
-        'youtube-oauth',
+        'YouTube-OAuth',
         `Failed to refresh access token: ${error?.message || body.error_description || 'Invalid response'}`
       )
       this.accessToken = null
@@ -70,7 +70,7 @@ export default class OAuth {
     this.accessToken = body.access_token
     this.tokenExpiry = Date.now() + body.expires_in * 1000 - 30000
 
-    logger('info', 'youtube-oauth', 'Successfully refreshed access token.')
+    logger('info', 'YouTube-OAuth', 'Successfully refreshed access token.')
 
     return this.accessToken
   }
@@ -87,7 +87,7 @@ export default class OAuth {
   static async acquireRefreshToken() {
     logger(
       'info',
-      'youtube-oauth',
+      'YouTube-OAuth',
       'Step 1: Requesting device code from Google...'
     )
     const data = {
@@ -111,44 +111,70 @@ export default class OAuth {
         )
       }
 
-      console.log(
+      logger(
+        'info',
+        'YouTube-OAuth',
         '=================================================================='
       )
-      console.log(
+      logger(
+        'info',
+        'YouTube-OAuth',
         '🚨 ALERT: DO NOT USE YOUR MAIN GOOGLE ACCOUNT! USE A SECONDARY OR BURNER ACCOUNT ONLY!'
       )
-      console.log('To authorize, visit the following URL in your browser:')
-      console.log(`URL: ${response.verification_url}`)
-      console.log(`And enter the code: ${response.user_code}`)
-      console.log(
+      logger(
+        'info',
+        'YouTube-OAuth',
+        'To authorize, visit the following URL in your browser:'
+      )
+      logger('info', 'YouTube-OAuth', `URL: ${response.verification_url}`)
+      logger(
+        'info',
+        'YouTube-OAuth',
+        `And enter the code: ${response.user_code}`
+      )
+      logger(
+        'info',
+        'YouTube-OAuth',
         '=================================================================='
       )
-      console.log('Waiting for authorization...')
+      logger('info', 'YouTube-OAuth', 'Waiting for authorization...')
 
       const refreshToken = await OAuth.pollForToken(
         response.device_code,
         response.interval
       )
 
-      console.log(
+      logger(
+        'info',
+        'YouTube-OAuth',
         '=================================================================='
       )
-      console.log('Authorization granted successfully!')
-      console.log(
+      logger('info', 'YouTube-OAuth', 'Authorization granted successfully!')
+      logger(
+        'info',
+        'YouTube-OAuth',
         '=================================================================='
       )
-      console.log(
+      logger(
+        'info',
+        'YouTube-OAuth',
         'Refresh Token (use this to obtain new Access Tokens in the future):'
       )
-      console.log(refreshToken)
-      console.log('Save your Refresh Token in a secure place!')
-      console.log(
+      logger('info', 'YouTube-OAuth', refreshToken)
+      logger(
+        'info',
+        'YouTube-OAuth',
+        'Save your Refresh Token in a secure place!'
+      )
+      logger(
+        'info',
+        'YouTube-OAuth',
         '=================================================================='
       )
 
       return refreshToken
     } catch (error) {
-      logger('error', 'youtube-oauth', `Failed in Step 1: ${error.message}`)
+      logger('error', 'YouTube-OAuth', `Failed in Step 1: ${error.message}`)
       throw error
     }
   }
@@ -181,21 +207,21 @@ export default class OAuth {
             } else if (response.error === 'expired_token') {
               logger(
                 'error',
-                'youtube-oauth',
+                'YouTube-OAuth',
                 'Authorization code expired. Please run the script again.'
               )
               reject(new Error('Authorization code expired.'))
             } else if (response.error === 'access_denied') {
               logger(
                 'error',
-                'youtube-oauth',
+                'YouTube-OAuth',
                 'Access denied. Authorization was cancelled.'
               )
               reject(new Error('Access denied.'))
             } else {
               logger(
                 'error',
-                'youtube-oauth',
+                'YouTube-OAuth',
                 `Error during polling: ${response.error_description}`
               )
               reject(
@@ -208,7 +234,7 @@ export default class OAuth {
         } catch (error) {
           logger(
             'error',
-            'youtube-oauth',
+            'YouTube-OAuth',
             `Failed in Step 2 (Polling): ${error.message}`
           )
           setTimeout(poll, interval * 1000)

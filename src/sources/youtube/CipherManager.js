@@ -23,7 +23,7 @@ export default class CipherManager {
     this.explicitPlayerScriptUrl = new CachedPlayerScript(url)
     logger(
       'debug',
-      'youtube-cipher',
+      'YouTube-Cipher',
       `Explicit player script URL set: ${this.explicitPlayerScriptUrl.url}`
     )
   }
@@ -42,7 +42,7 @@ export default class CipherManager {
       ) {
         logger(
           'debug',
-          'youtube-cipher',
+          'YouTube-Cipher',
           `Using explicit player script URL: ${this.explicitPlayerScriptUrl.url}`
         )
         this.cachedPlayerScript = this.explicitPlayerScriptUrl
@@ -68,7 +68,7 @@ export default class CipherManager {
       this.cachedPlayerScript = new CachedPlayerScript(scriptUrl)
       logger(
         'debug',
-        'youtube-cipher',
+        'YouTube-Cipher',
         `Obtained player script from /embed/: ${this.cachedPlayerScript.url}`
       )
       return this.cachedPlayerScript
@@ -103,7 +103,7 @@ export default class CipherManager {
     if (error || statusCode !== 200) {
       logger(
         'error',
-        'CipherManager',
+        'YouTube-Cipher',
         `Failed to fetch player script for timestamp: ${error?.message || `Status ${statusCode}`}`
       )
       throw new Error(
@@ -118,7 +118,7 @@ export default class CipherManager {
     if (!timestampMatch || !timestampMatch[1]) {
       logger(
         'error',
-        'CipherManager',
+        'YouTube-Cipher',
         `Timestamp not found in player script: ${playerUrl}`
       )
       throw new Error(`Timestamp not found in player script: ${playerUrl}`)
@@ -127,7 +127,7 @@ export default class CipherManager {
     const sts = timestampMatch[1]
     logger(
       'debug',
-      'CipherManager',
+      'YouTube-Cipher',
       `Extracted timestamp from player script: ${sts}`
     )
 
@@ -147,7 +147,7 @@ export default class CipherManager {
 
     logger(
       'debug',
-      'CipherManager',
+      'YouTube-Cipher',
       `Deciphering N param: ${n} with script: ${playerScript.url}`
     )
 
@@ -160,7 +160,7 @@ export default class CipherManager {
         disableBodyCompression: true
       }
     )
-    console.log(body, error, statusCode)
+
     if (error || statusCode !== 200) {
       throw new Error(
         `Failed to decrypt n-parameter: ${error?.message || body?.message || 'Invalid response'}`
@@ -172,12 +172,11 @@ export default class CipherManager {
       throw new Error('Proxy did not return a decrypted n-parameter.')
     }
 
-    logger('debug', 'CipherManager', `Received decrypted N: ${decryptedN}`)
+    logger('debug', 'YouTube-Cipher', `Received decrypted N: ${decryptedN}`)
     return decryptedN
   }
 
   async _getUriWithSignature(playerScript, format) {
-    console.log(format)
     const cipherData = new URLSearchParams(format.signatureCipher)
     const encryptedSignature = cipherData.get('s')
     const baseUrl = cipherData.get('url')
@@ -206,7 +205,7 @@ export default class CipherManager {
 
     logger(
       'debug',
-      'CipherManager',
+      'YouTube-Cipher',
       `Sending to remote cipher: encryptedSignature=${encryptedSignature}, n_param=${n_param}, sp=${sp}, player_url=${playerScript.url}`
     )
 
@@ -228,7 +227,7 @@ export default class CipherManager {
 
     logger(
       'debug',
-      'CipherManager',
+      'YouTube-Cipher',
       `Received from remote cipher: decrypted_signature=${body.decrypted_signature}, decrypted_n_sig=${body.decrypted_n_sig}`
     )
 
@@ -239,7 +238,7 @@ export default class CipherManager {
     } else {
       logger(
         'warn',
-        'CipherManager',
+        'YouTube-Cipher',
         'Proxy did not return a decrypted signature, the URL will likely be invalid.'
       )
     }
@@ -267,7 +266,7 @@ export default class CipherManager {
       initialUrl.searchParams.set('n', newN)
 
       const finalUrl = initialUrl.toString()
-      logger('debug', 'CipherManager', `Final N-transformed URL: ${finalUrl}`)
+      logger('debug', 'YouTube-Cipher', `Final N-transformed URL: ${finalUrl}`)
       return finalUrl
     }
 

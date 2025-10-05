@@ -1,4 +1,4 @@
-import { encodeTrack } from '../utils.js'
+import { encodeTrack, logger } from '../utils.js'
 function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const track = parsedUrl.searchParams.get('track')
   if (!track) {
@@ -14,9 +14,11 @@ function handler(nodelink, req, res, sendResponse, parsedUrl) {
     return
   }
   try {
+    logger('debug', 'Tracks', `Encoding track: ${track}`)
     const encodedTrack = encodeTrack(track)
     sendResponse(req, res, encodedTrack, 200)
   } catch (error) {
+    logger('error', 'Tracks', `Failed to encode track ${track}:`, error)
     // biome-ignore format: off
     sendResponse(req, res, {
             timestamp: Date.now(),

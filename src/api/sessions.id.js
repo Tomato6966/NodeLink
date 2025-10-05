@@ -1,4 +1,4 @@
-import { decodeTrack } from '../utils.js'
+import { decodeTrack, logger } from '../utils.js'
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const parts = parsedUrl.pathname.split('/')
@@ -26,10 +26,22 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     req.method === 'PATCH'
   ) {
     const payload = req.body
+    logger(
+      'debug',
+      'Session',
+      `Received PATCH for session ${sessionId}:`,
+      payload
+    )
+
     const { resuming, timeout } = payload
 
     if (resuming !== undefined) {
       if (typeof resuming !== 'boolean') {
+        logger(
+          'warn',
+          'Session',
+          `Invalid resuming value for session ${sessionId}: ${resuming}`
+        )
         return sendResponse(
           req,
           res,
@@ -48,6 +60,11 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
     if (timeout !== undefined) {
       if (typeof timeout !== 'number' || timeout < 0) {
+        logger(
+          'warn',
+          'Session',
+          `Invalid timeout value for session ${sessionId}: ${timeout}`
+        )
         return sendResponse(
           req,
           res,
@@ -64,6 +81,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       session.timeout = timeout
     }
 
+    logger('debug', 'Session', `Updated session ${sessionId}:`, {
+      resuming: session.resuming,
+      timeout: session.timeout
+    })
     return sendResponse(
       req,
       res,

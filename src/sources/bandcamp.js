@@ -12,7 +12,7 @@ export default class BandCampSource {
   }
 
   async setup() {
-    logger('info', 'BandCamp', 'Source is ready.')
+    logger('info', 'Sources', 'Loaded BandCamp source.')
     return true
   }
 
@@ -45,7 +45,11 @@ export default class BandCampSource {
       )
 
       if (!resultBlocks || resultBlocks.length === 0) {
-        logger('info', 'BandCamp', `No results found for: "${query}"`)
+        logger(
+          'debug',
+          'Sources',
+          `No results found on BandCamp for: "${query}"`
+        )
         return { loadType: 'empty', data: {} }
       }
 
@@ -84,16 +88,16 @@ export default class BandCampSource {
       if (tracks.length === 0) {
         logger(
           'warn',
-          'BandCamp',
-          'Search results found, but no tracks could be parsed.'
+          'Sources',
+          'Search results found on BandCamp, but no tracks could be parsed.'
         )
         return { loadType: 'empty', data: {} }
       }
 
       logger(
-        'info',
-        'BandCamp',
-        `Found ${tracks.length} tracks for: "${query}"`
+        'debug',
+        'Sources',
+        `Found ${tracks.length} tracks on BandCamp for: "${query}"`
       )
       return {
         loadType: 'search',
@@ -111,7 +115,11 @@ export default class BandCampSource {
     try {
       const tralbumData = await this.extractTralbumData(url)
       if (!tralbumData) {
-        logger('warn', 'BandCamp', `No 'tralbum' data found for: ${url}`)
+        logger(
+          'warn',
+          'Sources',
+          `No 'tralbum' data found on BandCamp for: ${url}`
+        )
         return { loadType: 'empty', data: {} }
       }
 
@@ -214,7 +222,11 @@ export default class BandCampSource {
   }
 
   async loadStream(decodedTrack, url) {
-    logger('debug', 'BandCamp', `Loading stream for "${decodedTrack.title}"`)
+    logger(
+      'debug',
+      'Sources',
+      `Loading BandCamp stream for "${decodedTrack.title}"`
+    )
     try {
       const response = await makeRequest(url, {
         method: 'GET',
@@ -233,7 +245,11 @@ export default class BandCampSource {
 
       return { stream }
     } catch (err) {
-      logger('error', 'BandCamp', `Failed to load stream: ${err.message}`)
+      logger(
+        'error',
+        'Sources',
+        `Failed to load BandCamp stream: ${err.message}`
+      )
       return {
         exception: {
           message: err.message,
@@ -251,8 +267,8 @@ export default class BandCampSource {
     if (error || statusCode !== 200) {
       logger(
         'error',
-        'BandCamp',
-        `Failed to fetch page: ${error?.message || statusCode}`
+        'Sources',
+        `Failed to fetch BandCamp page: ${error?.message || statusCode}`
       )
       return null
     }

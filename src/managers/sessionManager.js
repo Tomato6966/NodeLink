@@ -8,6 +8,11 @@ export default class SessionManager {
   }
   create(request, socket, clientInfo) {
     const sessionId = generateRandomLetters(16)
+    logger(
+      'debug',
+      'SessionManager',
+      `New session created with ID ${sessionId}`
+    )
     this.connections.set(sessionId, {
       clientInfo,
       userId: request.headers['user-id'],
@@ -32,7 +37,7 @@ export default class SessionManager {
       connection?.socket?.destroy()
       this.connections.delete(sessionId)
       logger(
-        'info',
+        'debug',
         'SessionManager',
         `Session ${sessionId} deleted, destroyed all players and socket`
       )

@@ -4,6 +4,24 @@ export default {
     port: 3000,
     password: '123'
   },
+  logging: {
+    level: 'debug',
+    file: {
+      enabled: false,
+      path: 'logs'
+    },
+    debug: {
+      all: true,
+      request: true,
+      session: true,
+      player: true,
+      filters: true,
+      sources: true,
+      lyrics: true,
+      youtube: true,
+      'youtube-cipher': true
+    }
+  },
   maxSearchResults: 10,
   maxAlbumPlaylistLength: 100,
   playerUpdateInterval: 2000,
@@ -39,7 +57,8 @@ export default {
       enabled: true
     },
     local: {
-      enabled: true
+      enabled: true,
+      basePath: './local-music/'
     },
     http: {
       enabled: true

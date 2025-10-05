@@ -20,7 +20,7 @@ export default class InstagramSource {
   }
 
   async setup() {
-    logger('info', 'Instagram', 'Fetching API parameters...')
+    logger('info', 'Sources', 'Fetching Instagram API parameters...')
     try {
       const response = await makeRequest('https://www.instagram.com/', {
         method: 'GET',
@@ -48,8 +48,8 @@ export default class InstagramSource {
       if (!csrfToken || !igAppId || !fbLsd) {
         logger(
           'error',
-          'Instagram',
-          'Could not fetch all required parameters (CSRF, AppID, LSD). Source will be unavailable.'
+          'Sources',
+          'Could not fetch all required Instagram parameters (CSRF, AppID, LSD). Source will be unavailable.'
         )
         return false
       }
@@ -59,13 +59,13 @@ export default class InstagramSource {
       this.apiConfig.fbLsd = fbLsd
       if (docIdPost) this.apiConfig.docId_post = docIdPost
 
-      logger('info', 'Instagram', 'Successfully fetched API parameters.')
+      logger('info', 'Sources', 'Loaded Instagram source.')
       return true
     } catch (e) {
       logger(
         'error',
-        'Instagram',
-        `Setup failed: ${e.message}. Source will be unavailable.`
+        'Sources',
+        `Instagram setup failed: ${e.message}. Source will be unavailable.`
       )
       return false
     }
@@ -121,8 +121,8 @@ export default class InstagramSource {
     } catch (e) {
       logger(
         'debug',
-        'Instagram',
-        `Could not convert mediaId "${mediaId}" to shortcode: ${e.message}`
+        'Sources',
+        `Could not convert Instagram mediaId "${mediaId}" to shortcode: ${e.message}`
       )
       return null
     }
@@ -202,8 +202,8 @@ export default class InstagramSource {
     } catch (e) {
       logger(
         'error',
-        'Instagram',
-        `Internal error during GraphQL request for postId ${postId}: ${e.message}`
+        'Sources',
+        `Internal error during Instagram GraphQL request for postId ${postId}: ${e.message}`
       )
       return {
         data: null,

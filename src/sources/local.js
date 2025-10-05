@@ -78,26 +78,42 @@ export default class LocalSource {
   }
 
   async search(query) {
-    const file = path.resolve(query)
-    logger('sources', 'info', `Searching file: ${file}`)
+    const basePath = path.resolve(
+      this.nodelink.options.sources.local.basePath || './'
+    )
+    const filePath = path.resolve(basePath, query)
+
+    logger('debug', 'Sources', `Searching local file: ${filePath}`)
+
+    if (!filePath.startsWith(basePath)) {
+      logger(
+        'warn',
+        'Sources',
+        `Path traversal attempt blocked for local source: "${query}"`
+      )
+      return {
+        loadType: 'error',
+        data: { message: 'Path traversal is not allowed.', severity: 'common' }
+      }
+    }
 
     try {
-      await fs.promises.access(file, fs.constants.R_OK)
+      await fs.promises.access(filePath, fs.constants.R_OK)
 
-      const meta = readFileInfo(file)
-      const track = this.buildTrack(file, meta)
+      const meta = readFileInfo(filePath)
+      const track = this.buildTrack(filePath, meta)
 
       logger(
-        'sources',
-        'info',
-        `Track found: ${track.info.title} [${meta.fileType}]`
+        'debug',
+        'Sources',
+        `Local track found: ${track.info.title} [${meta.fileType}]`
       )
       return { loadType: 'search', data: [track] }
     } catch (err) {
       logger(
-        'sources',
         'warn',
-        `File not found or unreadable: ${file} — ${err.message}`
+        'Sources',
+        `Local file not found or unreadable: ${filePath} — ${err.message}`
       )
       return { loadType: 'empty', data: {} }
     }
@@ -153,7 +169,7 @@ export default class LocalSource {
     const stream = fs.createReadStream(decoded.uri)
     stream.once('close', () => stream.emit('finishBuffering'))
     stream.on('error', (err) =>
-      logger('sources', 'error', `Stream error: ${err.message}`)
+      logger('error', 'Sources', `Local stream error: ${err.message}`)
     )
     return { stream, type: 'arbitrary' }
   }

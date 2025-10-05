@@ -20,8 +20,8 @@ export default class YouTubeLyrics {
       !resolvedTrack.data.pluginInfo?.captions
     ) {
       logger(
-        'lyrics',
         'debug',
+        'Lyrics',
         `No captions found for ${trackInfo.title} after resolving.`
       )
       return { loadType: 'empty', data: {} }
@@ -48,8 +48,8 @@ export default class YouTubeLyrics {
 
     if (error || statusCode !== 200) {
       logger(
-        'lyrics',
         'error',
+        'Lyrics',
         `Failed to fetch lyrics content from ${trackLang.baseUrl}: ${error?.message || statusCode}`
       )
       return { loadType: 'empty', data: {} }

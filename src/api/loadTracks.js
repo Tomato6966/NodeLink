@@ -1,3 +1,5 @@
+import { logger } from '../utils.js'
+
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const sendError = (status, error, message) => {
     // biome-ignore format: off
@@ -12,7 +14,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   }
 
   const identifier = parsedUrl.searchParams.get('identifier')
+  logger('debug', 'Tracks', `Loading tracks with identifier: "${identifier}"`)
+
   if (!identifier) {
+    logger('warn', 'Tracks', 'Missing identifier parameter')
     return sendError(
       400,
       'missing identifier parameter',
@@ -24,6 +29,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>[A-Za-z0-9]+):(?<query>[^/\s].*))$/i
   const match = re.exec(identifier)
   if (!match) {
+    logger('warn', 'Tracks', `Invalid identifier: "${identifier}"`)
     return sendError(
       400,
       'invalid identifier parameter',
@@ -42,6 +48,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     const tracks = await nodelink.sources.search(source, query)
     return sendResponse(req, res, tracks, 200)
   } catch (err) {
+    logger(
+      'error',
+      'Tracks',
+      `Failed to load track with identifier "${identifier}":`,
+      err
+    )
     return sendError(
       500,
       'failed to load track',

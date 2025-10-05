@@ -53,7 +53,7 @@ export default class Web extends BaseClient {
       const message =
         error?.message ||
         `Failed to load results from ${sourceName}. Status: ${statusCode}`
-      logger('error', 'youtube-web', message)
+      logger('error', 'YouTube-Web', message)
       return {
         loadType: 'error',
         data: { message, severity: 'common', cause: 'Upstream' }
@@ -63,7 +63,7 @@ export default class Web extends BaseClient {
     if (searchResult.error) {
       logger(
         'error',
-        'youtube-web',
+        'YouTube-Web',
         `Error from ${sourceName} search API: ${searchResult.error.message}`
       )
       return {
@@ -83,8 +83,8 @@ export default class Web extends BaseClient {
 
     if (!videos || videos.length === 0) {
       logger(
-        'info',
-        'youtube-web',
+        'debug',
+        'YouTube-Web',
         `No matches found on ${sourceName} for: ${query}`
       )
       return { loadType: 'empty', data: {} }
@@ -112,8 +112,8 @@ export default class Web extends BaseClient {
 
     if (tracks.length === 0) {
       logger(
-        'info',
-        'youtube-web',
+        'debug',
+        'YouTube-Web',
         `No processable tracks found on ${sourceName} for: ${query}`
       )
       return { loadType: 'empty', data: {} }

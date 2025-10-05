@@ -1,4 +1,4 @@
-import { decodeTrack } from '../utils.js'
+import { decodeTrack, logger } from '../utils.js'
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const parts = parsedUrl.pathname.split('/')
@@ -64,6 +64,13 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
     if (req.method === 'PATCH') {
       const payload = req.body
+      logger(
+        'debug',
+        'PlayerUpdate',
+        `Received payload for guild ${guildId}:`,
+        payload
+      )
+
       if (!player) {
         player = session.players.create(guildId)
       }
@@ -71,6 +78,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       if (payload.voice) {
         const { endpoint, token, sessionId: voiceSessionId } = payload.voice
         if (!endpoint || !token || !voiceSessionId) {
+          logger(
+            'warn',
+            'PlayerUpdate',
+            `Received invalid voice object for guild ${guildId}:`,
+            payload.voice
+          )
           return sendResponse(
             req,
             res,
@@ -78,12 +91,19 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               timestamp: Date.now(),
               status: 400,
               error: 'Bad Request',
-              message: 'Invalid voice object.',
+              message:
+                'Invalid voice object. Endpoint, token, and sessionId are required.',
               path: parsedUrl.pathname
             },
             400
           )
         }
+        logger(
+          'debug',
+          'PlayerUpdate',
+          `Updating voice for guild ${guildId}:`,
+          payload.voice
+        )
         player.updateVoice(payload.voice)
 
         if (player.track) {
@@ -94,15 +114,24 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           })
         }
       }
-      if (payload.encodedTrack)
-        console.log(
-          'deprecated: encodedTrack is deprecated, use track.encoded instead'
+
+      if (payload.encodedTrack) {
+        logger(
+          'warn',
+          'PlayerUpdate',
+          'The `encodedTrack` field is deprecated. Use `track.encoded` instead.'
         )
+      }
 
       const encodedTrack = payload.track?.encoded
       if (encodedTrack !== undefined) {
         if (encodedTrack === null) {
           if (!player.track) {
+            logger(
+              'warn',
+              'PlayerUpdate',
+              `Stop requested for guild ${guildId}, but player is not playing.`
+            )
             return sendResponse(
               req,
               res,
@@ -116,11 +145,17 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               400
             )
           }
+          logger('debug', 'PlayerUpdate', `Stopping track for guild ${guildId}`)
           player.stop()
         } else {
           const noReplace = parsedUrl.searchParams.get('noReplace') === 'true'
           const decodedTrack = decodeTrack(encodedTrack)
           if (!decodedTrack) {
+            logger(
+              'warn',
+              'PlayerUpdate',
+              `Received invalid track for guild ${guildId}: ${encodedTrack}`
+            )
             return sendResponse(
               req,
               res,
@@ -134,6 +169,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               400
             )
           }
+          logger(
+            'debug',
+            'PlayerUpdate',
+            `Playing track for guild ${guildId}:`,
+            { track: decodedTrack.info, noReplace }
+          )
           await player.play({
             encoded: encodedTrack,
             info: decodedTrack.info,
@@ -144,6 +185,11 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
       if (payload.volume !== undefined) {
         if (payload.volume < 0 || payload.volume > 1000) {
+          logger(
+            'warn',
+            'PlayerUpdate',
+            `Received invalid volume for guild ${guildId}: ${payload.volume}. Expected 0-1000.`
+          )
           return sendResponse(
             req,
             res,
@@ -157,11 +203,21 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             400
           )
         }
+        logger(
+          'debug',
+          'PlayerUpdate',
+          `Setting volume to ${payload.volume} for guild ${guildId}`
+        )
         player.volume(payload.volume)
       }
 
       if (payload.paused !== undefined) {
         if (typeof payload.paused !== 'boolean') {
+          logger(
+            'warn',
+            'PlayerUpdate',
+            `Received invalid paused value for guild ${guildId}: ${payload.paused}. Expected boolean.`
+          )
           return sendResponse(
             req,
             res,
@@ -175,11 +231,21 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             400
           )
         }
+        logger(
+          'debug',
+          'PlayerUpdate',
+          `Setting paused to ${payload.paused} for guild ${guildId}`
+        )
         player.pause(payload.paused)
       }
 
       if (payload.position !== undefined) {
         if (typeof payload.position !== 'number') {
+          logger(
+            'warn',
+            'PlayerUpdate',
+            `Received invalid position for guild ${guildId}: ${payload.position}. Expected number.`
+          )
           return sendResponse(
             req,
             res,
@@ -193,11 +259,21 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             400
           )
         }
+        logger(
+          'debug',
+          'PlayerUpdate',
+          `Seeking to ${payload.position}ms for guild ${guildId}`
+        )
         await player.seek(payload.position)
       }
 
       if (payload.filters !== undefined) {
         if (typeof payload.filters !== 'object') {
+          logger(
+            'warn',
+            'PlayerUpdate',
+            `Received invalid filters value for guild ${guildId}: ${payload.filters}. Expected object.`
+          )
           return sendResponse(
             req,
             res,
@@ -211,7 +287,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             400
           )
         }
-        console.log('Applying filters:', payload.filters)
+        logger(
+          'debug',
+          'PlayerUpdate',
+          `Applying filters for guild ${guildId}:`,
+          payload.filters
+        )
         player.setFilters(payload)
       }
 

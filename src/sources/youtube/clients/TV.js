@@ -30,7 +30,7 @@ export default class TV extends BaseClient {
       if (accessToken) {
         logger(
           'debug',
-          'youtube-tv',
+          'YouTube-TV',
           'Successfully acquired access token for authentication.'
         )
         return {
@@ -40,7 +40,7 @@ export default class TV extends BaseClient {
     }
     logger(
       'debug',
-      'youtube-tv',
+      'YouTube-TV',
       'No access token available. Proceeding without authentication.'
     )
     return {}
@@ -59,7 +59,7 @@ export default class TV extends BaseClient {
         if (!videoIdMatch || !videoIdMatch[1]) {
           logger(
             'error',
-            'youtube-tv',
+            'YouTube-TV',
             `Could not parse video ID from URL: ${url}`
           )
           return {
@@ -84,7 +84,7 @@ export default class TV extends BaseClient {
 
         if (statusCode !== 200) {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
-          logger('error', 'youtube-tv', message)
+          logger('error', 'YouTube-TV', message)
           return {
             loadType: 'error',
             data: { message, severity: 'common', cause: 'Upstream' }
@@ -107,7 +107,7 @@ export default class TV extends BaseClient {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',
-      'youtube-tv',
+      'YouTube-TV',
       `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`
     )
 
@@ -118,10 +118,10 @@ export default class TV extends BaseClient {
       headers,
       cipherManager
     )
-    console.log(headers, context, playerResponse)
+
     if (statusCode !== 200) {
       const message = `Failed to get player data for stream. Status: ${statusCode}`
-      logger('error', 'youtube-tv', message)
+      logger('error', 'YouTube-TV', message)
       return { exception: { message, severity: 'common', cause: 'Upstream' } }
     }
 

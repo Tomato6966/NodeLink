@@ -6,6 +6,11 @@ import https from 'node:https'
 import { URL } from 'node:url'
 import util from 'node:util'
 import zlib from 'node:zlib'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+import config from '../config.js'
 import packageJson from '../package.json' with { type: 'json' }
 import {
   DEFAULT_MAX_REDIRECTS,
@@ -22,7 +27,53 @@ function validateProperty(property, validator, errorMessage) {
   }
 }
 
+const loggingConfig = config.logging || {}
+const logLevels = {
+  debug: 0,
+  info: 1,
+  warn: 2,
+  error: 3
+}
+const currentLogLevel = logLevels[loggingConfig.level || 'info']
+let logStream = null
+
+function initFileLogger() {
+  if (!loggingConfig.file?.enabled) return
+
+  const logDir = loggingConfig.file.path || 'logs'
+  if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true })
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+  const randomId = crypto.randomBytes(4).toString('hex')
+  const logFileName = `${timestamp}-${randomId}.log`
+  const logFilePath = path.join(logDir, logFileName)
+
+  logStream = fs.createWriteStream(logFilePath, { flags: 'a' })
+
+  const gitInfo = getGitInfo()
+  const version = getVersion()
+  const initialInfo = `\n--- NodeLink Log ---\nTimestamp: ${new Date().toISOString()}\nVersion: ${version}\nGit Branch: ${gitInfo.branch}\nGit Commit: ${gitInfo.commit}\nOS: ${os.platform()} ${os.release()}\nNode.js: ${process.version}\n--------------------\n`
+  logStream.write(initialInfo)
+}
+
 function logger(level, ...args) {
+  const effectiveLevel =
+    level === 'sources' || level === 'started' ? 'info' : level
+  const levelIndex = logLevels[effectiveLevel]
+
+  if (levelIndex === undefined || levelIndex < currentLogLevel) return
+
+  const category = args.length > 1 ? args[0] : ''
+
+  if (level === 'debug') {
+    const debugConfig = loggingConfig.debug || {}
+    if (!debugConfig.all && !debugConfig[category]) {
+      return
+    }
+  }
+
   const levels = {
     info: { label: 'INFO', color: '\x1b[1m\x1b[3;42m' },
     warn: { label: 'WARN', color: '\x1b[1m\x1b[3;43m' },
@@ -34,16 +85,32 @@ function logger(level, ...args) {
 
   const resetColor = '\x1b[0m'
   const time = new Date().toISOString().slice(11, 23)
-  const lvl = levels[level] || levels.info
-  // biome-ignore lint: no-unused-vars
-  const prefix = args.length > 1 ? args[0] + ':' : ''
-  const msg =
-    args.length > 1 ? util.format(...args.slice(1)) : util.format(...args)
+  const lvl = levels[level] || { label: level.toUpperCase(), color: '' }
+  const formattedCategory = category ? `: ${category} >` : ''
 
-  console.log(
-    `[${time}] ${lvl.color}[${lvl.label}]${resetColor} ${prefix} ${msg}`
-  )
+  const messageArgs = args.length > 1 ? args.slice(1) : args
+  const formattedArgs = messageArgs.map((arg) => {
+    if (arg instanceof Error) {
+      return `${arg.stack || arg.message}`
+    }
+    if (typeof arg === 'object' && arg !== null) {
+      return util.inspect(arg, { depth: null, colors: false })
+    }
+    return arg
+  })
+
+  const msg = util.format(...formattedArgs)
+
+  const consoleOutput = `[${time}] ${lvl.color}[${lvl.label}] >${resetColor}${formattedCategory} ${msg}`
+  console.log(consoleOutput)
+
+  if (logStream) {
+    const fileOutput = `[${new Date().toISOString()}] [${lvl.label}] ${formattedCategory} ${msg}\n`
+    logStream.write(fileOutput)
+  }
 }
+
+initFileLogger()
 
 function parseSemver(version) {
   const match = SEMVER_PATTERN.exec(version)

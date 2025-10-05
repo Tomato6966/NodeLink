@@ -41,8 +41,8 @@ export default class SpotifySource {
     if (!tokenData || !tokenData?.accessToken || !tokenData?.clientId) {
       logger(
         'error',
-        'spotify',
-        'Failed to fetch access token: Invalid response'
+        'Sources',
+        'Failed to fetch Spotify access token: Invalid response'
       )
       return false
     }
@@ -50,8 +50,8 @@ export default class SpotifySource {
     if (tokenData?.error) {
       logger(
         'error',
-        'spotify',
-        `Failed to fetch access token: ${tokenData.error.message}`
+        'Sources',
+        `Failed to fetch Spotify access token: ${tokenData.error.message}`
       )
       return false
     }
@@ -82,16 +82,16 @@ export default class SpotifySource {
     ) {
       logger(
         'error',
-        'spotify',
-        'Failed to fetch client token: Invalid response'
+        'Sources',
+        'Failed to fetch Spotify client token: Invalid response'
       )
       return false
     }
     if (clientTokenData.response_type !== 'RESPONSE_GRANTED_TOKEN_RESPONSE') {
       logger(
         'error',
-        'spotify',
-        `Failed to fetch client token: ${JSON.stringify(clientTokenData)}`
+        'Sources',
+        `Failed to fetch Spotify client token: ${JSON.stringify(clientTokenData)}`
       )
       return false
     }
@@ -99,6 +99,7 @@ export default class SpotifySource {
     this.accessToken = tokenData.accessToken
     this.clientToken = clientTokenData.granted_token.token
 
+    logger('info', 'Sources', 'Loaded Spotify source.')
     return true
   }
 

@@ -20,7 +20,7 @@ export default class DeezerSource {
   }
 
   async setup() {
-    logger('info', 'deezer', 'Initializing Deezer source...')
+    logger('info', 'Sources', 'Initializing Deezer source...')
 
     try {
       let initialCookie = ''
@@ -60,16 +60,16 @@ export default class DeezerSource {
         throw new Error('CSRF Token or License Token not found in response.')
       }
 
-      logger('info', 'deezer', 'Deezer source setup successfully.')
+      logger('info', 'Sources', 'Deezer source setup successfully.')
       return true
     } catch (e) {
-      logger('error', 'deezer', `Failed to setup Deezer source: ${e.message}`)
+      logger('error', 'Sources', `Failed to setup Deezer source: ${e.message}`)
       return false
     }
   }
 
   async search(query) {
-    logger('debug', 'deezer', `Searching for: ${query}`)
+    logger('debug', 'Sources', `Searching Deezer for: "${query}"`)
 
     const { body, error } = await makeRequest(
       `https://api.deezer.com/2.0/search?q=${encodeURI(query)}`,
@@ -103,7 +103,11 @@ export default class DeezerSource {
     if (!match) return { loadType: 'empty', data: {} }
 
     const [, type, id] = match
-    logger('debug', 'deezer', `Resolving URL of type '${type}' with ID '${id}'`)
+    logger(
+      'debug',
+      'Sources',
+      `Resolving Deezer URL of type '${type}' with ID '${id}'`
+    )
 
     const { body, error } = await makeRequest(
       `https://api.deezer.com/2.0/${type}/${id}`,
@@ -299,7 +303,11 @@ export default class DeezerSource {
           const error =
             res.error ||
             new Error(`Request failed with status ${res.statusCode}`)
-          logger('error', 'deezer', `Error fetching stream: ${error.message}`)
+          logger(
+            'error',
+            'Sources',
+            `Error fetching Deezer stream: ${error.message}`
+          )
           return resolve({
             exception: {
               message: error.message,
@@ -314,8 +322,8 @@ export default class DeezerSource {
         res.stream.on('error', (error) => {
           logger(
             'error',
-            'deezer',
-            `Error in source stream for track ${decodedTrack.title}: ${error.message}`
+            'Sources',
+            `Error in Deezer source stream for track ${decodedTrack.title}: ${error.message}`
           )
           resolve({
             exception: {
@@ -363,8 +371,8 @@ export default class DeezerSource {
       } catch (e) {
         logger(
           'error',
-          'deezer',
-          `Failed to load stream for ${decodedTrack.identifier}: ${e.message}`
+          'Sources',
+          `Failed to load Deezer stream for ${decodedTrack.identifier}: ${e.message}`
         )
         resolve({ exception: { message: e.message, severity: 'fault' } })
       }

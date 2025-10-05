@@ -1,4 +1,4 @@
-import { decodeTrack, sendResponse } from '../utils.js'
+import { decodeTrack, logger, sendResponse } from '../utils.js'
 
 function handler(nodelink, req, res, parsedUrl) {
   const encodedTrack = parsedUrl.searchParams.get('encodedTrack')
@@ -16,9 +16,11 @@ function handler(nodelink, req, res, parsedUrl) {
   }
 
   try {
+    logger('debug', 'Tracks', `Decoding track: ${encodedTrack}`)
     const decodedTrack = decodeTrack(encodedTrack)
     sendResponse(req, res, decodedTrack, 200)
   } catch (error) {
+    logger('error', 'Tracks', `Failed to decode track ${encodedTrack}:`, error)
     // biome-ignore format: off
     sendResponse(req, res, {
       timestamp: Date.now(),
