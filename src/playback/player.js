@@ -206,7 +206,7 @@ export class Player {
     if (fetched.exception) return fetched
     const resource = createAudioResource(
       fetched.stream,
-      urlData.format,
+      fetched.type || urlData.format,
       this.nodelink,
       this.filters
     )

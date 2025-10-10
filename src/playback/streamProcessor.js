@@ -1,44 +1,11 @@
 import { FiltersManager } from './filtersManager.js'
-import { PassThrough, Readable } from 'node:stream'
+import { PassThrough, Readable, Transform } from 'node:stream'
 import prism from 'prism-media'
+import { createRequire } from 'node:module'
 
-function buildTimescaleArgs(timescale = {}) {
-  const { speed = 1.0, pitch = 1.0, rate = 1.0 } = timescale
-  if (speed === 1.0 && pitch === 1.0 && rate === 1.0) return []
-
-  const sampleRate = 48000
-  const finalRate = sampleRate * speed * pitch
-  const tempo = rate / pitch
-
-  const filters = []
-  if (Math.abs(finalRate - sampleRate) > 1) {
-    filters.push(`asetrate=${finalRate}`)
-  }
-
-  if (tempo !== 1.0) {
-    const MAX_ATEMPO = 100.0
-    const MIN_ATEMPO = 0.5
-    let currentTempo = tempo
-    while (currentTempo > MAX_ATEMPO) {
-      filters.push(`atempo=${MAX_ATEMPO}`)
-      currentTempo /= MAX_ATEMPO
-    }
-    while (currentTempo < MIN_ATEMPO && currentTempo > 0) {
-      filters.push(`atempo=${MIN_ATEMPO}`)
-      currentTempo /= MIN_ATEMPO
-    }
-    if (
-      currentTempo !== 1.0 &&
-      currentTempo >= MIN_ATEMPO &&
-      currentTempo <= MAX_ATEMPO
-    ) {
-      filters.push(`atempo=${currentTempo}`)
-    }
-  }
-
-  if (filters.length === 0) return []
-  return ['-af', filters.join(',')]
-}
+const require = createRequire(import.meta.url)
+const { MPEGDecoder } = require('mpg123-decoder')
+const LibSampleRate = require('@alexanderolsen/libsamplerate-js')
 
 class BaseAudioResource {
   constructor() {
@@ -122,6 +89,92 @@ class BaseAudioResource {
   }
 }
 
+class MpegDecoderStream extends Transform {
+  constructor(options) {
+    super(options)
+    this.decoder = new MPEGDecoder()
+    this.resampler = null
+    this.isDecoderReady = false
+
+    this.decoder.ready.then(() => {
+        this.isDecoderReady = true;
+        this.emit('decoderReady');
+    }).catch(err => this.emit('error', err));
+  }
+
+  _transform(chunk, encoding, callback) {
+    if (!this.isDecoderReady) {
+        this.once('decoderReady', () => this._transform(chunk, encoding, callback));
+        return;
+    }
+
+    try {
+        const { channelData, samplesDecoded, sampleRate, channels } = this.decoder.decode(chunk);
+
+        if (samplesDecoded > 0) {
+            if (sampleRate === 48000) {
+                this._process(channelData, channels, callback);
+            } else if (this.resampler) {
+                this._resample(channelData, channels, callback);
+            } else {
+                LibSampleRate.create(2, sampleRate, 48000, { converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY })
+                    .then(src => {
+                        this.resampler = src;
+                        this._resample(channelData, channels, callback);
+                    })
+                    .catch(err => callback(err));
+            }
+        } else {
+            callback();
+        }
+    } catch (e) {
+        callback(e);
+    }
+  }
+
+  _process(channelData, channels, callback) {
+    const sampleCount = channelData[0].length;
+    const pcm = new Int16Array(sampleCount * 2);
+    const floatL = channelData[0];
+    const floatR = channels > 1 ? channelData[1] : floatL;
+
+    for (let i = 0; i < sampleCount; i++) {
+        pcm[i * 2] = Math.max(-1, Math.min(1, floatL[i])) * 32767;
+        pcm[i * 2 + 1] = Math.max(-1, Math.min(1, floatR[i])) * 32767;
+    }
+    
+    this.push(Buffer.from(pcm.buffer));
+    callback();
+  }
+
+  _resample(channelData, channels, callback) {
+    const floatL = channelData[0];
+    const floatR = channels > 1 ? channelData[1] : floatL;
+    const interleaved = new Float32Array(floatL.length * 2);
+    for (let i = 0; i < floatL.length; i++) {
+        interleaved[i * 2] = floatL[i];
+        interleaved[i * 2 + 1] = floatR[i];
+    }
+
+    const resampled = this.resampler.full(interleaved);
+
+    const pcmInt16 = new Int16Array(resampled.length);
+    for (let i = 0; i < resampled.length; i++) {
+        pcmInt16[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767;
+    }
+
+    this.push(Buffer.from(pcmInt16.buffer));
+    callback();
+  }
+
+  _flush(callback) {
+    if (this.resampler) {
+        this.resampler.destroy();
+    }
+    callback();
+  }
+}
+
 class StreamAudioResource extends BaseAudioResource {
   constructor(stream, type, nodelink, initialFilters = {}) {
     super()
@@ -130,19 +183,28 @@ class StreamAudioResource extends BaseAudioResource {
     }
 
     const lowerType = (type || '').toLowerCase()
-    const timescale = initialFilters.filters?.timescale
-    const useFFmpegForTimescale =
-      timescale &&
-      (timescale.speed !== 1.0 ||
-        timescale.pitch !== 1.0 ||
-        timescale.rate !== 1.0)
+    let pcmStream
 
-    let audioStream
+    this.pipes = [stream]
 
-    if (
-      !['webm/opus', 'ogg/opus'].includes(lowerType) ||
-      useFFmpegForTimescale
-    ) {
+    if (['audio/mpeg', 'audio/mp3'].includes(lowerType)) {
+      const mpegDecoder = new MpegDecoderStream()
+      pcmStream = stream.pipe(mpegDecoder)
+      this.pipes.push(mpegDecoder)
+    } else if (['webm/opus', 'ogg/opus'].includes(lowerType)) {
+      const DemuxerClass =
+        lowerType === 'webm/opus'
+          ? prism.opus.WebmDemuxer
+          : prism.opus.OggDemuxer
+      const demuxer = new DemuxerClass()
+      const decoder = new prism.opus.Decoder({
+        rate: 48000,
+        channels: 2,
+        frameSize: 960
+      })
+      pcmStream = stream.pipe(demuxer).pipe(decoder)
+      this.pipes.push(demuxer, decoder)
+    } else {
       const ffmpegArgs = [
         '-hide_banner',
         '-loglevel',
@@ -155,7 +217,6 @@ class StreamAudioResource extends BaseAudioResource {
         '4096',
         '-i',
         '-',
-        ...buildTimescaleArgs(timescale),
         '-f',
         's16le',
         '-ar',
@@ -164,44 +225,23 @@ class StreamAudioResource extends BaseAudioResource {
         '2'
       ]
       const ffmpeg = new prism.FFmpeg({ args: ffmpegArgs })
-      const volume = new prism.VolumeTransformer({ type: 's16le' })
-      const filters = new FiltersManager(nodelink, initialFilters)
-      const opus = new prism.opus.Encoder({
-        rate: 48000,
-        channels: 2,
-        frameSize: 960
-      })
-
-      stream.pipe(ffmpeg).pipe(volume).pipe(filters).pipe(opus)
-
-      this.pipes = [stream, ffmpeg, volume, filters, opus]
-      audioStream = opus
-    } else {
-      const DemuxerClass =
-        lowerType === 'webm/opus'
-          ? prism.opus.WebmDemuxer
-          : prism.opus.OggDemuxer
-      const demuxer = new DemuxerClass()
-      const decoder = new prism.opus.Decoder({
-        rate: 48000,
-        channels: 2,
-        frameSize: 960
-      })
-      const volume = new prism.VolumeTransformer({ type: 's16le' })
-      const filters = new FiltersManager(nodelink, initialFilters)
-      const opus = new prism.opus.Encoder({
-        rate: 48000,
-        channels: 2,
-        frameSize: 960
-      })
-
-      stream.pipe(demuxer).pipe(decoder).pipe(volume).pipe(filters).pipe(opus)
-
-      this.pipes = [stream, demuxer, decoder, volume, filters, opus]
-      audioStream = opus
+      pcmStream = stream.pipe(ffmpeg)
+      this.pipes.push(ffmpeg)
     }
 
-    this.stream = audioStream
+    const volume = new prism.VolumeTransformer({ type: 's16le' })
+    const filters = new FiltersManager(nodelink, initialFilters)
+    const opus = new prism.opus.Encoder({
+      rate: 48000,
+      channels: 2,
+      frameSize: 960
+    })
+
+    pcmStream.pipe(volume).pipe(filters).pipe(opus)
+
+    this.pipes.push(volume, filters, opus)
+    this.stream = opus
+
     stream.on('finishBuffering', () => this.stream.emit('finishBuffering'))
   }
 }
@@ -210,7 +250,6 @@ class FFmpegUrlAudioResource extends BaseAudioResource {
   constructor(url, type, seekTime = 0, nodelink, initialFilters = {}) {
     super()
 
-    const timescale = initialFilters.filters?.timescale
     const ffmpegArgs = [
       '-hide_banner',
       '-loglevel',
@@ -230,7 +269,6 @@ class FFmpegUrlAudioResource extends BaseAudioResource {
     ffmpegArgs.push(
       '-i',
       url,
-      ...buildTimescaleArgs(timescale),
       '-f',
       's16le',
       '-ar',

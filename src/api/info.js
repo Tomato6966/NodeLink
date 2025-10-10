@@ -10,7 +10,7 @@ function handler(nodelink, req, res, sendResponse) {
     git: nodelink.gitInfo,
     nodejs: process.version,
     isNodeLink: true,
-    sourceManagers: [],
+    sourceManagers: nodelink.sources?.sources ? Array.from(nodelink.sources.sources.keys()) : [],
     filters: [],
     plugins: []
   }

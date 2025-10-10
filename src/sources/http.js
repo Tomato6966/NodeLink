@@ -87,7 +87,16 @@ export default class HttpSource {
       }
       const response = await makeRequest(url, opts)
       if (response.error) throw response.error
-      return { stream: response.stream }
+
+      const contentType = response.headers?.['content-type']
+      const httpStream = response.stream
+
+      httpStream.on('end', () => {
+        logger('debug', 'HTTP Source', `Stream ended for ${url}, emitting finishBuffering.`)
+        httpStream.emit('finishBuffering')
+      })
+
+      return { stream: httpStream, type: contentType }
     } catch (err) {
       logger('error', 'Sources', `Failed to load http stream: ${err.message}`)
       return { exception: { message: err.message, severity: 'common' } }
