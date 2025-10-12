@@ -390,6 +390,115 @@ class OggVorbisDecoderStream extends Transform {
   }
 }
 
+class MPEGTSToAACStream extends Transform {
+  constructor(options) {
+    super(options)
+    this.buffer = Buffer.alloc(0)
+    this.patPmtId = null
+    this.aacPid = null
+    this.aacData = Buffer.alloc(0)
+    this.packetsProcessed = 0
+    this.aacPidFound = false
+  }
+
+  _transform(chunk, encoding, callback) {
+    try {
+      this.buffer = Buffer.concat([this.buffer, chunk])
+      const len = this.buffer.length
+      let pos = 0
+
+      while (pos <= len - 188) {
+        if (this.buffer[pos] !== 0x47) {
+          const syncIndex = this.buffer.indexOf(0x47, pos + 1)
+          if (syncIndex === -1) {
+            this.buffer = Buffer.alloc(0)
+            break
+          }
+          pos = syncIndex
+          continue
+        }
+
+        const packet = this.buffer.slice(pos, pos + 188)
+        this.packetsProcessed++
+        
+        const pusi = !!(packet[1] & 0x40)
+        const pid = ((packet[1] & 0x1F) << 8) + packet[2]
+        const atf = (packet[3] & 0x30) >> 4
+        
+        let offset = 4
+        if (atf > 1) {
+          const atflen = packet[4]
+          offset = 5 + atflen
+          if (offset >= 188) {
+            pos += 188
+            continue
+          }
+        }
+
+        if (pid === 0 && pusi) {
+          offset += packet[offset] + 1
+          this.patPmtId = (packet[offset + 10] & 0x1F) << 8 | packet[offset + 11]
+        } else if (this.patPmtId && pid === this.patPmtId && pusi) {
+          offset += packet[offset] + 1
+          const foundPid = this._parsePMT(packet, offset)
+          if (foundPid && !this.aacPidFound) {
+            this.aacPid = foundPid
+            this.aacPidFound = true
+          }
+        } else if (this.aacPid && pid === this.aacPid) {
+          if (pusi) {
+            if (this.aacData.length > 0) {
+              this.push(this.aacData)
+              this.aacData = Buffer.alloc(0)
+            }
+            const pesHeaderLength = packet[offset + 8]
+            offset += 9 + pesHeaderLength
+            if (offset >= 188) {
+              pos += 188
+              continue
+            }
+          }
+          const payload = packet.slice(offset)
+          this.aacData = Buffer.concat([this.aacData, payload])
+        }
+
+        pos += 188
+      }
+
+      this.buffer = this.buffer.slice(pos)
+      callback()
+    } catch (err) {
+      callback()
+    }
+  }
+
+  _parsePMT(packet, offset) {
+    const sectionLength = (packet[offset + 1] & 0x0F) << 8 | packet[offset + 2]
+    const tableEnd = offset + 3 + sectionLength - 4
+    const programInfoLength = (packet[offset + 10] & 0x0F) << 8 | packet[offset + 11]
+    offset += 12 + programInfoLength
+
+    while (offset < tableEnd && offset < 188) {
+      const streamType = packet[offset]
+      const elementaryPid = (packet[offset + 1] & 0x1F) << 8 | packet[offset + 2]
+      const esInfoLength = (packet[offset + 3] & 0x0F) << 8 | packet[offset + 4]
+
+      if (streamType === 0x0F) {
+        return elementaryPid
+      }
+      offset += 5 + esInfoLength
+    }
+    return null
+  }
+
+  _flush(callback) {
+    if (this.aacData.length > 0) {
+      this.push(this.aacData)
+    }
+    callback()
+  }
+}
+
 class AACDecoderStream extends Transform {
   constructor(options) {
     super(options)
@@ -803,6 +912,11 @@ class StreamAudioResource extends BaseAudioResource {
         const aacDecoder = new AACDecoderStream()
         pcmStream = stream.pipe(aacDecoder)
         this.pipes.push(aacDecoder)
+      } else if (['mpegts', 'video/mp2t', 'video/MP2T'].includes(lowerType)) {
+        const mpegtsToAAC = new MPEGTSToAACStream()
+        const aacDecoder = new AACDecoderStream()
+        pcmStream = stream.pipe(mpegtsToAAC).pipe(aacDecoder)
+        this.pipes.push(mpegtsToAAC, aacDecoder)
       } else if (['audio/mp4', 'audio/mp4a', 'audio/x-m4a', 'video/mp4', 'video/quicktime', 'video/x-m4v', 'm4a', 'mp4'].includes(lowerType)) {
         const mp4ToAAC = new MP4ToAACStream()
         const aacDecoder = new AACDecoderStream()
@@ -838,6 +952,7 @@ class StreamAudioResource extends BaseAudioResource {
         const supportedFormats = [
           'MP3 (audio/mpeg)',
           'AAC (audio/aac, audio/aacp)',
+          'MPEG-TS (mpegts, video/mp2t)',
           'MP4/M4A (audio/mp4, video/mp4)',
           'FLAC (audio/flac)',
           'OGG Vorbis (audio/ogg)',
