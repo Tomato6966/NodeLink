@@ -94,50 +94,49 @@ export default class CipherManager {
   }
 
   async getTimestamp(playerUrl) {
-    const {
-      body: scriptContent,
-      error,
-      statusCode
-    } = await makeRequest(playerUrl, { method: 'GET' })
+    if (!this.config.url) {
+      const {
+        body: scriptContent,
+        error,
+        statusCode
+      } = await makeRequest(playerUrl, { method: 'GET' })
 
-    if (error || statusCode !== 200) {
+      if (error || statusCode !== 200) {
+        logger(
+          'error',
+          'YouTube-Cipher',
+          `Failed to fetch player script for timestamp: ${error?.message || `Status ${statusCode}`}`
+        )
+        throw new Error(
+          `Failed to fetch player script for timestamp: ${error?.message || `Status ${statusCode}`}`
+        )
+      }
+
+      const timestampMatch = scriptContent.match(
+        /(?:signatureTimestamp|sts):(\d+)/
+      )
+
+      if (!timestampMatch || !timestampMatch[1]) {
+        logger(
+          'error',
+          'YouTube-Cipher',
+          `Timestamp not found in player script: ${playerUrl}`
+        )
+        throw new Error(`Timestamp not found in player script: ${playerUrl}`)
+      }
+
+      const sts = timestampMatch[1]
       logger(
-        'error',
+        'debug',
         'YouTube-Cipher',
-        `Failed to fetch player script for timestamp: ${error?.message || `Status ${statusCode}`}`
+        `Extracted timestamp from player script: ${sts}`
       )
-      throw new Error(
-        `Failed to fetch player script for timestamp: ${error?.message || `Status ${statusCode}`}`
-      )
+
+      return sts
     }
 
-    const timestampMatch = scriptContent.match(
-      /(?:signatureTimestamp|sts):(\d+)/
-    )
-
-    if (!timestampMatch || !timestampMatch[1]) {
-      logger(
-        'error',
-        'YouTube-Cipher',
-        `Timestamp not found in player script: ${playerUrl}`
-      )
-      throw new Error(`Timestamp not found in player script: ${playerUrl}`)
-    }
-
-    const sts = timestampMatch[1]
-    logger(
-      'debug',
-      'YouTube-Cipher',
-      `Extracted timestamp from player script: ${sts}`
-    )
-
-    return sts
-  }
-
-  async _decipherN(playerScript, n) {
     const requestBody = {
-      player_url: playerScript.url,
-      n_param: n
+      player_url: playerUrl
     }
 
     const headers = { 'Content-Type': 'application/json' }
@@ -148,11 +147,11 @@ export default class CipherManager {
     logger(
       'debug',
       'YouTube-Cipher',
-      `Deciphering N param: ${n} with script: ${playerScript.url}`
+      `Fetching STS via /get_sts: ${playerUrl}`
     )
 
     const { body, error, statusCode } = await makeRequest(
-      `${this.config.url}/decrypt_signature`,
+      `${this.config.url}/get_sts`,
       {
         method: 'POST',
         headers,
@@ -163,91 +162,16 @@ export default class CipherManager {
 
     if (error || statusCode !== 200) {
       throw new Error(
-        `Failed to decrypt n-parameter: ${error?.message || body?.message || 'Invalid response'}`
+        `Failed to get STS: ${error?.message || body?.message || 'Invalid response'}`
       )
     }
 
-    const decryptedN = body.decrypted_n_sig
-    if (!decryptedN) {
-      throw new Error('Proxy did not return a decrypted n-parameter.')
+    if (!body.sts) {
+      throw new Error('Server did not return STS.')
     }
 
-    logger('debug', 'YouTube-Cipher', `Received decrypted N: ${decryptedN}`)
-    return decryptedN
-  }
-
-  async _getUriWithSignature(playerScript, format) {
-    const cipherData = new URLSearchParams(format.signatureCipher)
-    const encryptedSignature = cipherData.get('s')
-    const baseUrl = cipherData.get('url')
-    const sp = cipherData.get('sp') || 'sig'
-
-    if (!encryptedSignature) {
-      throw new Error(
-        `Could not extract signature from signatureCipher: ${format.signatureCipher}`
-      )
-    }
-
-    const tempUrl = new URL(baseUrl)
-    const n_param = tempUrl.searchParams.get('n')
-
-    const requestBody = {
-      player_url: playerScript.url,
-      encrypted_signature: encryptedSignature,
-      signature_key: sp,
-      n_param: n_param
-    }
-
-    const headers = { 'Content-Type': 'application/json' }
-    if (this.config.token) {
-      headers.Authorization = this.config.token
-    }
-
-    logger(
-      'debug',
-      'YouTube-Cipher',
-      `Sending to remote cipher: encryptedSignature=${encryptedSignature}, n_param=${n_param}, sp=${sp}, player_url=${playerScript.url}`
-    )
-
-    const { body, error, statusCode } = await makeRequest(
-      `${this.config.url}/decrypt_signature`,
-      {
-        method: 'POST',
-        headers,
-        body: requestBody,
-        disableBodyCompression: true
-      }
-    )
-
-    if (error || statusCode !== 200) {
-      throw new Error(
-        `Failed to decrypt signature: ${error?.message || body?.message || 'Invalid response'}`
-      )
-    }
-
-    logger(
-      'debug',
-      'YouTube-Cipher',
-      `Received from remote cipher: decrypted_signature=${body.decrypted_signature}, decrypted_n_sig=${body.decrypted_n_sig}`
-    )
-
-    const finalUrl = new URL(baseUrl)
-
-    if (body.decrypted_signature) {
-      finalUrl.searchParams.set(sp, body.decrypted_signature)
-    } else {
-      logger(
-        'warn',
-        'YouTube-Cipher',
-        'Proxy did not return a decrypted signature, the URL will likely be invalid.'
-      )
-    }
-
-    if (body.decrypted_n_sig) {
-      finalUrl.searchParams.set('n', body.decrypted_n_sig)
-    }
-
-    return finalUrl.toString()
+    logger('debug', 'YouTube-Cipher', `Received STS: ${body.sts}`)
+    return body.sts
   }
 
   async resolveFormatUrl(playerScript, format) {
@@ -255,22 +179,67 @@ export default class CipherManager {
       throw new Error('Remote cipher URL is not configured.')
     }
 
+    let streamUrl, encryptedSignature, signatureKey
+
     if (format.signatureCipher) {
-      return this._getUriWithSignature(playerScript, format)
+      const cipherData = new URLSearchParams(format.signatureCipher)
+      encryptedSignature = cipherData.get('s')
+      streamUrl = cipherData.get('url')
+      signatureKey = cipherData.get('sp') || 'sig'
+
+      if (!encryptedSignature) {
+        throw new Error(
+          `Could not extract signature from signatureCipher: ${format.signatureCipher}`
+        )
+      }
+    } else if (format.url) {
+      streamUrl = format.url
+    } else {
+      throw new Error('Format has no url or signatureCipher')
     }
 
-    if (format.url && new URL(format.url).searchParams.has('n')) {
-      const initialUrl = new URL(format.url)
-      const nParameter = initialUrl.searchParams.get('n')
-      const newN = await this._decipherN(playerScript, nParameter)
-      initialUrl.searchParams.set('n', newN)
-
-      const finalUrl = initialUrl.toString()
-      logger('debug', 'YouTube-Cipher', `Final N-transformed URL: ${finalUrl}`)
-      return finalUrl
+    const requestBody = {
+      stream_url: streamUrl,
+      player_url: playerScript.url
     }
 
-    // This path should not be reached if called from common.js correctly
-    return format.url
+    if (encryptedSignature) {
+      requestBody.encrypted_signature = encryptedSignature
+      requestBody.signature_key = signatureKey
+    }
+
+    const headers = { 'Content-Type': 'application/json' }
+    if (this.config.token) {
+      headers.Authorization = this.config.token
+    }
+
+    logger(
+      'debug',
+      'YouTube-Cipher',
+      `Resolving URL via /resolve_url: ${streamUrl}`
+    )
+
+    const { body, error, statusCode } = await makeRequest(
+      `${this.config.url}/resolve_url`,
+      {
+        method: 'POST',
+        headers,
+        body: requestBody,
+        disableBodyCompression: true
+      }
+    )
+
+    if (error || statusCode !== 200) {
+      throw new Error(
+        `Failed to resolve URL: ${error?.message || body?.message || 'Invalid response'}`
+      )
+    }
+
+    if (!body.resolved_url) {
+      throw new Error('Server did not return a resolved URL.')
+    }
+
+    logger('debug', 'YouTube-Cipher', `Resolved URL: ${body.resolved_url}`)
+    return body.resolved_url
   }
 }
