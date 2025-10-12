@@ -401,7 +401,7 @@ export default class InstagramSource {
         )
       }
 
-      return { stream: response.stream }
+      return { stream: response.stream, type: 'video/mp4' }
     } catch (err) {
       return {
         exception: {

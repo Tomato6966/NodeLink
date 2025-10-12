@@ -2,6 +2,10 @@ import { FiltersManager } from './filtersManager.js'
 import { PassThrough, Readable, Transform } from 'node:stream'
 import prism from 'prism-media'
 import { createRequire } from 'node:module'
+import * as MP4Box from 'mp4box'
+import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js'
+import { FLACDecoder } from '@wasm-audio-decoders/flac'
+import { OggVorbisDecoder } from '@wasm-audio-decoders/ogg-vorbis'
 
 const require = createRequire(import.meta.url)
 const { MPEGDecoder } = require('mpg123-decoder')
@@ -97,152 +101,781 @@ class MpegDecoderStream extends Transform {
     this.isDecoderReady = false
 
     this.decoder.ready.then(() => {
-        this.isDecoderReady = true;
-        this.emit('decoderReady');
-    }).catch(err => this.emit('error', err));
+      this.isDecoderReady = true
+      this.emit('decoderReady')
+    }).catch(err => this.emit('error', err))
   }
 
   _transform(chunk, encoding, callback) {
     if (!this.isDecoderReady) {
-        this.once('decoderReady', () => this._transform(chunk, encoding, callback));
-        return;
+      this.once('decoderReady', () => this._transform(chunk, encoding, callback))
+      return
     }
 
     try {
-        const { channelData, samplesDecoded, sampleRate, channels } = this.decoder.decode(chunk);
+      const { channelData, samplesDecoded, sampleRate, channels } = this.decoder.decode(chunk)
 
-        if (samplesDecoded > 0) {
-            if (sampleRate === 48000) {
-                this._process(channelData, channels, callback);
-            } else if (this.resampler) {
-                this._resample(channelData, channels, callback);
-            } else {
-                LibSampleRate.create(2, sampleRate, 48000, { converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY })
-                    .then(src => {
-                        this.resampler = src;
-                        this._resample(channelData, channels, callback);
-                    })
-                    .catch(err => callback(err));
-            }
+      if (samplesDecoded > 0) {
+        if (sampleRate === 48000) {
+          this._process(channelData, channels, callback)
+        } else if (this.resampler) {
+          this._resample(channelData, channels, callback)
         } else {
-            callback();
+          LibSampleRate.create(2, sampleRate, 48000, { 
+            converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY 
+          }).then(src => {
+            this.resampler = src
+            this._resample(channelData, channels, callback)
+          }).catch(err => {
+            callback()
+          })
         }
+      } else {
+        callback()
+      }
     } catch (e) {
-        callback(e);
+      callback()
     }
   }
 
   _process(channelData, channels, callback) {
-    const sampleCount = channelData[0].length;
-    const pcm = new Int16Array(sampleCount * 2);
-    const floatL = channelData[0];
-    const floatR = channels > 1 ? channelData[1] : floatL;
+    const sampleCount = channelData[0].length
+    const pcm = new Int16Array(sampleCount * 2)
+    const floatL = channelData[0]
+    const floatR = channels > 1 ? channelData[1] : floatL
 
     for (let i = 0; i < sampleCount; i++) {
-        pcm[i * 2] = Math.max(-1, Math.min(1, floatL[i])) * 32767;
-        pcm[i * 2 + 1] = Math.max(-1, Math.min(1, floatR[i])) * 32767;
+      pcm[i * 2] = Math.max(-1, Math.min(1, floatL[i])) * 32767
+      pcm[i * 2 + 1] = Math.max(-1, Math.min(1, floatR[i])) * 32767
     }
     
-    this.push(Buffer.from(pcm.buffer));
-    callback();
+    this.push(Buffer.from(pcm.buffer))
+    callback()
   }
 
   _resample(channelData, channels, callback) {
-    const floatL = channelData[0];
-    const floatR = channels > 1 ? channelData[1] : floatL;
-    const interleaved = new Float32Array(floatL.length * 2);
+    const floatL = channelData[0]
+    const floatR = channels > 1 ? channelData[1] : floatL
+    const interleaved = new Float32Array(floatL.length * 2)
+    
     for (let i = 0; i < floatL.length; i++) {
-        interleaved[i * 2] = floatL[i];
-        interleaved[i * 2 + 1] = floatR[i];
+      interleaved[i * 2] = floatL[i]
+      interleaved[i * 2 + 1] = floatR[i]
     }
 
-    const resampled = this.resampler.full(interleaved);
-
-    const pcmInt16 = new Int16Array(resampled.length);
+    const resampled = this.resampler.full(interleaved)
+    const pcmInt16 = new Int16Array(resampled.length)
+    
     for (let i = 0; i < resampled.length; i++) {
-        pcmInt16[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767;
+      pcmInt16[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767
     }
 
-    this.push(Buffer.from(pcmInt16.buffer));
-    callback();
+    this.push(Buffer.from(pcmInt16.buffer))
+    callback()
   }
 
   _flush(callback) {
     if (this.resampler) {
-        this.resampler.destroy();
+      this.resampler.destroy()
     }
-    callback();
+    callback()
+  }
+}
+
+class FLACDecoderStream extends Transform {
+  constructor(options) {
+    super(options)
+    this.decoder = new FLACDecoder()
+    this.resampler = null
+    this.isDecoderReady = false
+
+    this.decoder.ready.then(() => {
+      this.isDecoderReady = true
+      this.emit('decoderReady')
+    }).catch(err => this.emit('error', err))
+  }
+
+  async _transform(chunk, encoding, callback) {
+    if (!this.isDecoderReady) {
+      this.once('decoderReady', () => this._transform(chunk, encoding, callback))
+      return
+    }
+
+    try {
+      const result = await this.decoder.decode(chunk)
+      
+      if (result && result.samplesDecoded > 0) {
+        const { channelData, samplesDecoded, sampleRate } = result
+        const channels = channelData.length
+
+        if (sampleRate === 48000) {
+          this._process(channelData, channels, samplesDecoded, callback)
+        } else if (this.resampler) {
+          this._resample(channelData, channels, samplesDecoded, sampleRate, callback)
+        } else {
+          try {
+            this.resampler = await LibSampleRate.create(2, sampleRate, 48000, { 
+              converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY 
+            })
+            this._resample(channelData, channels, samplesDecoded, sampleRate, callback)
+          } catch (err) {
+            callback()
+          }
+        }
+      } else {
+        callback()
+      }
+    } catch (e) {
+      callback()
+    }
+  }
+
+  _process(channelData, channels, samplesDecoded, callback) {
+    const pcm = new Int16Array(samplesDecoded * 2)
+    const floatL = channelData[0]
+    const floatR = channels > 1 ? channelData[1] : floatL
+
+    for (let i = 0; i < samplesDecoded; i++) {
+      pcm[i * 2] = Math.max(-1, Math.min(1, floatL[i])) * 32767
+      pcm[i * 2 + 1] = Math.max(-1, Math.min(1, floatR[i])) * 32767
+    }
+    
+    this.push(Buffer.from(pcm.buffer))
+    callback()
+  }
+
+  _resample(channelData, channels, samplesDecoded, sampleRate, callback) {
+    const floatL = channelData[0]
+    const floatR = channels > 1 ? channelData[1] : floatL
+    const interleaved = new Float32Array(samplesDecoded * 2)
+    
+    for (let i = 0; i < samplesDecoded; i++) {
+      interleaved[i * 2] = floatL[i]
+      interleaved[i * 2 + 1] = floatR[i]
+    }
+
+    const resampled = this.resampler.full(interleaved)
+    const pcmInt16 = new Int16Array(resampled.length)
+    
+    for (let i = 0; i < resampled.length; i++) {
+      pcmInt16[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767
+    }
+
+    this.push(Buffer.from(pcmInt16.buffer))
+    callback()
+  }
+
+  async _flush(callback) {
+    try {
+      const result = await this.decoder.flush()
+      if (result && result.samplesDecoded > 0) {
+        const { channelData, samplesDecoded, sampleRate } = result
+        const channels = channelData.length
+        
+        if (sampleRate === 48000) {
+          this._process(channelData, channels, samplesDecoded, () => {})
+        } else if (this.resampler) {
+          this._resample(channelData, channels, samplesDecoded, sampleRate, () => {})
+        }
+      }
+    } catch (err) {}
+
+    if (this.resampler) this.resampler.destroy?.()
+    if (this.decoder) this.decoder.free()
+    callback()
+  }
+}
+
+class OggVorbisDecoderStream extends Transform {
+  constructor(options) {
+    super(options)
+    this.decoder = new OggVorbisDecoder()
+    this.resampler = null
+    this.isDecoderReady = false
+
+    this.decoder.ready.then(() => {
+      this.isDecoderReady = true
+      this.emit('decoderReady')
+    }).catch(err => this.emit('error', err))
+  }
+
+  async _transform(chunk, encoding, callback) {
+    if (!this.isDecoderReady) {
+      this.once('decoderReady', () => this._transform(chunk, encoding, callback))
+      return
+    }
+
+    try {
+      const result = await this.decoder.decode(chunk)
+      
+      if (result && result.samplesDecoded > 0) {
+        const { channelData, samplesDecoded, sampleRate } = result
+        const channels = channelData.length
+
+        if (sampleRate === 48000) {
+          this._process(channelData, channels, samplesDecoded, callback)
+        } else if (this.resampler) {
+          this._resample(channelData, channels, samplesDecoded, sampleRate, callback)
+        } else {
+          try {
+            this.resampler = await LibSampleRate.create(2, sampleRate, 48000, { 
+              converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY 
+            })
+            this._resample(channelData, channels, samplesDecoded, sampleRate, callback)
+          } catch (err) {
+            callback()
+          }
+        }
+      } else {
+        callback()
+      }
+    } catch (e) {
+      callback()
+    }
+  }
+
+  _process(channelData, channels, samplesDecoded, callback) {
+    const pcm = new Int16Array(samplesDecoded * 2)
+    const floatL = channelData[0]
+    const floatR = channels > 1 ? channelData[1] : floatL
+
+    for (let i = 0; i < samplesDecoded; i++) {
+      pcm[i * 2] = Math.max(-1, Math.min(1, floatL[i])) * 32767
+      pcm[i * 2 + 1] = Math.max(-1, Math.min(1, floatR[i])) * 32767
+    }
+    
+    this.push(Buffer.from(pcm.buffer))
+    callback()
+  }
+
+  _resample(channelData, channels, samplesDecoded, sampleRate, callback) {
+    const floatL = channelData[0]
+    const floatR = channels > 1 ? channelData[1] : floatL
+    const interleaved = new Float32Array(samplesDecoded * 2)
+    
+    for (let i = 0; i < samplesDecoded; i++) {
+      interleaved[i * 2] = floatL[i]
+      interleaved[i * 2 + 1] = floatR[i]
+    }
+
+    const resampled = this.resampler.full(interleaved)
+    const pcmInt16 = new Int16Array(resampled.length)
+    
+    for (let i = 0; i < resampled.length; i++) {
+      pcmInt16[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767
+    }
+
+    this.push(Buffer.from(pcmInt16.buffer))
+    callback()
+  }
+
+  async _flush(callback) {
+    try {
+      const result = await this.decoder.flush()
+      if (result && result.samplesDecoded > 0) {
+        const { channelData, samplesDecoded, sampleRate } = result
+        const channels = channelData.length
+        
+        if (sampleRate === 48000) {
+          this._process(channelData, channels, samplesDecoded, () => {})
+        } else if (this.resampler) {
+          this._resample(channelData, channels, samplesDecoded, sampleRate, () => {})
+        }
+      }
+    } catch (err) {}
+
+    if (this.resampler) this.resampler.destroy?.()
+    if (this.decoder) this.decoder.free()
+    callback()
+  }
+}
+
+class AACDecoderStream extends Transform {
+  constructor(options) {
+    super(options)
+    this.decoder = new FAAD2NodeDecoder()
+    this.resampler = null
+    this.isDecoderReady = false
+    this.isConfigured = false
+    this.pendingChunks = []
+    this.buffer = Buffer.alloc(0)
+
+    this.decoder.ready.then(() => {
+      this.isDecoderReady = true
+      this.emit('decoderReady')
+      this._processPendingChunks()
+    }).catch(err => this.emit('error', err))
+  }
+
+  _downmixToStereo(interleavedPCM, channels, samplesPerChannel) {
+    if (channels === 2) return interleavedPCM
+
+    if (channels === 1) {
+      const stereo = new Float32Array(samplesPerChannel * 2)
+      for (let i = 0; i < samplesPerChannel; i++) {
+        stereo[i * 2] = interleavedPCM[i]
+        stereo[i * 2 + 1] = interleavedPCM[i]
+      }
+      return stereo
+    }
+
+    const stereo = new Float32Array(samplesPerChannel * 2)
+    const CENTER_MIX = 0.707
+    const SURROUND_MIX = 0.707
+    const LFE_MIX = 0.5
+
+    for (let i = 0; i < samplesPerChannel; i++) {
+      let left = 0
+      let right = 0
+
+      switch (channels) {
+        case 3: {
+          const C = interleavedPCM[i * 3]
+          const L = interleavedPCM[i * 3 + 1]
+          const R = interleavedPCM[i * 3 + 2]
+          left = L + C * CENTER_MIX
+          right = R + C * CENTER_MIX
+          break
+        }
+        case 4: {
+          const C = interleavedPCM[i * 4]
+          const L = interleavedPCM[i * 4 + 1]
+          const R = interleavedPCM[i * 4 + 2]
+          const Cs = interleavedPCM[i * 4 + 3]
+          left = L + C * CENTER_MIX + Cs * SURROUND_MIX * 0.5
+          right = R + C * CENTER_MIX + Cs * SURROUND_MIX * 0.5
+          break
+        }
+        case 5: {
+          const C = interleavedPCM[i * 5]
+          const L = interleavedPCM[i * 5 + 1]
+          const R = interleavedPCM[i * 5 + 2]
+          const Ls = interleavedPCM[i * 5 + 3]
+          const Rs = interleavedPCM[i * 5 + 4]
+          left = L + C * CENTER_MIX + Ls * SURROUND_MIX
+          right = R + C * CENTER_MIX + Rs * SURROUND_MIX
+          break
+        }
+        case 6: {
+          const C = interleavedPCM[i * 6]
+          const L = interleavedPCM[i * 6 + 1]
+          const R = interleavedPCM[i * 6 + 2]
+          const Ls = interleavedPCM[i * 6 + 3]
+          const Rs = interleavedPCM[i * 6 + 4]
+          const LFE = interleavedPCM[i * 6 + 5]
+          left = L + C * CENTER_MIX + Ls * SURROUND_MIX + LFE * LFE_MIX
+          right = R + C * CENTER_MIX + Rs * SURROUND_MIX + LFE * LFE_MIX
+          break
+        }
+        case 8: {
+          const C = interleavedPCM[i * 8]
+          const L = interleavedPCM[i * 8 + 1]
+          const R = interleavedPCM[i * 8 + 2]
+          const Ls = interleavedPCM[i * 8 + 3]
+          const Rs = interleavedPCM[i * 8 + 4]
+          const Lc = interleavedPCM[i * 8 + 5]
+          const Rc = interleavedPCM[i * 8 + 6]
+          const LFE = interleavedPCM[i * 8 + 7]
+          left = L + C * CENTER_MIX + Ls * SURROUND_MIX + Lc * SURROUND_MIX * 0.5 + LFE * LFE_MIX
+          right = R + C * CENTER_MIX + Rs * SURROUND_MIX + Rc * SURROUND_MIX * 0.5 + LFE * LFE_MIX
+          break
+        }
+        default:
+          left = interleavedPCM[i * channels]
+          right = interleavedPCM[i * channels + 1] || interleavedPCM[i * channels]
+          break
+      }
+
+      const normalize = (sample) => {
+        if (sample > 1.0) return 1.0 - Math.exp(-(sample - 1.0))
+        if (sample < -1.0) return -1.0 + Math.exp(-(Math.abs(sample) - 1.0))
+        return sample
+      }
+
+      stereo[i * 2] = normalize(left)
+      stereo[i * 2 + 1] = normalize(right)
+    }
+
+    return stereo
+  }
+
+  async _processPendingChunks() {
+    if (!this.isDecoderReady || this.pendingChunks.length === 0) return
+
+    for (const { chunk, encoding, callback } of this.pendingChunks) {
+      await this._decodeChunk(chunk, encoding, callback)
+    }
+    this.pendingChunks = []
+  }
+
+  _findADTSFrame(buffer) {
+    for (let i = 0; i < buffer.length - 7; i++) {
+      const syncword = (buffer[i] << 4) | (buffer[i + 1] >> 4)
+      if (syncword === 0xFFF) {
+        const frameLength = ((buffer[i + 3] & 0x03) << 11) | 
+                           (buffer[i + 4] << 3) | 
+                           ((buffer[i + 5] >> 5) & 0x07)
+        
+        if (i + frameLength <= buffer.length) {
+          return {
+            start: i,
+            end: i + frameLength,
+            frame: buffer.slice(i, i + frameLength)
+          }
+        }
+      }
+    }
+    return null
+  }
+
+  _transform(chunk, encoding, callback) {
+    if (!this.isDecoderReady) {
+      this.pendingChunks.push({ chunk, encoding, callback })
+      return
+    }
+
+    this._decodeChunk(chunk, encoding, callback)
+  }
+
+  async _decodeChunk(chunk, encoding, callback) {
+    try {
+      this.buffer = Buffer.concat([this.buffer, chunk])
+
+      if (!this.isConfigured) {
+        try {
+          await this.decoder.configure(this.buffer, true)
+          this.isConfigured = true
+        } catch (err) {
+          return callback()
+        }
+      }
+
+      while (this.buffer.length > 0) {
+        const frameInfo = this._findADTSFrame(this.buffer)
+        
+        if (!frameInfo) break
+
+        try {
+          const result = this.decoder.decode(frameInfo.frame)
+          
+          if (result && result.pcm && result.pcm.length > 0) {
+            let { pcm, sampleRate, channels, samplesPerChannel } = result
+
+            if (channels > 2 || channels === 1) {
+              pcm = this._downmixToStereo(pcm, channels, samplesPerChannel)
+              channels = 2
+            }
+
+            if (sampleRate !== 48000) {
+              if (!this.resampler) {
+                this.resampler = await LibSampleRate.create(2, sampleRate, 48000, { 
+                  converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY 
+                })
+              }
+
+              const resampled = this.resampler.full(pcm)
+              const pcmInt16 = new Int16Array(resampled.length)
+              for (let i = 0; i < resampled.length; i++) {
+                pcmInt16[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767
+              }
+              this.push(Buffer.from(pcmInt16.buffer))
+            } else {
+              const pcmInt16 = new Int16Array(pcm.length)
+              for (let i = 0; i < pcm.length; i++) {
+                pcmInt16[i] = Math.max(-1, Math.min(1, pcm[i])) * 32767
+              }
+              this.push(Buffer.from(pcmInt16.buffer))
+            }
+          }
+        } catch (decodeErr) {}
+
+        this.buffer = this.buffer.slice(frameInfo.end)
+      }
+
+      callback()
+    } catch (err) {
+      callback()
+    }
+  }
+
+  _flush(callback) {
+    if (this.buffer.length > 0 && this.isConfigured) {
+      try {
+        const frameInfo = this._findADTSFrame(this.buffer)
+        if (frameInfo) {
+          const result = this.decoder.decode(frameInfo.frame)
+          if (result && result.pcm) {
+            const pcmInt16 = new Int16Array(result.pcm.length)
+            for (let i = 0; i < result.pcm.length; i++) {
+              pcmInt16[i] = Math.max(-1, Math.min(1, result.pcm[i])) * 32767
+            }
+            this.push(Buffer.from(pcmInt16.buffer))
+          }
+        }
+      } catch (err) {}
+    }
+
+    if (this.resampler) this.resampler.destroy?.()
+    if (this.decoder) this.decoder.destroy?.()
+    callback()
+  }
+}
+
+class MP4ToAACStream extends Transform {
+  constructor(options) {
+    super(options)
+    this.mp4boxFile = MP4Box.createFile()
+    this.audioConfig = null
+    this.offset = 0
+    this.isReady = false
+
+    this.mp4boxFile.onReady = (info) => {
+      try {
+        const audioTrack = info.tracks.find(t => t.codec && t.codec.startsWith('mp4a'))
+        if (!audioTrack) {
+          this.emit('error', new Error('No AAC track found in MP4'))
+          return
+        }
+
+        this.audioConfig = this._getAudioConfig(audioTrack)
+        this.mp4boxFile.setExtractionOptions(audioTrack.id, null, { nbSamples: 1000 })
+        this.mp4boxFile.start()
+        this.isReady = true
+      } catch (err) {
+        this.emit('error', new Error(`MP4 initialization error: ${err.message}`))
+      }
+    }
+
+    this.mp4boxFile.onSamples = (id, user, samples) => {
+      try {
+        if (!samples || !Array.isArray(samples)) return
+
+        for (const sample of samples) {
+          if (sample && sample.data) {
+            const adts = this._createAdtsHeader(sample.data.byteLength, this.audioConfig)
+            const sampleData = sample.data instanceof ArrayBuffer 
+              ? Buffer.from(sample.data)
+              : Buffer.from(sample.data.buffer || sample.data)
+            
+            this.push(adts)
+            this.push(sampleData)
+          }
+        }
+      } catch (err) {}
+    }
+
+    this.mp4boxFile.onError = (e) => {
+      this.emit('error', new Error(`MP4Box error: ${e}`))
+    }
+  }
+
+  _getAudioConfig(track) {
+    const sampleRates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]
+    const samplingIndex = sampleRates.indexOf(track.audio.sample_rate)
+    if (samplingIndex === -1) throw new Error('Unsupported sample rate for ADTS')
+    
+    let profile = 2
+    
+    if (track.codec) {
+      const codecParts = track.codec.split('.')
+      if (codecParts.length >= 3) {
+        profile = parseInt(codecParts[2], 10)
+      }
+    }
+    
+    return {
+      profile,
+      samplingIndex,
+      channelCount: track.audio.channel_count
+    }
+  }
+
+  _createAdtsHeader(sampleLength, audioConfig) {
+    const adts = Buffer.alloc(7)
+    const frameLength = sampleLength + 7
+    
+    const profile = audioConfig.profile - 1
+    const samplingIndex = audioConfig.samplingIndex
+    const channelCount = audioConfig.channelCount
+
+    adts[0] = 0xff
+    adts[1] = 0xf1
+    adts[2] = ((profile & 0x03) << 6) | ((samplingIndex & 0x0f) << 2) | ((channelCount & 0x04) >> 2)
+    adts[3] = ((channelCount & 0x03) << 6) | ((frameLength & 0x1800) >> 11)
+    adts[4] = (frameLength & 0x7f8) >> 3
+    adts[5] = ((frameLength & 0x7) << 5) | 0x1f
+    adts[6] = 0xfc
+    
+    return adts
+  }
+
+  _transform(chunk, encoding, callback) {
+    try {
+      const arrayBuffer = chunk instanceof ArrayBuffer
+        ? chunk
+        : chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength)
+      
+      arrayBuffer.fileStart = this.offset
+      this.offset += arrayBuffer.byteLength
+      
+      this.mp4boxFile.appendBuffer(arrayBuffer)
+      callback()
+    } catch (err) {
+      callback()
+    }
+  }
+
+  _flush(callback) {
+    try {
+      this.mp4boxFile.flush()
+      callback()
+    } catch (err) {
+      callback()
+    }
+  }
+}
+
+class WAVDecoderStream extends Transform {
+  constructor(options) {
+    super(options)
+    this.headerParsed = false
+    this.headerBuffer = Buffer.alloc(0)
+  }
+
+  _transform(chunk, encoding, callback) {
+    try {
+      if (!this.headerParsed) {
+        this.headerBuffer = Buffer.concat([this.headerBuffer, chunk])
+        
+        if (this.headerBuffer.length >= 44) {
+          const riff = this.headerBuffer.toString('ascii', 0, 4)
+          const wave = this.headerBuffer.toString('ascii', 8, 12)
+          
+          if (riff === 'RIFF' && wave === 'WAVE') {
+            let dataPos = 12
+            while (dataPos < this.headerBuffer.length - 8) {
+              const chunkId = this.headerBuffer.toString('ascii', dataPos, dataPos + 4)
+              const chunkSize = this.headerBuffer.readUInt32LE(dataPos + 4)
+              
+              if (chunkId === 'data') {
+                const audioData = this.headerBuffer.slice(dataPos + 8)
+                if (audioData.length > 0) {
+                  this.push(audioData)
+                }
+                this.headerParsed = true
+                break
+              }
+              
+              dataPos += 8 + chunkSize
+            }
+          }
+        }
+        
+        if (!this.headerParsed) {
+          return callback()
+        }
+      } else {
+        this.push(chunk)
+      }
+      
+      callback()
+    } catch (err) {
+      callback()
+    }
   }
 }
 
 class StreamAudioResource extends BaseAudioResource {
   constructor(stream, type, nodelink, initialFilters = {}) {
     super()
-    if (!stream || !(stream instanceof Readable)) {
-      throw new Error('Invalid stream provided')
-    }
+    
+    try {
+      if (!stream || !(stream instanceof Readable)) {
+        throw new Error('Invalid stream provided')
+      }
 
-    const lowerType = (type || '').toLowerCase()
-    let pcmStream
+      const lowerType = (type || '').toLowerCase()
+      let pcmStream
 
-    this.pipes = [stream]
+      this.pipes = [stream]
 
-    if (['audio/mpeg', 'audio/mp3'].includes(lowerType)) {
-      const mpegDecoder = new MpegDecoderStream()
-      pcmStream = stream.pipe(mpegDecoder)
-      this.pipes.push(mpegDecoder)
-    } else if (['webm/opus', 'ogg/opus'].includes(lowerType)) {
-      const DemuxerClass =
-        lowerType === 'webm/opus'
-          ? prism.opus.WebmDemuxer
-          : prism.opus.OggDemuxer
-      const demuxer = new DemuxerClass()
-      const decoder = new prism.opus.Decoder({
+      if (['audio/aac', 'audio/aacp', 'aac'].includes(lowerType)) {
+        const aacDecoder = new AACDecoderStream()
+        pcmStream = stream.pipe(aacDecoder)
+        this.pipes.push(aacDecoder)
+      } else if (['audio/mp4', 'audio/mp4a', 'audio/x-m4a', 'video/mp4', 'video/quicktime', 'video/x-m4v', 'm4a', 'mp4'].includes(lowerType)) {
+        const mp4ToAAC = new MP4ToAACStream()
+        const aacDecoder = new AACDecoderStream()
+        pcmStream = stream.pipe(mp4ToAAC).pipe(aacDecoder)
+        this.pipes.push(mp4ToAAC, aacDecoder)
+      } else if (['audio/mpeg', 'audio/mp3', 'mp3'].includes(lowerType)) {
+        const mpegDecoder = new MpegDecoderStream()
+        pcmStream = stream.pipe(mpegDecoder)
+        this.pipes.push(mpegDecoder)
+      } else if (['audio/flac', 'audio/x-flac', 'flac'].includes(lowerType)) {
+        const flacDecoder = new FLACDecoderStream()
+        pcmStream = stream.pipe(flacDecoder)
+        this.pipes.push(flacDecoder)
+      } else if (['audio/ogg', 'audio/vorbis', 'ogg/vorbis', 'audio/x-vorbis', 'ogg'].includes(lowerType)) {
+        const vorbisDecoder = new OggVorbisDecoderStream()
+        pcmStream = stream.pipe(vorbisDecoder)
+        this.pipes.push(vorbisDecoder)
+      } else if (['audio/wav', 'audio/wave', 'audio/x-wav', 'wav'].includes(lowerType)) {
+        const wavDecoder = new WAVDecoderStream()
+        pcmStream = stream.pipe(wavDecoder)
+        this.pipes.push(wavDecoder)
+      } else if (['webm/opus', 'ogg/opus', 'opus'].includes(lowerType)) {
+        const DemuxerClass = lowerType === 'webm/opus' ? prism.opus.WebmDemuxer : prism.opus.OggDemuxer
+        const demuxer = new DemuxerClass()
+        const decoder = new prism.opus.Decoder({
+          rate: 48000,
+          channels: 2,
+          frameSize: 960
+        })
+        pcmStream = stream.pipe(demuxer).pipe(decoder)
+        this.pipes.push(demuxer, decoder)
+      } else {
+        const supportedFormats = [
+          'MP3 (audio/mpeg)',
+          'AAC (audio/aac, audio/aacp)',
+          'MP4/M4A (audio/mp4, video/mp4)',
+          'FLAC (audio/flac)',
+          'OGG Vorbis (audio/ogg)',
+          'WAV (audio/wav)',
+          'Opus (webm/opus, ogg/opus)'
+        ]
+        
+        throw new Error(
+          `Unsupported audio format: "${type}".\n` +
+          `Supported formats:\n${supportedFormats.map(f => `  • ${f}`).join('\n')}`
+        )
+      }
+
+      const volume = new prism.VolumeTransformer({ type: 's16le' })
+      const filters = new FiltersManager(nodelink, initialFilters)
+      const opus = new prism.opus.Encoder({
         rate: 48000,
         channels: 2,
         frameSize: 960
       })
-      pcmStream = stream.pipe(demuxer).pipe(decoder)
-      this.pipes.push(demuxer, decoder)
-    } else {
-      const ffmpegArgs = [
-        '-hide_banner',
-        '-loglevel',
-        'error',
-        '-analyzeduration',
-        '0',
-        '-probesize',
-        '32',
-        '-thread_queue_size',
-        '4096',
-        '-i',
-        '-',
-        '-f',
-        's16le',
-        '-ar',
-        '48000',
-        '-ac',
-        '2'
-      ]
-      const ffmpeg = new prism.FFmpeg({ args: ffmpegArgs })
-      pcmStream = stream.pipe(ffmpeg)
-      this.pipes.push(ffmpeg)
+
+      pcmStream.pipe(volume).pipe(filters).pipe(opus)
+
+      this.pipes.push(volume, filters, opus)
+      this.stream = opus
+
+      stream.on('finishBuffering', () => this.stream.emit('finishBuffering'))
+      
+      stream.on('error', (err) => {
+        this.stream.emit('error', new Error(`Source stream error: ${err.message}`))
+      })
+
+      for (const pipe of this.pipes) {
+        pipe.on?.('error', (err) => {})
+      }
+    } catch (err) {
+      throw new Error(`Failed to create audio resource: ${err.message}`)
     }
-
-    const volume = new prism.VolumeTransformer({ type: 's16le' })
-    const filters = new FiltersManager(nodelink, initialFilters)
-    const opus = new prism.opus.Encoder({
-      rate: 48000,
-      channels: 2,
-      frameSize: 960
-    })
-
-    pcmStream.pipe(volume).pipe(filters).pipe(opus)
-
-    this.pipes.push(volume, filters, opus)
-    this.stream = opus
-
-    stream.on('finishBuffering', () => this.stream.emit('finishBuffering'))
   }
 }
 

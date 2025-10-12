@@ -15,25 +15,41 @@ export default class HttpSource {
   }
 
   async resolve(url) {
-    const data = await makeRequest(url, { method: 'HEAD' })
-    if (data.error) {
+    try {
+      const data = await makeRequest(url, { method: 'HEAD' })
+      if (data.error) {
+        return {
+          loadType: 'error',
+          data: { message: data.error.message, severity: 'common' }
+        }
+      }
+
+      const headers = data.headers || {}
+      const contentType = headers['content-type'] || ''
+      
+      const validAudioPrefixes = ['audio/', 'video/']
+      const validApplicationTypes = ['application/octet-stream']
+      
+      const isValidMedia = 
+        validAudioPrefixes.some(prefix => contentType.startsWith(prefix)) ||
+        validApplicationTypes.includes(contentType) ||
+        contentType === ''
+      
+      if (!isValidMedia) {
+        return {
+          loadType: 'error',
+          data: { message: `Unsupported content type: ${contentType}`, severity: 'common' }
+        }
+      }
+
+      const isStream = Boolean(headers['icy-metaint']) || !('content-length' in headers)
+      return { loadType: 'track', data: this.buildTrack(url, headers, isStream) }
+    } catch (err) {
       return {
         loadType: 'error',
-        data: { message: data.error.message, severity: 'common' }
+        data: { message: `Failed to resolve URL: ${err.message}`, severity: 'common' }
       }
     }
-
-    const headers = data.headers || {}
-    if (!headers['content-type']?.startsWith('audio/')) {
-      return {
-        loadType: 'error',
-        data: { message: 'Not an audio file', severity: 'common' }
-      }
-    }
-
-    const isStream =
-      Boolean(headers['icy-metaint']) || !('content-length' in headers)
-    return { loadType: 'track', data: this.buildTrack(url, headers, isStream) }
   }
 
   buildTrack(url, headers, isStream) {
@@ -88,12 +104,16 @@ export default class HttpSource {
       const response = await makeRequest(url, opts)
       if (response.error) throw response.error
 
-      const contentType = response.headers?.['content-type']
+      const contentType = response.headers?.['content-type'] || ''
       const httpStream = response.stream
 
       httpStream.on('end', () => {
         logger('debug', 'HTTP Source', `Stream ended for ${url}, emitting finishBuffering.`)
         httpStream.emit('finishBuffering')
+      })
+
+      httpStream.on('error', (err) => {
+        logger('error', 'HTTP Source', `Stream error: ${err.message}`)
       })
 
       return { stream: httpStream, type: contentType }
