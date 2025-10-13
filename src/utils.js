@@ -36,6 +36,7 @@ const logLevels = {
 }
 const currentLogLevel = logLevels[loggingConfig.level || 'info']
 let logStream = null
+let gitInfoCache = null
 
 function initFileLogger() {
   if (!loggingConfig.file?.enabled) return
@@ -174,6 +175,8 @@ export function sendResponse(req, res, data, status) {
 }
 
 function getGitInfo() {
+  if (gitInfoCache) return gitInfoCache
+
   try {
     const branch = execSync('git rev-parse --abbrev-ref HEAD', {
       encoding: 'utf8'
@@ -187,11 +190,12 @@ function getGitInfo() {
         10
       ) * 1000
 
-    return {
+    gitInfoCache = {
       branch,
       commit,
       commitTime
     }
+    return gitInfoCache
   } catch (error) {
     logger(
       'warn',
@@ -199,11 +203,12 @@ function getGitInfo() {
       'Unable to retrieve git information. %s',
       error.message
     )
-    return {
+    gitInfoCache = {
       branch: 'unknown',
       commit: 'unknown',
       commitTime: -1
     }
+    return gitInfoCache
   }
 }
 
@@ -374,6 +379,7 @@ function parseClient(agent) {
 
 const httpAgent = new http.Agent({ keepAlive: true })
 const httpsAgent = new https.Agent({ keepAlive: true })
+const http2FailedHosts = new Set()
 
 async function http1makeRequest(urlString, options = {}) {
   const {
@@ -525,6 +531,15 @@ async function makeRequest(urlString, options = {}) {
     )
   }
 
+  try {
+    const url = new URL(urlString)
+    if (http2FailedHosts.has(url.host)) {
+      return http1makeRequest(urlString, options)
+    }
+  } catch (e) {
+    return http1makeRequest(urlString, options)
+  }
+
   return new Promise((resolve, reject) => {
     let session
     let sessionClosed = false
@@ -535,6 +550,10 @@ async function makeRequest(urlString, options = {}) {
         sessionClosed = true
         session.close()
       }
+      try {
+        const url = new URL(urlString)
+        http2FailedHosts.add(url.host)
+      } catch (e) {}
       resolve(http1makeRequest(urlString, options))
     }
 

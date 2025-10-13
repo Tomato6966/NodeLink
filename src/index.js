@@ -32,6 +32,7 @@ class NodelinkServer {
       players: 0,
       playingPlayers: 0
     }
+    this._globalPlayerUpdater = null
     logger('info', 'Server', `version ${this.version}`)
     logger(
       'info',
@@ -229,6 +230,25 @@ class NodelinkServer {
       process.exit(1)
     }
   }
+  _startGlobalPlayerUpdater() {
+    if (this._globalPlayerUpdater) return
+    const updateInterval = this.options?.playerUpdateInterval ?? 5000
+    this._globalPlayerUpdater = setInterval(() => {
+      for (const session of this.sessions.values()) {
+        for (const player of session.players.players.values()) {
+          if (player && player.track && !player.isPaused && player.connection) {
+            player._sendUpdate()
+          }
+        }
+      }
+    }, updateInterval)
+  }
+  _stopGlobalPlayerUpdater() {
+    if (this._globalPlayerUpdater) {
+      clearInterval(this._globalPlayerUpdater)
+      this._globalPlayerUpdater = null
+    }
+  }
   async start() {
     this._validateConfig()
 
@@ -260,6 +280,7 @@ class NodelinkServer {
     await this.lyrics.loadFolder()
     this._createServer()
     this._listen()
+    this._startGlobalPlayerUpdater()
     return this
   }
 }

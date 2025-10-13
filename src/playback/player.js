@@ -137,7 +137,6 @@ export class Player {
         EndReasons.LOAD_FAILED
       ].includes(state.reason)
     ) {
-      this._stopUpdater()
       this.emitEvent(GatewayEvents.TRACK_END, {
         track: this.track,
         reason: state.reason
@@ -211,21 +210,6 @@ export class Player {
       this.filters
     )
     return { stream: resource }
-  }
-
-  _startUpdater() {
-    if (this._updater) return
-    this._updater = setInterval(() => {
-      if (!this.track || this.isPaused) return
-      if (!this._sendUpdate()) this._stopUpdater()
-    }, this.nodelink.options?.playerUpdateInterval ?? 2000)
-  }
-
-  _stopUpdater() {
-    if (this._updater) {
-      clearInterval(this._updater)
-      this._updater = null
-    }
   }
 
   _sendUpdate() {
@@ -359,7 +343,6 @@ export class Player {
     logger('debug', 'Player', `Playing resource for guild ${this.guildId}`)
     this.connection.play(resource)
     await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
-    this._startUpdater()
     return true
   }
 
@@ -410,7 +393,6 @@ export class Player {
 
       this.connection.play(resource)
 
-      this._startUpdater()
       return true
     } catch (e) {
       logger(
@@ -456,7 +438,6 @@ export class Player {
       })
       this._resetTrack()
     }
-    this._stopUpdater()
     return true
   }
 
@@ -471,10 +452,8 @@ export class Player {
     if (this.connection?.audioStream) {
       if (shouldPause) {
         this.connection.pause('requested')
-        this._stopUpdater()
       } else {
         this.connection.unpause('requested')
-        this._startUpdater()
       }
     }
     return true
@@ -557,7 +536,6 @@ export class Player {
       })
     }
     this._resetTrack()
-    this._stopUpdater()
     this.connStatus = 'destroyed'
     this.volumePercent = this.nodelink.options?.defaultVolume ?? 100
   }
