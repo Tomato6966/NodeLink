@@ -747,7 +747,7 @@ class MP4ToAACStream extends Transform {
         }
 
         this.audioConfig = this._getAudioConfig(audioTrack)
-        this.mp4boxFile.setExtractionOptions(audioTrack.id, null, { nbSamples: 1000 })
+        this.mp4boxFile.setExtractionOptions(audioTrack.id, null, { nbSamples: 1 })
         this.mp4boxFile.start()
         this.isReady = true
       } catch (err) {
@@ -780,7 +780,7 @@ class MP4ToAACStream extends Transform {
 
   _getAudioConfig(track) {
     const sampleRates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]
-    const samplingIndex = sampleRates.indexOf(track.audio.sample_rate)
+    let samplingIndex = sampleRates.indexOf(track.audio.sample_rate)
     if (samplingIndex === -1) throw new Error('Unsupported sample rate for ADTS')
     
     let profile = 2
@@ -788,7 +788,18 @@ class MP4ToAACStream extends Transform {
     if (track.codec) {
       const codecParts = track.codec.split('.')
       if (codecParts.length >= 3) {
-        profile = parseInt(codecParts[2], 10)
+        const objectType = parseInt(codecParts[2], 10)
+        
+        if (objectType === 5) {
+          profile = 2 
+          const coreSampleRate = track.audio.sample_rate / 2
+          const coreSamplingIndex = sampleRates.indexOf(coreSampleRate)
+          if (coreSamplingIndex !== -1) {
+            samplingIndex = coreSamplingIndex
+          }
+        } else {
+          profile = objectType
+        }
       }
     }
     
