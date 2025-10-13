@@ -302,10 +302,22 @@ export default class {
     // The code would perform a new search by the track title using the default source and return the alternative URL.
     // Since there is currently no other source implemented for alternative search, this functionality will not be implemented at this time.
 
+    let format = 'opus'
+    if (transcoding.format.mime_type) {
+      const mimeType = transcoding.format.mime_type.toLowerCase()
+      if (mimeType.includes('opus')) {
+        format = 'ogg/opus'
+      } else if (mimeType.includes('mpeg')) {
+        format = 'audio/mpeg'
+      } else if (mimeType.includes('aac')) {
+        format = 'audio/aac'
+      }
+    }
+
     return {
       url,
       protocol: transcoding.format.protocol,
-      format: 'arbitrary'
+      format
     }
   }
   async loadStream(track, url, protocol, additionalData) {
