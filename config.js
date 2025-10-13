@@ -88,6 +88,9 @@ export default {
     kwai: {
       enabled: true
     },
+    twitch: {
+      enabled: true
+    },
     spotify: {
       enabled: true
       // clientId: '',
