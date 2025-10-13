@@ -1,4 +1,5 @@
 import { encodeTrack, makeRequest, http1makeRequest, logger } from '../utils.js'
+import { PassThrough } from 'stream'
 
 export default class KwaiSource {
   constructor(nodelink) {
@@ -54,7 +55,7 @@ export default class KwaiSource {
       const urlMatch = body.match(/share_info:c,main_mv_urls:\s*\[(.*?)\]/)
       const kwaiIdMatch = body.match(/kwai_id\s*:\s*"([^"]+)"/)
       const durationMatch = body.match(/duration:\s*([\d]+)/)
-      
+
       let thumbnailUrl = body.match(/poster="([^"]+)"/)?.[1]
       if (!thumbnailUrl) {
         const thumbnailMatch = body.match(/cover_thumbnail_urls:\[\{cdn:p,url:\s*"([^"]+)"/)
@@ -183,9 +184,18 @@ export default class KwaiSource {
       if (response.error || !response.stream) {
         throw response.error || new Error('Failed to get stream, no stream object returned.')
       }
+      const stream = new PassThrough()
 
-      return { stream: response.stream, type: 'mp4' }
-    } catch (error) {
+      response.stream.on('data', (chunk) => stream.write(chunk))
+      response.stream.on('end', () => stream.emit('finishBuffering'))
+      response.stream.on('error', (error) => {
+        logger('error', 'Kwai', `Upstream stream error: ${error.message}`)
+        stream.emit('error', error)
+        stream.emit('finishBuffering')
+      })
+
+      return { stream: stream, type: 'mp4' }
+        } catch (error) {
       throw {
         exception: {
           message: error.message || 'Failed to load stream',
