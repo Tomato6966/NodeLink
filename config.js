@@ -85,6 +85,9 @@ export default {
     instagram: {
       enabled: true
     },
+    kwai: {
+      enabled: true
+    },
     spotify: {
       enabled: true
       // clientId: '',
