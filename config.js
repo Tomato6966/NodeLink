@@ -95,6 +95,9 @@ export default {
       enabled: true
       // clientId: '',
       // clientSecret: '',
+    },
+    nicovideo: {
+      enabled: true
     }
   },
   lyrics: {

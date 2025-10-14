@@ -481,21 +481,27 @@ async function http1makeRequest(urlString, options = {}) {
       finalStream.on('data', (chunk) => chunks.push(chunk))
       finalStream.on('end', () => {
         try {
-          const responseBuffer = Buffer.concat(chunks)
-          const text = responseBuffer.toString('utf8')
+          const responseBuffer = Buffer.concat(chunks);
+
+          if (options.responseType === 'buffer') {
+            resolve({ statusCode, headers: respHeaders, body: responseBuffer });
+            return;
+          }
+
+          const text = responseBuffer.toString('utf8');
           const isJson = (respHeaders['content-type'] || '')
             .toLowerCase()
-            .startsWith('application/json')
-          const responseBody = isJson && text ? JSON.parse(text) : text
-          resolve({ statusCode, headers: respHeaders, body: responseBody })
+            .startsWith('application/json');
+          const responseBody = isJson && text ? JSON.parse(text) : text;
+          resolve({ statusCode, headers: respHeaders, body: responseBody });
         } catch (err) {
           reject(
             new Error(
               `Error processing response body for ${urlString}: ${err.message}`
             )
-          )
+          );
         }
-      })
+      });
     })
 
     req.on('error', (err) =>
