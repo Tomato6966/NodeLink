@@ -3,7 +3,7 @@ import { EndReasons, GatewayEvents } from '../constants.js'
 import { logger } from '../utils.js'
 import {
   createAudioResource,
-  createFFmpegAudioResource
+  createSeekeableAudioResource
 } from './streamProcessor.js'
 
 export class Player {
@@ -360,27 +360,25 @@ export class Player {
     const unsupportedSources = ['deezer', 'local']
 
     if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
-      return this._ffmpegSeek(position)
+      return this._seekeableSeek(position)
     } else {
       return this._legacySeek(position)
     }
   }
 
-  async _ffmpegSeek(position) {
+  async _seekeableSeek(position) {
     logger(
       'debug',
       'Player',
-      `Seeking with FFmpeg to ${position}ms for guild ${this.guildId}`
+      `Seeking with Seekeable to ${position}ms for guild ${this.guildId}`
     )
     this.position = position
 
     try {
       const url = this.streamInfo.url
-      const format = this.streamInfo.format
 
-      const resource = createFFmpegAudioResource(
+      const resource = await createSeekeableAudioResource(
         url,
-        format,
         position,
         this.nodelink,
         this.filters
@@ -398,7 +396,7 @@ export class Player {
       logger(
         'error',
         'Player',
-        `FFmpeg seek failed for guild ${this.guildId}: ${e.message}. Falling back to old method.`
+        `Seekeable seek failed for guild ${this.guildId}: ${e.message}. Falling back to old method.`
       )
       return this._legacySeek(position)
     }

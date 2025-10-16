@@ -6,6 +6,8 @@ import * as MP4Box from 'mp4box'
 import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js'
 import { FLACDecoder } from '@wasm-audio-decoders/flac'
 import { OggVorbisDecoder } from '@wasm-audio-decoders/ogg-vorbis'
+import { SeekeableNode } from '@ecliptia/seekeable-node'
+import { SupportedFormats, normalizeFormat } from '../constants.js'
 
 const require = createRequire(import.meta.url)
 const { MPEGDecoder } = require('mpg123-decoder')
@@ -1096,72 +1098,92 @@ class StreamAudioResource extends BaseAudioResource {
         throw new Error('Invalid stream provided')
       }
 
-      const lowerType = (type || '').toLowerCase()
+      const normalizedType = normalizeFormat(type)
       let pcmStream
 
       this.pipes = [stream]
 
-      if (['audio/aac', 'audio/aacp', 'aac'].includes(lowerType)) {
-        const aacDecoder = new AACDecoderStream()
-        pcmStream = stream.pipe(aacDecoder)
-        this.pipes.push(aacDecoder)
-      } else if (['fmp4', 'hls', 'application/vnd.apple.mpegurl', 'application/x-mpegurl'].includes(lowerType)) {
-        const fmp4ToAAC = new FMP4ToAACStream()
-        const aacDecoder = new AACDecoderStream()
-        pcmStream = stream.pipe(fmp4ToAAC).pipe(aacDecoder)
-        this.pipes.push(fmp4ToAAC, aacDecoder)
-      } else if (['mpegts', 'video/mp2t', 'video/MP2T'].includes(lowerType)) {
-        const mpegtsToAAC = new MPEGTSToAACStream()
-        const aacDecoder = new AACDecoderStream()
-        pcmStream = stream.pipe(mpegtsToAAC).pipe(aacDecoder)
-        this.pipes.push(mpegtsToAAC, aacDecoder)
-      } else if (['audio/mp4', 'audio/mp4a', 'audio/x-m4a', 'video/mp4', 'video/quicktime', 'video/x-m4v', 'm4a', 'mp4'].includes(lowerType)) {
-        const mp4ToAAC = new MP4ToAACStream()
-        const aacDecoder = new AACDecoderStream()
-        pcmStream = stream.pipe(mp4ToAAC).pipe(aacDecoder)
-        this.pipes.push(mp4ToAAC, aacDecoder)
-      } else if (['audio/mpeg', 'audio/mp3', 'mp3'].includes(lowerType)) {
-        const mpegDecoder = new MpegDecoderStream()
-        pcmStream = stream.pipe(mpegDecoder)
-        this.pipes.push(mpegDecoder)
-      } else if (['audio/flac', 'audio/x-flac', 'flac'].includes(lowerType)) {
-        const flacDecoder = new FLACDecoderStream()
-        pcmStream = stream.pipe(flacDecoder)
-        this.pipes.push(flacDecoder)
-      } else if (['audio/ogg', 'audio/vorbis', 'ogg/vorbis', 'audio/x-vorbis', 'ogg'].includes(lowerType)) {
-        const vorbisDecoder = new OggVorbisDecoderStream()
-        pcmStream = stream.pipe(vorbisDecoder)
-        this.pipes.push(vorbisDecoder)
-      } else if (['audio/wav', 'audio/wave', 'audio/x-wav', 'wav'].includes(lowerType)) {
-        const wavDecoder = new WAVDecoderStream()
-        pcmStream = stream.pipe(wavDecoder)
-        this.pipes.push(wavDecoder)
-      } else if (['webm/opus', 'ogg/opus', 'opus'].includes(lowerType)) {
-        const DemuxerClass = lowerType === 'webm/opus' ? prism.opus.WebmDemuxer : prism.opus.OggDemuxer
-        const demuxer = new DemuxerClass()
-        const decoder = new prism.opus.Decoder({
-          rate: 48000,
-          channels: 2,
-          frameSize: 960
-        })
-        pcmStream = stream.pipe(demuxer).pipe(decoder)
-        this.pipes.push(demuxer, decoder)
-      } else {
-        const supportedFormats = [
-          'MP3 (audio/mpeg)',
-          'AAC (audio/aac, audio/aacp)',
-          'MPEG-TS (mpegts, video/mp2t)',
-          'MP4/M4A (audio/mp4, video/mp4)',
-          'FLAC (audio/flac)',
-          'OGG Vorbis (audio/ogg)',
-          'WAV (audio/wav)',
-          'Opus (webm/opus, ogg/opus)'
-        ]
-        
-        throw new Error(
-          `Unsupported audio format: "${type}".\n` +
-          `Supported formats:\n${supportedFormats.map(f => `  • ${f}`).join('\n')}`
-        )
+      switch (normalizedType) {
+        case SupportedFormats.AAC: {
+          const lowerType = type.toLowerCase()
+          let aacStream = stream
+
+          if (lowerType.includes('fmp4') || lowerType.includes('hls') || lowerType.includes('mpegurl')) {
+            const fmp4ToAAC = new FMP4ToAACStream()
+            aacStream = stream.pipe(fmp4ToAAC)
+            this.pipes.push(fmp4ToAAC)
+          } else if (lowerType.includes('mpegts') || lowerType.includes('video/mp2t')) {
+            const mpegtsToAAC = new MPEGTSToAACStream()
+            aacStream = stream.pipe(mpegtsToAAC)
+            this.pipes.push(mpegtsToAAC)
+          } else if (lowerType.includes('mp4') || lowerType.includes('m4a') || lowerType.includes('m4v') || lowerType.includes('mov')) {
+            const mp4ToAAC = new MP4ToAACStream()
+            aacStream = stream.pipe(mp4ToAAC)
+            this.pipes.push(mp4ToAAC)
+          }
+
+          const aacDecoder = new AACDecoderStream()
+          pcmStream = aacStream.pipe(aacDecoder)
+          this.pipes.push(aacDecoder)
+          break
+        }
+        case SupportedFormats.MPEG: {
+          const mpegDecoder = new MpegDecoderStream()
+          pcmStream = stream.pipe(mpegDecoder)
+          this.pipes.push(mpegDecoder)
+          break
+        }
+        case SupportedFormats.FLAC: {
+          const flacDecoder = new FLACDecoderStream()
+          pcmStream = stream.pipe(flacDecoder)
+          this.pipes.push(flacDecoder)
+          break
+        }
+        case SupportedFormats.OGG_VORBIS: {
+          const vorbisDecoder = new OggVorbisDecoderStream()
+          pcmStream = stream.pipe(vorbisDecoder)
+          this.pipes.push(vorbisDecoder)
+          break
+        }
+        case SupportedFormats.WAV: {
+          const wavDecoder = new WAVDecoderStream()
+          pcmStream = stream.pipe(wavDecoder)
+          this.pipes.push(wavDecoder)
+          break
+        }
+        case SupportedFormats.OPUS: {
+          const lowerType = type.toLowerCase()
+          const decoder = new prism.opus.Decoder({
+            rate: 48000,
+            channels: 2,
+            frameSize: 960
+          })
+
+          if (lowerType.includes('webm')) {
+            const demuxer = new prism.opus.WebmDemuxer()
+            pcmStream = stream.pipe(demuxer).pipe(decoder)
+            this.pipes.push(demuxer, decoder)
+          } else {
+            pcmStream = stream.pipe(decoder)
+            this.pipes.push(decoder)
+          }
+          break
+        }
+        default: {
+          const supportedFormatsList = [
+            'MP3 (audio/mpeg)',
+            'AAC (audio/aac, audio/aacp, mp4, m4a, m4v, mov, hls, mpegurl, fmp4, mpegts)',
+            'FLAC (audio/flac)',
+            'OGG Vorbis (audio/ogg, audio/vorbis)',
+            'WAV (audio/wav)',
+            'Opus (webm/opus, ogg/opus)'
+          ]
+          
+          throw new Error(
+            `Unsupported audio format: "${type}".\n` +
+            `Supported formats:\n${supportedFormatsList.map(f => `  • ${f}`).join('\n')}`
+          )
+        }
       }
 
       const volume = new prism.VolumeTransformer({ type: 's16le' })
@@ -1180,69 +1202,18 @@ class StreamAudioResource extends BaseAudioResource {
       stream.on('finishBuffering', () => this.stream.emit('finishBuffering'))
       
       stream.on('error', (err) => {
-        this.stream.emit('error', new Error(`Source stream error: ${err.message}`))
+        this.stream.emit('error', err)
       })
 
       for (const pipe of this.pipes) {
-        pipe.on?.('error', (err) => {})
+        pipe.on?.('error', (err) => {
+          console.error(`Error in stream pipe ${pipe.constructor.name}:`, err)
+          stream.emit('error', err)
+        })
       }
     } catch (err) {
       throw new Error(`Failed to create audio resource: ${err.message}`)
     }
-  }
-}
-
-class FFmpegUrlAudioResource extends BaseAudioResource {
-  constructor(url, type, seekTime = 0, nodelink, initialFilters = {}) {
-    super()
-
-    const ffmpegArgs = [
-      '-hide_banner',
-      '-loglevel',
-      'error',
-      '-analyzeduration',
-      '0',
-      '-probesize',
-      '32',
-      '-thread_queue_size',
-      '4096'
-    ]
-
-    if (seekTime > 0) {
-      ffmpegArgs.push('-ss', `${seekTime / 1000}`)
-    }
-
-    ffmpegArgs.push(
-      '-i',
-      url,
-      '-f',
-      's16le',
-      '-ar',
-      '48000',
-      '-ac',
-      '2'
-    )
-
-    const ffmpeg = new prism.FFmpeg({ args: ffmpegArgs })
-    const stream = new PassThrough()
-    const volume = new prism.VolumeTransformer({ type: 's16le' })
-    const filters = new FiltersManager(nodelink, initialFilters)
-    const opus = new prism.opus.Encoder({
-      rate: 48000,
-      channels: 2,
-      frameSize: 960
-    })
-
-    ffmpeg.process.stdout.on('data', (data) => stream.write(data))
-    ffmpeg.process.stdout.on('end', () => stream.emit('finishBuffering'))
-
-    stream.pipe(volume).pipe(filters).pipe(opus)
-
-    this.pipes = [ffmpeg, stream, volume, filters, opus]
-    this.stream = opus
-
-    ffmpeg.on('close', () => this.stream.emit('finishBuffering'))
-    ffmpeg.on('error', (err) => this.stream.emit('error', err))
   }
 }
 
@@ -1253,10 +1224,30 @@ export const createAudioResource = (
   initialFilters = {}
 ) => new StreamAudioResource(stream, type, nodelink, initialFilters)
 
-export const createFFmpegAudioResource = (
+export const createSeekeableAudioResource = async (
   url,
-  type,
   seekTime = 0,
   nodelink,
   initialFilters = {}
-) => new FFmpegUrlAudioResource(url, type, seekTime, nodelink, initialFilters)
+) => {
+  const seekeable = new SeekeableNode();
+  await seekeable.load(url, 4096);
+  const { stream: demuxerStream, type } = seekeable.createAVStream(seekTime / 1000);
+
+  const packetStream = new PassThrough();
+  demuxerStream.on('data', (packet) => {
+    if (packet && packet.data && packet.data.length > 0) {
+      packetStream.write(Buffer.from(packet.data));
+    }
+  });
+  demuxerStream.on('end', () => {
+    packetStream.emit('finishBuffering');
+    seekeable.destroy();
+  });
+  demuxerStream.on('error', (err) => {
+    packetStream.emit('error', err);
+    seekeable.destroy();
+  });
+
+  return new StreamAudioResource(packetStream, type, nodelink, initialFilters);
+}

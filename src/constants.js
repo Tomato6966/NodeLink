@@ -22,3 +22,27 @@ export const EndReasons = {
   REPLACED: 'replaced',
   CLEANUP: 'cleanup'
 }
+
+export const SupportedFormats = {
+  OPUS: 'opus',
+  AAC: 'aac',
+  MPEG: 'mpeg',
+  FLAC: 'flac',
+  OGG_VORBIS: 'ogg-vorbis',
+  WAV: 'wav',
+  UNKNOWN: 'unknown'
+}
+
+export function normalizeFormat(type) {
+  if (!type) return SupportedFormats.UNKNOWN;
+  const lowerType = type.toLowerCase();
+
+  if (lowerType.includes('opus')) return SupportedFormats.OPUS;
+  if (lowerType.includes('aac') || lowerType.includes('mp4') || lowerType.includes('m4a') || lowerType.includes('m4v') || lowerType.includes('mov') || lowerType.includes('hls') || lowerType.includes('mpegurl') || lowerType.includes('fmp4') || lowerType.includes('mpegts')) return SupportedFormats.AAC;
+  if (lowerType.includes('mpeg') || lowerType.includes('mp3')) return SupportedFormats.MPEG;
+  if (lowerType.includes('flac')) return SupportedFormats.FLAC;
+  if (lowerType.includes('ogg') || lowerType.includes('vorbis')) return SupportedFormats.OGG_VORBIS;
+  if (lowerType.includes('wav')) return SupportedFormats.WAV;
+
+  return SupportedFormats.UNKNOWN;
+}
