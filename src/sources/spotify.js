@@ -1,5 +1,6 @@
-import crypto from 'node:crypto'
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+
+const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1';
 
 export default class SpotifySource {
   constructor(nodelink) {
@@ -11,117 +12,125 @@ export default class SpotifySource {
     ]
 
     this.accessToken = null
-    this.clientToken = null
+    this.clientId = null
+    this.clientSecret = null
+    this.tokenInitialized = false
   }
 
-  static TOTP_SECRET = new Uint8Array([
-    53, 53, 48, 55, 49, 52, 53, 56, 53, 51, 52, 56, 55, 52, 57, 57, 53, 57, 50,
-    50, 52, 56, 54, 51, 48, 51, 50, 57, 51, 52, 55
-  ])
-
   async setup() {
-    const [totp, ts] = this._generateTotp()
-    const params = new URLSearchParams({
-      reason: 'init',
-      productType: 'web-player',
-      totp,
-      totpVer: '5',
-      ts: ts.toString()
-    })
+    if (this.tokenInitialized) return true;
 
-    const { body: tokenData } = await http1makeRequest(
-      `https://open.spotify.com/api/token?${params}`,
-      {
-        headers: {
-          accept: 'application/json'
-        },
-        disableBodyCompression: true
+    try {
+      this.clientId = this.config.sources.spotify?.clientId;
+      this.clientSecret = this.config.sources.spotify?.clientSecret;
+
+      if (!this.clientId || !this.clientSecret) {
+        logger('warn', 'Spotify', 'Client ID or Client Secret not provided. Disabling source.');
+        return false;
       }
-    )
-    if (!tokenData || !tokenData?.accessToken || !tokenData?.clientId) {
-      logger(
-        'error',
-        'Sources',
-        'Failed to fetch Spotify access token: Invalid response'
-      )
-      return false
-    }
 
-    if (tokenData?.error) {
-      logger(
-        'error',
-        'Sources',
-        `Failed to fetch Spotify access token: ${tokenData.error.message}`
-      )
-      return false
-    }
-    const { body: clientTokenData } = await http1makeRequest(
-      'https://clienttoken.spotify.com/v1/clienttoken',
-      {
+      const auth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+
+      const { body: tokenData, error, statusCode } = await http1makeRequest('https://accounts.spotify.com/api/token', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          accept: 'application/json'
+          Authorization: `Basic ${auth}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
-        body: {
-          client_data: {
-            client_version: '1.2.9.2269',
-            client_id: tokenData.clientId,
-            js_sdk_data: {
-              device_type: 'computer'
-            }
-          }
-        },
-        disableBodyCompression: true
+        body: 'grant_type=client_credentials',
+      });
+
+      if (error || statusCode !== 200) {
+        logger('error', 'Spotify', `Error initializing token: ${statusCode} - ${error?.message || 'Unknown error'}`);
+        return false;
       }
-    )
-    if (
-      !clientTokenData ||
-      !clientTokenData?.granted_token ||
-      !clientTokenData?.granted_token?.token
-    ) {
-      logger(
-        'error',
-        'Sources',
-        'Failed to fetch Spotify client token: Invalid response'
-      )
-      return false
+
+      this.accessToken = tokenData.access_token;
+      this.tokenInitialized = true;
+      logger('info', 'Spotify', 'Tokens initialized successfully');
+      return true;
+    } catch (e) {
+      logger('error', 'Spotify', `Error initializing Spotify tokens: ${e.message}`);
+      return false;
     }
-    if (clientTokenData.response_type !== 'RESPONSE_GRANTED_TOKEN_RESPONSE') {
-      logger(
-        'error',
-        'Sources',
-        `Failed to fetch Spotify client token: ${JSON.stringify(clientTokenData)}`
-      )
-      return false
+  }
+
+  async _apiRequest(path) {
+    if (!this.tokenInitialized) {
+        const success = await this.setup();
+        if (!success) {
+            throw new Error('Failed to initialize Spotify for API request.');
+        }
     }
 
-    this.accessToken = tokenData.accessToken
-    this.clientToken = clientTokenData.granted_token.token
+    try {
+      const url = path.startsWith('http') ? path : `${SPOTIFY_API_BASE_URL}${path}`;
 
-    logger('info', 'Sources', 'Loaded Spotify source.')
-    return true
+      const { body, statusCode } = await http1makeRequest(url, {
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+          Accept: 'application/json',
+        },
+      });
+
+      if (statusCode === 401) {
+        this.tokenInitialized = false;
+        return this._apiRequest(path);
+      }
+
+      if (statusCode !== 200) {
+        logger('error', 'Spotify', `API error: ${statusCode}`);
+        return null;
+      }
+
+      return body;
+    } catch (e) {
+      logger('error', 'Spotify', `Error in Spotify apiRequest: ${e.message}`);
+      return null;
+    }
+  }
+
+  buildTrack(item, artworkUrl = null) {
+    const trackInfo = {
+      identifier: item.id,
+      isSeekable: true,
+      author: item.artists?.map((a) => a.name).join(', ') || 'Unknown',
+      length: item.duration_ms,
+      isStream: false,
+      position: 0,
+      title: item.name,
+      uri: item.external_urls.spotify,
+      artworkUrl: artworkUrl || item.album?.images[0]?.url,
+      isrc: item.external_ids?.isrc || null,
+      sourceName: 'spotify'
+    }
+
+    return {
+      encoded: encodeTrack(trackInfo),
+      info: trackInfo,
+      pluginInfo: {}
+    }
   }
 
   async search(query) {
     try {
       const limit = this.config.maxSearchResults || 10
-      const { body } = await this._apiRequest(
+      const data = await this._apiRequest(
         `/search?q=${encodeURIComponent(query)}&type=track&limit=${limit}&market=US`
       )
 
-      if (body.error) {
+      if (!data || data.error) {
         return {
           loadType: 'error',
-          data: { message: body.error.message, severity: 'common' }
+          data: { message: data?.error?.message || 'Search failed on Spotify.', severity: 'common' }
         }
       }
 
-      if (!body.tracks || body.tracks.items.length === 0) {
+      if (!data.tracks || data.tracks.items.length === 0) {
         return { loadType: 'empty', data: {} }
       }
 
-      const tracks = body.tracks.items.map((item) => this.buildTrack(item))
+      const tracks = data.tracks.items.map((item) => this.buildTrack(item))
 
       return { loadType: 'search', data: tracks }
     } catch (e) {
@@ -141,34 +150,43 @@ export default class SpotifySource {
 
       switch (type) {
         case 'track': {
-          const { body } = await this._apiRequest(`/tracks/${id}`)
-          return { loadType: 'track', data: this.buildTrack(body) }
+          const data = await this._apiRequest(`/tracks/${id}`)
+          if (!data) return { loadType: 'error', data: { message: 'Track not found.', severity: 'common' } };
+          return { loadType: 'track', data: this.buildTrack(data) }
         }
         case 'album': {
-          const { body } = await this._apiRequest(`/albums/${id}`)
-          const tracks = body.tracks.items.map((item) =>
-            this.buildTrack(item, body.images[0]?.url)
+          const data = await this._apiRequest(`/albums/${id}`)
+          if (!data) return { loadType: 'error', data: { message: 'Album not found.', severity: 'common' } };
+
+          const tracks = data.tracks.items.map((item) =>
+            this.buildTrack(item, data.images[0]?.url)
           )
           return {
             loadType: 'playlist',
-            data: { info: { name: body.name, selectedTrack: 0 }, tracks }
+            data: { info: { name: data.name, selectedTrack: 0 }, tracks }
           }
         }
         case 'playlist': {
-          const { body } = await this._apiRequest(`/playlists/${id}`)
-          const tracks = body.tracks.items.map((item) =>
+          const data = await this._apiRequest(`/playlists/${id}`)
+          if (!data) return { loadType: 'error', data: { message: 'Playlist not found.', severity: 'common' } };
+
+          const tracks = data.tracks.items.map((item) =>
             this.buildTrack(item.track)
           )
           return {
             loadType: 'playlist',
-            data: { info: { name: body.name, selectedTrack: 0 }, tracks }
+            data: { info: { name: data.name, selectedTrack: 0 }, tracks }
           }
         }
         case 'artist': {
-          const { body: artist } = await this._apiRequest(`/artists/${id}`)
-          const { body: topTracks } = await this._apiRequest(
+          const artist = await this._apiRequest(`/artists/${id}`)
+          if (!artist) return { loadType: 'error', data: { message: 'Artist not found.', severity: 'common' } };
+
+          const topTracks = await this._apiRequest(
             `/artists/${id}/top-tracks?market=US`
           )
+          if (!topTracks) return { loadType: 'error', data: { message: 'Failed to get artist top tracks.', severity: 'common' } };
+
           const tracks = topTracks.tracks.map((item) =>
             this.buildTrack(item, artist.images[0]?.url)
           )
@@ -201,28 +219,6 @@ export default class SpotifySource {
     }
   }
 
-  buildTrack(item, artworkUrl = null) {
-    const trackInfo = {
-      identifier: item.id,
-      isSeekable: true,
-      author: item.artists?.map((a) => a.name).join(', ') || 'Unknown',
-      length: item.duration_ms,
-      isStream: false,
-      position: 0,
-      title: item.name,
-      uri: item.external_urls.spotify,
-      artworkUrl: artworkUrl || item.album?.images[0]?.url,
-      isrc: item.external_ids?.isrc || null,
-      sourceName: 'spotify'
-    }
-
-    return {
-      encoded: encodeTrack(trackInfo),
-      info: trackInfo,
-      pluginInfo: {}
-    }
-  }
-
   async getTrackUrl(decodedTrack) {
     const query = `${decodedTrack.title} - ${decodedTrack.author}`
 
@@ -241,58 +237,5 @@ export default class SpotifySource {
     } catch (e) {
       return { exception: { message: e.message, severity: 'fault' } }
     }
-  }
-
-  async _apiRequest(endpoint) {
-    if (!this.accessToken) {
-      const success = await this.setup()
-      if (!success)
-        throw new Error('Failed to initialize Spotify for API request.')
-    }
-
-    const headers = {
-      Authorization: `Bearer ${this.accessToken}`,
-      Accept: 'application/json'
-    }
-
-    let { body, statusCode } = await http1makeRequest(
-      `https://api.spotify.com/v1${endpoint}`,
-      {
-        headers
-      }
-    )
-
-    if (statusCode === 401) {
-      const success = await this.setup()
-      if (!success)
-        throw new Error('Failed to re-initialize Spotify after 401.')
-
-      headers.Authorization = `Bearer ${this.accessToken}`
-      const res = await http1makeRequest(
-        `https://api.spotify.com/v1${endpoint}`,
-        { headers }
-      )
-      body = res.body
-    }
-
-    return { body }
-  }
-
-  _generateTotp() {
-    const counter = Math.floor(Date.now() / 30000)
-    const buf = Buffer.alloc(8)
-    buf.writeBigInt64BE(BigInt(counter))
-    const hmac = crypto
-      .createHmac('sha1', SpotifySource.TOTP_SECRET)
-      .update(buf)
-      .digest()
-    const offset = hmac[hmac.length - 1] & 0x0f
-    const bin =
-      ((hmac[offset] & 0x7f) << 24) |
-      ((hmac[offset + 1] & 0xff) << 16) |
-      ((hmac[offset + 2] & 0xff) << 8) |
-      (hmac[offset + 3] & 0xff)
-    const totp = (bin % 1e6).toString().padStart(6, '0')
-    return [totp, counter * 30000]
   }
 }
