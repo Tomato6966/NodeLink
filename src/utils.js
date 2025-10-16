@@ -10,7 +10,6 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import config from '../config.js'
 import packageJson from '../package.json' with { type: 'json' }
 import {
   DEFAULT_MAX_REDIRECTS,
@@ -19,22 +18,15 @@ import {
   REDIRECT_STATUS_CODES,
   SEMVER_PATTERN
 } from './constants.js'
-const verifyDiscordID = (id) => DISCORD_ID_REGEX.test(String(id))
 
-function validateProperty(property, validator, errorMessage) {
-  if (!validator(property)) {
-    throw new Error(errorMessage)
-  }
-}
-
-const loggingConfig = config.logging || {}
-const logLevels = {
+let loggingConfig = {}
+let logLevels = {
   debug: 0,
   info: 1,
   warn: 2,
   error: 3
 }
-const currentLogLevel = logLevels[loggingConfig.level || 'info']
+let currentLogLevel = logLevels.info
 let logStream = null
 let gitInfoCache = null
 
@@ -57,6 +49,12 @@ function initFileLogger() {
   const version = getVersion()
   const initialInfo = `\n--- NodeLink Log ---\nTimestamp: ${new Date().toISOString()}\nVersion: ${version}\nGit Branch: ${gitInfo.branch}\nGit Commit: ${gitInfo.commit}\nOS: ${os.platform()} ${os.release()}\nNode.js: ${process.version}\n--------------------\n`
   logStream.write(initialInfo)
+}
+
+function initLogger(config) {
+  loggingConfig = config.logging || {}
+  currentLogLevel = logLevels[loggingConfig.level || 'info']
+  initFileLogger()
 }
 
 function logger(level, ...args) {
@@ -111,7 +109,13 @@ function logger(level, ...args) {
   }
 }
 
-initFileLogger()
+const verifyDiscordID = (id) => DISCORD_ID_REGEX.test(String(id))
+
+function validateProperty(property, validator, errorMessage) {
+  if (!validator(property)) {
+    throw new Error(errorMessage)
+  }
+}
 
 function parseSemver(version) {
   const match = SEMVER_PATTERN.exec(version)
@@ -135,7 +139,7 @@ function getVersion(type = 'string') {
   }
 }
 
-export function sendResponse(req, res, data, status) {
+function sendResponse(req, res, data, status) {
   const headers = {}
 
   if (!data) {
@@ -876,7 +880,31 @@ async function loadHLSPlaylist(url, stream) {
   }
 }
 
+async function checkForUpdates() {
+  logger('info', 'Git', 'Checking for updates...');
+  try {
+    execSync('git fetch', { stdio: 'ignore' });
+
+    const local = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+    const remote = execSync('git rev-parse @{u}', { encoding: 'utf8' }).trim();
+
+    if (local !== remote) {
+      const behind = execSync('git rev-list --right-only --count HEAD...@{u}', { encoding: 'utf8' }).trim();
+      const remoteCommit = execSync('git log -1 --pretty=format:"%h - %s (%cr)" @{u}', { encoding: 'utf8' }).trim();
+      
+      logger('warn', 'Git', `Your version is ${behind} commits behind the remote.`);
+      logger('warn', 'Git', `Latest commit: ${remoteCommit}`);
+      logger('warn', 'Git', 'Please run "git pull" to update.');
+    } else {
+      logger('info', 'Git', 'You are running the latest version.');
+    }
+  } catch (error) {
+    logger('warn', 'Git', `Failed to check for updates: ${error.message}`);
+  }
+}
+
 export {
+  initLogger,
   validateProperty,
   logger,
   getVersion,
@@ -891,5 +919,7 @@ export {
   makeRequest,
   http1makeRequest,
   loadHLSPlaylist,
-  loadHLS
+  sendResponse,
+  loadHLS,
+  checkForUpdates
 }

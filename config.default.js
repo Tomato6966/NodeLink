@@ -92,9 +92,9 @@ export default {
       enabled: true
     },
     spotify: {
-      enabled: true
-      // clientId: '',
-      // clientSecret: '',
+      enabled: true,
+      clientId: '',
+      clientSecret: '',
     },
     nicovideo: {
       enabled: true

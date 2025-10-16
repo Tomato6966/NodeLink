@@ -1146,9 +1146,7 @@ class StreamAudioResource extends BaseAudioResource {
           break
         }
         case SupportedFormats.WAV: {
-          const wavDecoder = new WAVDecoderStream()
-          pcmStream = stream.pipe(wavDecoder)
-          this.pipes.push(wavDecoder)
+          pcmStream = stream
           break
         }
         case SupportedFormats.OPUS: {

@@ -1,20 +1,43 @@
 import http from 'node:http'
 import WebSocketServer from '@performanc/pwsl-server'
-import config from '../config.js'
+
 import requestHandler from './api/index.js'
 import lyricsManager from './managers/lyricsManager.js'
 import sessionManager from './managers/sessionManager.js'
 import sourceManager from './managers/sourceManager.js'
 import OAuth from './sources/youtube/OAuth.js'
 import {
+  initLogger,
   getGitInfo,
   getVersion,
   logger,
   parseClient,
   validateProperty,
-  verifyDiscordID
+  verifyDiscordID,
+  checkForUpdates
 } from './utils.js'
 import 'dotenv/config'
+
+let config;
+
+try {
+  config = (await import('../config.js')).default;
+} catch (e) {
+  if (e.code === 'ERR_MODULE_NOT_FOUND') {
+    try {
+      config = (await import('../config.default.js')).default;
+      console.log('[WARN] Config: config.js not found, using config.default.js. It is recommended to create a config.js file for your own configuration.');
+    } catch (e2) {
+      console.error('[ERROR] Config: Failed to load config.default.js. Please make sure it exists.');
+      throw e2;
+    }
+  } else {
+    throw e;
+  }
+}
+
+initLogger(config);
+await checkForUpdates();
 
 class NodelinkServer {
   constructor(options) {
