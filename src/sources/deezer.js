@@ -132,7 +132,40 @@ export default class DeezerSource {
         const track = this.buildTrack(body)
         return { loadType: 'track', data: track }
       }
-      case 'album':
+      case 'album': {
+        const albumData = body
+        const tracklistUrl = `${albumData.tracklist}?limit=${this.config.maxAlbumPlaylistLength || 1000}`
+        const tracksRes = await makeRequest(tracklistUrl)
+
+        if (tracksRes.error || !tracksRes.body?.data) {
+          return {
+            loadType: 'error',
+            data: {
+              message: 'Could not fetch album tracks.',
+              severity: 'common'
+            }
+          }
+        }
+
+        const tracks = tracksRes.body.data.map((item) =>
+          this.buildTrack(
+            item,
+            albumData.cover_xl || albumData.picture_xl
+          )
+        )
+
+        return {
+          loadType: 'album',
+          data: {
+            info: {
+              name: albumData.title,
+              selectedTrack: 0
+            },
+            pluginInfo: {},
+            tracks
+          }
+        }
+      }
       case 'playlist': {
         const playlistData = body
         const tracklistUrl = `${playlistData.tracklist}?limit=${this.config.maxAlbumPlaylistLength || 1000}`
@@ -142,7 +175,7 @@ export default class DeezerSource {
           return {
             loadType: 'error',
             data: {
-              message: 'Could not fetch playlist/album tracks.',
+              message: 'Could not fetch playlist tracks.',
               severity: 'common'
             }
           }
@@ -191,10 +224,10 @@ export default class DeezerSource {
         })
 
         return {
-          loadType: 'playlist',
+          loadType: 'artist',
           data: {
             info: {
-              name: `${artistData.name}'s Top Tracks`,
+              name: `${artistData.name}\'s Top Tracks`,
               selectedTrack: 0
             },
             pluginInfo: {},

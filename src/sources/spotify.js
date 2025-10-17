@@ -162,7 +162,7 @@ export default class SpotifySource {
             this.buildTrack(item, data.images[0]?.url)
           )
           return {
-            loadType: 'playlist',
+            loadType: 'album',
             data: { info: { name: data.name, selectedTrack: 0 }, tracks }
           }
         }
@@ -191,9 +191,9 @@ export default class SpotifySource {
             this.buildTrack(item, artist.images[0]?.url)
           )
           return {
-            loadType: 'playlist',
+            loadType: 'artist',
             data: {
-              info: { name: `${artist.name}'s Top Tracks`, selectedTrack: 0 },
+              info: { name: `${artist.name}\'s Top Tracks`, selectedTrack: 0 },
               tracks
             }
           }
