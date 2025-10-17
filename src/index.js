@@ -129,7 +129,7 @@ class NodelinkServer {
                 `Session with ID: ${sessionId} is resuming, waiting for reconnection in ${session.timeout || 60} seconds`
               )
 
-              socket.interval = setTimeout(
+              session.interval = setTimeout(
                 () => {
                   if (this.sessions.get(sessionId)?.resumed !== true) {
                     logger(

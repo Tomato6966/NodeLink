@@ -243,7 +243,7 @@ export default class DeezerSource {
   buildTrack(item, artworkUrl = null) {
     const trackInfo = {
       identifier: item.id.toString(),
-      isSeekable: true,
+      isSeekable: false,
       author: item.artist.name,
       length: item.duration * 1000,
       isStream: false,

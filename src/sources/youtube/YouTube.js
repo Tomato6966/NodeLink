@@ -367,7 +367,7 @@ export default class YouTubeSource {
               return {
                 url: urlData.hlsUrl,
                 protocol: 'hls',
-                format: 'arbitrary'
+                format: 'mpegts'
               }
             }
 
@@ -396,7 +396,7 @@ export default class YouTubeSource {
             return {
               url: urlData.hlsUrl,
               protocol: 'hls',
-              format: 'arbitrary'
+              format: 'mpegts'
             }
           }
 

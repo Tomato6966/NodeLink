@@ -229,7 +229,7 @@ function getStats(nodelink) {
     frameStats = { sent: 0, nulled: 0, deficit: 0, expected: 0 }
     for (const session of nodelink.sessions.values()) {
       if (!session.players) continue
-      for (const player of session.players.values()) {
+      for (const player of session.players.players.values()) {
         if (!player.connection) continue
         const sent = player.connection.statistics.packetsSent || 0
         const nulled = player.connection.statistics.packetsLost || 0

@@ -34,6 +34,9 @@ class BaseAudioResource {
 
   destroy() {
     this._end()
+    if (this.seekeable) {
+      this.seekeable.destroy()
+    }
   }
 
   setVolume(volume) {
@@ -180,6 +183,9 @@ class MpegDecoderStream extends Transform {
     if (this.resampler) {
       this.resampler.destroy()
     }
+    if (this.decoder) {
+      this.decoder.free()
+    }
     callback()
   }
 }
@@ -283,7 +289,7 @@ class FLACDecoderStream extends Transform {
     } catch (err) {}
 
     if (this.resampler) this.resampler.destroy?.()
-    if (this.decoder) this.decoder.free()
+    if (this.decoder) this.decoder.free?.()
     callback()
   }
 }
@@ -387,7 +393,7 @@ class OggVorbisDecoderStream extends Transform {
     } catch (err) {}
 
     if (this.resampler) this.resampler.destroy?.()
-    if (this.decoder) this.decoder.free()
+    if (this.decoder) this.decoder.free?.()
     callback()
   }
 }
@@ -1090,8 +1096,9 @@ class WAVDecoderStream extends Transform {
 }
 
 class StreamAudioResource extends BaseAudioResource {
-  constructor(stream, type, nodelink, initialFilters = {}) {
+  constructor(stream, type, nodelink, initialFilters = {}, seekeable = null) {
     super()
+    this.seekeable = seekeable
     
     try {
       if (!stream || !(stream instanceof Readable)) {
@@ -1248,5 +1255,5 @@ export const createSeekeableAudioResource = async (
     seekeable.destroy();
   });
 
-  return new StreamAudioResource(packetStream, type, nodelink, initialFilters);
+  return new StreamAudioResource(packetStream, type, nodelink, initialFilters, seekeable);
 }

@@ -504,7 +504,7 @@ export class BaseClient {
       format: directUrl
         ? audioFormat.mimeType.includes('opus')
           ? 'webm/opus'
-          : 'arbitrary'
+          : 'mpegts'
         : null,
       hlsUrl: streamingData.hlsManifestUrl || null
     }
