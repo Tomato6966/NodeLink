@@ -61,8 +61,9 @@ export class Player {
         this.connection.on(event, handler)
       })
 
-    this._lastPosition = null
-    this._stuckCount = 0
+    this._lastPosition = 0
+    this._stuckTime = 0
+    this._lastStreamDataTime = 0
     this._initConnection()
   }
 
@@ -91,6 +92,11 @@ export class Player {
       )
       this._onError(err)
     })
+    this.connection.on('audioStream', (audioStream) => {
+        audioStream.on('data', () => {
+            this._lastStreamDataTime = Date.now();
+        });
+    });
   }
 
   _onConn(state) {
@@ -156,19 +162,36 @@ export class Player {
 
   _onError(error) {
     if (this.track) {
-      this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
-        track: this.track,
-        exception: {
-          message: error.message,
-          severity: 'fault',
-          cause: `${error.name}: ${error.message}`
-        }
-      })
-      this.emitEvent(GatewayEvents.TRACK_END, {
-        track: this.track,
-        reason: EndReasons.LOAD_FAILED
-      })
-      this._resetTrack()
+      const isStreamError = error.message.includes('stream') || error.message.includes('timeout') || error.name === 'AbortError';
+
+      if (isStreamError) {
+        logger(
+          'warn',
+          'Player',
+          `Stream error detected for guild ${this.guildId}. Emitting TrackRecoveryNeededEvent.`
+        );
+        this.emitEvent(GatewayEvents.TRACK_RECOVERY_NEEDED, {
+          guildId: this.guildId,
+          track: this.track,
+          reason: 'stream_error',
+          message: error.message
+        });
+
+      } else {
+        this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
+          track: this.track,
+          exception: {
+            message: error.message,
+            severity: 'fault',
+            cause: `${error.name}: ${error.message}`
+          }
+        })
+        this.emitEvent(GatewayEvents.TRACK_END, {
+          track: this.track,
+          reason: EndReasons.LOAD_FAILED
+        })
+        this._resetTrack()
+      }
     }
   }
 
@@ -217,6 +240,20 @@ export class Player {
 
     const position = this._realPosition()
 
+    const threshold = this.nodelink.options.trackStuckThresholdMs;
+    if (threshold > 0) {
+        if (this._lastPosition === position) {
+            this._stuckTime += this.nodelink.options.playerUpdateInterval;
+            if (this._stuckTime >= threshold) {
+                this.emitEvent(GatewayEvents.TRACK_STUCK, { thresholdMs: threshold });
+                this.stop();
+                this._stuckTime = 0;
+            }
+        } else {
+            this._stuckTime = 0;
+        }
+    }
+
     this._lastPosition = position
 
     this.session.socket.send(
@@ -239,17 +276,17 @@ export class Player {
     info,
     noReplace = false,
     startTime = 0,
-    isSeek = false
+    endTime = 0
   }) {
     logger('debug', 'Player', `play() called for guild ${this.guildId}`, {
       encoded,
       noReplace,
       startTime,
-      isSeek,
+      endTime,
       track: info
     })
 
-    if (noReplace && this.track && !isSeek) {
+    if (noReplace && this.track) {
       logger(
         'debug',
         'Player',
@@ -258,7 +295,7 @@ export class Player {
       return false
     }
 
-    if (this.track && !isSeek) {
+    if (this.track) {
       this.emitEvent(GatewayEvents.TRACK_END, {
         track: this.track,
         reason: EndReasons.REPLACED
@@ -266,7 +303,7 @@ export class Player {
       this._resetTrack()
     }
 
-    this.track = { encoded, info }
+    this.track = { encoded, info, endTime }
 
     const urlData = await this.nodelink.sources.getTrackUrl(info)
     this.streamInfo = { ...urlData, trackInfo: info }
@@ -276,20 +313,7 @@ export class Player {
 
     if (urlData.exception) {
       const err = new Error(urlData.exception.message)
-      if (!isSeek) {
-        logger(
-          'error',
-          'Player',
-          `Load failed on getTrackUrl for source "${info.sourceName}" on guild ${this.guildId}: ${err.message}`
-        )
-        this._onError(err)
-      } else {
-        logger(
-          'error',
-          'Player',
-          `Seek failed on getTrackUrl for guild ${this.guildId}: ${err.message}`
-        )
-      }
+      this._onError(err)
       return false
     }
 
@@ -312,20 +336,7 @@ export class Player {
     const fetched = await this._fetchResource(info, urlData, startTime)
     if (fetched.exception) {
       const err = new Error(fetched.exception.message)
-      if (!isSeek) {
-        logger(
-          'error',
-          'Player',
-          `Load failed while fetching resource from source "${info.sourceName}" on guild ${this.guildId}: ${err.message}`
-        )
-        this._onError(err)
-      } else {
-        logger(
-          'error',
-          'Player',
-          `Seek fetch failed for guild ${this.guildId}: ${err.message}`
-        )
-      }
+      this._onError(err)
       return false
     }
 
@@ -346,7 +357,7 @@ export class Player {
     return true
   }
 
-  async seek(position) {
+  async seek(position, endTime) {
     if (!this.track) return false
     if (!this.track.info.isSeekable && !this.track.info.isStream) return false
     if (
@@ -360,13 +371,13 @@ export class Player {
     const unsupportedSources = ['deezer', 'local']
 
     if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
-      return this._seekeableSeek(position)
+      return this._seekeableSeek(position, endTime !== undefined ? endTime : this.track.endTime)
     } else {
-      return this._legacySeek(position)
+      return this._legacySeek(position, endTime !== undefined ? endTime : this.track.endTime)
     }
   }
 
-  async _seekeableSeek(position) {
+  async _seekeableSeek(position, endTime) {
     logger(
       'debug',
       'Player',
@@ -380,6 +391,7 @@ export class Player {
       const resource = await createSeekeableAudioResource(
         url,
         position,
+        endTime,
         this.nodelink,
         this.filters
       )
@@ -398,11 +410,11 @@ export class Player {
         'Player',
         `Seekeable seek failed for guild ${this.guildId}: ${e.message}. Falling back to old method.`
       )
-      return this._legacySeek(position)
+      return this._legacySeek(position, endTime)
     }
   }
 
-  async _legacySeek(position) {
+  async _legacySeek(position, endTime) {
     if (!this.track) return false
     if (position < 0 || position > this.track.info.length) return false
 
@@ -418,6 +430,7 @@ export class Player {
       encoded: this.track.encoded,
       info: this.track.info,
       startTime: position,
+      endTime: endTime,
       isSeek: true
     })
 

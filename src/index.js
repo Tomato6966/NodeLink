@@ -5,6 +5,7 @@ import requestHandler from './api/index.js'
 import lyricsManager from './managers/lyricsManager.js'
 import sessionManager from './managers/sessionManager.js'
 import sourceManager from './managers/sourceManager.js'
+import routePlannerManager from './managers/routePlannerManager.js'
 import OAuth from './sources/youtube/OAuth.js'
 import {
   initLogger,
@@ -50,6 +51,7 @@ class NodelinkServer {
     this.sessions = new sessionManager(this)
     this.sources = new sourceManager(this)
     this.lyrics = new lyricsManager(this)
+    this.routePlanner = new routePlannerManager(this)
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     this.statistics = {
@@ -254,9 +256,11 @@ class NodelinkServer {
       process.exit(1)
     }
   }
-  _startGlobalPlayerUpdater() {
+  _startGlobalUpdater() {
     if (this._globalUpdater) return
     const updateInterval = this.options?.playerUpdateInterval ?? 5000
+    const zombieThreshold = this.options?.zombieThresholdMs ?? 60000; 
+
     this._globalUpdater = setInterval(() => {
       const stats = getStats(this)
       const statsPayload = JSON.stringify({ op: 'stats', ...stats })
@@ -268,6 +272,16 @@ class NodelinkServer {
 
         for (const player of session.players.players.values()) {
           if (player && player.track && !player.isPaused && player.connection) {
+            if (player._lastStreamDataTime > 0 && (Date.now() - player._lastStreamDataTime >= zombieThreshold)) {
+                logger('warn', 'Player', `Player for guild ${player.guildId} detected as zombie (no stream data).`);
+                player.emitEvent(GatewayEvents.TRACK_RECOVERY_NEEDED, {
+                    guildId: player.guildId,
+                    track: player.track,
+                    reason: 'no_stream_data',
+                    thresholdMs: zombieThreshold
+                });
+
+            }
             player._sendUpdate()
           }
         }

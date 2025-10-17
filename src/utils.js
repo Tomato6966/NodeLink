@@ -240,6 +240,8 @@ export function getStats(nodelink) {
       }
     }
     frameStats.deficit += Math.max(0, frameStats.expected - frameStats.sent)
+  } else {
+    frameStats = null;
   }
 
   const uptime = Math.floor(process.uptime() * 1000)
@@ -447,6 +449,7 @@ async function http1makeRequest(urlString, options = {}) {
     streamOnly = false,
     disableBodyCompression = false,
     maxRedirects = DEFAULT_MAX_REDIRECTS,
+    localAddress,
     _redirectsFollowed = 0
   } = options
 
@@ -487,7 +490,8 @@ async function http1makeRequest(urlString, options = {}) {
     hostname: currentUrl.hostname,
     port: currentUrl.port || (isHttps ? 443 : 80),
     path: currentUrl.pathname + currentUrl.search,
-    headers: reqHeaders
+    headers: reqHeaders,
+    localAddress
   }
 
   return new Promise((resolve, reject) => {
@@ -577,7 +581,7 @@ async function http1makeRequest(urlString, options = {}) {
     }
   })
 }
-async function makeRequest(urlString, options = {}) {
+async function makeRequest(urlString, options = {}, nodelink) {
   const {
     method = 'GET',
     headers: customHeaders = {},
@@ -594,13 +598,15 @@ async function makeRequest(urlString, options = {}) {
     )
   }
 
+  const localAddress = nodelink.routePlanner.getIP();
+
   try {
     const url = new URL(urlString)
     if (http2FailedHosts.has(url.host)) {
-      return http1makeRequest(urlString, options)
+      return http1makeRequest(urlString, { ...options, localAddress })
     }
   } catch (e) {
-    return http1makeRequest(urlString, options)
+    return http1makeRequest(urlString, { ...options, localAddress })
   }
 
   return new Promise((resolve, reject) => {
@@ -617,12 +623,12 @@ async function makeRequest(urlString, options = {}) {
         const url = new URL(urlString)
         http2FailedHosts.add(url.host)
       } catch (e) {}
-      resolve(http1makeRequest(urlString, options))
+      resolve(http1makeRequest(urlString, { ...options, localAddress }))
     }
 
     try {
       currentUrl = new URL(urlString)
-      session = http2.connect(currentUrl.origin)
+      session = http2.connect(currentUrl.origin, { localAddress })
 
       const closeSessionGracefully = () => {
         if (
@@ -682,6 +688,10 @@ async function makeRequest(urlString, options = {}) {
 
       req.on('response', async (headers) => {
         const statusCode = headers[':status']
+
+        if (statusCode === 429) {
+          nodelink.routePlanner.banIP(localAddress);
+        }
 
         if (REDIRECT_STATUS_CODES.includes(statusCode) && headers.location) {
           const newLocation = new URL(headers.location, urlString).href

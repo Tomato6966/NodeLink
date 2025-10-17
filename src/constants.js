@@ -12,7 +12,9 @@ export const GatewayEvents = {
   WEBSOCKET_CLOSED: 'WebSocketClosedEvent',
   TRACK_END: 'TrackEndEvent',
   TRACK_START: 'TrackStartEvent',
+  TRACK_STUCK: 'TrackStuckEvent',
   TRACK_EXCEPTION: 'TrackExceptionEvent',
+  TRACK_RECOVERY_NEEDED: 'TrackRecoveryNeededEvent',
   PLAYER_UPDATE: 'playerUpdate'
 }
 export const EndReasons = {

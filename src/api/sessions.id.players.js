@@ -178,7 +178,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           await player.play({
             encoded: encodedTrack,
             info: decodedTrack.info,
-            noReplace
+            noReplace,
+            endTime: payload.endTime
           })
         }
       }
@@ -265,6 +266,34 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           `Seeking to ${payload.position}ms for guild ${guildId}`
         )
         await player.seek(payload.position)
+      }
+
+      if (payload.endTime !== undefined) {
+        if (typeof payload.endTime !== 'number' || payload.endTime < 0) {
+          logger(
+            'warn',
+            'PlayerUpdate',
+            `Received invalid endTime for guild ${guildId}: ${payload.endTime}. Expected a non-negative number.`
+          )
+          return sendResponse(
+            req,
+            res,
+            {
+              timestamp: Date.now(),
+              status: 400,
+              error: 'Bad Request',
+              message: 'The endTime value must be a non-negative number.',
+              path: parsedUrl.pathname
+            },
+            400
+          )
+        }
+        logger(
+          'debug',
+          'PlayerUpdate',
+          `Setting endTime to ${payload.endTime}ms for guild ${guildId}`
+        )
+        await player.seek(player.position, payload.endTime)
       }
 
       if (payload.filters !== undefined) {

@@ -1225,12 +1225,13 @@ export const createAudioResource = (
 export const createSeekeableAudioResource = async (
   url,
   seekTime = 0,
+  endTime = 0,
   nodelink,
   initialFilters = {}
 ) => {
   const seekeable = new SeekeableNode();
   await seekeable.load(url, 4096);
-  const { stream: demuxerStream, type } = seekeable.createAVStream(seekTime / 1000);
+  const { stream: demuxerStream, type } = seekeable.createAVStream(seekTime / 1000, endTime / 1000);
 
   const packetStream = new PassThrough();
   demuxerStream.on('data', (packet) => {

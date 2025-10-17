@@ -25,6 +25,8 @@ export default {
   maxSearchResults: 10,
   maxAlbumPlaylistLength: 100,
   playerUpdateInterval: 2000,
+  trackStuckThresholdMs: 10000,
+  zombieThresholdMs: 60000,
   filters: {
     enabled: {
       tremolo: true,
@@ -123,5 +125,10 @@ export default {
   },
   audio: {
     encryption: 'aead_aes256_gcm_rtpsize'
+  },
+  routePlanner: {
+    strategy: 'RotateOnBan', // RotateOnBan, RoundRobin, LoadBalance
+    bannedIpCooldown: 600000, // 10 minutes
+    ipBlocks: []
   }
 }
