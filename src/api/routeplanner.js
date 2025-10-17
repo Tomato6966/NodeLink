@@ -1,15 +1,34 @@
-import { logger, sendResponse } from '../utils.js';
+import { sendResponse } from '../utils.js';
 
 function getStatus(nodelink, req, res) {
+  const routePlanner = nodelink.routePlanner;
+  const now = Date.now();
+
+  const failingAddresses = [];
+  for (const [ip, expiry] of routePlanner.bannedIps.entries()) {
+    if (now < expiry) {
+      const cooldown = routePlanner.config.bannedIpCooldown || 600000;
+      const failingTimestamp = expiry - cooldown;
+      failingAddresses.push({
+        failingAddress: ip,
+        failingTimestamp: failingTimestamp,
+        failingTime: new Date(failingTimestamp).toString(),
+      });
+    }
+  }
+
   const status = {
-    class: nodelink.routePlanner.constructor.name,
+    class: 'BalancingIpRoutePlanner', // Reflects the current implementation
     details: {
       ipBlock: {
-        type: nodelink.routePlanner.config.ipBlocks[0]?.type || 'Unknown',
-        size: nodelink.routePlanner.ipBlocks.length,
+        type: routePlanner.config.ipBlocks[0]?.includes(':') ? 'Inet6Address' : 'Inet4Address',
+        size: routePlanner.ipBlocks.length,
       },
-      failingAddresses: nodelink.routePlanner.bannedIps.size,
-      strategy: nodelink.routePlanner.config.strategy,
+      failingAddresses: failingAddresses,
+      strategy: routePlanner.config.strategy || 'RotateOnBan',
+      currentAddress: null, // N/A for balancing planner
+      blockIndex: null,     // N/A for balancing planner
+      ipIndex: null         // N/A for balancing planner
     },
   };
 
@@ -20,34 +39,54 @@ function freeAddress(nodelink, req, res) {
   const { address } = req.body;
 
   if (!address) {
-    return sendResponse(req, res, { message: 'Address not provided' }, 400);
+    return sendResponse(req, res, {
+      timestamp: Date.now(),
+      status: 400,
+      error: 'Bad Request',
+      message: 'The address field is required.',
+      path: req.url
+    }, 400);
   }
 
   nodelink.routePlanner.freeIP(address);
-  sendResponse(req, res, { message: `Freed address: ${address}` }, 200);
+  res.writeHead(204);
+  res.end();
 }
 
 function freeAll(nodelink, req, res) {
   nodelink.routePlanner.freeAll();
-  sendResponse(req, res, { message: 'Freed all addresses' }, 200);
+  res.writeHead(204);
+  res.end();
 }
 
+const routes = {
+  '/v4/routeplanner/status': {
+    'GET': getStatus
+  },
+  '/v4/routeplanner/free/address': {
+    'POST': freeAddress
+  },
+  '/v4/routeplanner/free/all': {
+    'POST': freeAll
+  }
+};
+
 function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  if (req.method === 'GET') {
-    return getStatus(nodelink, req, res);
-  }
-
-  if (req.method === 'POST') {
-    if (parsedUrl.pathname.endsWith('/free')) {
-      return freeAddress(nodelink, req, res);
-    }
-
-    if (parsedUrl.pathname.endsWith('/free/all')) {
-      return freeAll(nodelink, req, res);
+  const route = routes[parsedUrl.pathname];
+  if (route) {
+    const methodHandler = route[req.method];
+    if (methodHandler) {
+      return methodHandler(nodelink, req, res);
     }
   }
 
-  sendResponse(req, res, { message: 'Invalid method' }, 405);
+  return sendResponse(req, res, {
+    timestamp: Date.now(),
+    status: 404,
+    error: 'Not Found',
+    message: 'The requested route planner endpoint was not found.',
+    path: parsedUrl.pathname
+  }, 404);
 }
 
 export default {
