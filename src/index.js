@@ -14,7 +14,8 @@ import {
   parseClient,
   validateProperty,
   verifyDiscordID,
-  checkForUpdates
+  checkForUpdates,
+  getStats
 } from './utils.js'
 import 'dotenv/config'
 
@@ -55,7 +56,7 @@ class NodelinkServer {
       players: 0,
       playingPlayers: 0
     }
-    this._globalPlayerUpdater = null
+    this._globalUpdater = null
     logger('info', 'Server', `version ${this.version}`)
     logger(
       'info',
@@ -254,10 +255,17 @@ class NodelinkServer {
     }
   }
   _startGlobalPlayerUpdater() {
-    if (this._globalPlayerUpdater) return
+    if (this._globalUpdater) return
     const updateInterval = this.options?.playerUpdateInterval ?? 5000
-    this._globalPlayerUpdater = setInterval(() => {
+    this._globalUpdater = setInterval(() => {
+      const stats = getStats(this)
+      const statsPayload = JSON.stringify({ op: 'stats', ...stats })
+
       for (const session of this.sessions.values()) {
+        if (session.socket) {
+            session.socket.send(statsPayload)
+        }
+
         for (const player of session.players.players.values()) {
           if (player && player.track && !player.isPaused && player.connection) {
             player._sendUpdate()
@@ -267,9 +275,9 @@ class NodelinkServer {
     }, updateInterval)
   }
   _stopGlobalPlayerUpdater() {
-    if (this._globalPlayerUpdater) {
-      clearInterval(this._globalPlayerUpdater)
-      this._globalPlayerUpdater = null
+    if (this._globalUpdater) {
+      clearInterval(this._globalUpdater)
+      this._globalUpdater = null
     }
   }
   async start() {
@@ -303,7 +311,7 @@ class NodelinkServer {
     await this.lyrics.loadFolder()
     this._createServer()
     this._listen()
-    this._startGlobalPlayerUpdater()
+    this._startGlobalUpdater()
     return this
   }
 }
