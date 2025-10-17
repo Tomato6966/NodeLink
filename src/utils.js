@@ -139,7 +139,7 @@ function getVersion(type = 'string') {
   }
 }
 
-function sendResponse(req, res, data, status) {
+function sendResponse(req, res, data, status, trace = false) {
   const headers = {}
 
   if (!data) {
@@ -148,8 +148,14 @@ function sendResponse(req, res, data, status) {
     return
   }
 
+  let finalData = data;
+  if (data.trace && !trace) {
+    const { trace, ...rest } = data;
+    finalData = rest;
+  }
+
   headers['Content-Type'] = 'application/json'
-  const jsonData = JSON.stringify(data)
+  const jsonData = JSON.stringify(finalData)
 
   const encoding = req.headers['accept-encoding'] || ''
   const compressions = [
@@ -216,7 +222,7 @@ function getGitInfo() {
   }
 }
 
-function verifyMethod(parsedUrl, req, res, expected, clientAddress) {
+function verifyMethod(parsedUrl, req, res, expected, clientAddress, trace = false) {
   const methods = Array.isArray(expected) ? expected : [expected]
   // biome-ignore format: off
   if (!methods.includes(req.method)) {
@@ -231,7 +237,8 @@ function verifyMethod(parsedUrl, req, res, expected, clientAddress) {
         error: 'Method Not Allowed',
         message: `Method must be one of ${methods.join(', ')}`,
         path: parsedUrl.pathname,
-      }, 405)
+        trace: new Error().stack
+      }, 405, trace)
     return false
   }
   return true

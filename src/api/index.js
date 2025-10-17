@@ -54,6 +54,7 @@ const routesPromise = loadRoutes()
 
 async function requestHandler(nodelink, req, res) {
   const parsedUrl = new URL(req.url, `http://${req.headers.host}`)
+  const trace = parsedUrl.searchParams.get('trace') === 'true'
   const remoteAddress = req.socket.remoteAddress
   const isInternal = ['127.0.0.1', '::1', 'localhost'].includes(remoteAddress)
   const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${req.socket.remotePort})`
@@ -100,7 +101,8 @@ async function requestHandler(nodelink, req, res) {
               trace: new Error().stack,
               path: parsedUrl.pathname
             },
-            400
+            400,
+            trace
           )
           return
         }
@@ -122,7 +124,7 @@ async function requestHandler(nodelink, req, res) {
 
   const staticRoute = staticRoutes.get(parsedUrl.pathname)
   if (staticRoute) {
-    if (!verifyMethod(parsedUrl, req, res, staticRoute.methods, clientAddress))
+    if (!verifyMethod(parsedUrl, req, res, staticRoute.methods, clientAddress, trace))
       return
     staticRoute.handler(nodelink, req, res, sendResponse, parsedUrl)
     return
@@ -136,8 +138,8 @@ async function requestHandler(nodelink, req, res) {
           req,
           res,
           route.methods,
-          sendResponse,
-          clientAddress
+          clientAddress,
+          trace
         )
       )
         return
@@ -159,7 +161,7 @@ async function requestHandler(nodelink, req, res) {
     trace: new Error().stack,
     message: 'The requested route was not found.',
     path: parsedUrl.pathname,
-  }, 404)
+  }, 404, trace)
 }
 
 export default requestHandler
