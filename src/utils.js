@@ -222,7 +222,7 @@ function getGitInfo() {
   }
 }
 
-export function getStats(nodelink) {
+function getStats(nodelink) {
   const { players, playingPlayers } = nodelink.statistics
   let frameStats = null
   if (players > 0) {
@@ -598,7 +598,7 @@ async function makeRequest(urlString, options = {}, nodelink) {
     )
   }
 
-  const localAddress = nodelink.routePlanner.getIP();
+  const localAddress = nodelink?.routePlanner?.getIP();
 
   try {
     const url = new URL(urlString)

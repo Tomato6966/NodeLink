@@ -331,4 +331,5 @@ class NodelinkServer {
 }
 
 const server = new NodelinkServer(config).start()
+global.nodelink = server
 export default server

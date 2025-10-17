@@ -1,4 +1,3 @@
-import ip from 'ip';
 import { logger } from '../utils.js';
 
 export default class RoutePlannerManager {
