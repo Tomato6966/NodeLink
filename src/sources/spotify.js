@@ -1,6 +1,6 @@
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
-const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1';
+const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1'
 
 export default class SpotifySource {
   constructor(nodelink) {
@@ -18,75 +18,95 @@ export default class SpotifySource {
   }
 
   async setup() {
-    if (this.tokenInitialized) return true;
+    if (this.tokenInitialized) return true
 
     try {
-      this.clientId = this.config.sources.spotify?.clientId;
-      this.clientSecret = this.config.sources.spotify?.clientSecret;
+      this.clientId = this.config.sources.spotify?.clientId
+      this.clientSecret = this.config.sources.spotify?.clientSecret
 
       if (!this.clientId || !this.clientSecret) {
-        logger('warn', 'Spotify', 'Client ID or Client Secret not provided. Disabling source.');
-        return false;
+        logger(
+          'warn',
+          'Spotify',
+          'Client ID or Client Secret not provided. Disabling source.'
+        )
+        return false
       }
 
-      const auth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
+      const auth = Buffer.from(
+        `${this.clientId}:${this.clientSecret}`
+      ).toString('base64')
 
-      const { body: tokenData, error, statusCode } = await http1makeRequest('https://accounts.spotify.com/api/token', {
+      const {
+        body: tokenData,
+        error,
+        statusCode
+      } = await http1makeRequest('https://accounts.spotify.com/api/token', {
         method: 'POST',
         headers: {
           Authorization: `Basic ${auth}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/x-www-form-urlencoded'
         },
-        body: 'grant_type=client_credentials',
-      });
+        body: 'grant_type=client_credentials'
+      })
 
       if (error || statusCode !== 200) {
-        logger('error', 'Spotify', `Error initializing token: ${statusCode} - ${error?.message || 'Unknown error'}`);
-        return false;
+        logger(
+          'error',
+          'Spotify',
+          `Error initializing token: ${statusCode} - ${error?.message || 'Unknown error'}`
+        )
+        return false
       }
 
-      this.accessToken = tokenData.access_token;
-      this.tokenInitialized = true;
-      logger('info', 'Spotify', 'Tokens initialized successfully');
-      return true;
+      this.accessToken = tokenData.access_token
+      this.tokenInitialized = true
+      logger('info', 'Spotify', 'Tokens initialized successfully')
+      return true
     } catch (e) {
-      logger('error', 'Spotify', `Error initializing Spotify tokens: ${e.message}`);
-      return false;
+      logger(
+        'error',
+        'Spotify',
+        `Error initializing Spotify tokens: ${e.message}`
+      )
+      return false
     }
   }
 
   async _apiRequest(path) {
     if (!this.tokenInitialized) {
-        const success = await this.setup();
-        if (!success) {
-            throw new Error('Failed to initialize Spotify for API request.');
-        }
+      const success = await this.setup()
+      if (!success) {
+        throw new Error('Failed to initialize Spotify for API request.')
+      }
     }
 
     try {
-      const url = path.startsWith('http') ? path : `${SPOTIFY_API_BASE_URL}${path}`;
+      const url = path.startsWith('http')
+        ? path
+        : `${SPOTIFY_API_BASE_URL}${path}`
 
       const { body, statusCode } = await http1makeRequest(url, {
         headers: {
           Authorization: `Bearer ${this.accessToken}`,
-          Accept: 'application/json',
-        },
-      });
+          Accept: 'application/json'
+        }
+      })
 
       if (statusCode === 401) {
-        this.tokenInitialized = false;
-        return this._apiRequest(path);
+        this.tokenInitialized = false
+        return this._apiRequest(path)
       }
 
       if (statusCode !== 200) {
-        logger('error', 'Spotify', `API error: ${statusCode}`);
-        return null;
+        logger('error', 'Spotify', `API error: ${statusCode}`)
+        return null
       }
 
-      return body;
+      return body
     } catch (e) {
-      logger('error', 'Spotify', `Error in Spotify apiRequest: ${e.message}`);
-      return null;
+      logger('error', 'Spotify', `Error in Spotify apiRequest: ${e.message}`)
+      return null
     }
   }
 
@@ -122,7 +142,10 @@ export default class SpotifySource {
       if (!data || data.error) {
         return {
           loadType: 'error',
-          data: { message: data?.error?.message || 'Search failed on Spotify.', severity: 'common' }
+          data: {
+            message: data?.error?.message || 'Search failed on Spotify.',
+            severity: 'common'
+          }
         }
       }
 
@@ -151,12 +174,20 @@ export default class SpotifySource {
       switch (type) {
         case 'track': {
           const data = await this._apiRequest(`/tracks/${id}`)
-          if (!data) return { loadType: 'error', data: { message: 'Track not found.', severity: 'common' } };
+          if (!data)
+            return {
+              loadType: 'error',
+              data: { message: 'Track not found.', severity: 'common' }
+            }
           return { loadType: 'track', data: this.buildTrack(data) }
         }
         case 'album': {
           const data = await this._apiRequest(`/albums/${id}`)
-          if (!data) return { loadType: 'error', data: { message: 'Album not found.', severity: 'common' } };
+          if (!data)
+            return {
+              loadType: 'error',
+              data: { message: 'Album not found.', severity: 'common' }
+            }
 
           const tracks = data.tracks.items.map((item) =>
             this.buildTrack(item, data.images[0]?.url)
@@ -168,7 +199,11 @@ export default class SpotifySource {
         }
         case 'playlist': {
           const data = await this._apiRequest(`/playlists/${id}`)
-          if (!data) return { loadType: 'error', data: { message: 'Playlist not found.', severity: 'common' } };
+          if (!data)
+            return {
+              loadType: 'error',
+              data: { message: 'Playlist not found.', severity: 'common' }
+            }
 
           const tracks = data.tracks.items.map((item) =>
             this.buildTrack(item.track)
@@ -180,12 +215,23 @@ export default class SpotifySource {
         }
         case 'artist': {
           const artist = await this._apiRequest(`/artists/${id}`)
-          if (!artist) return { loadType: 'error', data: { message: 'Artist not found.', severity: 'common' } };
+          if (!artist)
+            return {
+              loadType: 'error',
+              data: { message: 'Artist not found.', severity: 'common' }
+            }
 
           const topTracks = await this._apiRequest(
             `/artists/${id}/top-tracks?market=US`
           )
-          if (!topTracks) return { loadType: 'error', data: { message: 'Failed to get artist top tracks.', severity: 'common' } };
+          if (!topTracks)
+            return {
+              loadType: 'error',
+              data: {
+                message: 'Failed to get artist top tracks.',
+                severity: 'common'
+              }
+            }
 
           const tracks = topTracks.tracks.map((item) =>
             this.buildTrack(item, artist.images[0]?.url)

@@ -26,28 +26,38 @@ export default class HttpSource {
 
       const headers = data.headers || {}
       const contentType = headers['content-type'] || ''
-      
+
       const validAudioPrefixes = ['audio/', 'video/']
       const validApplicationTypes = ['application/octet-stream']
-      
-      const isValidMedia = 
-        validAudioPrefixes.some(prefix => contentType.startsWith(prefix)) ||
+
+      const isValidMedia =
+        validAudioPrefixes.some((prefix) => contentType.startsWith(prefix)) ||
         validApplicationTypes.includes(contentType) ||
         contentType === ''
-      
+
       if (!isValidMedia) {
         return {
           loadType: 'error',
-          data: { message: `Unsupported content type: ${contentType}`, severity: 'common' }
+          data: {
+            message: `Unsupported content type: ${contentType}`,
+            severity: 'common'
+          }
         }
       }
 
-      const isStream = Boolean(headers['icy-metaint']) || !('content-length' in headers)
-      return { loadType: 'track', data: this.buildTrack(url, headers, isStream) }
+      const isStream =
+        Boolean(headers['icy-metaint']) || !('content-length' in headers)
+      return {
+        loadType: 'track',
+        data: this.buildTrack(url, headers, isStream)
+      }
     } catch (err) {
       return {
         loadType: 'error',
-        data: { message: `Failed to resolve URL: ${err.message}`, severity: 'common' }
+        data: {
+          message: `Failed to resolve URL: ${err.message}`,
+          severity: 'common'
+        }
       }
     }
   }
@@ -108,7 +118,11 @@ export default class HttpSource {
       const httpStream = response.stream
 
       httpStream.on('end', () => {
-        logger('debug', 'HTTP Source', `Stream ended for ${url}, emitting finishBuffering.`)
+        logger(
+          'debug',
+          'HTTP Source',
+          `Stream ended for ${url}, emitting finishBuffering.`
+        )
         httpStream.emit('finishBuffering')
       })
 

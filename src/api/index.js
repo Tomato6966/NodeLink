@@ -124,7 +124,16 @@ async function requestHandler(nodelink, req, res) {
 
   const staticRoute = staticRoutes.get(parsedUrl.pathname)
   if (staticRoute) {
-    if (!verifyMethod(parsedUrl, req, res, staticRoute.methods, clientAddress, trace))
+    if (
+      !verifyMethod(
+        parsedUrl,
+        req,
+        res,
+        staticRoute.methods,
+        clientAddress,
+        trace
+      )
+    )
       return
     staticRoute.handler(nodelink, req, res, sendResponse, parsedUrl)
     return
@@ -133,14 +142,7 @@ async function requestHandler(nodelink, req, res) {
   for (const [regex, route] of dynamicRoutes) {
     if (regex.test(parsedUrl.pathname)) {
       if (
-        !verifyMethod(
-          parsedUrl,
-          req,
-          res,
-          route.methods,
-          clientAddress,
-          trace
-        )
+        !verifyMethod(parsedUrl, req, res, route.methods, clientAddress, trace)
       )
         return
       route.handler(nodelink, req, res, sendResponse, parsedUrl)

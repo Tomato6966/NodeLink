@@ -35,8 +35,9 @@ export default class KwaiSource {
   async getVideoInfo(videoId) {
     const url = `https://www.kwai.com/video/${videoId}?responseType=json`
     const headers = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-      'Accept': '*/*'
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
+      Accept: '*/*'
     }
 
     try {
@@ -58,16 +59,20 @@ export default class KwaiSource {
 
       let thumbnailUrl = body.match(/poster="([^"]+)"/)?.[1]
       if (!thumbnailUrl) {
-        const thumbnailMatch = body.match(/cover_thumbnail_urls:\[\{cdn:p,url:\s*"([^"]+)"/)
-        thumbnailUrl = thumbnailMatch ? this.decodeUnicodeEscapes(thumbnailMatch[1]) : null
+        const thumbnailMatch = body.match(
+          /cover_thumbnail_urls:\[\{cdn:p,url:\s*"([^"]+)"/
+        )
+        thumbnailUrl = thumbnailMatch
+          ? this.decodeUnicodeEscapes(thumbnailMatch[1])
+          : null
       }
-      
+
       if (!urlMatch) {
         throw new Error('Video URL not found in response')
       }
 
       const videoUrlMatch = urlMatch[1].match(/url:\s*"([^"]+)"/)
-      
+
       if (!videoUrlMatch) {
         throw new Error('Could not extract video URL')
       }
@@ -140,7 +145,7 @@ export default class KwaiSource {
   async getTrackUrl(track) {
     try {
       const videoData = await this.getVideoInfo(track.identifier)
-      
+
       if (!videoData.videoUrl) {
         return {
           exception: {
@@ -173,16 +178,20 @@ export default class KwaiSource {
         method: 'GET',
         streamOnly: true,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
-          'Accept': '*/*'
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
+          Accept: '*/*'
         },
         disableBodyCompression: true
       }
-      
+
       const response = await http1makeRequest(url, options)
 
       if (response.error || !response.stream) {
-        throw response.error || new Error('Failed to get stream, no stream object returned.')
+        throw (
+          response.error ||
+          new Error('Failed to get stream, no stream object returned.')
+        )
       }
       const stream = new PassThrough()
 
@@ -195,7 +204,7 @@ export default class KwaiSource {
       })
 
       return { stream: stream, type: 'mp4' }
-        } catch (error) {
+    } catch (error) {
       throw {
         exception: {
           message: error.message || 'Failed to load stream',

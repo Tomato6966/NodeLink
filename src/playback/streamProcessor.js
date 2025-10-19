@@ -105,20 +105,25 @@ class MpegDecoderStream extends Transform {
     this.resampler = null
     this.isDecoderReady = false
 
-    this.decoder.ready.then(() => {
-      this.isDecoderReady = true
-      this.emit('decoderReady')
-    }).catch(err => this.emit('error', err))
+    this.decoder.ready
+      .then(() => {
+        this.isDecoderReady = true
+        this.emit('decoderReady')
+      })
+      .catch((err) => this.emit('error', err))
   }
 
   _transform(chunk, encoding, callback) {
     if (!this.isDecoderReady) {
-      this.once('decoderReady', () => this._transform(chunk, encoding, callback))
+      this.once('decoderReady', () =>
+        this._transform(chunk, encoding, callback)
+      )
       return
     }
 
     try {
-      const { channelData, samplesDecoded, sampleRate, channels } = this.decoder.decode(chunk)
+      const { channelData, samplesDecoded, sampleRate, channels } =
+        this.decoder.decode(chunk)
 
       if (samplesDecoded > 0) {
         if (sampleRate === 48000) {
@@ -126,14 +131,16 @@ class MpegDecoderStream extends Transform {
         } else if (this.resampler) {
           this._resample(channelData, channels, callback)
         } else {
-          LibSampleRate.create(2, sampleRate, 48000, { 
-            converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY 
-          }).then(src => {
-            this.resampler = src
-            this._resample(channelData, channels, callback)
-          }).catch(err => {
-            callback()
+          LibSampleRate.create(2, sampleRate, 48000, {
+            converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY
           })
+            .then((src) => {
+              this.resampler = src
+              this._resample(channelData, channels, callback)
+            })
+            .catch((err) => {
+              callback()
+            })
         }
       } else {
         callback()
@@ -153,7 +160,7 @@ class MpegDecoderStream extends Transform {
       pcm[i * 2] = Math.max(-1, Math.min(1, floatL[i])) * 32767
       pcm[i * 2 + 1] = Math.max(-1, Math.min(1, floatR[i])) * 32767
     }
-    
+
     this.push(Buffer.from(pcm.buffer))
     callback()
   }
@@ -162,7 +169,7 @@ class MpegDecoderStream extends Transform {
     const floatL = channelData[0]
     const floatR = channels > 1 ? channelData[1] : floatL
     const interleaved = new Float32Array(floatL.length * 2)
-    
+
     for (let i = 0; i < floatL.length; i++) {
       interleaved[i * 2] = floatL[i]
       interleaved[i * 2 + 1] = floatR[i]
@@ -170,7 +177,7 @@ class MpegDecoderStream extends Transform {
 
     const resampled = this.resampler.full(interleaved)
     const pcmInt16 = new Int16Array(resampled.length)
-    
+
     for (let i = 0; i < resampled.length; i++) {
       pcmInt16[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767
     }
@@ -197,21 +204,25 @@ class FLACDecoderStream extends Transform {
     this.resampler = null
     this.isDecoderReady = false
 
-    this.decoder.ready.then(() => {
-      this.isDecoderReady = true
-      this.emit('decoderReady')
-    }).catch(err => this.emit('error', err))
+    this.decoder.ready
+      .then(() => {
+        this.isDecoderReady = true
+        this.emit('decoderReady')
+      })
+      .catch((err) => this.emit('error', err))
   }
 
   async _transform(chunk, encoding, callback) {
     if (!this.isDecoderReady) {
-      this.once('decoderReady', () => this._transform(chunk, encoding, callback))
+      this.once('decoderReady', () =>
+        this._transform(chunk, encoding, callback)
+      )
       return
     }
 
     try {
       const result = await this.decoder.decode(chunk)
-      
+
       if (result && result.samplesDecoded > 0) {
         const { channelData, samplesDecoded, sampleRate } = result
         const channels = channelData.length
@@ -219,13 +230,25 @@ class FLACDecoderStream extends Transform {
         if (sampleRate === 48000) {
           this._process(channelData, channels, samplesDecoded, callback)
         } else if (this.resampler) {
-          this._resample(channelData, channels, samplesDecoded, sampleRate, callback)
+          this._resample(
+            channelData,
+            channels,
+            samplesDecoded,
+            sampleRate,
+            callback
+          )
         } else {
           try {
-            this.resampler = await LibSampleRate.create(2, sampleRate, 48000, { 
-              converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY 
+            this.resampler = await LibSampleRate.create(2, sampleRate, 48000, {
+              converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY
             })
-            this._resample(channelData, channels, samplesDecoded, sampleRate, callback)
+            this._resample(
+              channelData,
+              channels,
+              samplesDecoded,
+              sampleRate,
+              callback
+            )
           } catch (err) {
             callback()
           }
@@ -247,7 +270,7 @@ class FLACDecoderStream extends Transform {
       pcm[i * 2] = Math.max(-1, Math.min(1, floatL[i])) * 32767
       pcm[i * 2 + 1] = Math.max(-1, Math.min(1, floatR[i])) * 32767
     }
-    
+
     this.push(Buffer.from(pcm.buffer))
     callback()
   }
@@ -256,7 +279,7 @@ class FLACDecoderStream extends Transform {
     const floatL = channelData[0]
     const floatR = channels > 1 ? channelData[1] : floatL
     const interleaved = new Float32Array(samplesDecoded * 2)
-    
+
     for (let i = 0; i < samplesDecoded; i++) {
       interleaved[i * 2] = floatL[i]
       interleaved[i * 2 + 1] = floatR[i]
@@ -264,7 +287,7 @@ class FLACDecoderStream extends Transform {
 
     const resampled = this.resampler.full(interleaved)
     const pcmInt16 = new Int16Array(resampled.length)
-    
+
     for (let i = 0; i < resampled.length; i++) {
       pcmInt16[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767
     }
@@ -279,11 +302,17 @@ class FLACDecoderStream extends Transform {
       if (result && result.samplesDecoded > 0) {
         const { channelData, samplesDecoded, sampleRate } = result
         const channels = channelData.length
-        
+
         if (sampleRate === 48000) {
           this._process(channelData, channels, samplesDecoded, () => {})
         } else if (this.resampler) {
-          this._resample(channelData, channels, samplesDecoded, sampleRate, () => {})
+          this._resample(
+            channelData,
+            channels,
+            samplesDecoded,
+            sampleRate,
+            () => {}
+          )
         }
       }
     } catch (err) {}
@@ -301,21 +330,25 @@ class OggVorbisDecoderStream extends Transform {
     this.resampler = null
     this.isDecoderReady = false
 
-    this.decoder.ready.then(() => {
-      this.isDecoderReady = true
-      this.emit('decoderReady')
-    }).catch(err => this.emit('error', err))
+    this.decoder.ready
+      .then(() => {
+        this.isDecoderReady = true
+        this.emit('decoderReady')
+      })
+      .catch((err) => this.emit('error', err))
   }
 
   async _transform(chunk, encoding, callback) {
     if (!this.isDecoderReady) {
-      this.once('decoderReady', () => this._transform(chunk, encoding, callback))
+      this.once('decoderReady', () =>
+        this._transform(chunk, encoding, callback)
+      )
       return
     }
 
     try {
       const result = await this.decoder.decode(chunk)
-      
+
       if (result && result.samplesDecoded > 0) {
         const { channelData, samplesDecoded, sampleRate } = result
         const channels = channelData.length
@@ -323,13 +356,25 @@ class OggVorbisDecoderStream extends Transform {
         if (sampleRate === 48000) {
           this._process(channelData, channels, samplesDecoded, callback)
         } else if (this.resampler) {
-          this._resample(channelData, channels, samplesDecoded, sampleRate, callback)
+          this._resample(
+            channelData,
+            channels,
+            samplesDecoded,
+            sampleRate,
+            callback
+          )
         } else {
           try {
-            this.resampler = await LibSampleRate.create(2, sampleRate, 48000, { 
-              converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY 
+            this.resampler = await LibSampleRate.create(2, sampleRate, 48000, {
+              converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY
             })
-            this._resample(channelData, channels, samplesDecoded, sampleRate, callback)
+            this._resample(
+              channelData,
+              channels,
+              samplesDecoded,
+              sampleRate,
+              callback
+            )
           } catch (err) {
             callback()
           }
@@ -351,7 +396,7 @@ class OggVorbisDecoderStream extends Transform {
       pcm[i * 2] = Math.max(-1, Math.min(1, floatL[i])) * 32767
       pcm[i * 2 + 1] = Math.max(-1, Math.min(1, floatR[i])) * 32767
     }
-    
+
     this.push(Buffer.from(pcm.buffer))
     callback()
   }
@@ -360,7 +405,7 @@ class OggVorbisDecoderStream extends Transform {
     const floatL = channelData[0]
     const floatR = channels > 1 ? channelData[1] : floatL
     const interleaved = new Float32Array(samplesDecoded * 2)
-    
+
     for (let i = 0; i < samplesDecoded; i++) {
       interleaved[i * 2] = floatL[i]
       interleaved[i * 2 + 1] = floatR[i]
@@ -368,7 +413,7 @@ class OggVorbisDecoderStream extends Transform {
 
     const resampled = this.resampler.full(interleaved)
     const pcmInt16 = new Int16Array(resampled.length)
-    
+
     for (let i = 0; i < resampled.length; i++) {
       pcmInt16[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767
     }
@@ -383,11 +428,17 @@ class OggVorbisDecoderStream extends Transform {
       if (result && result.samplesDecoded > 0) {
         const { channelData, samplesDecoded, sampleRate } = result
         const channels = channelData.length
-        
+
         if (sampleRate === 48000) {
           this._process(channelData, channels, samplesDecoded, () => {})
         } else if (this.resampler) {
-          this._resample(channelData, channels, samplesDecoded, sampleRate, () => {})
+          this._resample(
+            channelData,
+            channels,
+            samplesDecoded,
+            sampleRate,
+            () => {}
+          )
         }
       }
     } catch (err) {}
@@ -428,11 +479,11 @@ class MPEGTSToAACStream extends Transform {
 
         const packet = this.buffer.slice(pos, pos + 188)
         this.packetsProcessed++
-        
+
         const pusi = !!(packet[1] & 0x40)
-        const pid = ((packet[1] & 0x1F) << 8) + packet[2]
+        const pid = ((packet[1] & 0x1f) << 8) + packet[2]
         const atf = (packet[3] & 0x30) >> 4
-        
+
         let offset = 4
         if (atf > 1) {
           const atflen = packet[4]
@@ -445,7 +496,8 @@ class MPEGTSToAACStream extends Transform {
 
         if (pid === 0 && pusi) {
           offset += packet[offset] + 1
-          this.patPmtId = (packet[offset + 10] & 0x1F) << 8 | packet[offset + 11]
+          this.patPmtId =
+            ((packet[offset + 10] & 0x1f) << 8) | packet[offset + 11]
         } else if (this.patPmtId && pid === this.patPmtId && pusi) {
           offset += packet[offset] + 1
           const foundPid = this._parsePMT(packet, offset)
@@ -481,17 +533,21 @@ class MPEGTSToAACStream extends Transform {
   }
 
   _parsePMT(packet, offset) {
-    const sectionLength = (packet[offset + 1] & 0x0F) << 8 | packet[offset + 2]
+    const sectionLength =
+      ((packet[offset + 1] & 0x0f) << 8) | packet[offset + 2]
     const tableEnd = offset + 3 + sectionLength - 4
-    const programInfoLength = (packet[offset + 10] & 0x0F) << 8 | packet[offset + 11]
+    const programInfoLength =
+      ((packet[offset + 10] & 0x0f) << 8) | packet[offset + 11]
     offset += 12 + programInfoLength
 
     while (offset < tableEnd && offset < 188) {
       const streamType = packet[offset]
-      const elementaryPid = (packet[offset + 1] & 0x1F) << 8 | packet[offset + 2]
-      const esInfoLength = (packet[offset + 3] & 0x0F) << 8 | packet[offset + 4]
+      const elementaryPid =
+        ((packet[offset + 1] & 0x1f) << 8) | packet[offset + 2]
+      const esInfoLength =
+        ((packet[offset + 3] & 0x0f) << 8) | packet[offset + 4]
 
-      if (streamType === 0x0F) {
+      if (streamType === 0x0f) {
         return elementaryPid
       }
       offset += 5 + esInfoLength
@@ -517,11 +573,13 @@ class AACDecoderStream extends Transform {
     this.pendingChunks = []
     this.buffer = Buffer.alloc(0)
 
-    this.decoder.ready.then(() => {
-      this.isDecoderReady = true
-      this.emit('decoderReady')
-      this._processPendingChunks()
-    }).catch(err => this.emit('error', err))
+    this.decoder.ready
+      .then(() => {
+        this.isDecoderReady = true
+        this.emit('decoderReady')
+        this._processPendingChunks()
+      })
+      .catch((err) => this.emit('error', err))
   }
 
   _downmixToStereo(interleavedPCM, channels, samplesPerChannel) {
@@ -593,13 +651,24 @@ class AACDecoderStream extends Transform {
           const Lc = interleavedPCM[i * 8 + 5]
           const Rc = interleavedPCM[i * 8 + 6]
           const LFE = interleavedPCM[i * 8 + 7]
-          left = L + C * CENTER_MIX + Ls * SURROUND_MIX + Lc * SURROUND_MIX * 0.5 + LFE * LFE_MIX
-          right = R + C * CENTER_MIX + Rs * SURROUND_MIX + Rc * SURROUND_MIX * 0.5 + LFE * LFE_MIX
+          left =
+            L +
+            C * CENTER_MIX +
+            Ls * SURROUND_MIX +
+            Lc * SURROUND_MIX * 0.5 +
+            LFE * LFE_MIX
+          right =
+            R +
+            C * CENTER_MIX +
+            Rs * SURROUND_MIX +
+            Rc * SURROUND_MIX * 0.5 +
+            LFE * LFE_MIX
           break
         }
         default:
           left = interleavedPCM[i * channels]
-          right = interleavedPCM[i * channels + 1] || interleavedPCM[i * channels]
+          right =
+            interleavedPCM[i * channels + 1] || interleavedPCM[i * channels]
           break
       }
 
@@ -628,11 +697,12 @@ class AACDecoderStream extends Transform {
   _findADTSFrame(buffer) {
     for (let i = 0; i < buffer.length - 7; i++) {
       const syncword = (buffer[i] << 4) | (buffer[i + 1] >> 4)
-      if (syncword === 0xFFF) {
-        const frameLength = ((buffer[i + 3] & 0x03) << 11) | 
-                           (buffer[i + 4] << 3) | 
-                           ((buffer[i + 5] >> 5) & 0x07)
-        
+      if (syncword === 0xfff) {
+        const frameLength =
+          ((buffer[i + 3] & 0x03) << 11) |
+          (buffer[i + 4] << 3) |
+          ((buffer[i + 5] >> 5) & 0x07)
+
         if (i + frameLength <= buffer.length) {
           return {
             start: i,
@@ -669,12 +739,12 @@ class AACDecoderStream extends Transform {
 
       while (this.buffer.length > 0) {
         const frameInfo = this._findADTSFrame(this.buffer)
-        
+
         if (!frameInfo) break
 
         try {
           const result = this.decoder.decode(frameInfo.frame)
-          
+
           if (result && result.pcm && result.pcm.length > 0) {
             let { pcm, sampleRate, channels, samplesPerChannel } = result
 
@@ -685,9 +755,15 @@ class AACDecoderStream extends Transform {
 
             if (sampleRate !== 48000) {
               if (!this.resampler) {
-                this.resampler = await LibSampleRate.create(2, sampleRate, 48000, { 
-                  converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY 
-                })
+                this.resampler = await LibSampleRate.create(
+                  2,
+                  sampleRate,
+                  48000,
+                  {
+                    converterType:
+                      LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY
+                  }
+                )
               }
 
               const resampled = this.resampler.full(pcm)
@@ -748,18 +824,25 @@ class MP4ToAACStream extends Transform {
 
     this.mp4boxFile.onReady = (info) => {
       try {
-        const audioTrack = info.tracks.find(t => t.codec && t.codec.startsWith('mp4a'))
+        const audioTrack = info.tracks.find(
+          (t) => t.codec && t.codec.startsWith('mp4a')
+        )
         if (!audioTrack) {
           this.emit('error', new Error('No AAC track found in MP4'))
           return
         }
 
         this.audioConfig = this._getAudioConfig(audioTrack)
-        this.mp4boxFile.setExtractionOptions(audioTrack.id, null, { nbSamples: 1 })
+        this.mp4boxFile.setExtractionOptions(audioTrack.id, null, {
+          nbSamples: 1
+        })
         this.mp4boxFile.start()
         this.isReady = true
       } catch (err) {
-        this.emit('error', new Error(`MP4 initialization error: ${err.message}`))
+        this.emit(
+          'error',
+          new Error(`MP4 initialization error: ${err.message}`)
+        )
       }
     }
 
@@ -769,11 +852,15 @@ class MP4ToAACStream extends Transform {
 
         for (const sample of samples) {
           if (sample && sample.data) {
-            const adts = this._createAdtsHeader(sample.data.byteLength, this.audioConfig)
-            const sampleData = sample.data instanceof ArrayBuffer 
-              ? Buffer.from(sample.data)
-              : Buffer.from(sample.data.buffer || sample.data)
-            
+            const adts = this._createAdtsHeader(
+              sample.data.byteLength,
+              this.audioConfig
+            )
+            const sampleData =
+              sample.data instanceof ArrayBuffer
+                ? Buffer.from(sample.data)
+                : Buffer.from(sample.data.buffer || sample.data)
+
             this.push(adts)
             this.push(sampleData)
           }
@@ -787,19 +874,23 @@ class MP4ToAACStream extends Transform {
   }
 
   _getAudioConfig(track) {
-    const sampleRates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]
+    const sampleRates = [
+      96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000,
+      11025, 8000, 7350
+    ]
     let samplingIndex = sampleRates.indexOf(track.audio.sample_rate)
-    if (samplingIndex === -1) throw new Error('Unsupported sample rate for ADTS')
-    
+    if (samplingIndex === -1)
+      throw new Error('Unsupported sample rate for ADTS')
+
     let profile = 2
-    
+
     if (track.codec) {
       const codecParts = track.codec.split('.')
       if (codecParts.length >= 3) {
         const objectType = parseInt(codecParts[2], 10)
-        
+
         if (objectType === 5) {
-          profile = 2 
+          profile = 2
           const coreSampleRate = track.audio.sample_rate / 2
           const coreSamplingIndex = sampleRates.indexOf(coreSampleRate)
           if (coreSamplingIndex !== -1) {
@@ -810,7 +901,7 @@ class MP4ToAACStream extends Transform {
         }
       }
     }
-    
+
     return {
       profile,
       samplingIndex,
@@ -821,31 +912,38 @@ class MP4ToAACStream extends Transform {
   _createAdtsHeader(sampleLength, audioConfig) {
     const adts = Buffer.alloc(7)
     const frameLength = sampleLength + 7
-    
+
     const profile = audioConfig.profile - 1
     const samplingIndex = audioConfig.samplingIndex
     const channelCount = audioConfig.channelCount
 
     adts[0] = 0xff
     adts[1] = 0xf1
-    adts[2] = ((profile & 0x03) << 6) | ((samplingIndex & 0x0f) << 2) | ((channelCount & 0x04) >> 2)
+    adts[2] =
+      ((profile & 0x03) << 6) |
+      ((samplingIndex & 0x0f) << 2) |
+      ((channelCount & 0x04) >> 2)
     adts[3] = ((channelCount & 0x03) << 6) | ((frameLength & 0x1800) >> 11)
     adts[4] = (frameLength & 0x7f8) >> 3
     adts[5] = ((frameLength & 0x7) << 5) | 0x1f
     adts[6] = 0xfc
-    
+
     return adts
   }
 
   _transform(chunk, encoding, callback) {
     try {
-      const arrayBuffer = chunk instanceof ArrayBuffer
-        ? chunk
-        : chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength)
-      
+      const arrayBuffer =
+        chunk instanceof ArrayBuffer
+          ? chunk
+          : chunk.buffer.slice(
+              chunk.byteOffset,
+              chunk.byteOffset + chunk.byteLength
+            )
+
       arrayBuffer.fileStart = this.offset
       this.offset += arrayBuffer.byteLength
-      
+
       this.mp4boxFile.appendBuffer(arrayBuffer)
       callback()
     } catch (err) {
@@ -874,13 +972,13 @@ class FMP4ToAACStream extends Transform {
     const boxes = []
     while (offset < buffer.length) {
       if (offset + 8 > buffer.length) break
-      
+
       const size = buffer.readUInt32BE(offset)
       const type = buffer.toString('ascii', offset + 4, offset + 8)
-      
+
       if (size === 0 || size > buffer.length - offset) break
       if (type === '\0\0\0\0') break
-      
+
       const boxData = buffer.subarray(offset + 8, offset + size)
       boxes.push({ type, size, data: boxData, offset })
       offset += size
@@ -890,45 +988,48 @@ class FMP4ToAACStream extends Transform {
 
   _extractAudioConfigFromInit(initSegment) {
     const boxes = this._parseBoxes(initSegment)
-    const moovBox = boxes.find(b => b.type === 'moov')
+    const moovBox = boxes.find((b) => b.type === 'moov')
     if (!moovBox) return null
-    
+
     const moovBoxes = this._parseBoxes(moovBox.data)
-    const trakBox = moovBoxes.find(b => b.type === 'trak')
+    const trakBox = moovBoxes.find((b) => b.type === 'trak')
     if (!trakBox) return null
-    
+
     const trakBoxes = this._parseBoxes(trakBox.data)
-    const mdiaBox = trakBoxes.find(b => b.type === 'mdia')
+    const mdiaBox = trakBoxes.find((b) => b.type === 'mdia')
     if (!mdiaBox) return null
-    
+
     const mdiaBoxes = this._parseBoxes(mdiaBox.data)
-    const minfBox = mdiaBoxes.find(b => b.type === 'minf')
+    const minfBox = mdiaBoxes.find((b) => b.type === 'minf')
     if (!minfBox) return null
-    
+
     const minfBoxes = this._parseBoxes(minfBox.data)
-    const stblBox = minfBoxes.find(b => b.type === 'stbl')
+    const stblBox = minfBoxes.find((b) => b.type === 'stbl')
     if (!stblBox) return null
-    
+
     const stblBoxes = this._parseBoxes(stblBox.data)
-    const stsdBox = stblBoxes.find(b => b.type === 'stsd')
+    const stsdBox = stblBoxes.find((b) => b.type === 'stsd')
     if (!stsdBox) return null
-    
+
     const stsd = stsdBox.data
     if (stsd.length < 16) return null
-    
+
     const stsdBoxes = this._parseBoxes(stsd, 8)
-    const mp4aBox = stsdBoxes.find(b => b.type === 'mp4a')
+    const mp4aBox = stsdBoxes.find((b) => b.type === 'mp4a')
     if (!mp4aBox) return null
-    
+
     const mp4a = mp4aBox.data
     if (mp4a.length < 28) return null
-    
+
     const channelCount = mp4a.readUInt16BE(16)
     const sampleRate = mp4a.readUInt32BE(24) >> 16
-    
-    const sampleRates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]
+
+    const sampleRates = [
+      96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000,
+      11025, 8000, 7350
+    ]
     const samplingIndex = sampleRates.indexOf(sampleRate)
-    
+
     return {
       profile: 2,
       samplingIndex: samplingIndex !== -1 ? samplingIndex : 4,
@@ -940,54 +1041,57 @@ class FMP4ToAACStream extends Transform {
   _createAdtsHeader(sampleLength, audioConfig) {
     const adts = Buffer.alloc(7)
     const frameLength = sampleLength + 7
-    
+
     const profile = (audioConfig.profile || 2) - 1
     const samplingIndex = audioConfig.samplingIndex || 4
     const channelCount = audioConfig.channelCount || 2
-    
+
     adts[0] = 0xff
     adts[1] = 0xf1
-    adts[2] = ((profile & 0x03) << 6) | ((samplingIndex & 0x0f) << 2) | ((channelCount & 0x04) >> 2)
+    adts[2] =
+      ((profile & 0x03) << 6) |
+      ((samplingIndex & 0x0f) << 2) |
+      ((channelCount & 0x04) >> 2)
     adts[3] = ((channelCount & 0x03) << 6) | ((frameLength & 0x1800) >> 11)
     adts[4] = (frameLength & 0x7f8) >> 3
     adts[5] = ((frameLength & 0x7) << 5) | 0x1f
     adts[6] = 0xfc
-    
+
     return adts
   }
 
   _extractAACFromSegment(buffer) {
     if (!this.audioConfig) return null
-    
+
     const boxes = this._parseBoxes(buffer)
-    const mdatBox = boxes.find(b => b.type === 'mdat')
+    const mdatBox = boxes.find((b) => b.type === 'mdat')
     if (!mdatBox) return null
-    
+
     const aacData = mdatBox.data
-    const moofBox = boxes.find(b => b.type === 'moof')
+    const moofBox = boxes.find((b) => b.type === 'moof')
     if (!moofBox) return aacData
-    
+
     const moofBoxes = this._parseBoxes(moofBox.data)
-    const trafBox = moofBoxes.find(b => b.type === 'traf')
+    const trafBox = moofBoxes.find((b) => b.type === 'traf')
     if (!trafBox) return aacData
-    
+
     const trafBoxes = this._parseBoxes(trafBox.data)
-    const trunBox = trafBoxes.find(b => b.type === 'trun')
+    const trunBox = trafBoxes.find((b) => b.type === 'trun')
     if (!trunBox) return aacData
-    
+
     const trun = trunBox.data
     if (trun.length < 8) return aacData
-    
+
     const flags = (trun[1] << 16) | (trun[2] << 8) | trun[3]
     const sampleCount = trun.readUInt32BE(4)
-    
+
     let offset = 8
     if (flags & 0x1) offset += 4
     if (flags & 0x4) offset += 4
-    
+
     const sampleSizes = []
     const hasSampleSize = flags & 0x200
-    
+
     for (let i = 0; i < sampleCount && offset < trun.length; i++) {
       if (flags & 0x100) offset += 4
       if (hasSampleSize && offset + 4 <= trun.length) {
@@ -997,21 +1101,27 @@ class FMP4ToAACStream extends Transform {
       if (flags & 0x400) offset += 4
       if (flags & 0x800) offset += 4
     }
-    
+
     if (sampleSizes.length > 0) {
       const frames = []
       let dataOffset = 0
       for (const sampleSize of sampleSizes) {
         if (dataOffset + sampleSize <= aacData.length) {
-          const adtsHeader = this._createAdtsHeader(sampleSize, this.audioConfig)
-          const aacSample = aacData.subarray(dataOffset, dataOffset + sampleSize)
+          const adtsHeader = this._createAdtsHeader(
+            sampleSize,
+            this.audioConfig
+          )
+          const aacSample = aacData.subarray(
+            dataOffset,
+            dataOffset + sampleSize
+          )
           frames.push(Buffer.concat([adtsHeader, aacSample]))
           dataOffset += sampleSize
         }
       }
       return frames.length > 0 ? Buffer.concat(frames) : null
     }
-    
+
     return null
   }
 
@@ -1026,14 +1136,14 @@ class FMP4ToAACStream extends Transform {
           return
         }
       }
-      
+
       if (this.audioConfig) {
         const aacData = this._extractAACFromSegment(chunk)
         if (aacData) {
           this.push(aacData)
         }
       }
-      
+
       callback()
     } catch (err) {
       callback()
@@ -1056,17 +1166,21 @@ class WAVDecoderStream extends Transform {
     try {
       if (!this.headerParsed) {
         this.headerBuffer = Buffer.concat([this.headerBuffer, chunk])
-        
+
         if (this.headerBuffer.length >= 44) {
           const riff = this.headerBuffer.toString('ascii', 0, 4)
           const wave = this.headerBuffer.toString('ascii', 8, 12)
-          
+
           if (riff === 'RIFF' && wave === 'WAVE') {
             let dataPos = 12
             while (dataPos < this.headerBuffer.length - 8) {
-              const chunkId = this.headerBuffer.toString('ascii', dataPos, dataPos + 4)
+              const chunkId = this.headerBuffer.toString(
+                'ascii',
+                dataPos,
+                dataPos + 4
+              )
               const chunkSize = this.headerBuffer.readUInt32LE(dataPos + 4)
-              
+
               if (chunkId === 'data') {
                 const audioData = this.headerBuffer.slice(dataPos + 8)
                 if (audioData.length > 0) {
@@ -1075,19 +1189,19 @@ class WAVDecoderStream extends Transform {
                 this.headerParsed = true
                 break
               }
-              
+
               dataPos += 8 + chunkSize
             }
           }
         }
-        
+
         if (!this.headerParsed) {
           return callback()
         }
       } else {
         this.push(chunk)
       }
-      
+
       callback()
     } catch (err) {
       callback()
@@ -1099,7 +1213,7 @@ class StreamAudioResource extends BaseAudioResource {
   constructor(stream, type, nodelink, initialFilters = {}, seekeable = null) {
     super()
     this.seekeable = seekeable
-    
+
     try {
       if (!stream || !(stream instanceof Readable)) {
         throw new Error('Invalid stream provided')
@@ -1115,15 +1229,27 @@ class StreamAudioResource extends BaseAudioResource {
           const lowerType = type.toLowerCase()
           let aacStream = stream
 
-          if (lowerType.includes('fmp4') || lowerType.includes('hls') || lowerType.includes('mpegurl')) {
+          if (
+            lowerType.includes('fmp4') ||
+            lowerType.includes('hls') ||
+            lowerType.includes('mpegurl')
+          ) {
             const fmp4ToAAC = new FMP4ToAACStream()
             aacStream = stream.pipe(fmp4ToAAC)
             this.pipes.push(fmp4ToAAC)
-          } else if (lowerType.includes('mpegts') || lowerType.includes('video/mp2t')) {
+          } else if (
+            lowerType.includes('mpegts') ||
+            lowerType.includes('video/mp2t')
+          ) {
             const mpegtsToAAC = new MPEGTSToAACStream()
             aacStream = stream.pipe(mpegtsToAAC)
             this.pipes.push(mpegtsToAAC)
-          } else if (lowerType.includes('mp4') || lowerType.includes('m4a') || lowerType.includes('m4v') || lowerType.includes('mov')) {
+          } else if (
+            lowerType.includes('mp4') ||
+            lowerType.includes('m4a') ||
+            lowerType.includes('m4v') ||
+            lowerType.includes('mov')
+          ) {
             const mp4ToAAC = new MP4ToAACStream()
             aacStream = stream.pipe(mp4ToAAC)
             this.pipes.push(mp4ToAAC)
@@ -1183,10 +1309,10 @@ class StreamAudioResource extends BaseAudioResource {
             'WAV (audio/wav)',
             'Opus (webm/opus, ogg/opus)'
           ]
-          
+
           throw new Error(
             `Unsupported audio format: "${type}".\n` +
-            `Supported formats:\n${supportedFormatsList.map(f => `  • ${f}`).join('\n')}`
+              `Supported formats:\n${supportedFormatsList.map((f) => `  • ${f}`).join('\n')}`
           )
         }
       }
@@ -1205,7 +1331,7 @@ class StreamAudioResource extends BaseAudioResource {
       this.stream = opus
 
       stream.on('finishBuffering', () => this.stream.emit('finishBuffering'))
-      
+
       stream.on('error', (err) => {
         this.stream.emit('error', err)
       })
@@ -1236,24 +1362,33 @@ export const createSeekeableAudioResource = async (
   nodelink,
   initialFilters = {}
 ) => {
-  const seekeable = new SeekeableNode();
-  await seekeable.load(url, 4096);
-  const { stream: demuxerStream, type } = seekeable.createAVStream(seekTime / 1000, endTime / 1000);
+  const seekeable = new SeekeableNode()
+  await seekeable.load(url, 4096)
+  const { stream: demuxerStream, type } = seekeable.createAVStream(
+    seekTime / 1000,
+    endTime / 1000
+  )
 
-  const packetStream = new PassThrough();
+  const packetStream = new PassThrough()
   demuxerStream.on('data', (packet) => {
     if (packet && packet.data && packet.data.length > 0) {
-      packetStream.write(Buffer.from(packet.data));
+      packetStream.write(Buffer.from(packet.data))
     }
-  });
+  })
   demuxerStream.on('end', () => {
-    packetStream.emit('finishBuffering');
-    seekeable.destroy();
-  });
+    packetStream.emit('finishBuffering')
+    seekeable.destroy()
+  })
   demuxerStream.on('error', (err) => {
-    packetStream.emit('error', err);
-    seekeable.destroy();
-  });
+    packetStream.emit('error', err)
+    seekeable.destroy()
+  })
 
-  return new StreamAudioResource(packetStream, type, nodelink, initialFilters, seekeable);
+  return new StreamAudioResource(
+    packetStream,
+    type,
+    nodelink,
+    initialFilters,
+    seekeable
+  )
 }

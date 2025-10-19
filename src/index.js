@@ -6,6 +6,7 @@ import lyricsManager from './managers/lyricsManager.js'
 import sessionManager from './managers/sessionManager.js'
 import sourceManager from './managers/sourceManager.js'
 import routePlannerManager from './managers/routePlannerManager.js'
+import connectionManager from './managers/connectionManager.js'
 import OAuth from './sources/youtube/OAuth.js'
 import {
   initLogger,
@@ -20,26 +21,30 @@ import {
 } from './utils.js'
 import 'dotenv/config'
 
-let config;
+let config
 
 try {
-  config = (await import('../config.js')).default;
+  config = (await import('../config.js')).default
 } catch (e) {
   if (e.code === 'ERR_MODULE_NOT_FOUND') {
     try {
-      config = (await import('../config.default.js')).default;
-      console.log('[WARN] Config: config.js not found, using config.default.js. It is recommended to create a config.js file for your own configuration.');
+      config = (await import('../config.default.js')).default
+      console.log(
+        '[WARN] Config: config.js not found, using config.default.js. It is recommended to create a config.js file for your own configuration.'
+      )
     } catch (e2) {
-      console.error('[ERROR] Config: Failed to load config.default.js. Please make sure it exists.');
-      throw e2;
+      console.error(
+        '[ERROR] Config: Failed to load config.default.js. Please make sure it exists.'
+      )
+      throw e2
     }
   } else {
-    throw e;
+    throw e
   }
 }
 
-initLogger(config);
-await checkForUpdates();
+initLogger(config)
+await checkForUpdates()
 
 class NodelinkServer {
   constructor(options) {
@@ -52,6 +57,7 @@ class NodelinkServer {
     this.sources = new sourceManager(this)
     this.lyrics = new lyricsManager(this)
     this.routePlanner = new routePlannerManager(this)
+    this.connectionManager = new connectionManager(this)
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     this.statistics = {
@@ -259,7 +265,7 @@ class NodelinkServer {
   _startGlobalUpdater() {
     if (this._globalUpdater) return
     const updateInterval = this.options?.playerUpdateInterval ?? 5000
-    const zombieThreshold = this.options?.zombieThresholdMs ?? 60000; 
+    const zombieThreshold = this.options?.zombieThresholdMs ?? 60000
 
     this._globalUpdater = setInterval(() => {
       const stats = getStats(this)
@@ -267,20 +273,26 @@ class NodelinkServer {
 
       for (const session of this.sessions.values()) {
         if (session.socket) {
-            session.socket.send(statsPayload)
+          session.socket.send(statsPayload)
         }
 
         for (const player of session.players.players.values()) {
           if (player && player.track && !player.isPaused && player.connection) {
-            if (player._lastStreamDataTime > 0 && (Date.now() - player._lastStreamDataTime >= zombieThreshold)) {
-                logger('warn', 'Player', `Player for guild ${player.guildId} detected as zombie (no stream data).`);
-                player.emitEvent(GatewayEvents.TRACK_RECOVERY_NEEDED, {
-                    guildId: player.guildId,
-                    track: player.track,
-                    reason: 'no_stream_data',
-                    thresholdMs: zombieThreshold
-                });
-
+            if (
+              player._lastStreamDataTime > 0 &&
+              Date.now() - player._lastStreamDataTime >= zombieThreshold
+            ) {
+              logger(
+                'warn',
+                'Player',
+                `Player for guild ${player.guildId} detected as zombie (no stream data).`
+              )
+              player.emitEvent(GatewayEvents.TRACK_RECOVERY_NEEDED, {
+                guildId: player.guildId,
+                track: player.track,
+                reason: 'no_stream_data',
+                thresholdMs: zombieThreshold
+              })
             }
             player._sendUpdate()
           }
@@ -326,6 +338,7 @@ class NodelinkServer {
     this._createServer()
     this._listen()
     this._startGlobalUpdater()
+    this.connectionManager.start()
     return this
   }
 }

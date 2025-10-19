@@ -93,10 +93,10 @@ export class Player {
       this._onError(err)
     })
     this.connection.on('audioStream', (audioStream) => {
-        audioStream.on('data', () => {
-            this._lastStreamDataTime = Date.now();
-        });
-    });
+      audioStream.on('data', () => {
+        this._lastStreamDataTime = Date.now()
+      })
+    })
   }
 
   _onConn(state) {
@@ -162,21 +162,23 @@ export class Player {
 
   _onError(error) {
     if (this.track) {
-      const isStreamError = error.message.includes('stream') || error.message.includes('timeout') || error.name === 'AbortError';
+      const isStreamError =
+        error.message.includes('stream') ||
+        error.message.includes('timeout') ||
+        error.name === 'AbortError'
 
       if (isStreamError) {
         logger(
           'warn',
           'Player',
           `Stream error detected for guild ${this.guildId}. Emitting TrackRecoveryNeededEvent.`
-        );
+        )
         this.emitEvent(GatewayEvents.TRACK_RECOVERY_NEEDED, {
           guildId: this.guildId,
           track: this.track,
           reason: 'stream_error',
           message: error.message
-        });
-
+        })
       } else {
         this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
           track: this.track,
@@ -240,18 +242,18 @@ export class Player {
 
     const position = this._realPosition()
 
-    const threshold = this.nodelink.options.trackStuckThresholdMs;
+    const threshold = this.nodelink.options.trackStuckThresholdMs
     if (threshold > 0) {
-        if (this._lastPosition === position) {
-            this._stuckTime += this.nodelink.options.playerUpdateInterval;
-            if (this._stuckTime >= threshold) {
-                this.emitEvent(GatewayEvents.TRACK_STUCK, { thresholdMs: threshold });
-                this.stop();
-                this._stuckTime = 0;
-            }
-        } else {
-            this._stuckTime = 0;
+      if (this._lastPosition === position) {
+        this._stuckTime += this.nodelink.options.playerUpdateInterval
+        if (this._stuckTime >= threshold) {
+          this.emitEvent(GatewayEvents.TRACK_STUCK, { thresholdMs: threshold })
+          this.stop()
+          this._stuckTime = 0
         }
+      } else {
+        this._stuckTime = 0
+      }
     }
 
     this._lastPosition = position
@@ -271,13 +273,7 @@ export class Player {
     return true
   }
 
-  async play({
-    encoded,
-    info,
-    noReplace = false,
-    startTime = 0,
-    endTime = 0
-  }) {
+  async play({ encoded, info, noReplace = false, startTime = 0, endTime = 0 }) {
     logger('debug', 'Player', `play() called for guild ${this.guildId}`, {
       encoded,
       noReplace,
@@ -371,9 +367,15 @@ export class Player {
     const unsupportedSources = ['deezer', 'local']
 
     if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
-      return this._seekeableSeek(position, endTime !== undefined ? endTime : this.track.endTime)
+      return this._seekeableSeek(
+        position,
+        endTime !== undefined ? endTime : this.track.endTime
+      )
     } else {
-      return this._legacySeek(position, endTime !== undefined ? endTime : this.track.endTime)
+      return this._legacySeek(
+        position,
+        endTime !== undefined ? endTime : this.track.endTime
+      )
     }
   }
 

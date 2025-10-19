@@ -22,6 +22,15 @@ export default {
       'youtube-cipher': true
     }
   },
+  connection: {
+    logAllChecks: false,
+    interval: 300000, // 5 minutes
+    timeout: 10000, // 10 seconds
+    thresholds: {
+      bad: 1, // Mbps
+      average: 5 // Mbps
+    }
+  },
   maxSearchResults: 10,
   maxAlbumPlaylistLength: 100,
   playerUpdateInterval: 2000,
@@ -96,7 +105,7 @@ export default {
     spotify: {
       enabled: true,
       clientId: '',
-      clientSecret: '',
+      clientSecret: ''
     },
     nicovideo: {
       enabled: true

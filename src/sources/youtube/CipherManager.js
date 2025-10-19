@@ -144,11 +144,7 @@ export default class CipherManager {
       headers.Authorization = this.config.token
     }
 
-    logger(
-      'debug',
-      'YouTube-Cipher',
-      `Fetching STS via /get_sts: ${playerUrl}`
-    )
+    logger('debug', 'YouTube-Cipher', `Fetching STS via /get_sts: ${playerUrl}`)
 
     const { body, error, statusCode } = await makeRequest(
       `${this.config.url}/get_sts`,

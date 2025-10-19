@@ -148,10 +148,7 @@ export default class DeezerSource {
         }
 
         const tracks = tracksRes.body.data.map((item) =>
-          this.buildTrack(
-            item,
-            albumData.cover_xl || albumData.picture_xl
-          )
+          this.buildTrack(item, albumData.cover_xl || albumData.picture_xl)
         )
 
         return {

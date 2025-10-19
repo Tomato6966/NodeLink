@@ -59,7 +59,9 @@ function initLogger(config) {
 
 function logger(level, ...args) {
   const effectiveLevel =
-    level === 'sources' || level === 'started' ? 'info' : level
+    level === 'sources' || level === 'started' || level === 'network'
+      ? 'info'
+      : level
   const levelIndex = logLevels[effectiveLevel]
 
   if (levelIndex === undefined || levelIndex < currentLogLevel) return
@@ -79,7 +81,8 @@ function logger(level, ...args) {
     error: { label: 'ERROR', color: '\x1b[1m\x1b[3;41m' },
     debug: { label: 'DEBUG', color: '\x1b[1m\x1b[3;45m' },
     sources: { label: 'SOURCES', color: '\x1b[1m\x1b[3;46m' },
-    started: { label: 'STARTED', color: '\x1b[1m\x1b[3;44m' }
+    started: { label: 'STARTED', color: '\x1b[1m\x1b[3;44m' },
+    network: { label: 'NETWORK', color: '\x1b[1m\x1b[3;44m' }
   }
 
   const resetColor = '\x1b[0m'
@@ -148,10 +151,10 @@ function sendResponse(req, res, data, status, trace = false) {
     return
   }
 
-  let finalData = data;
+  let finalData = data
   if (data.trace && !trace) {
-    const { trace, ...rest } = data;
-    finalData = rest;
+    const { trace, ...rest } = data
+    finalData = rest
   }
 
   headers['Content-Type'] = 'application/json'
@@ -241,7 +244,7 @@ function getStats(nodelink) {
     }
     frameStats.deficit += Math.max(0, frameStats.expected - frameStats.sent)
   } else {
-    frameStats = null;
+    frameStats = null
   }
 
   const uptime = Math.floor(process.uptime() * 1000)
@@ -270,7 +273,14 @@ function getStats(nodelink) {
   }
 }
 
-function verifyMethod(parsedUrl, req, res, expected, clientAddress, trace = false) {
+function verifyMethod(
+  parsedUrl,
+  req,
+  res,
+  expected,
+  clientAddress,
+  trace = false
+) {
   const methods = Array.isArray(expected) ? expected : [expected]
   // biome-ignore format: off
   if (!methods.includes(req.method)) {
@@ -542,27 +552,27 @@ async function http1makeRequest(urlString, options = {}) {
       finalStream.on('data', (chunk) => chunks.push(chunk))
       finalStream.on('end', () => {
         try {
-          const responseBuffer = Buffer.concat(chunks);
+          const responseBuffer = Buffer.concat(chunks)
 
           if (options.responseType === 'buffer') {
-            resolve({ statusCode, headers: respHeaders, body: responseBuffer });
-            return;
+            resolve({ statusCode, headers: respHeaders, body: responseBuffer })
+            return
           }
 
-          const text = responseBuffer.toString('utf8');
+          const text = responseBuffer.toString('utf8')
           const isJson = (respHeaders['content-type'] || '')
             .toLowerCase()
-            .startsWith('application/json');
-          const responseBody = isJson && text ? JSON.parse(text) : text;
-          resolve({ statusCode, headers: respHeaders, body: responseBody });
+            .startsWith('application/json')
+          const responseBody = isJson && text ? JSON.parse(text) : text
+          resolve({ statusCode, headers: respHeaders, body: responseBody })
         } catch (err) {
           reject(
             new Error(
               `Error processing response body for ${urlString}: ${err.message}`
             )
-          );
+          )
         }
-      });
+      })
     })
 
     req.on('error', (err) =>
@@ -598,7 +608,7 @@ async function makeRequest(urlString, options = {}, nodelink) {
     )
   }
 
-  const localAddress = nodelink?.routePlanner?.getIP();
+  const localAddress = nodelink?.routePlanner?.getIP()
 
   try {
     const url = new URL(urlString)
@@ -690,7 +700,7 @@ async function makeRequest(urlString, options = {}, nodelink) {
         const statusCode = headers[':status']
 
         if (statusCode === 429) {
-          nodelink.routePlanner.banIP(localAddress);
+          nodelink.routePlanner.banIP(localAddress)
         }
 
         if (REDIRECT_STATUS_CODES.includes(statusCode) && headers.location) {
@@ -944,25 +954,34 @@ async function loadHLSPlaylist(url, stream) {
 }
 
 async function checkForUpdates() {
-  logger('info', 'Git', 'Checking for updates...');
+  logger('info', 'Git', 'Checking for updates...')
   try {
-    execSync('git fetch', { stdio: 'ignore' });
+    execSync('git fetch', { stdio: 'ignore' })
 
-    const local = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
-    const remote = execSync('git rev-parse @{u}', { encoding: 'utf8' }).trim();
+    const local = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()
+    const remote = execSync('git rev-parse @{u}', { encoding: 'utf8' }).trim()
 
     if (local !== remote) {
-      const behind = execSync('git rev-list --right-only --count HEAD...@{u}', { encoding: 'utf8' }).trim();
-      const remoteCommit = execSync('git log -1 --pretty=format:"%h - %s (%cr)" @{u}', { encoding: 'utf8' }).trim();
-      
-      logger('warn', 'Git', `Your version is ${behind} commits behind the remote.`);
-      logger('warn', 'Git', `Latest commit: ${remoteCommit}`);
-      logger('warn', 'Git', 'Please run "git pull" to update.');
+      const behind = execSync('git rev-list --right-only --count HEAD...@{u}', {
+        encoding: 'utf8'
+      }).trim()
+      const remoteCommit = execSync(
+        'git log -1 --pretty=format:"%h - %s (%cr)" @{u}',
+        { encoding: 'utf8' }
+      ).trim()
+
+      logger(
+        'warn',
+        'Git',
+        `Your version is ${behind} commits behind the remote.`
+      )
+      logger('warn', 'Git', `Latest commit: ${remoteCommit}`)
+      logger('warn', 'Git', 'Please run "git pull" to update.')
     } else {
-      logger('info', 'Git', 'You are running the latest version.');
+      logger('info', 'Git', 'You are running the latest version.')
     }
   } catch (error) {
-    logger('warn', 'Git', `Failed to check for updates: ${error.message}`);
+    logger('warn', 'Git', `Failed to check for updates: ${error.message}`)
   }
 }
 
