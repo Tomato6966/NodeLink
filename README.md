@@ -15,9 +15,8 @@ What makes NodeLink stand out from other Lavalink servers?
 - **WebAssembly-Powered Decoding**  
   Most audio decoders run on WebAssembly, providing near-native performance directly in Node.js while ensuring stability and high-quality playback.
 
-- **FFmpeg-Free Playback**  
-  > [!IMPORTANT]  
-  > NodeLink no longer requires **FFmpeg** for core playback and decoding. This simplifies setup, reduces I/O overhead, and provides a more stable experience out of the box.
+- **FFmpeg-Free Playback**   
+  NodeLink no longer requires **FFmpeg** for core playback and decoding. This simplifies setup, reduces I/O overhead, and provides a more stable experience out of the box.
 
 ## Dependencies
 
