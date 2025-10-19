@@ -113,49 +113,65 @@ export default class SourcesManager {
     )
   }
 
+  async _instrumentedSourceCall(sourceName, method, ...args) {
+    const instance = this.sources.get(sourceName);
+    if (!instance || typeof instance[method] !== 'function') {
+      this.nodelink.statsManager.incrementSourceFailure(sourceName || 'unknown');
+      throw new Error(`Source ${sourceName} not found or does not support ${method}`);
+    }
+
+    try {
+      const result = await instance[method](...args);
+      if (result.loadType === 'error') {
+        this.nodelink.statsManager.incrementSourceFailure(sourceName);
+      } else {
+        this.nodelink.statsManager.incrementSourceSuccess(sourceName);
+      }
+      return result;
+    } catch (e) {
+      this.nodelink.statsManager.incrementSourceFailure(sourceName);
+      throw e;
+    }
+  }
+
   async search(sourceTerm, query) {
     const sourceName = this.searchTermMap.get(sourceTerm)
     if (!sourceName) {
       throw new Error(`Source not found for term: ${sourceTerm}`)
     }
-    const instance = this.sources.get(sourceName)
     logger('debug', 'Sources', `Searching on ${sourceName} for: "${query}"`)
-    return instance.search(query)
+    return this._instrumentedSourceCall(sourceName, 'search', query)
   }
 
   async searchWithDefault(query) {
     const defaultSource = this.nodelink.options.defaultSearchSource
     const sourceName = this.searchTermMap.get(defaultSource) || defaultSource
-    const instance = this.sources.get(sourceName)
     logger(
       'debug',
       'Sources',
       `Searching on default source "${sourceName}" for: "${query}"`
     )
-    return instance.search(query)
+    return this._instrumentedSourceCall(sourceName, 'search', query)
   }
 
   async unifiedSearch(query) {
     const searchSources = this.nodelink.options.unifiedSearchSources || ['youtube']
     logger('debug', 'Sources', `Performing unified search for "${query}" on [${searchSources.join(', ')}]`)
 
-    const searchPromises = searchSources.map(sourceName => {
-      const instance = this.sources.get(sourceName)
-      if (!instance || typeof instance.search !== 'function') {
-        logger('warn', 'Sources', `Unified search configured for unknown or non-searchable source: ${sourceName}`)
-        return Promise.resolve({ loadType: 'empty', data: {} })
-      }
-      return instance.search(query)
-    })
+    const searchPromises = searchSources.map(sourceName => 
+      this._instrumentedSourceCall(sourceName, 'search', query)
+        .catch(e => {
+          logger('warn', 'Sources', `A source (${sourceName}) failed during unified search: ${e.message}`)
+          return { loadType: 'error', data: { message: e.message } }; // Return an error object to not break allSettled
+        })
+    )
 
-    const results = await Promise.allSettled(searchPromises)
+    const results = await Promise.all(searchPromises)
     
     const allTracks = []
     results.forEach(result => {
-      if (result.status === 'fulfilled' && result.value.loadType === 'search') {
-        allTracks.push(...result.value.data)
-      } else if (result.status === 'rejected') {
-        logger('warn', 'Sources', `A source failed during unified search: ${result.reason}`)
+      if (result.loadType === 'search') {
+        allTracks.push(...result.data)
       }
     })
 
@@ -177,18 +193,15 @@ export default class SourcesManager {
   }
 
   async resolve(url) {
-    const sourceName = this.patternMap.find(({ regex }) =>
+    let sourceName = this.patternMap.find(({ regex }) =>
       regex.test(url)
     )?.sourceName
-    if (
-      !sourceName &&
-      (url.startsWith('https://') || url.includes('http://'))
-    ) {
-      const instance = this.sources.get('http')
-      logger('debug', 'Sources', `Resolving with http source for: ${url}`)
-      const result = await instance.resolve(url)
-      return result
-    } else if (!sourceName) {
+
+    if (!sourceName && (url.startsWith('https://') || url.startsWith('http://'))) {
+      sourceName = 'http'
+    } 
+
+    if (!sourceName) {
       logger('warn', 'Sources', `No source found for URL: ${url}`)
       return {
         loadType: 'error',
@@ -199,9 +212,9 @@ export default class SourcesManager {
         }
       }
     }
-    const instance = this.sources.get(sourceName)
+
     logger('debug', 'Sources', `Resolving with ${sourceName} for: ${url}`)
-    return instance.resolve(url)
+    return this._instrumentedSourceCall(sourceName, 'resolve', url)
   }
 
   async reload() {

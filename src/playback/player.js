@@ -41,6 +41,8 @@ export class Player {
     )
 
     this.emitEvent = (type, payload = {}) => {
+      this.nodelink.statsManager.incrementPlaybackEvent(type)
+
       try {
         this.session.socket.send(
           JSON.stringify({
@@ -156,6 +158,9 @@ export class Player {
       this.track &&
       ['requested', 'reconnected'].includes(state.reason)
     ) {
+      if (this.isRecovering) {
+        this.nodelink.statsManager.incrementRecoverySuccess()
+      }
       this.emitEvent(GatewayEvents.TRACK_START, { track: this.track })
       this.isPaused = false
       this.isRecovering = false
@@ -207,8 +212,11 @@ export class Player {
   async _recoverTrack(reason) {
     if (this.isRecovering || !this.track) return
 
+    this.nodelink.statsManager.incrementRecoveryAttempt()
+
     const maxAttempts = this.nodelink.options.recovery?.maxAttempts ?? 3
     if (this.recoveryAttempts >= maxAttempts) {
+      this.nodelink.statsManager.incrementRecoveryFailure()
       logger('error', 'Player', `Track recovery failed after ${maxAttempts} attempts for guild ${this.guildId}.`)
       this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
         track: this.track,

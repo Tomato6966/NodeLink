@@ -54,6 +54,7 @@ const routesPromise = loadRoutes()
 
 async function requestHandler(nodelink, req, res) {
   const parsedUrl = new URL(req.url, `http://${req.headers.host}`)
+  nodelink.statsManager.incrementApiRequest(parsedUrl.pathname)
   const trace = parsedUrl.searchParams.get('trace') === 'true'
   const remoteAddress = req.socket.remoteAddress
   const isInternal = ['127.0.0.1', '::1', 'localhost'].includes(remoteAddress)

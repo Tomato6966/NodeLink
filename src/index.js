@@ -7,6 +7,7 @@ import sessionManager from './managers/sessionManager.js'
 import sourceManager from './managers/sourceManager.js'
 import routePlannerManager from './managers/routePlannerManager.js'
 import connectionManager from './managers/connectionManager.js'
+import statsManager from './managers/statsManager.js'
 import OAuth from './sources/youtube/OAuth.js'
 import {
   initLogger,
@@ -58,6 +59,7 @@ class NodelinkServer {
     this.lyrics = new lyricsManager(this)
     this.routePlanner = new routePlannerManager(this)
     this.connectionManager = new connectionManager(this)
+    this.statsManager = new statsManager(this)
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     this.statistics = {
