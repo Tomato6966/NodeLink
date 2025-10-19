@@ -45,6 +45,11 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       return sendResponse(req, res, track, 200)
     }
 
+    if (source === 'search') {
+      const tracks = await nodelink.sources.unifiedSearch(query)
+      return sendResponse(req, res, tracks, 200)
+    }
+
     const tracks = await nodelink.sources.search(source, query)
     return sendResponse(req, res, tracks, 200)
   } catch (err) {

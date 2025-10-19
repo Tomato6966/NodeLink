@@ -60,6 +60,7 @@ export default {
     }
   },
   defaultSearchSource: 'youtube',
+  unifiedSearchSources: ['youtube', 'soundcloud'],
   sources: {
     deezer: {
       // arl: '',

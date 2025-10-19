@@ -135,6 +135,47 @@ export default class SourcesManager {
     return instance.search(query)
   }
 
+  async unifiedSearch(query) {
+    const searchSources = this.nodelink.options.unifiedSearchSources || ['youtube']
+    logger('debug', 'Sources', `Performing unified search for "${query}" on [${searchSources.join(', ')}]`)
+
+    const searchPromises = searchSources.map(sourceName => {
+      const instance = this.sources.get(sourceName)
+      if (!instance || typeof instance.search !== 'function') {
+        logger('warn', 'Sources', `Unified search configured for unknown or non-searchable source: ${sourceName}`)
+        return Promise.resolve({ loadType: 'empty', data: {} })
+      }
+      return instance.search(query)
+    })
+
+    const results = await Promise.allSettled(searchPromises)
+    
+    const allTracks = []
+    results.forEach(result => {
+      if (result.status === 'fulfilled' && result.value.loadType === 'search') {
+        allTracks.push(...result.value.data)
+      } else if (result.status === 'rejected') {
+        logger('warn', 'Sources', `A source failed during unified search: ${result.reason}`)
+      }
+    })
+
+    if (allTracks.length === 0) {
+      return { loadType: 'empty', data: {} }
+    }
+
+    return {
+      loadType: 'playlist',
+      data: {
+        info: {
+          name: `Search results for: ${query}`,
+          selectedTrack: -1
+        },
+        pluginInfo: {},
+        tracks: allTracks
+      }
+    }
+  }
+
   async resolve(url) {
     const sourceName = this.patternMap.find(({ regex }) =>
       regex.test(url)
