@@ -31,6 +31,9 @@ export class Player {
     this.voice = { sessionId: null, token: null, endpoint: null }
     this.streamInfo = null
 
+    this.isRecovering = false
+    this.recoveryAttempts = 0
+
     logger(
       'debug',
       'Player',
@@ -155,6 +158,8 @@ export class Player {
     ) {
       this.emitEvent(GatewayEvents.TRACK_START, { track: this.track })
       this.isPaused = false
+      this.isRecovering = false
+      this.recoveryAttempts = 0
     } else if (state.status === 'paused') {
       this.isPaused = true
     }
@@ -167,11 +172,13 @@ export class Player {
         error.message.includes('timeout') ||
         error.name === 'AbortError'
 
-      if (isStreamError) {
+      if (isStreamError && this.nodelink.options.recovery?.enabled) {
+        this._recoverTrack(`stream_error: ${error.message}`)
+      } else if (isStreamError) {
         logger(
           'warn',
           'Player',
-          `Stream error detected for guild ${this.guildId}. Emitting TrackRecoveryNeededEvent.`
+          `Stream error detected for guild ${this.guildId}. Recovery is disabled. Emitting TrackRecoveryNeededEvent.`
         )
         this.emitEvent(GatewayEvents.TRACK_RECOVERY_NEEDED, {
           guildId: this.guildId,
@@ -197,10 +204,60 @@ export class Player {
     }
   }
 
+  async _recoverTrack(reason) {
+    if (this.isRecovering || !this.track) return
+
+    const maxAttempts = this.nodelink.options.recovery?.maxAttempts ?? 3
+    if (this.recoveryAttempts >= maxAttempts) {
+      logger('error', 'Player', `Track recovery failed after ${maxAttempts} attempts for guild ${this.guildId}.`)
+      this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
+        track: this.track,
+        exception: {
+          message: `Track recovery failed after ${maxAttempts} attempts.`,
+          severity: 'fault',
+          cause: 'All recovery attempts failed.'
+        }
+      })
+      this.stop()
+      return
+    }
+
+    this.isRecovering = true
+    this.recoveryAttempts++
+
+    const initialDelay = this.nodelink.options.recovery?.initialDelay ?? 1000
+    const delay = initialDelay * Math.pow(2, this.recoveryAttempts - 1)
+    
+    logger('warn', 'Player', `Track recovery attempt ${this.recoveryAttempts}/${maxAttempts} for guild ${this.guildId} due to ${reason}. Retrying in ${delay}ms.`)
+    
+    await new Promise(resolve => setTimeout(resolve, delay))
+
+    if (!this.track || !this.session.socket) {
+      this.isRecovering = false
+      return
+    }
+
+    try {
+      const lastPosition = this._realPosition()
+      await this.play({
+        encoded: this.track.encoded,
+        info: this.track.info,
+        startTime: lastPosition,
+        endTime: this.track.endTime
+      })
+    } catch (e) {
+      logger('error', 'Player', `Error during recovery attempt for guild ${this.guildId}: ${e.message}`)
+      this.isRecovering = false
+      await this._recoverTrack('recovery_attempt_failed')
+    }
+  }
+
   _resetTrack() {
     this.track = null
     this.isPaused = false
     this.position = 0
+    this.isRecovering = false
+    this.recoveryAttempts = 0
   }
 
   _realPosition() {
@@ -247,9 +304,13 @@ export class Player {
       if (this._lastPosition === position) {
         this._stuckTime += this.nodelink.options.playerUpdateInterval
         if (this._stuckTime >= threshold) {
-          this.emitEvent(GatewayEvents.TRACK_STUCK, { thresholdMs: threshold })
-          this.stop()
           this._stuckTime = 0
+          if (this.nodelink.options.recovery?.enabled) {
+            this._recoverTrack('track_stuck')
+          } else {
+            this.emitEvent(GatewayEvents.TRACK_STUCK, { thresholdMs: threshold })
+            this.stop()
+          }
         }
       } else {
         this._stuckTime = 0
@@ -366,17 +427,24 @@ export class Player {
     const sourceName = this.track.info.sourceName
     const unsupportedSources = ['deezer', 'local']
 
+    let seekPromise
     if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
-      return this._seekeableSeek(
+      seekPromise = this._seekeableSeek(
         position,
         endTime !== undefined ? endTime : this.track.endTime
       )
     } else {
-      return this._legacySeek(
+      seekPromise = this._legacySeek(
         position,
         endTime !== undefined ? endTime : this.track.endTime
       )
     }
+
+    const result = await seekPromise
+    if (result) {
+      this.emitEvent(GatewayEvents.SEEK, { position: this.position })
+    }
+    return result
   }
 
   async _seekeableSeek(position, endTime) {
@@ -469,6 +537,7 @@ export class Player {
         this.connection.unpause('requested')
       }
     }
+    this.emitEvent(GatewayEvents.PAUSE, { paused: this.isPaused })
     return true
   }
 
@@ -480,6 +549,7 @@ export class Player {
     )
     this.volumePercent = Math.max(0, Math.min(1000, level))
     this.connection?.audioStream?.setVolume(this.volumePercent / 100)
+    this.emitEvent(GatewayEvents.VOLUME_CHANGED, { volume: this.volumePercent })
     return true
   }
 
@@ -507,6 +577,8 @@ export class Player {
     if (this.connection?.audioStream) {
       this.connection.audioStream.setFilters(this.filters)
     }
+
+    this.emitEvent(GatewayEvents.FILTERS_CHANGED, { filters: this.filters })
 
     return true
   }

@@ -36,6 +36,11 @@ export default {
   playerUpdateInterval: 2000,
   trackStuckThresholdMs: 10000,
   zombieThresholdMs: 60000,
+  recovery: {
+    enabled: true, // Whether to enable track recovery
+    maxAttempts: 3, // Maximum number of recovery attempts
+    initialDelay: 1000 // Initial delay in ms before the first retry
+  },
   filters: {
     enabled: {
       tremolo: true,

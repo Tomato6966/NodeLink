@@ -16,7 +16,11 @@ export const GatewayEvents = {
   TRACK_EXCEPTION: 'TrackExceptionEvent',
   TRACK_RECOVERY_NEEDED: 'TrackRecoveryNeededEvent',
   PLAYER_UPDATE: 'playerUpdate',
-  CONNECTION_STATUS: 'ConnectionStatusEvent'
+  CONNECTION_STATUS: 'ConnectionStatusEvent',
+  VOLUME_CHANGED: 'VolumeChangedEvent',
+  FILTERS_CHANGED: 'FiltersChangedEvent',
+  SEEK: 'SeekEvent',
+  PAUSE: 'PauseEvent'
 }
 export const EndReasons = {
   STOPPED: 'stopped',
