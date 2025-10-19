@@ -44,7 +44,6 @@ export default class ConnectionManager {
     }
 
     this.isChecking = true
-    logger('debug', 'ConnectionManager', 'Running connection speed check...')
 
     const startTime = Date.now()
     let downloadedBytes = 0
