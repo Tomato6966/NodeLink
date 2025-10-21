@@ -17,6 +17,156 @@ import TV from './clients/TV.js'
 import TVEmbedded from './clients/TVEmbedded.js'
 import Web from './clients/Web.js'
 
+async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
+  const segmentQueue = []
+  const processedSegments = new Set()
+  let stop = false
+
+  outputStream.on('close', () => {
+    stop = true
+  })
+
+  const fetchWithUserAgent = async (url) => {
+    return http1makeRequest(url, {
+      method: 'GET'
+    })
+  }
+
+  const playlistFetcher = async (playlistUrl) => {
+    while (!stop) {
+      try {
+        const { body: playlistContent, error, statusCode } = await fetchWithUserAgent(playlistUrl)
+        if (error || statusCode !== 200) {
+          logger('error', 'YouTube-HLS-Fetcher', `Playlist fetch failed: ${statusCode} - ${error?.message}`)
+          throw new Error(`Playlist fetch failed: ${statusCode}`)
+        }
+
+        const lines = playlistContent.split('\n').map((l) => l.trim())
+        let targetDuration = 2 // Default HLS target duration
+        const targetDurationLine = lines.find((l) => l.startsWith('#EXT-X-TARGETDURATION:'))
+        if (targetDurationLine) {
+          targetDuration = Number.parseInt(targetDurationLine.split(':')[1], 10)
+        }
+
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].startsWith('#EXTINF:')) {
+            const segmentUrl = lines[i + 1]
+            if (segmentUrl && !segmentUrl.startsWith('#')) {
+              const absoluteUrl = new URL(segmentUrl, playlistUrl).toString()
+              if (!processedSegments.has(absoluteUrl)) {
+                processedSegments.add(absoluteUrl)
+                segmentQueue.push(absoluteUrl)
+              }
+            }
+          }
+        }
+
+        if (playlistContent.includes('#EXT-X-ENDLIST')) {
+          stop = true
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, targetDuration * 1000))
+      } catch (e) {
+        logger('error', 'YouTube-HLS-Fetcher', `Error: ${e.message}`)
+        stop = true
+      }
+    }
+  }
+
+  const segmentDownloader = async () => {
+    while (!stop || segmentQueue.length > 0) {
+      if (segmentQueue.length === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        continue
+      }
+
+      const segmentUrl = segmentQueue.shift()
+
+      try {
+        const { stream: segmentStream, error, statusCode } = await http1makeRequest(segmentUrl, {
+          streamOnly: true
+        })
+        if (error || statusCode !== 200) {
+          logger('warn', 'YouTube-HLS-Downloader', `Failed segment ${segmentUrl}: ${statusCode}`)
+          continue
+        }
+
+        await new Promise((resolve, reject) => {
+          segmentStream.pipe(outputStream, { end: false })
+          segmentStream.on('end', resolve)
+          segmentStream.on('error', reject)
+        })
+      } catch (e) {
+        logger('error', 'YouTube-HLS-Downloader', `Error processing segment ${segmentUrl}: ${e.message}`)
+      }
+    }
+
+    if (!outputStream.destroyed) {
+      outputStream.emit('finishBuffering')
+      outputStream.end()
+    }
+  }
+
+  try {
+    const { body: masterPlaylistContent, error: masterError, statusCode: masterStatusCode } = await fetchWithUserAgent(hlsManifestUrl)
+    if (masterError || masterStatusCode !== 200) {
+      throw new Error(`Master playlist fetch failed: ${masterStatusCode} - ${masterError?.message}`)
+    }
+
+    const lines = masterPlaylistContent.split('\n').map((l) => l.trim())
+    let bestBandwidth = 0
+    let bestStreamUrl = null
+    let bestAudioOnlyUrl = null
+    let bestAudioOnlyBandwidth = 0
+
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
+        const streamInf = lines[i]
+        const streamUrl = lines[i + 1]
+
+        if (streamUrl && !streamUrl.startsWith('#')) {
+          const bandwidthMatch = streamInf.match(/BANDWIDTH=(\d+)/)
+          const codecsMatch = streamInf.match(/CODECS="([^"]+)"/)
+
+          const bandwidth = bandwidthMatch ? Number.parseInt(bandwidthMatch[1], 10) : 0
+          const codecs = codecsMatch ? codecsMatch[1] : ''
+
+          if (codecs.includes('avc1') && codecs.includes('mp4a')) {
+            if (bandwidth > bestBandwidth) {
+              bestBandwidth = bandwidth
+              bestStreamUrl = new URL(streamUrl, hlsManifestUrl).toString()
+            }
+          } else if (codecs.includes('mp4a') || codecs.includes('opus')) {
+            if (bandwidth > bestAudioOnlyBandwidth) {
+              bestAudioOnlyBandwidth = bandwidth
+              bestAudioOnlyUrl = new URL(streamUrl, hlsManifestUrl).toString()
+            }
+          }
+        }
+      }
+    }
+
+    let selectedPlaylistUrl = null
+    if (bestStreamUrl) {
+      selectedPlaylistUrl = bestStreamUrl
+      logger('debug', 'YouTube-HLS', `Selected best combined stream: ${selectedPlaylistUrl}`)
+    } else if (bestAudioOnlyUrl) {
+      selectedPlaylistUrl = bestAudioOnlyUrl
+      logger('debug', 'YouTube-HLS', `Selected best audio-only stream: ${selectedPlaylistUrl}`)
+    } else {
+      throw new Error('No suitable HLS stream found in master playlist.')
+    }
+
+    playlistFetcher(selectedPlaylistUrl)
+    segmentDownloader()
+  } catch (e) {
+    logger('error', 'YouTube-HLS', `Error managing YouTube HLS stream: ${e.message}`)
+    if (!outputStream.destroyed) {
+      outputStream.destroy(e)
+    }
+  }
+}
+
 export default class YouTubeSource {
   constructor(nodelink) {
     this.nodelink = nodelink
@@ -502,7 +652,7 @@ export default class YouTubeSource {
     try {
       if (protocol === 'hls') {
         const stream = new PassThrough()
-        loadHLSPlaylist(url, stream)
+        _manageYoutubeHlsStream(url, stream)
         return { stream }
       }
 
