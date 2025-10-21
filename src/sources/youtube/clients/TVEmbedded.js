@@ -1,4 +1,4 @@
-import { logger } from '../../../utils.js'
+import { logger, makeRequest } from '../../../utils.js'
 import {
   BaseClient,
   YOUTUBE_CONSTANTS,
@@ -109,6 +109,65 @@ export default class TVEmbedded extends BaseClient {
           playerResponse,
           sourceName,
           videoId
+        )
+      }
+
+      case YOUTUBE_CONSTANTS.PLAYLIST: {
+        const playlistIdMatch = url.match(/[?&]list=([\w-]+)/)
+        if (!playlistIdMatch || !playlistIdMatch[1]) {
+          logger(
+            'error',
+            'YouTube-TVEmbedded',
+            `Could not parse playlist ID from URL: ${url}`
+          )
+          return {
+            loadType: 'error',
+            data: {
+              message: 'Invalid playlist URL.',
+              severity: 'common',
+              cause: 'Input'
+            }
+          }
+        }
+
+        const playlistId = playlistIdMatch[1]
+        const videoIdMatch = url.match(/[?&]v=([\w-]+)/)
+        const currentVideoId = videoIdMatch?.[1] ?? null
+
+        const { body: playlistResponse, statusCode } = await makeRequest(
+          `${apiEndpoint}/youtubei/v1/next`,
+          {
+            headers: { 'User-Agent': this.getClient(context).client.userAgent },
+            body: {
+              context: this.getClient(context),
+              playlistId,
+              contentCheckOk: true,
+              racyCheckOk: true
+            },
+            method: 'POST',
+            disableBodyCompression: true
+          }
+        )
+
+        if (statusCode !== 200) {
+          const errMsg = `Failed to fetch playlist. Status: ${statusCode}`
+          logger(
+            'error',
+            'YouTube-TVEmbedded',
+            `Error loading playlist ${playlistId}: ${errMsg}`
+          )
+          return {
+            loadType: 'error',
+            data: { message: errMsg, severity: 'common', cause: 'Upstream' }
+          }
+        }
+
+        return await this._handlePlaylistResponse(
+          playlistId,
+          currentVideoId,
+          playlistResponse,
+          sourceName,
+          context
         )
       }
 

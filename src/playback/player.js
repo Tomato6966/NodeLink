@@ -217,7 +217,11 @@ export class Player {
     const maxAttempts = this.nodelink.options.recovery?.maxAttempts ?? 3
     if (this.recoveryAttempts >= maxAttempts) {
       this.nodelink.statsManager.incrementRecoveryFailure()
-      logger('error', 'Player', `Track recovery failed after ${maxAttempts} attempts for guild ${this.guildId}.`)
+      logger(
+        'error',
+        'Player',
+        `Track recovery failed after ${maxAttempts} attempts for guild ${this.guildId}.`
+      )
       this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
         track: this.track,
         exception: {
@@ -235,10 +239,14 @@ export class Player {
 
     const initialDelay = this.nodelink.options.recovery?.initialDelay ?? 1000
     const delay = initialDelay * Math.pow(2, this.recoveryAttempts - 1)
-    
-    logger('warn', 'Player', `Track recovery attempt ${this.recoveryAttempts}/${maxAttempts} for guild ${this.guildId} due to ${reason}. Retrying in ${delay}ms.`)
-    
-    await new Promise(resolve => setTimeout(resolve, delay))
+
+    logger(
+      'warn',
+      'Player',
+      `Track recovery attempt ${this.recoveryAttempts}/${maxAttempts} for guild ${this.guildId} due to ${reason}. Retrying in ${delay}ms.`
+    )
+
+    await new Promise((resolve) => setTimeout(resolve, delay))
 
     if (!this.track || !this.session.socket) {
       this.isRecovering = false
@@ -254,7 +262,11 @@ export class Player {
         endTime: this.track.endTime
       })
     } catch (e) {
-      logger('error', 'Player', `Error during recovery attempt for guild ${this.guildId}: ${e.message}`)
+      logger(
+        'error',
+        'Player',
+        `Error during recovery attempt for guild ${this.guildId}: ${e.message}`
+      )
       this.isRecovering = false
       await this._recoverTrack('recovery_attempt_failed')
     }
@@ -316,7 +328,9 @@ export class Player {
           if (this.nodelink.options.recovery?.enabled) {
             this._recoverTrack('track_stuck')
           } else {
-            this.emitEvent(GatewayEvents.TRACK_STUCK, { thresholdMs: threshold })
+            this.emitEvent(GatewayEvents.TRACK_STUCK, {
+              thresholdMs: threshold
+            })
             this.stop()
           }
         }

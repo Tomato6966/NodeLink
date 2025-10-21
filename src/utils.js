@@ -592,7 +592,7 @@ async function http1makeRequest(urlString, options = {}) {
   })
 }
 async function makeRequest(urlString, options = {}, nodelink) {
-  const { 
+  const {
     method = 'GET',
     headers: customHeaders = {},
     body,
@@ -603,13 +603,24 @@ async function makeRequest(urlString, options = {}, nodelink) {
     _redirectsFollowed = 0
   } = options
 
-  const logId = crypto.randomBytes(4).toString('hex');
+  const logId = crypto.randomBytes(4).toString('hex')
   if (loggingConfig.debug?.network) {
-    logger('debug', 'Network', `[${logId}] Request: ${method} ${urlString}`);
-    logger('debug', 'Network', `[${logId}] Headers: ${JSON.stringify(customHeaders, (key, value) => (key.toLowerCase().includes('authorization') || key.toLowerCase().includes('cookie') ? '[REDACTED]' : value))}`);
+    logger('debug', 'Network', `[${logId}] Request: ${method} ${urlString}`)
+    logger(
+      'debug',
+      'Network',
+      `[${logId}] Headers: ${JSON.stringify(customHeaders, (key, value) => (key.toLowerCase().includes('authorization') || key.toLowerCase().includes('cookie') ? '[REDACTED]' : value))}`
+    )
     if (body) {
-      const bodySnippet = typeof body === 'string' ? body.substring(0, 200) : JSON.stringify(body).substring(0, 200);
-      logger('debug', 'Network', `[${logId}] Body: ${bodySnippet}${bodySnippet.length === 200 ? '...' : ''}`);
+      const bodySnippet =
+        typeof body === 'string'
+          ? body.substring(0, 200)
+          : JSON.stringify(body).substring(0, 200)
+      logger(
+        'debug',
+        'Network',
+        `[${logId}] Body: ${bodySnippet}${bodySnippet.length === 200 ? '...' : ''}`
+      )
     }
   }
 
@@ -777,9 +788,20 @@ async function makeRequest(urlString, options = {}, nodelink) {
           const responseBody = isJson && text ? JSON.parse(text) : text
 
           if (loggingConfig.debug?.network) {
-            const bodySnippet = typeof responseBody === 'string' ? responseBody.substring(0, 200) : JSON.stringify(responseBody).substring(0, 200);
-            logger('debug', 'Network', `[${logId}] Response Status: ${statusCode}`);
-            logger('debug', 'Network', `[${logId}] Response Body: ${bodySnippet}${bodySnippet.length === 200 ? '...' : ''}`);
+            const bodySnippet =
+              typeof responseBody === 'string'
+                ? responseBody.substring(0, 200)
+                : JSON.stringify(responseBody).substring(0, 200)
+            logger(
+              'debug',
+              'Network',
+              `[${logId}] Response Status: ${statusCode}`
+            )
+            logger(
+              'debug',
+              'Network',
+              `[${logId}] Response Body: ${bodySnippet}${bodySnippet.length === 200 ? '...' : ''}`
+            )
           }
 
           resolve({

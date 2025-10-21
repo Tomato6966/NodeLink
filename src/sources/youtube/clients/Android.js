@@ -224,12 +224,17 @@ export default class Android extends BaseClient {
         const videoIdMatch = url.match(/[?&]v=([\w-]+)/)
         const currentVideoId = videoIdMatch?.[1] ?? null
 
+        logger(
+          'debug',
+          'YouTube-Android',
+          `User-Agent for playlist request: ${this.getClient(context).client.userAgent}`
+        )
         const { body: playlistResponse, statusCode } = await makeRequest(
           `${apiEndpoint}/youtubei/v1/next`,
           {
-            headers: { 'User-Agent': this.getClient(context).userAgent },
+            headers: { 'User-Agent': this.getClient(context).client.userAgent },
             body: {
-              context: { client: this.getClient(context) },
+              context: this.getClient(context),
               playlistId,
               contentCheckOk: true,
               racyCheckOk: true

@@ -114,23 +114,25 @@ export default class SourcesManager {
   }
 
   async _instrumentedSourceCall(sourceName, method, ...args) {
-    const instance = this.sources.get(sourceName);
+    const instance = this.sources.get(sourceName)
     if (!instance || typeof instance[method] !== 'function') {
-      this.nodelink.statsManager.incrementSourceFailure(sourceName || 'unknown');
-      throw new Error(`Source ${sourceName} not found or does not support ${method}`);
+      this.nodelink.statsManager.incrementSourceFailure(sourceName || 'unknown')
+      throw new Error(
+        `Source ${sourceName} not found or does not support ${method}`
+      )
     }
 
     try {
-      const result = await instance[method](...args);
+      const result = await instance[method](...args)
       if (result.loadType === 'error') {
-        this.nodelink.statsManager.incrementSourceFailure(sourceName);
+        this.nodelink.statsManager.incrementSourceFailure(sourceName)
       } else {
-        this.nodelink.statsManager.incrementSourceSuccess(sourceName);
+        this.nodelink.statsManager.incrementSourceSuccess(sourceName)
       }
-      return result;
+      return result
     } catch (e) {
-      this.nodelink.statsManager.incrementSourceFailure(sourceName);
-      throw e;
+      this.nodelink.statsManager.incrementSourceFailure(sourceName)
+      throw e
     }
   }
 
@@ -155,21 +157,30 @@ export default class SourcesManager {
   }
 
   async unifiedSearch(query) {
-    const searchSources = this.nodelink.options.unifiedSearchSources || ['youtube']
-    logger('debug', 'Sources', `Performing unified search for "${query}" on [${searchSources.join(', ')}]`)
+    const searchSources = this.nodelink.options.unifiedSearchSources || [
+      'youtube'
+    ]
+    logger(
+      'debug',
+      'Sources',
+      `Performing unified search for "${query}" on [${searchSources.join(', ')}]`
+    )
 
-    const searchPromises = searchSources.map(sourceName => 
-      this._instrumentedSourceCall(sourceName, 'search', query)
-        .catch(e => {
-          logger('warn', 'Sources', `A source (${sourceName}) failed during unified search: ${e.message}`)
-          return { loadType: 'error', data: { message: e.message } }; // Return an error object to not break allSettled
-        })
+    const searchPromises = searchSources.map((sourceName) =>
+      this._instrumentedSourceCall(sourceName, 'search', query).catch((e) => {
+        logger(
+          'warn',
+          'Sources',
+          `A source (${sourceName}) failed during unified search: ${e.message}`
+        )
+        return { loadType: 'error', data: { message: e.message } } // Return an error object to not break allSettled
+      })
     )
 
     const results = await Promise.all(searchPromises)
-    
+
     const allTracks = []
-    results.forEach(result => {
+    results.forEach((result) => {
       if (result.loadType === 'search') {
         allTracks.push(...result.data)
       }
@@ -197,9 +208,12 @@ export default class SourcesManager {
       regex.test(url)
     )?.sourceName
 
-    if (!sourceName && (url.startsWith('https://') || url.startsWith('http://'))) {
+    if (
+      !sourceName &&
+      (url.startsWith('https://') || url.startsWith('http://'))
+    ) {
       sourceName = 'http'
-    } 
+    }
 
     if (!sourceName) {
       logger('warn', 'Sources', `No source found for URL: ${url}`)

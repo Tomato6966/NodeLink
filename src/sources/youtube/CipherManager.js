@@ -49,16 +49,17 @@ export default class CipherManager {
         return this.cachedPlayerScript
       }
 
-            const scriptUrl = await this._fetchPlayerScriptFromWatchPage('dQw4w9WgXcQ')
+      const scriptUrl =
+        await this._fetchPlayerScriptFromWatchPage('dQw4w9WgXcQ')
 
-            this.cachedPlayerScript = new CachedPlayerScript(scriptUrl)
-            logger(
-              'debug',
-              'YouTube-Cipher',
+      this.cachedPlayerScript = new CachedPlayerScript(scriptUrl)
+      logger(
+        'debug',
+        'YouTube-Cipher',
 
-              `Obtained player script from watch page: ${this.cachedPlayerScript.url}`
-            )
-            return this.cachedPlayerScript
+        `Obtained player script from watch page: ${this.cachedPlayerScript.url}`
+      )
+      return this.cachedPlayerScript
     } finally {
       this.cipherLoadLock = false
     }
@@ -159,25 +160,51 @@ export default class CipherManager {
 
   async checkCipherServerStatus() {
     if (!this.config.url) {
-      logger('warn', 'YouTube-Cipher', 'Remote cipher URL is not configured. Skipping online check.');
-      return false;
+      logger(
+        'warn',
+        'YouTube-Cipher',
+        'Remote cipher URL is not configured. Skipping online check.'
+      )
+      return false
     }
 
     try {
-      const { statusCode, error } = await makeRequest(`${this.config.url}/status`, { method: 'GET', timeout: 5000 });
+      const { statusCode, error } = await makeRequest(
+        `${this.config.url}/status`,
+        { method: 'GET', timeout: 5000 }
+      )
       if (error || statusCode !== 200) {
-        logger('warn', 'YouTube-Cipher', `Cipher server at ${this.config.url} is offline or unreachable. Status: ${statusCode || 'N/A'}, Error: ${error?.message || 'Unknown'}`);
-        return false;
+        logger(
+          'warn',
+          'YouTube-Cipher',
+          `Cipher server at ${this.config.url} is offline or unreachable. Status: ${statusCode || 'N/A'}, Error: ${error?.message || 'Unknown'}`
+        )
+        return false
       }
-      logger('info', 'YouTube-Cipher', `Cipher server at ${this.config.url} is online.`);
-      return true;
+      logger(
+        'info',
+        'YouTube-Cipher',
+        `Cipher server at ${this.config.url} is online.`
+      )
+      return true
     } catch (e) {
-      logger('warn', 'YouTube-Cipher', `Cipher server at ${this.config.url} is offline or unreachable. Error: ${e.message}`);
-      return false;
+      logger(
+        'warn',
+        'YouTube-Cipher',
+        `Cipher server at ${this.config.url} is offline or unreachable. Error: ${e.message}`
+      )
+      return false
     }
   }
 
-  async resolveUrl(streamUrl, encryptedSignature, nParam, signatureKey, playerScript, context) {
+  async resolveUrl(
+    streamUrl,
+    encryptedSignature,
+    nParam,
+    signatureKey,
+    playerScript,
+    context
+  ) {
     if (!this.config.url) {
       throw new Error('Remote cipher URL is not configured.')
     }
@@ -248,9 +275,16 @@ export default class CipherManager {
 
   async _fetchPlayerScriptFromWatchPage(videoId) {
     const watchUrl = `https://www.youtube.com/watch?v=${videoId}`
-    const { body: watchPage, error, statusCode } = await makeRequest(watchUrl, {
+    const {
+      body: watchPage,
+      error,
+      statusCode
+    } = await makeRequest(watchUrl, {
       method: 'GET',
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36' }
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+      }
     })
 
     if (error || statusCode !== 200) {

@@ -23,48 +23,58 @@ export default class {
   }
   async setup() {
     if (this.clientId) return true
-    const mainPageRequest = await makeRequest('https://soundcloud.com', {
-      method: 'GET'
-    })
-    if (!mainPageRequest) {
-      logger('error', 'Sources', 'Failed to load SoundCloud main page')
-      return false
-    }
-    if (mainPageRequest.error) {
+    try {
+      const mainPageRequest = await makeRequest('https://soundcloud.com', {
+        method: 'GET'
+      })
+      if (!mainPageRequest) {
+        logger('error', 'Sources', 'Failed to load SoundCloud main page')
+        return false
+      }
+      if (mainPageRequest.error) {
+        logger(
+          'error',
+          'Sources',
+          `Failed to fetch SoundCloud clientId: ${mainPageRequest.error.message}`
+        )
+        return false
+      }
+      const assetId = mainPageRequest.body.match(
+        /https:\/\/a-v2.sndcdn.com\/assets\/([a-zA-Z0-9-]+).js/gs
+      )[5]
+      const assetRequest = await http1makeRequest(assetId)
+      if (!assetRequest) {
+        logger('error', 'Sources', 'Failed to load SoundCloud asset')
+        return false
+      }
+      if (assetRequest.error) {
+        logger(
+          'error',
+          'Sources',
+          `Failed to fetch SoundCloud assets: ${assetRequest.error.message}`
+        )
+        return false
+      }
+
+      const clientId = assetRequest.body.match(/client_id=([a-zA-Z0-9]{32})/)[1]
+      if (!clientId) {
+        logger('error', 'Sources', 'Failed to fetch SoundCloud clientId')
+        return false
+      }
+      logger(
+        'info',
+        'Sources',
+        `Loaded SoundCloud source (clientId: ${clientId})`
+      )
+      this.clientId = clientId
+    } catch (err) {
       logger(
         'error',
         'Sources',
-        `Failed to fetch SoundCloud clientId: ${mainPageRequest.error.message}`
+        `Error setting up SoundCloud source: ${err.message}`
       )
       return false
     }
-    const assetId = mainPageRequest.body.match(
-      /https:\/\/a-v2.sndcdn.com\/assets\/([a-zA-Z0-9-]+).js/gs
-    )[5]
-    const assetRequest = await http1makeRequest(assetId)
-    if (!assetRequest) {
-      logger('error', 'Sources', 'Failed to load SoundCloud asset')
-      return false
-    }
-    if (assetRequest.error) {
-      logger(
-        'error',
-        'Sources',
-        `Failed to fetch SoundCloud assets: ${assetRequest.error.message}`
-      )
-      return false
-    }
-    const clientId = assetRequest.body.match(/client_id=([a-zA-Z0-9]{32})/)[1]
-    if (!clientId) {
-      logger('error', 'Sources', 'Failed to fetch SoundCloud clientId')
-      return false
-    }
-    logger(
-      'info',
-      'Sources',
-      `Loaded SoundCloud source (clientId: ${clientId})`
-    )
-    this.clientId = clientId
     return true
   }
   match() {}

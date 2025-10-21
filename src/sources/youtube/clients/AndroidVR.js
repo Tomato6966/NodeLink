@@ -229,7 +229,7 @@ export default class AndroidVR extends BaseClient {
           {
             headers: { 'User-Agent': this.getClient(context).userAgent },
             body: {
-              context: { client: this.getClient(context) },
+              context: this.getClient(context),
               playlistId,
               contentCheckOk: true,
               racyCheckOk: true

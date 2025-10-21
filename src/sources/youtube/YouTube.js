@@ -5,6 +5,7 @@ import {
   logger,
   makeRequest
 } from '../../utils.js'
+import { YOUTUBE_CONSTANTS, checkURLType } from './common.js'
 
 import CipherManager from './CipherManager.js'
 import OAuth from './OAuth.js'
@@ -64,7 +65,11 @@ export default class YouTubeSource {
         this.oauth
       )
     }
-    logger('debug', 'YouTube', `Initialized clients: ${Object.keys(this.clients).join(', ')}`)
+    logger(
+      'debug',
+      'YouTube',
+      `Initialized clients: ${Object.keys(this.clients).join(', ')}`
+    )
 
     await this._fetchVisitorData()
     await this.cipherManager.getCachedPlayerScript()
@@ -217,10 +222,72 @@ export default class YouTubeSource {
   async resolve(url, type) {
     const clientList = this.config.clients.playback
     const clientErrors = []
+    const urlType = checkURLType(url, 'youtube')
+
+    // Prioritize Android client for playlists
+    if (urlType === YOUTUBE_CONSTANTS.PLAYLIST) {
+      const androidClient = this.clients.Android
+      if (androidClient) {
+        try {
+          logger(
+            'debug',
+            'YouTube',
+            `Attempting to resolve playlist URL with Android client (priority).`
+          )
+          const result = await androidClient.resolve(
+            url,
+            type,
+            this.ytContext,
+            this.cipherManager
+          )
+
+          if (
+            result &&
+            (result.loadType === 'track' || result.loadType === 'playlist')
+          ) {
+            logger(
+              'debug',
+              'YouTube',
+              `Successfully resolved playlist URL with Android client.`
+            )
+            return result
+          }
+          const errorMessage =
+            result?.data?.message ||
+            'Android client returned empty or failed for playlist.'
+          clientErrors.push({ client: 'Android', message: errorMessage })
+          logger(
+            'debug',
+            'YouTube',
+            `Android client returned empty or failed to resolve playlist URL.`
+          )
+        } catch (e) {
+          clientErrors.push({ client: 'Android', message: e.message })
+          logger(
+            'warn',
+            'YouTube',
+            `Android client threw an exception during playlist resolve: ${e.message}`
+          )
+        }
+      } else {
+        clientErrors.push({
+          client: 'Android',
+          message: 'Android client not available.'
+        })
+        logger(
+          'warn',
+          'YouTube',
+          'Android client not available for playlist priority.'
+        )
+      }
+    }
 
     for (const clientName of clientList) {
       const client = this.clients[clientName]
       if (!client) continue
+      // Skip Android if it was already tried for playlist and failed
+      if (urlType === YOUTUBE_CONSTANTS.PLAYLIST && clientName === 'Android')
+        continue
 
       try {
         logger(

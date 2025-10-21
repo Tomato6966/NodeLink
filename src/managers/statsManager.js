@@ -32,9 +32,10 @@ export default class StatsManager {
   }
 
   incrementApiRequest(endpoint) {
-    this.stats.api.requests[endpoint] = (this.stats.api.requests[endpoint] || 0) + 1
+    this.stats.api.requests[endpoint] =
+      (this.stats.api.requests[endpoint] || 0) + 1
   }
-  
+
   incrementApiError(endpoint) {
     this.stats.api.errors[endpoint] = (this.stats.api.errors[endpoint] || 0) + 1
   }
@@ -50,7 +51,8 @@ export default class StatsManager {
   }
 
   incrementPlaybackEvent(eventType) {
-    this.stats.playback.events[eventType] = (this.stats.playback.events[eventType] || 0) + 1
+    this.stats.playback.events[eventType] =
+      (this.stats.playback.events[eventType] || 0) + 1
   }
 
   incrementRecoveryAttempt() {
@@ -60,7 +62,7 @@ export default class StatsManager {
   incrementRecoverySuccess() {
     this.stats.playback.recovery.successes++
   }
-  
+
   incrementRecoveryFailure() {
     this.stats.playback.recovery.failures++
   }

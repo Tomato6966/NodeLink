@@ -144,7 +144,9 @@ export function buildTrack(
     } else {
       title = getRunsText(
         renderer.title?.runs,
-        getItemValue(fullApiResponse, ['videoDetails.endscreen.endscreenRenderer.elements.1.endscreenElementRenderer.title.simpleText']),
+        getItemValue(fullApiResponse, [
+          'videoDetails.endscreen.endscreenRenderer.elements.1.endscreenElementRenderer.title.simpleText'
+        ]),
         getItemValue(renderer, ['title.simpleText'], 'Unknown Title')
       )
     }
@@ -156,7 +158,9 @@ export function buildTrack(
           'shortBylineText.runs',
           'ownerText.runs'
         ]),
-        getItemValue(fullApiResponse, ['videoDetails.endscreen.endscreenRenderer.elements.0.endscreenElementRenderer.title.simpleText']),
+        getItemValue(fullApiResponse, [
+          'videoDetails.endscreen.endscreenRenderer.elements.0.endscreenElementRenderer.title.simpleText'
+        ]),
         'Unknown Channel'
       )
     const lengthText = getItemValue(
@@ -279,19 +283,24 @@ export class BaseClient {
         )
       }
     }
-    const response = await makeRequest(`${apiEndpoint}/youtubei/v1/player?prettyPrint=false`, {
-      method: 'POST',
-      headers: {
-        'User-Agent': this.getClient(context).client.userAgent,
-        ...(this.getClient(context).client.visitorData
-          ? { 'X-Goog-Visitor-Id': this.getClient(context).client.visitorData }
-          : {}),
-        ...(this.isEmbedded() ? { Referer: 'https://www.youtube.com' } : {}),
-        ...headers
-      },
-      body: requestBody,
-      disableBodyCompression: true
-    })
+    const response = await makeRequest(
+      `${apiEndpoint}/youtubei/v1/player?prettyPrint=false`,
+      {
+        method: 'POST',
+        headers: {
+          'User-Agent': this.getClient(context).client.userAgent,
+          ...(this.getClient(context).client.visitorData
+            ? {
+                'X-Goog-Visitor-Id': this.getClient(context).client.visitorData
+              }
+            : {}),
+          ...(this.isEmbedded() ? { Referer: 'https://www.youtube.com' } : {}),
+          ...headers
+        },
+        body: requestBody,
+        disableBodyCompression: true
+      }
+    )
     if (response.statusCode !== 200) {
       const message = `Failed to get player data for stream. Status: ${response.statusCode}`
       logger('error', `youtube-${this.name}`, message)
@@ -331,7 +340,11 @@ export class BaseClient {
       }
     }
 
-    logger('debug', `youtube-${this.name}`, `Player response for ${videoId}: ${JSON.stringify(playerResponse, null, 2)}`)
+    logger(
+      'debug',
+      `youtube-${this.name}`,
+      `Player response for ${videoId}: ${JSON.stringify(playerResponse, null, 2)}`
+    )
 
     const track = buildTrack(
       playerResponse.videoDetails,
@@ -453,7 +466,9 @@ export class BaseClient {
       ...(streamingData.formats || [])
     ]
 
-    const filteredFormats = allFormats.filter(format => targetItags.includes(format.itag))
+    const filteredFormats = allFormats.filter((format) =>
+      targetItags.includes(format.itag)
+    )
 
     if (this.requirePlayerScript()) {
       const playerScript = await cipherManager.getCachedPlayerScript()
@@ -499,7 +514,8 @@ export class BaseClient {
       audioFormat = filteredFormats[0] // Pick the first one after filtering
     }
 
-    const directUrl = audioFormat?.url && !decodedTrack.isStream ? audioFormat.url : undefined
+    const directUrl =
+      audioFormat?.url && !decodedTrack.isStream ? audioFormat.url : undefined
 
     if (!directUrl && !streamingData.hlsManifestUrl) {
       logger(
