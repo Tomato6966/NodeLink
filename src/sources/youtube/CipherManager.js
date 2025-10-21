@@ -49,29 +49,16 @@ export default class CipherManager {
         return this.cachedPlayerScript
       }
 
-      const {
-        body: responseText,
-        error,
-        statusCode
-      } = await makeRequest('https://www.youtube.com/embed/')
-      if (error || statusCode !== 200) {
-        throw new Error(
-          `Failed to fetch player script (embed): ${error?.message || statusCode}`
-        )
-      }
+            const scriptUrl = await this._fetchPlayerScriptFromWatchPage('dQw4w9WgXcQ')
 
-      const scriptUrl = responseText.match(/"jsUrl":"([^"]+)"/)?.[1]
-      if (!scriptUrl) {
-        throw new Error('No jsUrl found in embed page')
-      }
+            this.cachedPlayerScript = new CachedPlayerScript(scriptUrl)
+            logger(
+              'debug',
+              'YouTube-Cipher',
 
-      this.cachedPlayerScript = new CachedPlayerScript(scriptUrl)
-      logger(
-        'debug',
-        'YouTube-Cipher',
-        `Obtained player script from /embed/: ${this.cachedPlayerScript.url}`
-      )
-      return this.cachedPlayerScript
+              `Obtained player script from watch page: ${this.cachedPlayerScript.url}`
+            )
+            return this.cachedPlayerScript
     } finally {
       this.cipherLoadLock = false
     }
@@ -170,28 +157,29 @@ export default class CipherManager {
     return body.sts
   }
 
-  async resolveFormatUrl(playerScript, format) {
+  async checkCipherServerStatus() {
     if (!this.config.url) {
-      throw new Error('Remote cipher URL is not configured.')
+      logger('warn', 'YouTube-Cipher', 'Remote cipher URL is not configured. Skipping online check.');
+      return false;
     }
 
-    let streamUrl, encryptedSignature, signatureKey
-
-    if (format.signatureCipher) {
-      const cipherData = new URLSearchParams(format.signatureCipher)
-      encryptedSignature = cipherData.get('s')
-      streamUrl = cipherData.get('url')
-      signatureKey = cipherData.get('sp') || 'sig'
-
-      if (!encryptedSignature) {
-        throw new Error(
-          `Could not extract signature from signatureCipher: ${format.signatureCipher}`
-        )
+    try {
+      const { statusCode, error } = await makeRequest(`${this.config.url}/status`, { method: 'GET', timeout: 5000 });
+      if (error || statusCode !== 200) {
+        logger('warn', 'YouTube-Cipher', `Cipher server at ${this.config.url} is offline or unreachable. Status: ${statusCode || 'N/A'}, Error: ${error?.message || 'Unknown'}`);
+        return false;
       }
-    } else if (format.url) {
-      streamUrl = format.url
-    } else {
-      throw new Error('Format has no url or signatureCipher')
+      logger('info', 'YouTube-Cipher', `Cipher server at ${this.config.url} is online.`);
+      return true;
+    } catch (e) {
+      logger('warn', 'YouTube-Cipher', `Cipher server at ${this.config.url} is offline or unreachable. Error: ${e.message}`);
+      return false;
+    }
+  }
+
+  async resolveUrl(streamUrl, encryptedSignature, nParam, signatureKey, playerScript, context) {
+    if (!this.config.url) {
+      throw new Error('Remote cipher URL is not configured.')
     }
 
     const requestBody = {
@@ -201,18 +189,31 @@ export default class CipherManager {
 
     if (encryptedSignature) {
       requestBody.encrypted_signature = encryptedSignature
-      requestBody.signature_key = signatureKey
+      requestBody.signature_key = signatureKey || 'sig'
+    }
+
+    if (nParam) {
+      requestBody.n_param = nParam
     }
 
     const headers = { 'Content-Type': 'application/json' }
     if (this.config.token) {
       headers.Authorization = this.config.token
     }
+    if (context && context.client && context.client.userAgent) {
+      headers['User-Agent'] = context.client.userAgent
+    }
 
     logger(
       'debug',
       'YouTube-Cipher',
       `Resolving URL via /resolve_url: ${streamUrl}`
+    )
+
+    logger(
+      'debug',
+      'YouTube-Cipher',
+      `Sending to cipher service: ${JSON.stringify(requestBody, null, 2)}`
     )
 
     const { body, error, statusCode } = await makeRequest(
@@ -223,6 +224,12 @@ export default class CipherManager {
         body: requestBody,
         disableBodyCompression: true
       }
+    )
+
+    logger(
+      'debug',
+      'YouTube-Cipher',
+      `Received from cipher service (Status: ${statusCode}): ${JSON.stringify(body, null, 2)}`
     )
 
     if (error || statusCode !== 200) {
@@ -237,5 +244,28 @@ export default class CipherManager {
 
     logger('debug', 'YouTube-Cipher', `Resolved URL: ${body.resolved_url}`)
     return body.resolved_url
+  }
+
+  async _fetchPlayerScriptFromWatchPage(videoId) {
+    const watchUrl = `https://www.youtube.com/watch?v=${videoId}`
+    const { body: watchPage, error, statusCode } = await makeRequest(watchUrl, {
+      method: 'GET',
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36' }
+    })
+
+    if (error || statusCode !== 200) {
+      throw new Error(
+        `Failed to fetch watch page for player script: ${error?.message || statusCode}`
+      )
+    }
+
+    const jsUrlMatch = watchPage.match(/"jsUrl":"([^"]+)"/)
+    if (!jsUrlMatch) {
+      throw new Error('Could not find jsUrl in watch page.')
+    }
+
+    let scriptUrl = jsUrlMatch[1]
+    scriptUrl = scriptUrl.replace(/\/[a-z]{2}_[A-Z]{2}\//, '/en_US/')
+    return `https://www.youtube.com${scriptUrl}`
   }
 }

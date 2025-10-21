@@ -13,16 +13,21 @@ export default class Music extends BaseClient {
 
   getClient(context) {
     return {
-      ...context.client,
-      clientName: 'ANDROID_MUSIC',
-      clientVersion: '7.27.52',
-      userAgent:
-        'com.google.android.apps.youtube.music/7.27.52 (Linux; U; Android 14 gzip)',
-      deviceMake: 'Google',
-      deviceModel: 'Pixel 6',
-      osName: 'Android',
-      osVersion: '14',
-      androidSdkVersion: '30'
+      client: {
+        clientName: 'ANDROID_MUSIC',
+        clientVersion: '7.27.52',
+        userAgent:
+          'com.google.android.apps.youtube.music/7.27.52 (Linux; U; Android 14 gzip)',
+        deviceMake: 'Google',
+        deviceModel: 'Pixel 6',
+        osName: 'Android',
+        osVersion: '14',
+        androidSdkVersion: '30',
+        hl: context.client.hl,
+        gl: context.client.gl
+      },
+      user: { lockedSafetyMode: false },
+      request: { useSsl: true }
     }
   }
 
@@ -30,7 +35,7 @@ export default class Music extends BaseClient {
     const sourceName = 'ytmusic'
 
     const requestBody = {
-      context: { client: this.getClient(context) },
+      context: this.getClient(context),
       query: query,
       params: 'EgWKAQIIAWoQEAMQBBAJEAoQBRAREBAQFQ%3D%3D'
     }
@@ -42,7 +47,7 @@ export default class Music extends BaseClient {
     } = await makeRequest('https://music.youtube.com/youtubei/v1/search', {
       method: 'POST',
       headers: {
-        'User-Agent': this.getClient(context).userAgent,
+        'User-Agent': this.getClient(context).client.userAgent,
         'X-Goog-Api-Format-Version': '2'
       },
       body: requestBody,

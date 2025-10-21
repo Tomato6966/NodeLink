@@ -13,10 +13,15 @@ export default class TV extends BaseClient {
 
   getClient(context) {
     return {
-      ...context.client,
-      clientName: 'TVHTML5',
-      clientVersion: '7.20250319.10.00',
-      userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version'
+      client: {
+        clientName: 'TVHTML5',
+        clientVersion: '7.20250319.10.00',
+        userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+        hl: context.client.hl,
+        gl: context.client.gl
+      },
+      user: { lockedSafetyMode: false },
+      request: { useSsl: true }
     }
   }
 

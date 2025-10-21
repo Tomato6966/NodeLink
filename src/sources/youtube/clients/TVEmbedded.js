@@ -13,14 +13,16 @@ export default class TVEmbedded extends BaseClient {
 
   getClient(context) {
     return {
-      ...context.client,
-      clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
-      clientVersion: '2.0',
-      userAgent: 'Mozilla/5.0 (TV; rv:10.0) Gecko/20100101 Firefox/10.0', // Added User-Agent
-      thirdParty: {
-        embedUrl: 'https://www.youtube.com'
+      client: {
+        clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+        clientVersion: '2.0',
+        userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+        hl: context.client.hl,
+        gl: context.client.gl
       },
-      clientScreen: 'EMBED'
+      user: { lockedSafetyMode: false },
+      request: { useSsl: true },
+      thirdParty: { embedUrl: 'https://www.youtube.com' }
     }
   }
 

@@ -1,4 +1,5 @@
 import { Transform } from 'node:stream'
+import { logger } from '../utils.js'
 
 import Tremolo from './filters/tremolo.js'
 import Vibrato from './filters/vibrato.js'

@@ -225,7 +225,7 @@ export class BaseClient {
   }
 
   getApiEndpoint() {
-    return 'https://www.youtube.com'
+    return 'https://youtubei.googleapis.com'
   }
 
   getPlayerParams() {
@@ -247,7 +247,7 @@ export class BaseClient {
   async _makePlayerRequest(videoId, context, headers, cipherManager) {
     const apiEndpoint = this.getApiEndpoint()
     const requestBody = {
-      context: { client: this.getClient(context) },
+      context: this.getClient(context),
       videoId: videoId,
       contentCheckOk: true,
       racyCheckOk: true
@@ -264,7 +264,7 @@ export class BaseClient {
         const signatureTimestamp = await cipherManager.getTimestamp(
           playerScript.url
         )
-        requestBody.context.playbackContext = {
+        requestBody.playbackContext = {
           contentPlaybackContext: {
             signatureTimestamp: signatureTimestamp
           }
@@ -277,12 +277,12 @@ export class BaseClient {
         )
       }
     }
-    const response = await makeRequest(`${apiEndpoint}/youtubei/v1/player`, {
+    const response = await makeRequest(`${apiEndpoint}/youtubei/v1/player?prettyPrint=false`, {
       method: 'POST',
       headers: {
-        'User-Agent': this.getClient(context).userAgent,
-        ...(context.client.visitorData
-          ? { 'X-Goog-Visitor-Id': context.client.visitorData }
+        'User-Agent': this.getClient(context).client.userAgent,
+        ...(this.getClient(context).client.visitorData
+          ? { 'X-Goog-Visitor-Id': this.getClient(context).client.visitorData }
           : {}),
         ...(this.isEmbedded() ? { Referer: 'https://www.youtube.com' } : {}),
         ...headers
@@ -328,6 +328,8 @@ export class BaseClient {
         data: { message, severity: 'common', cause: 'UpstreamPlayability' }
       }
     }
+
+    logger('debug', `youtube-${this.name}`, `Player response for ${videoId}: ${JSON.stringify(playerResponse, null, 2)}`)
 
     const track = buildTrack(
       playerResponse.videoDetails,
@@ -441,54 +443,68 @@ export class BaseClient {
       }
     }
 
+    const qualityPriority = this._getQualityPriority()
+    const targetItags = qualityPriority[this.config.audio.quality || 'high']
+
+    const allFormats = [
+      ...(streamingData.adaptiveFormats || []),
+      ...(streamingData.formats || [])
+    ]
+
+    const filteredFormats = allFormats.filter(format => targetItags.includes(format.itag))
+
     if (this.requirePlayerScript()) {
       const playerScript = await cipherManager.getCachedPlayerScript()
 
-      for (const format of [
-        ...(streamingData.adaptiveFormats || []),
-        ...(streamingData.formats || [])
-      ]) {
-        if (
-          format.signatureCipher ||
-          (format.url && new URL(format.url).searchParams.has('n'))
-        ) {
+      for (const format of filteredFormats) {
+        let currentStreamUrl = format.url
+        let currentEncryptedSignature = undefined
+        let currentNParam = undefined
+        let currentSignatureKey = undefined
+
+        if (format.signatureCipher) {
+          const cipher = new URLSearchParams(format.signatureCipher)
+          currentStreamUrl = cipher.get('url')
+          currentEncryptedSignature = cipher.get('s')
+          currentSignatureKey = cipher.get('sp') || 'sig'
+          currentNParam = cipher.get('n')
+        }
+
+        if (currentStreamUrl) {
           try {
-            const decipheredUrl = await cipherManager.resolveFormatUrl(
+            const decipheredUrl = await cipherManager.resolveUrl(
+              currentStreamUrl,
+              currentEncryptedSignature,
+              currentNParam,
+              currentSignatureKey,
               playerScript,
-              format
+              context
             )
             format.url = decipheredUrl
           } catch (e) {
             logger(
               'warn',
               `youtube-${this.name}`,
-              `Failed to decipher format URL: ${e.message}`
+              `Failed to resolve format URL for itag ${format.itag}: ${e.message}`
             )
           }
         }
       }
     }
 
-    const qualityPriority = this._getQualityPriority()
-    const targetItags = qualityPriority[this.config.audio.quality || 'high']
-
     let audioFormat = null
-    if (streamingData.adaptiveFormats) {
-      for (const itag of targetItags) {
-        audioFormat = streamingData.adaptiveFormats.find((f) => f.itag === itag)
-        if (audioFormat) break
-      }
-      if (!audioFormat) {
-        audioFormat = streamingData.adaptiveFormats.find((f) =>
-          f.mimeType?.startsWith('audio/')
-        )
-      }
+    if (filteredFormats.length > 0) {
+      audioFormat = filteredFormats[0] // Pick the first one after filtering
     }
 
-    const directUrl =
-      audioFormat?.url && !decodedTrack.isStream ? audioFormat.url : null
+    const directUrl = audioFormat?.url && !decodedTrack.isStream ? audioFormat.url : undefined
 
     if (!directUrl && !streamingData.hlsManifestUrl) {
+      logger(
+        'debug',
+        `youtube-${this.name}`,
+        `No suitable audio stream found. Available streamingData: ${JSON.stringify(streamingData)}`
+      )
       return {
         exception: {
           message: 'No suitable audio stream found.',

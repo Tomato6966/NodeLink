@@ -64,14 +64,11 @@ export default class YouTubeSource {
         this.oauth
       )
     }
-    logger(
-      'debug',
-      'YouTube',
-      `Initialized clients: ${Object.keys(this.clients).join(', ')}`
-    )
+    logger('debug', 'YouTube', `Initialized clients: ${Object.keys(this.clients).join(', ')}`)
 
     await this._fetchVisitorData()
     await this.cipherManager.getCachedPlayerScript()
+    await this.cipherManager.checkCipherServerStatus()
 
     if (this.visitorDataInterval) {
       clearInterval(this.visitorDataInterval)

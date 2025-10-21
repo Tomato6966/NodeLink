@@ -13,12 +13,17 @@ export default class Web extends BaseClient {
 
   getClient(context) {
     return {
-      ...context.client,
-      clientName: 'WEB',
-      clientVersion: '2.20250403.01.00',
-      platform: 'DESKTOP',
-      userAgent:
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+      client: {
+        clientName: 'WEB',
+        clientVersion: '2.20250403.01.00',
+        platform: 'DESKTOP',
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        hl: context.client.hl,
+        gl: context.client.gl
+      },
+      user: { lockedSafetyMode: false },
+      request: { useSsl: true }
     }
   }
 
@@ -30,7 +35,7 @@ export default class Web extends BaseClient {
     const sourceName = 'youtube'
 
     const requestBody = {
-      context: { client: this.getClient(context) },
+      context: this.getClient(context),
       query: query,
       params: 'EgIQAQ%3D%3D'
     }
@@ -42,7 +47,7 @@ export default class Web extends BaseClient {
     } = await makeRequest('https://www.youtube.com/youtubei/v1/search', {
       method: 'POST',
       headers: {
-        'User-Agent': this.getClient(context).userAgent,
+        'User-Agent': this.getClient(context).client.userAgent,
         'X-Goog-Api-Format-Version': '2'
       },
       body: requestBody,
@@ -193,9 +198,12 @@ export default class Web extends BaseClient {
         const { body: playlistResponse, statusCode } = await makeRequest(
           `${apiEndpoint}/youtubei/v1/next`,
           {
-            headers: { 'User-Agent': this.getClient(context).userAgent },
+            headers: {
+              'User-Agent': this.getClient(context).client.userAgent,
+              ...headers
+            },
             body: {
-              context: { client: this.getClient(context) },
+              context: this.getClient(context),
               playlistId,
               contentCheckOk: true,
               racyCheckOk: true

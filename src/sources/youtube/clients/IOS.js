@@ -13,16 +13,22 @@ export default class IOS extends BaseClient {
 
   getClient(context) {
     return {
-      ...context.client,
-      clientName: 'IOS',
-      clientVersion: '19.47.7',
-      userAgent:
-        'com.google.ios.youtube/19.47.7 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
-      deviceMake: 'Apple',
-      deviceModel: 'iPhone16,2',
-      osName: 'iPhone',
-      osVersion: '17.5.1.21F90',
-      utcOffsetMinutes: 0
+      client: {
+        clientName: 'IOS',
+        clientVersion: '19.47.7',
+        userAgent:
+          'com.google.ios.youtube/19.47.7 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X;)',
+        deviceMake: 'Apple',
+        deviceModel: 'iPhone16,2',
+        osName: 'iPhone',
+        osVersion: '17.5.1.21F90',
+        utcOffsetMinutes: 0,
+        hl: context.client.hl,
+        gl: context.client.gl,
+        visitorData: context.client.visitorData
+      },
+      user: { lockedSafetyMode: false },
+      request: { useSsl: true }
     }
   }
 
@@ -109,9 +115,9 @@ export default class IOS extends BaseClient {
         const { body: playlistResponse, statusCode } = await makeRequest(
           `${apiEndpoint}/youtubei/v1/next`,
           {
-            headers: { 'User-Agent': this.getClient(context).userAgent },
+            headers: { 'User-Agent': this.getClient(context).client.userAgent },
             body: {
-              context: { client: this.getClient(context) },
+              context: this.getClient(context),
               playlistId,
               contentCheckOk: true,
               racyCheckOk: true

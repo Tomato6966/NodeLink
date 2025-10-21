@@ -13,14 +13,20 @@ export default class AndroidVR extends BaseClient {
 
   getClient(context) {
     return {
-      ...context.client,
-      clientName: 'ANDROID_VR',
-      clientVersion: '1.60.19',
-      userAgent:
-        'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
-      osName: 'Android',
-      osVersion: '12L',
-      androidSdkVersion: '32'
+      client: {
+        clientName: 'ANDROID_VR',
+        clientVersion: '1.60.19',
+        userAgent:
+          'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+        osName: 'Android',
+        osVersion: '12L',
+        androidSdkVersion: '32',
+        hl: context.client.hl,
+        gl: context.client.gl,
+        visitorData: context.client.visitorData
+      },
+      user: { lockedSafetyMode: false },
+      request: { useSsl: true }
     }
   }
 
@@ -32,7 +38,7 @@ export default class AndroidVR extends BaseClient {
     const sourceName = 'youtube'
 
     const requestBody = {
-      context: { client: this.getClient(context) },
+      context: this.getClient(context),
       query: query,
       params: 'EgIQAQ%3D%3D'
     }
@@ -47,7 +53,7 @@ export default class AndroidVR extends BaseClient {
         {
           method: 'POST',
           headers: {
-            'User-Agent': this.getClient(context).userAgent,
+            'User-Agent': this.getClient(context).client.userAgent,
             'X-Goog-Api-Format-Version': '2'
           },
           body: requestBody,
