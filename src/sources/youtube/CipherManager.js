@@ -1,5 +1,5 @@
 import { URLSearchParams } from 'node:url'
-import { logger, makeRequest } from '../../utils.js'
+import { http1makeRequest, logger, makeRequest } from '../../utils.js'
 
 const CACHE_DURATION_MS = 12 * 60 * 60 * 1000
 
@@ -169,15 +169,15 @@ export default class CipherManager {
     }
 
     try {
-      const { statusCode, error } = await makeRequest(
-        `${this.config.url}/status`,
+      const { statusCode, error } = await http1makeRequest(
+        `${this.config.url}/`,
         { method: 'GET', timeout: 5000 }
       )
       if (error || statusCode !== 200) {
         logger(
           'warn',
           'YouTube-Cipher',
-          `Cipher server at ${this.config.url} is offline or unreachable. Status: ${statusCode || 'N/A'}, Error: ${error?.message || 'Unknown'}`
+          `Cipher server at ${this.config.url} is offline or unreachable. Status: ${statusCode || 'N/A'}`
         )
         return false
       }
@@ -191,7 +191,7 @@ export default class CipherManager {
       logger(
         'warn',
         'YouTube-Cipher',
-        `Cipher server at ${this.config.url} is offline or unreachable. Error: ${e.message}`
+        `Cipher server at ${this.config.url} is offline or unreachable.`
       )
       return false
     }
