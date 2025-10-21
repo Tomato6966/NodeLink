@@ -44,7 +44,7 @@ export default class Equalizer {
 
     const gainDb = gain * 12.0
 
-    const A = Math.pow(10, gainDb / 40)
+    const A = 10 ** (gainDb / 40)
 
     const omega0 = (2 * Math.PI * freq) / SAMPLE_RATE
     const sin_omega0 = Math.sin(omega0)
@@ -52,12 +52,12 @@ export default class Equalizer {
 
     const alpha = sin_omega0 / (2 * DEFAULT_Q)
 
-    let b0 = 1 + alpha * A
-    let b1 = -2 * cos_omega0
-    let b2 = 1 - alpha * A
+    const b0 = 1 + alpha * A
+    const b1 = -2 * cos_omega0
+    const b2 = 1 - alpha * A
     let a0 = 1 + alpha / A
-    let a1 = -2 * cos_omega0
-    let a2 = 1 - alpha / A
+    const a1 = -2 * cos_omega0
+    const a2 = 1 - alpha / A
 
     if (Math.abs(a0) < 1e-12) {
       a0 = 1e-12

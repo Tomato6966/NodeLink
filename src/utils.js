@@ -20,7 +20,7 @@ import {
 } from './constants.js'
 
 let loggingConfig = {}
-let logLevels = {
+const logLevels = {
   debug: 0,
   info: 1,
   warn: 2,
@@ -479,17 +479,23 @@ async function http1makeRequest(urlString, options = {}) {
     ...customHeaders
   }
 
-  let payloadBuffer = null
+  let payloadBuffer = null;
   if (body != null && !['GET', 'HEAD'].includes(method)) {
-    reqHeaders['Content-Type'] =
-      reqHeaders['Content-Type'] || 'application/json'
-    const rawPayload = typeof body === 'string' ? body : JSON.stringify(body)
+    const isFormUrlEncoded = reqHeaders['Content-Type'] === 'application/x-www-form-urlencoded';
+    let rawPayload;
+
+    if (isFormUrlEncoded && typeof body === 'string') {
+      rawPayload = body;
+    } else {
+      reqHeaders['Content-Type'] = reqHeaders['Content-Type'] || 'application/json';
+      rawPayload = typeof body === 'string' ? body : JSON.stringify(body);
+    }
 
     if (disableBodyCompression) {
-      payloadBuffer = Buffer.from(rawPayload)
+      payloadBuffer = Buffer.from(rawPayload);
     } else {
-      reqHeaders['Content-Encoding'] = 'gzip'
-      payloadBuffer = zlib.gzipSync(rawPayload)
+      reqHeaders['Content-Encoding'] = 'gzip';
+      payloadBuffer = zlib.gzipSync(rawPayload);
     }
   }
 
@@ -591,7 +597,7 @@ async function http1makeRequest(urlString, options = {}) {
     }
   })
 }
-async function makeRequest(urlString, options = {}, nodelink) {
+async function makeRequest(urlString, options, nodelink) {
   const {
     method = 'GET',
     headers: customHeaders = {},

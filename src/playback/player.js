@@ -238,7 +238,7 @@ export class Player {
     this.recoveryAttempts++
 
     const initialDelay = this.nodelink.options.recovery?.initialDelay ?? 1000
-    const delay = initialDelay * Math.pow(2, this.recoveryAttempts - 1)
+    const delay = initialDelay * 2 ** (this.recoveryAttempts - 1)
 
     logger(
       'warn',
@@ -442,7 +442,7 @@ export class Player {
     if (
       position < 0 ||
       position > this.track.info.length ||
-      (position == 0 && position == this.position)
+      (position === 0 && position === this.position)
     )
       return false
 

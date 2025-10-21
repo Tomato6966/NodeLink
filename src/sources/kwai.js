@@ -1,5 +1,5 @@
 import { encodeTrack, makeRequest, http1makeRequest, logger } from '../utils.js'
-import { PassThrough } from 'stream'
+import { PassThrough } from 'node:stream'
 
 export default class KwaiSource {
   constructor(nodelink) {
@@ -28,7 +28,7 @@ export default class KwaiSource {
   decodeUnicodeEscapes(str) {
     if (!str) return null
     return str.replace(/\\u([\dA-Fa-f]{4})/g, (match, code) => {
-      return String.fromCharCode(parseInt(code, 16))
+      return String.fromCharCode(Number.parseInt(code, 16))
     })
   }
 
@@ -80,7 +80,7 @@ export default class KwaiSource {
       const videoInfo = {
         author: kwaiIdMatch ? kwaiIdMatch[1] : 'Unknown',
         title: kwaiIdMatch ? `Kwai - ${kwaiIdMatch[1]}` : 'Kwai Video',
-        length: durationMatch ? parseInt(durationMatch[1], 10) * 1000 : null,
+        length: durationMatch ? Number.parseInt(durationMatch[1], 10) * 1000 : null,
         thumbnail: thumbnailUrl,
         videoUrl: this.decodeUnicodeEscapes(videoUrlMatch[1])
       }

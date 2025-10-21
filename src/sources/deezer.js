@@ -375,9 +375,8 @@ export default class DeezerSource {
                 buf = Buffer.concat([buf, chunk])
               }
               break
-            } else {
-              buf = Buffer.concat([buf, chunk])
             }
+              buf = Buffer.concat([buf, chunk])
 
             while (buf.length >= bufferSize) {
               const bufferSized = buf.subarray(0, bufferSize)

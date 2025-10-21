@@ -279,7 +279,7 @@ class NodelinkServer {
         }
 
         for (const player of session.players.players.values()) {
-          if (player && player.track && !player.isPaused && player.connection) {
+          if (player?.track && !player.isPaused && player.connection) {
             if (
               player._lastStreamDataTime > 0 &&
               Date.now() - player._lastStreamDataTime >= zombieThreshold

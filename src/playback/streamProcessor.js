@@ -595,8 +595,8 @@ class AACDecoderStream extends Transform {
     }
 
     const stereo = new Float32Array(samplesPerChannel * 2)
-    const CENTER_MIX = 0.707
-    const SURROUND_MIX = 0.707
+    const CENTER_MIX = Math.SQRT1_2
+    const SURROUND_MIX = Math.SQRT1_2
     const LFE_MIX = 0.5
 
     for (let i = 0; i < samplesPerChannel; i++) {
@@ -745,7 +745,7 @@ class AACDecoderStream extends Transform {
         try {
           const result = this.decoder.decode(frameInfo.frame)
 
-          if (result && result.pcm && result.pcm.length > 0) {
+          if (result?.pcm && result.pcm.length > 0) {
             let { pcm, sampleRate, channels, samplesPerChannel } = result
 
             if (channels > 2 || channels === 1) {
@@ -797,7 +797,7 @@ class AACDecoderStream extends Transform {
         const frameInfo = this._findADTSFrame(this.buffer)
         if (frameInfo) {
           const result = this.decoder.decode(frameInfo.frame)
-          if (result && result.pcm) {
+          if (result?.pcm) {
             const pcmInt16 = new Int16Array(result.pcm.length)
             for (let i = 0; i < result.pcm.length; i++) {
               pcmInt16[i] = Math.max(-1, Math.min(1, result.pcm[i])) * 32767
@@ -825,7 +825,7 @@ class MP4ToAACStream extends Transform {
     this.mp4boxFile.onReady = (info) => {
       try {
         const audioTrack = info.tracks.find(
-          (t) => t.codec && t.codec.startsWith('mp4a')
+          (t) => t.codec?.startsWith('mp4a')
         )
         if (!audioTrack) {
           this.emit('error', new Error('No AAC track found in MP4'))
@@ -851,7 +851,7 @@ class MP4ToAACStream extends Transform {
         if (!samples || !Array.isArray(samples)) return
 
         for (const sample of samples) {
-          if (sample && sample.data) {
+          if (sample?.data) {
             const adts = this._createAdtsHeader(
               sample.data.byteLength,
               this.audioConfig
@@ -887,7 +887,7 @@ class MP4ToAACStream extends Transform {
     if (track.codec) {
       const codecParts = track.codec.split('.')
       if (codecParts.length >= 3) {
-        const objectType = parseInt(codecParts[2], 10)
+        const objectType = Number.parseInt(codecParts[2], 10)
 
         if (objectType === 5) {
           profile = 2
@@ -1357,8 +1357,8 @@ export const createAudioResource = (
 
 export const createSeekeableAudioResource = async (
   url,
-  seekTime = 0,
-  endTime = 0,
+  seekTime,
+  endTime,
   nodelink,
   initialFilters = {}
 ) => {
@@ -1371,7 +1371,7 @@ export const createSeekeableAudioResource = async (
 
   const packetStream = new PassThrough()
   demuxerStream.on('data', (packet) => {
-    if (packet && packet.data && packet.data.length > 0) {
+    if (packet?.data && packet.data.length > 0) {
       packetStream.write(Buffer.from(packet.data))
     }
   })

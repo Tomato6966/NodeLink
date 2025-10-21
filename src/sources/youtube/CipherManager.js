@@ -227,7 +227,7 @@ export default class CipherManager {
     if (this.config.token) {
       headers.Authorization = this.config.token
     }
-    if (context && context.client && context.client.userAgent) {
+    if (context?.client?.userAgent) {
       headers['User-Agent'] = context.client.userAgent
     }
 

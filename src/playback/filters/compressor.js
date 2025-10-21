@@ -2,7 +2,7 @@ import { SAMPLE_RATE } from '../../constants.js'
 import { clamp16Bit } from './dsp/clamp16Bit.js'
 
 function dbToLinear(db) {
-  return Math.pow(10, db / 20)
+  return 10 ** (db / 20)
 }
 
 function linearToDb(linear) {

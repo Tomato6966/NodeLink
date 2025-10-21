@@ -232,7 +232,7 @@ export default class YouTubeSource {
           logger(
             'debug',
             'YouTube',
-            `Attempting to resolve playlist URL with Android client (priority).`
+            'Attempting to resolve playlist URL with Android client (priority).'
           )
           const result = await androidClient.resolve(
             url,
@@ -248,7 +248,7 @@ export default class YouTubeSource {
             logger(
               'debug',
               'YouTube',
-              `Successfully resolved playlist URL with Android client.`
+              'Successfully resolved playlist URL with Android client.'
             )
             return result
           }
@@ -259,7 +259,7 @@ export default class YouTubeSource {
           logger(
             'debug',
             'YouTube',
-            `Android client returned empty or failed to resolve playlist URL.`
+            'Android client returned empty or failed to resolve playlist URL.'
           )
         } catch (e) {
           clientErrors.push({ client: 'Android', message: e.message })

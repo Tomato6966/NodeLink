@@ -5,7 +5,7 @@ async function manageHlsStream(initialUrl, outputStream) {
   const segmentQueue = []
   const processedSegments = new Set()
   let stop = false
-  let playlistUrl = initialUrl
+  const playlistUrl = initialUrl
 
   outputStream.on('close', () => {
     stop = true
@@ -28,7 +28,7 @@ async function manageHlsStream(initialUrl, outputStream) {
           l.startsWith('#EXT-X-TARGETDURATION:')
         )
         if (targetDurationLine)
-          targetDuration = parseInt(targetDurationLine.split(':')[1], 10)
+          targetDuration = Number.parseInt(targetDurationLine.split(':')[1], 10)
 
         for (let i = 0; i < lines.length; i++) {
           if (lines[i].startsWith('#EXTINF:')) {
@@ -139,7 +139,7 @@ export default class TwitchSource {
       }
 
       const clientIdMatch = body.match(/clientId="(\w+)"/)
-      if (clientIdMatch && clientIdMatch[1]) {
+      if (clientIdMatch?.[1]) {
         this.clientId = clientIdMatch[1]
       } else {
         logger(
@@ -156,7 +156,7 @@ export default class TwitchSource {
           : setCookieHeader
         if (deviceIdCookie) {
           const deviceIdMatch = deviceIdCookie.match(/unique_id=([^;]+);/)
-          if (deviceIdMatch && deviceIdMatch[1]) {
+          if (deviceIdMatch?.[1]) {
             this.deviceId = deviceIdMatch[1]
           }
         }
@@ -514,7 +514,7 @@ export default class TwitchSource {
       for (const quality of clipData.videoQualities) {
         if (
           !bestQuality ||
-          parseInt(quality.quality) > parseInt(bestQuality.quality)
+          Number.parseInt(quality.quality) > Number.parseInt(bestQuality.quality)
         ) {
           bestQuality = quality
         }
@@ -592,7 +592,7 @@ export default class TwitchSource {
       if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
         const bandwidthMatch = lines[i].match(/BANDWIDTH=(\d+)/)
         if (bandwidthMatch) {
-          const bandwidth = parseInt(bandwidthMatch[1], 10)
+          const bandwidth = Number.parseInt(bandwidthMatch[1], 10)
           if (bandwidth > bestBandwidth) {
             bestBandwidth = bandwidth
             bestUrl = lines[i + 1]
@@ -608,7 +608,7 @@ export default class TwitchSource {
     for (const line of lines) {
       if (line.startsWith('#EXT-X-MEDIA:') && line.includes('TYPE=AUDIO')) {
         const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/)
-        const bandwidth = bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0
+        const bandwidth = bandwidthMatch ? Number.parseInt(bandwidthMatch[1], 10) : 0
         const uriMatch = line.match(/URI="([^"]+)"/)
         if (uriMatch && bandwidth >= bestBandwidth) {
           bestBandwidth = bandwidth

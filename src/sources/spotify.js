@@ -47,7 +47,8 @@ export default class SpotifySource {
           Authorization: `Basic ${auth}`,
           'Content-Type': 'application/x-www-form-urlencoded'
         },
-        body: 'grant_type=client_credentials'
+        body: 'grant_type=client_credentials',
+        disableBodyCompression: true
       })
 
       if (error || statusCode !== 200) {

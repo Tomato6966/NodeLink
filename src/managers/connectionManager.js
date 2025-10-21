@@ -91,10 +91,10 @@ export default class ConnectionManager {
           speed: {
             bps: speedBps,
             kbps: speedKbps,
-            mbps: parseFloat(speedMbps.toFixed(2))
+            mbps: Number.parseFloat(speedMbps.toFixed(2))
           },
           downloadedBytes,
-          durationSeconds: parseFloat(durationSeconds.toFixed(2)),
+          durationSeconds: Number.parseFloat(durationSeconds.toFixed(2)),
           timestamp: Date.now()
         }
 

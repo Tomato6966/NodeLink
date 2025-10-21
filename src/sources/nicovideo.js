@@ -40,7 +40,7 @@ async function manageEncryptedHls(url, stream, headers) {
       l.startsWith('#EXT-X-MEDIA-SEQUENCE:')
     )
     const mediaSequence = mediaSequenceTag
-      ? parseInt(mediaSequenceTag.split(':')[1], 10)
+      ? Number.parseInt(mediaSequenceTag.split(':')[1], 10)
       : 0
     const mapTag = lines.find((l) => l.startsWith('#EXT-X-MAP:'))
 
@@ -130,7 +130,6 @@ async function manageEncryptedHls(url, stream, headers) {
             'NicoVideo-HLS',
             `Failed to decrypt segment ${segIndex + 1}: ${decryptError.message}`
           )
-          continue
         }
       }
       if (!stream.destroyed) {
@@ -253,7 +252,7 @@ export default class NicoVideoSource {
     }
     const durationStr = jsonLd.duration
     const durationMs = durationStr
-      ? parseInt(durationStr.match(/(\d+)S/)?.[1] || 0, 10) * 1000
+      ? Number.parseInt(durationStr.match(/(\d+)S/)?.[1] || 0, 10) * 1000
       : 0
     const track = {
       identifier: videoIdFromApi,
