@@ -144,6 +144,7 @@ export function buildTrack(
     } else {
       title = getRunsText(
         renderer.title?.runs,
+        getItemValue(fullApiResponse, ['videoDetails.endscreen.endscreenRenderer.elements.1.endscreenElementRenderer.title.simpleText']),
         getItemValue(renderer, ['title.simpleText'], 'Unknown Title')
       )
     }
@@ -155,6 +156,7 @@ export function buildTrack(
           'shortBylineText.runs',
           'ownerText.runs'
         ]),
+        getItemValue(fullApiResponse, ['videoDetails.endscreen.endscreenRenderer.elements.0.endscreenElementRenderer.title.simpleText']),
         'Unknown Channel'
       )
     const lengthText = getItemValue(
