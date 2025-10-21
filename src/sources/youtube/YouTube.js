@@ -511,9 +511,6 @@ export default class YouTubeSource {
       const response = await http1makeRequest(url, {
         method: 'GET',
         streamOnly: true,
-        headers: {
-          Range: 'bytes=0-'
-        }
       })
 
       if (response.statusCode !== 200 && response.statusCode !== 206)
