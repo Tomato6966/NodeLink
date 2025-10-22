@@ -25,33 +25,35 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  const re =
-    /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>[A-Za-z0-9]+):(?<query>[^/\s].*))$/i
-  const match = re.exec(identifier)
-  if (!match) {
-    logger('warn', 'Tracks', `Invalid identifier: "${identifier}"`)
-    return sendError(
-      400,
-      'invalid identifier parameter',
-      'identifier parameter is invalid'
-    )
-  }
-
-  const { url, source, query } = match.groups
-
   try {
-    if (url) {
-      const track = await nodelink.sources.resolve(url)
-      return sendResponse(req, res, track, 200)
-    }
+    let result;
+    if (nodelink.workerManager) {
+      const worker = nodelink.workerManager.getBestWorker();
+      result = await nodelink.workerManager.execute(worker, 'loadTracks', { identifier });
+    } else {
+      const re =
+        /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>[A-Za-z0-9]+):(?<query>[^/\s].*))$/i
+      const match = re.exec(identifier)
+      if (!match) {
+        logger('warn', 'Tracks', `Invalid identifier: "${identifier}"`)
+        return sendError(
+          400,
+          'invalid identifier parameter',
+          'identifier parameter is invalid'
+        )
+      }
 
-    if (source === 'search') {
-      const tracks = await nodelink.sources.unifiedSearch(query)
-      return sendResponse(req, res, tracks, 200)
-    }
+      const { url, source, query } = match.groups
 
-    const tracks = await nodelink.sources.search(source, query)
-    return sendResponse(req, res, tracks, 200)
+      if (url) {
+        result = await nodelink.sources.resolve(url)
+      } else if (source === 'search') {
+        result = await nodelink.sources.unifiedSearch(query)
+      } else {
+        result = await nodelink.sources.search(source, query)
+      }
+    }
+    return sendResponse(req, res, result, 200)
   } catch (err) {
     logger(
       'error',

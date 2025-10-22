@@ -2,8 +2,9 @@ import { generateRandomLetters, logger } from '../utils.js'
 import PlayerManager from './playerManager.js'
 
 export default class SessionManager {
-  constructor(nodelink) {
+  constructor(nodelink, PlayerManagerClass = PlayerManager) {
     this.nodelink = nodelink
+    this.PlayerManagerClass = PlayerManagerClass
     this.connections = new Map()
   }
   create(request, socket, clientInfo) {
@@ -18,7 +19,7 @@ export default class SessionManager {
       userId: request.headers['user-id'],
       request,
       socket,
-      players: new PlayerManager(this.nodelink, sessionId)
+      players: new this.PlayerManagerClass(this.nodelink, sessionId)
     })
     return sessionId
   }

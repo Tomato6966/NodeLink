@@ -24,9 +24,9 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
   if (!guildId && parsedUrl.pathname === `/v4/sessions/${sessionId}/players`) {
     if (req.method === 'GET') {
-      const players = Array.from(session.players.players.values()).map(
-        (player) => player.toJSON()
-      )
+      const players = await Promise.all(Array.from(session.players.players.values()).map(
+        (player) => session.players.toJSON(player.guildId)
+      ));
       return sendResponse(req, res, players, 200)
     }
   }
@@ -35,31 +35,21 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     let player = session.players.players.get(guildId)
 
     if (req.method === 'GET') {
-      if (!player) {
-        player = session.players.create(guildId)
-      }
-      return sendResponse(req, res, player.toJSON(), 200)
+      await session.players.create(guildId) // Ensure player exists or create it
+      const playerJson = await session.players.toJSON(guildId)
+      return sendResponse(req, res, playerJson, 200)
     }
 
     if (req.method === 'DELETE') {
-      if (!player) {
-        return sendResponse(
-          req,
-          res,
-          {
-            timestamp: Date.now(),
-            status: 404,
-            error: 'Not Found',
-            message: "The provided guildId doesn't exist.",
-            path: parsedUrl.pathname
-          },
-          404
-        )
+      try {
+        await session.players.destroy(guildId)
+        return sendResponse(req, res, null, 204)
+      } catch (error) {
+        if (error.message.includes('Player not found')) {
+            return sendResponse(req, res, { timestamp: Date.now(), status: 404, error: 'Not Found', message: error.message, path: parsedUrl.pathname }, 404);
+        }
+        throw error; // Re-throw other errors
       }
-      player.destroy()
-      session.players.players.delete(guildId)
-      nodelink.statistics.players--
-      return sendResponse(req, res, null, 204)
     }
 
     if (req.method === 'PATCH') {
@@ -71,9 +61,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         payload
       )
 
-      if (!player) {
-        player = session.players.create(guildId)
-      }
+      // Ensure player exists or create it
+      await session.players.create(guildId)
 
       if (payload.voice) {
         const { endpoint, token, sessionId: voiceSessionId } = payload.voice
@@ -104,15 +93,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           `Updating voice for guild ${guildId}:`,
           payload.voice
         )
-        player.updateVoice(payload.voice)
-
-        if (player.track) {
-          player.play({
-            encoded: player.track.encoded,
-            info: player.track.info,
-            noReplace: false
-          })
-        }
+        await session.players.updateVoice(guildId, payload.voice)
       }
 
       if (payload.encodedTrack) {
@@ -123,33 +104,14 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         )
       }
 
-      const encodedTrack = payload.track?.encoded
+      const encodedTrack = payload.track?.encoded;
       if (encodedTrack !== undefined) {
         if (encodedTrack === null) {
-          if (!player.track) {
-            logger(
-              'warn',
-              'PlayerUpdate',
-              `Stop requested for guild ${guildId}, but player is not playing.`
-            )
-            return sendResponse(
-              req,
-              res,
-              {
-                timestamp: Date.now(),
-                status: 400,
-                error: 'Bad Request',
-                message: 'The player is not playing.',
-                path: parsedUrl.pathname
-              },
-              400
-            )
-          }
-          logger('debug', 'PlayerUpdate', `Stopping track for guild ${guildId}`)
-          player.stop()
+          // The PlayerManager.stop method handles checking if the player is playing.
+          await session.players.stop(guildId);
         } else {
-          const noReplace = parsedUrl.searchParams.get('noReplace') === 'true'
-          const decodedTrack = decodeTrack(encodedTrack)
+          const noReplace = parsedUrl.searchParams.get('noReplace') === 'true';
+          const decodedTrack = decodeTrack(encodedTrack);
           if (!decodedTrack) {
             logger(
               'warn',
@@ -175,12 +137,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             `Playing track for guild ${guildId}:`,
             { track: decodedTrack.info, noReplace }
           )
-          await player.play({
+          await session.players.play(guildId, {
             encoded: encodedTrack,
             info: decodedTrack.info,
             noReplace,
             endTime: payload.endTime
-          })
+          });
         }
       }
 
@@ -209,7 +171,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           'PlayerUpdate',
           `Setting volume to ${payload.volume} for guild ${guildId}`
         )
-        player.volume(payload.volume)
+        await session.players.volume(guildId, payload.volume)
       }
 
       if (payload.paused !== undefined) {
@@ -237,7 +199,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           'PlayerUpdate',
           `Setting paused to ${payload.paused} for guild ${guildId}`
         )
-        player.pause(payload.paused)
+        await session.players.pause(guildId, payload.paused)
       }
 
       if (payload.position !== undefined) {
@@ -265,7 +227,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           'PlayerUpdate',
           `Seeking to ${payload.position}ms for guild ${guildId}`
         )
-        await player.seek(payload.position)
+        await session.players.seek(guildId, payload.position)
       }
 
       if (payload.endTime !== undefined) {
@@ -293,7 +255,9 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           'PlayerUpdate',
           `Setting endTime to ${payload.endTime}ms for guild ${guildId}`
         )
-        await player.seek(player.position, payload.endTime)
+        // Need to get current position from player state
+        const playerState = await session.players.toJSON(guildId);
+        await session.players.seek(guildId, playerState.state.position, payload.endTime);
       }
 
       if (payload.filters !== undefined) {
@@ -322,10 +286,11 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           `Applying filters for guild ${guildId}:`,
           payload.filters
         )
-        player.setFilters(payload)
+        await session.players.setFilters(guildId, payload)
       }
 
-      return sendResponse(req, res, player.toJSON(), 200)
+      const playerJson = await session.players.toJSON(guildId);
+      return sendResponse(req, res, playerJson, 200);
     }
   }
 

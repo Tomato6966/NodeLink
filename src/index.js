@@ -24,6 +24,7 @@ import {
   getStats
 } from './utils.js'
 import 'dotenv/config'
+import PlayerManager from './managers/playerManager.js';
 
 let config
 
@@ -61,26 +62,22 @@ else if (typeof config.cluster?.workers === 'number')
 initLogger(config)
 await checkForUpdates()
 
-function ipHash(ip) {
-  const cleaned = ip?.replace('::ffff:', '') ?? ''
-  let h = 0
-  for (let i = 0; i < cleaned.length; i++) {
-    h = (h << 5) - h + cleaned.charCodeAt(i)
-    h |= 0
-  }
-  return Math.abs(h)
-}
 
 class NodelinkServer {
-  constructor(options) {
+  constructor(options, PlayerManagerClass, isClusterPrimary = false) {
     if (!options || Object.keys(options).length === 0)
       throw new Error('Configuration file not found or empty')
     this.options = options
     this.server = null
     this.socket = null
-    this.sessions = new sessionManager(this)
-    this.sources = new sourceManager(this)
-    this.lyrics = new lyricsManager(this)
+    this.sessions = new sessionManager(this, PlayerManagerClass)
+    if (!isClusterPrimary) {
+        this.sources = new sourceManager(this)
+        this.lyrics = new lyricsManager(this)
+    } else {
+        this.sources = null;
+        this.lyrics = null;
+    }
     this.routePlanner = new routePlannerManager(this)
     this.connectionManager = new connectionManager(this)
     this.statsManager = new statsManager(this)
@@ -352,6 +349,16 @@ class NodelinkServer {
     }
   }
 
+  handleIPCMessage(msg) {
+    if (msg.type === 'playerEvent') {
+        const { sessionId, data } = msg.payload;
+        const session = this.sessions.get(sessionId);
+        session?.socket?.send(data);
+    } else if (msg.type === 'workerStats') {
+        // This could be expanded to a full stats manager
+    }
+  }
+
   async start(startOptions = {}) {
     this._validateConfig()
 
@@ -379,8 +386,13 @@ class NodelinkServer {
       }
     }
 
-    await this.sources.loadFolder()
-    await this.lyrics.loadFolder()
+        if (!startOptions.isClusterPrimary) {
+
+          await this.sources.loadFolder()
+
+          await this.lyrics.loadFolder()
+
+        }
     this._createServer()
 
     if (startOptions.isClusterWorker) {
@@ -418,131 +430,43 @@ class NodelinkServer {
   }
 }
 
+import WorkerManager from './managers/workerManager.js';
+
 if (clusterEnabled && cluster.isPrimary) {
-  const cpus = os.cpus().length
-  const workersCount =
-    configuredWorkers === 0 ? cpus : Math.max(1, configuredWorkers)
-
-  logger(
-    'info',
-    'Cluster',
-    `Primary process PID ${process.pid} - starting ${workersCount} workers`
-  )
-
-  const workerStats = new Map()
-  let globalStatsInterval
-
-  for (let i = 0; i < workersCount; i++) {
-    const w = cluster.fork()
-    logger('info', 'Cluster', `Spawned worker ${w.process.pid}`)
-  }
-
-  const workerIds = Object.keys(cluster.workers).map(Number)
-
-  cluster.on('message', (worker, message) => {
-    if (message.type === 'workerStats') {
-      workerStats.set(worker.id, message.stats)
-    }
-  })
-
-  const listenHost = config.server.host
-  const listenPort = config.server.port
-
-  const masterServer = net.createServer({ pauseOnConnect: true }, (socket) => {
-    const addr = socket.remoteAddress || ''
-    const index = ipHash(addr) % workerIds.length
-    const workerId = workerIds[index]
-    const worker = cluster.workers[workerId]
-    if (!worker) {
-      const fallbackWorkerId =
-        workerIds[Math.floor(Math.random() * workerIds.length)]
-      const fallback = cluster.workers[fallbackWorkerId]
-      try {
-        fallback.send({ type: 'sticky-session' }, socket)
-      } catch (e) {
-        socket.destroy()
-      }
-      return
-    }
-    try {
-      worker.send({ type: 'sticky-session' }, socket)
-    } catch (err) {
-      logger(
-        'warn',
-        'Cluster',
-        `Failed to send socket to worker ${worker.process.pid}: ${err.message}`
-      )
-      socket.destroy()
-    }
-  })
-
-  masterServer.on('error', (err) => {
-    logger('error', 'Cluster', `Master server error: ${err.message}`)
-  })
-
-  masterServer.listen(listenPort, listenHost, () => {
-    logger(
-      'started',
-      'Cluster',
-      `Master listening ${listenHost}:${listenPort} and distributing to ${workersCount} workers (PID ${process.pid})`
-    )
-  })
-
-  cluster.on('exit', (worker, code, signal) => {
-    logger(
-      'warn',
-      'Cluster',
-      `Worker ${worker.process.pid} exited (code=${code} signal=${signal}). Spawning a new worker...`
-    )
-    const nw = cluster.fork()
-    logger('info', 'Cluster', `Spawned worker ${nw.process.pid}`)
-    const idx = workerIds.indexOf(Number(worker.id))
-    if (idx !== -1) workerIds[idx] = Number(nw.id)
-  })
-
-  globalStatsInterval = setInterval(() => {
-    let totalPlayers = 0
-    let totalPlayingPlayers = 0
-
-    for (const stats of workerStats.values()) {
-      totalPlayers += stats.players
-      totalPlayingPlayers += stats.playingPlayers
-    }
-
-    const globalStats = {
-      players: totalPlayers,
-      playingPlayers: totalPlayingPlayers
-    }
-
-    for (const id in cluster.workers) {
-      cluster.workers[id].send({ type: 'globalStats', stats: globalStats })
-    }
-  }, config.playerUpdateInterval || 5000)
-} else {
-  const isWorker = clusterEnabled && cluster.worker
+  const workerManager = new WorkerManager(config);
 
   const serverInstancePromise = (async () => {
-    const nserver = new NodelinkServer(config)
-    await nserver.start({ isClusterWorker: !!isWorker })
-    global.nodelink = nserver
+    const nserver = new NodelinkServer(config, PlayerManager, true);
+    nserver.workerManager = workerManager;
 
-    if (isWorker) {
-      process.on('message', (message) => {
-        if (message.type === 'globalStats') {
-          nserver.statistics.players = message.stats.players
-          nserver.statistics.playingPlayers = message.stats.playingPlayers
-        }
-      })
-    } else {
-      logger(
-        'info',
-        'Server',
-        `Single-process server running (PID ${process.pid})`
-      )
-    }
 
-    return nserver
-  })()
 
-  await serverInstancePromise
+    await nserver.start({ isClusterPrimary: true });
+    global.nodelink = nserver;
+
+    logger('info', 'Server', `Primary process running (PID ${process.pid})`);
+
+    return nserver;
+  })();
+
+  await serverInstancePromise;
+
+} else if (clusterEnabled && cluster.isWorker) {
+  await import('./worker.js');
+} else {
+  const serverInstancePromise = (async () => {
+    const nserver = new NodelinkServer(config, PlayerManager, false);
+    await nserver.start();
+    global.nodelink = nserver;
+
+    logger(
+      'info',
+      'Server',
+      `Single-process server running (PID ${process.pid})`
+    );
+
+    return nserver;
+  })();
+
+  await serverInstancePromise;
 }
