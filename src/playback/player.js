@@ -624,7 +624,9 @@ export class Player {
     logger('debug', 'Player', `Destroying player for guild ${this.guildId}`)
     if (this.connection) {
       try {
-        this.connection.stop(EndReasons.CLEANUP)
+        if (this.connection.audioStream) {
+          this.connection.stop(EndReasons.CLEANUP)
+        }
         this.connection.destroy()
         this.connection = null
       } catch (err) {
