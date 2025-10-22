@@ -114,9 +114,6 @@ export default {
     },
     nicovideo: {
       enabled: true
-    },
-    jiosaavn: {
-      enabled: true
     }
   },
   lyrics: {
