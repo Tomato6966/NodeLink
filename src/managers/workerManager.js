@@ -240,12 +240,7 @@ export default class WorkerManager {
     execute(worker, type, payload) {
         return new Promise((resolve, reject) => {
             const requestId = crypto.randomBytes(16).toString('hex');
-            const timeout = setTimeout(() => {
-                this.pendingRequests.delete(requestId);
-                reject(new Error(`Request of type '${type}' to worker timed out`));
-            }, 15000)
-
-            this.pendingRequests.set(requestId, { resolve, reject, timeout });
+            this.pendingRequests.set(requestId, { resolve, reject });
 
             worker.send({ type, requestId, payload });
         });

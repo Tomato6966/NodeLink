@@ -16,7 +16,7 @@ try {
 initLogger(config);
 
 const players = new Map();
-
+const commandQueue = [];
 const nodelink = {
   options: config,
   logger,
@@ -35,14 +35,16 @@ async function initialize() {
 
 initialize();
 
-process.on('message', async (msg) => {
-  if (!msg.type || !msg.requestId) return;
+async function processQueue() {
+  if (commandQueue.length === 0) return;
+
+  const { type, requestId, payload } = commandQueue.shift();
 
   try {
     let result;
-    switch (msg.type) {
+    switch (type) {
       case 'createPlayer': {
-        const { sessionId, guildId, userId, voice } = msg.payload;
+        const { sessionId, guildId, userId, voice } = payload;
         if (players.has(guildId)) {
           result = { created: false, reason: 'Player already exists' };
           break;
@@ -70,7 +72,7 @@ process.on('message', async (msg) => {
       }
 
       case 'destroyPlayer': {
-        const { guildId } = msg.payload;
+        const { guildId } = payload;
         const player = players.get(guildId);
         if (player) {
           player.destroy(false);
@@ -83,7 +85,7 @@ process.on('message', async (msg) => {
       }
 
       case 'playerCommand': {
-        const { guildId, command, args } = msg.payload;
+        const { guildId, command, args } = payload;
         const player = players.get(guildId);
         if (player && typeof player[command] === 'function') {
           result = await player[command](...args);
@@ -94,7 +96,7 @@ process.on('message', async (msg) => {
       }
 
       case 'loadTracks': {
-        const { identifier } = msg.payload;
+        const { identifier } = payload;
         const re = /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>[A-Za-z0-9]+):(?<query>[^/\s].*))$/i;
         const match = re.exec(identifier);
         if (!match) throw new Error('Invalid identifier');
@@ -107,21 +109,34 @@ process.on('message', async (msg) => {
       }
 
       case 'loadLyrics': {
-        const { decodedTrack } = msg.payload;
+        const { decodedTrack } = payload;
         result = await nodelink.lyrics.loadLyrics(decodedTrack);
         break;
       }
+      default:
+          throw new Error(`Unknown command type: ${type}`);
     }
 
     if (process.connected) {
-      process.send({ type: 'commandResult', requestId: msg.requestId, payload: result });
+      process.send({ type: 'commandResult', requestId, payload: result });
     }
 
   } catch (e) {
     if (process.connected) {
-      process.send({ type: 'commandResult', requestId: msg.requestId, error: e.message });
+      process.send({ type: 'commandResult', requestId, error: e.message });
+    }
+  } finally {
+    if (commandQueue.length > 0) {
+      setImmediate(processQueue);
     }
   }
+}
+
+process.on('message', (msg) => {
+  if (!msg.type || !msg.requestId) return;
+
+  commandQueue.push(msg);
+  setImmediate(processQueue);
 });
 
 setInterval(() => {
@@ -140,7 +155,8 @@ setInterval(() => {
     pid: process.pid,
     stats: {
       players: localPlayers,
-      playingPlayers: localPlayingPlayers
+      playingPlayers: localPlayingPlayers,
+      commandQueueLength: commandQueue.length
     }
   });
 }, 5000);

@@ -6,16 +6,16 @@ export default {
   },
   cluster: {
     enabled: true, // active cluster (or use env CLUSTER_ENABLED)
-    workers: 1, // 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
-    scaling: { 
-      maxPlayersPerWorker: 20, // Reference capacity for utilization calculation
-      targetUtilization: 0.7, // Target utilization for scaling up/down
-      scaleUpThreshold: 0.75, // Utilization threshold to scale up
-      scaleDownThreshold: 0.30, // Utilization threshold to scale down
-      checkIntervalMs: 5000, // Interval to check for scaling needs
-      idleWorkerTimeoutMs: 60000 // Time in ms an idle worker should wait before being removed
-    }
-  },
+    workers: 0, // 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
+        scaling: { // New object to group scaling configurations
+          maxPlayersPerWorker: 20, // Reference capacity for utilization calculation
+          targetUtilization: 0.7, // Target utilization for scaling up/down
+          scaleUpThreshold: 0.75, // Utilization threshold to scale up
+          scaleDownThreshold: 0.30, // Utilization threshold to scale down
+          checkIntervalMs: 5000, // Interval to check for scaling needs
+          idleWorkerTimeoutMs: 60000, // Time in ms an idle worker should wait before being removed
+          queueLengthScaleUpFactor: 5 // How many commands in queue per active worker trigger scale up
+        }  },
   logging: {
     level: 'debug',
     file: {
