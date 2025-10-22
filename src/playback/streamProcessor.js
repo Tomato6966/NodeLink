@@ -824,9 +824,7 @@ class MP4ToAACStream extends Transform {
 
     this.mp4boxFile.onReady = (info) => {
       try {
-        const audioTrack = info.tracks.find(
-          (t) => t.codec?.startsWith('mp4a')
-        )
+        const audioTrack = info.tracks.find((t) => t.codec?.startsWith('mp4a'))
         if (!audioTrack) {
           this.emit('error', new Error('No AAC track found in MP4'))
           return

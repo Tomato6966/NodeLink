@@ -35,15 +35,25 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
   const playlistFetcher = async (playlistUrl) => {
     while (!stop) {
       try {
-        const { body: playlistContent, error, statusCode } = await fetchWithUserAgent(playlistUrl)
+        const {
+          body: playlistContent,
+          error,
+          statusCode
+        } = await fetchWithUserAgent(playlistUrl)
         if (error || statusCode !== 200) {
-          logger('error', 'YouTube-HLS-Fetcher', `Playlist fetch failed: ${statusCode} - ${error?.message}`)
+          logger(
+            'error',
+            'YouTube-HLS-Fetcher',
+            `Playlist fetch failed: ${statusCode} - ${error?.message}`
+          )
           throw new Error(`Playlist fetch failed: ${statusCode}`)
         }
 
         const lines = playlistContent.split('\n').map((l) => l.trim())
         let targetDuration = 2 // Default HLS target duration
-        const targetDurationLine = lines.find((l) => l.startsWith('#EXT-X-TARGETDURATION:'))
+        const targetDurationLine = lines.find((l) =>
+          l.startsWith('#EXT-X-TARGETDURATION:')
+        )
         if (targetDurationLine) {
           targetDuration = Number.parseInt(targetDurationLine.split(':')[1], 10)
         }
@@ -65,7 +75,9 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
           stop = true
         }
 
-        await new Promise((resolve) => setTimeout(resolve, targetDuration * 1000))
+        await new Promise((resolve) =>
+          setTimeout(resolve, targetDuration * 1000)
+        )
       } catch (e) {
         logger('error', 'YouTube-HLS-Fetcher', `Error: ${e.message}`)
         stop = true
@@ -83,11 +95,19 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
       const segmentUrl = segmentQueue.shift()
 
       try {
-        const { stream: segmentStream, error, statusCode } = await http1makeRequest(segmentUrl, {
+        const {
+          stream: segmentStream,
+          error,
+          statusCode
+        } = await http1makeRequest(segmentUrl, {
           streamOnly: true
         })
         if (error || statusCode !== 200) {
-          logger('warn', 'YouTube-HLS-Downloader', `Failed segment ${segmentUrl}: ${statusCode}`)
+          logger(
+            'warn',
+            'YouTube-HLS-Downloader',
+            `Failed segment ${segmentUrl}: ${statusCode}`
+          )
           continue
         }
 
@@ -97,7 +117,11 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
           segmentStream.on('error', reject)
         })
       } catch (e) {
-        logger('error', 'YouTube-HLS-Downloader', `Error processing segment ${segmentUrl}: ${e.message}`)
+        logger(
+          'error',
+          'YouTube-HLS-Downloader',
+          `Error processing segment ${segmentUrl}: ${e.message}`
+        )
       }
     }
 
@@ -108,9 +132,15 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
   }
 
   try {
-    const { body: masterPlaylistContent, error: masterError, statusCode: masterStatusCode } = await fetchWithUserAgent(hlsManifestUrl)
+    const {
+      body: masterPlaylistContent,
+      error: masterError,
+      statusCode: masterStatusCode
+    } = await fetchWithUserAgent(hlsManifestUrl)
     if (masterError || masterStatusCode !== 200) {
-      throw new Error(`Master playlist fetch failed: ${masterStatusCode} - ${masterError?.message}`)
+      throw new Error(
+        `Master playlist fetch failed: ${masterStatusCode} - ${masterError?.message}`
+      )
     }
 
     const lines = masterPlaylistContent.split('\n').map((l) => l.trim())
@@ -128,7 +158,9 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
           const bandwidthMatch = streamInf.match(/BANDWIDTH=(\d+)/)
           const codecsMatch = streamInf.match(/CODECS="([^"]+)"/)
 
-          const bandwidth = bandwidthMatch ? Number.parseInt(bandwidthMatch[1], 10) : 0
+          const bandwidth = bandwidthMatch
+            ? Number.parseInt(bandwidthMatch[1], 10)
+            : 0
           const codecs = codecsMatch ? codecsMatch[1] : ''
 
           if (codecs.includes('avc1') && codecs.includes('mp4a')) {
@@ -149,10 +181,18 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
     let selectedPlaylistUrl = null
     if (bestStreamUrl) {
       selectedPlaylistUrl = bestStreamUrl
-      logger('debug', 'YouTube-HLS', `Selected best combined stream: ${selectedPlaylistUrl}`)
+      logger(
+        'debug',
+        'YouTube-HLS',
+        `Selected best combined stream: ${selectedPlaylistUrl}`
+      )
     } else if (bestAudioOnlyUrl) {
       selectedPlaylistUrl = bestAudioOnlyUrl
-      logger('debug', 'YouTube-HLS', `Selected best audio-only stream: ${selectedPlaylistUrl}`)
+      logger(
+        'debug',
+        'YouTube-HLS',
+        `Selected best audio-only stream: ${selectedPlaylistUrl}`
+      )
     } else {
       throw new Error('No suitable HLS stream found in master playlist.')
     }
@@ -160,7 +200,11 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
     playlistFetcher(selectedPlaylistUrl)
     segmentDownloader()
   } catch (e) {
-    logger('error', 'YouTube-HLS', `Error managing YouTube HLS stream: ${e.message}`)
+    logger(
+      'error',
+      'YouTube-HLS',
+      `Error managing YouTube HLS stream: ${e.message}`
+    )
     if (!outputStream.destroyed) {
       outputStream.destroy(e)
     }
@@ -660,7 +704,7 @@ export default class YouTubeSource {
 
       const response = await http1makeRequest(url, {
         method: 'GET',
-        streamOnly: true,
+        streamOnly: true
       })
 
       if (response.statusCode !== 200 && response.statusCode !== 206)

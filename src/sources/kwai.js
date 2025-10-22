@@ -80,7 +80,9 @@ export default class KwaiSource {
       const videoInfo = {
         author: kwaiIdMatch ? kwaiIdMatch[1] : 'Unknown',
         title: kwaiIdMatch ? `Kwai - ${kwaiIdMatch[1]}` : 'Kwai Video',
-        length: durationMatch ? Number.parseInt(durationMatch[1], 10) * 1000 : null,
+        length: durationMatch
+          ? Number.parseInt(durationMatch[1], 10) * 1000
+          : null,
         thumbnail: thumbnailUrl,
         videoUrl: this.decodeUnicodeEscapes(videoUrlMatch[1])
       }

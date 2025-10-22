@@ -479,23 +479,25 @@ async function http1makeRequest(urlString, options = {}) {
     ...customHeaders
   }
 
-  let payloadBuffer = null;
+  let payloadBuffer = null
   if (body != null && !['GET', 'HEAD'].includes(method)) {
-    const isFormUrlEncoded = reqHeaders['Content-Type'] === 'application/x-www-form-urlencoded';
-    let rawPayload;
+    const isFormUrlEncoded =
+      reqHeaders['Content-Type'] === 'application/x-www-form-urlencoded'
+    let rawPayload
 
     if (isFormUrlEncoded && typeof body === 'string') {
-      rawPayload = body;
+      rawPayload = body
     } else {
-      reqHeaders['Content-Type'] = reqHeaders['Content-Type'] || 'application/json';
-      rawPayload = typeof body === 'string' ? body : JSON.stringify(body);
+      reqHeaders['Content-Type'] =
+        reqHeaders['Content-Type'] || 'application/json'
+      rawPayload = typeof body === 'string' ? body : JSON.stringify(body)
     }
 
     if (disableBodyCompression) {
-      payloadBuffer = Buffer.from(rawPayload);
+      payloadBuffer = Buffer.from(rawPayload)
     } else {
-      reqHeaders['Content-Encoding'] = 'gzip';
-      payloadBuffer = zlib.gzipSync(rawPayload);
+      reqHeaders['Content-Encoding'] = 'gzip'
+      payloadBuffer = zlib.gzipSync(rawPayload)
     }
   }
 

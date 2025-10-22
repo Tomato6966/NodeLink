@@ -194,8 +194,6 @@ export class Player {
     }
   }
 
-
-
   _resetTrack() {
     this.track = null
     this.isPaused = false
@@ -328,10 +326,10 @@ export class Player {
     }
 
     if (!this.connection.udpInfo?.secretKey) {
-      const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`;
-      logger('error', 'Player', errorMessage);
-      this._onError(new Error(errorMessage));
-      return false;
+      const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`
+      logger('error', 'Player', errorMessage)
+      this._onError(new Error(errorMessage))
+      return false
     }
 
     const fetched = await this._fetchResource(info, urlData, startTime)

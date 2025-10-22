@@ -10,8 +10,7 @@ export default class StatsManager {
       },
       sources: {}, // { youtube: { success: 10, failure: 1 }, ... }
       playback: {
-        events: {}, // { TrackStartEvent: 10, ... }
-
+        events: {} // { TrackStartEvent: 10, ... }
       }
     }
     logger('info', 'StatsManager', 'Initialized.')
@@ -50,6 +49,4 @@ export default class StatsManager {
     this.stats.playback.events[eventType] =
       (this.stats.playback.events[eventType] || 0) + 1
   }
-
-
 }

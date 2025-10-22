@@ -514,7 +514,8 @@ export default class TwitchSource {
       for (const quality of clipData.videoQualities) {
         if (
           !bestQuality ||
-          Number.parseInt(quality.quality) > Number.parseInt(bestQuality.quality)
+          Number.parseInt(quality.quality) >
+            Number.parseInt(bestQuality.quality)
         ) {
           bestQuality = quality
         }
@@ -608,7 +609,9 @@ export default class TwitchSource {
     for (const line of lines) {
       if (line.startsWith('#EXT-X-MEDIA:') && line.includes('TYPE=AUDIO')) {
         const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/)
-        const bandwidth = bandwidthMatch ? Number.parseInt(bandwidthMatch[1], 10) : 0
+        const bandwidth = bandwidthMatch
+          ? Number.parseInt(bandwidthMatch[1], 10)
+          : 0
         const uriMatch = line.match(/URI="([^"]+)"/)
         if (uriMatch && bandwidth >= bestBandwidth) {
           bestBandwidth = bandwidth

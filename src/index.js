@@ -53,8 +53,10 @@ const clusterEnabled =
   false
 
 let configuredWorkers = 0
-if (process.env.CLUSTER_WORKERS) configuredWorkers = Number(process.env.CLUSTER_WORKERS)
-else if (typeof config.cluster?.workers === 'number') configuredWorkers = config.cluster.workers
+if (process.env.CLUSTER_WORKERS)
+  configuredWorkers = Number(process.env.CLUSTER_WORKERS)
+else if (typeof config.cluster?.workers === 'number')
+  configuredWorkers = config.cluster.workers
 
 initLogger(config)
 await checkForUpdates()
@@ -276,11 +278,7 @@ class NodelinkServer {
       const port = this.options.server.port
       const host = this.options.server.host
       this.server.listen(port, host, () => {
-        logger(
-          'started',
-          'Server',
-          `running at host ${host} on port ${port}`
-        )
+        logger('started', 'Server', `running at host ${host} on port ${port}`)
       })
     } catch (error) {
       logger('error', 'Server', `Failed to start server: ${error.message}`)
@@ -293,14 +291,14 @@ class NodelinkServer {
     const zombieThreshold = this.options?.zombieThresholdMs ?? 60000
 
     this._globalUpdater = setInterval(() => {
-      let localPlayers = 0;
-      let localPlayingPlayers = 0;
+      let localPlayers = 0
+      let localPlayingPlayers = 0
       for (const session of this.sessions.values()) {
-        if (!session.players) continue;
+        if (!session.players) continue
         for (const player of session.players.players.values()) {
-          localPlayers++;
+          localPlayers++
           if (!player.isPaused && player.track) {
-            localPlayingPlayers++;
+            localPlayingPlayers++
           }
         }
       }
@@ -310,9 +308,9 @@ class NodelinkServer {
           type: 'workerStats',
           stats: {
             players: localPlayers,
-            playingPlayers: localPlayingPlayers,
+            playingPlayers: localPlayingPlayers
           }
-        });
+        })
       }
 
       const stats = getStats(this)
@@ -386,16 +384,28 @@ class NodelinkServer {
     this._createServer()
 
     if (startOptions.isClusterWorker) {
-      logger('info', 'Server', 'Running as cluster worker — waiting for sockets from master.')
+      logger(
+        'info',
+        'Server',
+        'Running as cluster worker — waiting for sockets from master.'
+      )
       process.on('message', (msg, handle) => {
         if (!msg || msg.type !== 'sticky-session') return
         if (!handle) return
         try {
-          try { handle.pause && handle.pause() } catch (e) {}
+          try {
+            handle.pause && handle.pause()
+          } catch (e) {}
           this.server.emit('connection', handle)
         } catch (err) {
-          logger('error', 'Server', `Failed to inject socket from master: ${err?.message ?? err}`)
-          try { handle.destroy && handle.destroy() } catch (e) {}
+          logger(
+            'error',
+            'Server',
+            `Failed to inject socket from master: ${err?.message ?? err}`
+          )
+          try {
+            handle.destroy && handle.destroy()
+          } catch (e) {}
         }
       })
     } else {
@@ -410,12 +420,17 @@ class NodelinkServer {
 
 if (clusterEnabled && cluster.isPrimary) {
   const cpus = os.cpus().length
-  const workersCount = configuredWorkers === 0 ? cpus : Math.max(1, configuredWorkers)
+  const workersCount =
+    configuredWorkers === 0 ? cpus : Math.max(1, configuredWorkers)
 
-  logger('info', 'Cluster', `Primary process PID ${process.pid} - starting ${workersCount} workers`)
+  logger(
+    'info',
+    'Cluster',
+    `Primary process PID ${process.pid} - starting ${workersCount} workers`
+  )
 
-  const workerStats = new Map();
-  let globalStatsInterval;
+  const workerStats = new Map()
+  let globalStatsInterval
 
   for (let i = 0; i < workersCount; i++) {
     const w = cluster.fork()
@@ -426,9 +441,9 @@ if (clusterEnabled && cluster.isPrimary) {
 
   cluster.on('message', (worker, message) => {
     if (message.type === 'workerStats') {
-      workerStats.set(worker.id, message.stats);
+      workerStats.set(worker.id, message.stats)
     }
-  });
+  })
 
   const listenHost = config.server.host
   const listenPort = config.server.port
@@ -439,7 +454,8 @@ if (clusterEnabled && cluster.isPrimary) {
     const workerId = workerIds[index]
     const worker = cluster.workers[workerId]
     if (!worker) {
-      const fallbackWorkerId = workerIds[Math.floor(Math.random() * workerIds.length)]
+      const fallbackWorkerId =
+        workerIds[Math.floor(Math.random() * workerIds.length)]
       const fallback = cluster.workers[fallbackWorkerId]
       try {
         fallback.send({ type: 'sticky-session' }, socket)
@@ -451,7 +467,11 @@ if (clusterEnabled && cluster.isPrimary) {
     try {
       worker.send({ type: 'sticky-session' }, socket)
     } catch (err) {
-      logger('warn', 'Cluster', `Failed to send socket to worker ${worker.process.pid}: ${err.message}`)
+      logger(
+        'warn',
+        'Cluster',
+        `Failed to send socket to worker ${worker.process.pid}: ${err.message}`
+      )
       socket.destroy()
     }
   })
@@ -461,11 +481,19 @@ if (clusterEnabled && cluster.isPrimary) {
   })
 
   masterServer.listen(listenPort, listenHost, () => {
-    logger('started', 'Cluster', `Master listening ${listenHost}:${listenPort} and distributing to ${workersCount} workers (PID ${process.pid})`)
+    logger(
+      'started',
+      'Cluster',
+      `Master listening ${listenHost}:${listenPort} and distributing to ${workersCount} workers (PID ${process.pid})`
+    )
   })
 
   cluster.on('exit', (worker, code, signal) => {
-    logger('warn', 'Cluster', `Worker ${worker.process.pid} exited (code=${code} signal=${signal}). Spawning a new worker...`)
+    logger(
+      'warn',
+      'Cluster',
+      `Worker ${worker.process.pid} exited (code=${code} signal=${signal}). Spawning a new worker...`
+    )
     const nw = cluster.fork()
     logger('info', 'Cluster', `Spawned worker ${nw.process.pid}`)
     const idx = workerIds.indexOf(Number(worker.id))
@@ -473,23 +501,23 @@ if (clusterEnabled && cluster.isPrimary) {
   })
 
   globalStatsInterval = setInterval(() => {
-    let totalPlayers = 0;
-    let totalPlayingPlayers = 0;
+    let totalPlayers = 0
+    let totalPlayingPlayers = 0
 
     for (const stats of workerStats.values()) {
-      totalPlayers += stats.players;
-      totalPlayingPlayers += stats.playingPlayers;
+      totalPlayers += stats.players
+      totalPlayingPlayers += stats.playingPlayers
     }
 
     const globalStats = {
       players: totalPlayers,
-      playingPlayers: totalPlayingPlayers,
-    };
+      playingPlayers: totalPlayingPlayers
+    }
 
     for (const id in cluster.workers) {
-      cluster.workers[id].send({ type: 'globalStats', stats: globalStats });
+      cluster.workers[id].send({ type: 'globalStats', stats: globalStats })
     }
-  }, config.playerUpdateInterval || 5000); 
+  }, config.playerUpdateInterval || 5000)
 } else {
   const isWorker = clusterEnabled && cluster.worker
 
@@ -501,16 +529,20 @@ if (clusterEnabled && cluster.isPrimary) {
     if (isWorker) {
       process.on('message', (message) => {
         if (message.type === 'globalStats') {
-          nserver.statistics.players = message.stats.players;
-          nserver.statistics.playingPlayers = message.stats.playingPlayers;
+          nserver.statistics.players = message.stats.players
+          nserver.statistics.playingPlayers = message.stats.playingPlayers
         }
-      });
-    } else { 
-      logger('info', 'Server', `Single-process server running (PID ${process.pid})`)
+      })
+    } else {
+      logger(
+        'info',
+        'Server',
+        `Single-process server running (PID ${process.pid})`
+      )
     }
 
     return nserver
-  })(); 
+  })()
 
   await serverInstancePromise
 }

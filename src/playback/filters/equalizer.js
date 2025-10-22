@@ -77,7 +77,9 @@ export default class Equalizer {
       this.initFilters()
     }
 
-    const equalizerBands = Array.isArray(filters.equalizer) ? filters.equalizer : [];
+    const equalizerBands = Array.isArray(filters.equalizer)
+      ? filters.equalizer
+      : []
 
     for (let i = 0; i < BAND_FREQUENCIES.length; i++) {
       this.filtersCoefficients[i] = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }
