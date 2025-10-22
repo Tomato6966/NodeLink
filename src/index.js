@@ -293,7 +293,6 @@ class NodelinkServer {
     const zombieThreshold = this.options?.zombieThresholdMs ?? 60000
 
     this._globalUpdater = setInterval(() => {
-      // Calculate local stats for this worker
       let localPlayers = 0;
       let localPlayingPlayers = 0;
       for (const session of this.sessions.values()) {
@@ -306,20 +305,17 @@ class NodelinkServer {
         }
       }
 
-      // If it's a worker, send local stats to master
       if (clusterEnabled && cluster.isWorker) {
         process.send({
           type: 'workerStats',
           stats: {
             players: localPlayers,
             playingPlayers: localPlayingPlayers,
-            // ... other local stats if needed
           }
         });
       }
 
-      // Use the global stats (updated by master) for sending to clients
-      const stats = getStats(this) // This will now use the global.nodelink.statistics updated by the master
+      const stats = getStats(this)
       const statsPayload = JSON.stringify({ op: 'stats', ...stats })
 
       for (const session of this.sessions.values()) {
@@ -418,8 +414,8 @@ if (clusterEnabled && cluster.isPrimary) {
 
   logger('info', 'Cluster', `Primary process PID ${process.pid} - starting ${workersCount} workers`)
 
-  const workerStats = new Map(); // To store stats from each worker
-  let globalStatsInterval; // To hold the interval for sending global stats
+  const workerStats = new Map();
+  let globalStatsInterval;
 
   for (let i = 0; i < workersCount; i++) {
     const w = cluster.fork()
@@ -476,7 +472,6 @@ if (clusterEnabled && cluster.isPrimary) {
     if (idx !== -1) workerIds[idx] = Number(nw.id)
   })
 
-  // Start an interval in the master to aggregate and broadcast global stats
   globalStatsInterval = setInterval(() => {
     let totalPlayers = 0;
     let totalPlayingPlayers = 0;
@@ -494,7 +489,7 @@ if (clusterEnabled && cluster.isPrimary) {
     for (const id in cluster.workers) {
       cluster.workers[id].send({ type: 'globalStats', stats: globalStats });
     }
-  }, config.playerUpdateInterval || 5000); // Use the same interval as player updates
+  }, config.playerUpdateInterval || 5000); 
 } else {
   const isWorker = clusterEnabled && cluster.worker
 
@@ -502,22 +497,20 @@ if (clusterEnabled && cluster.isPrimary) {
     const nserver = new NodelinkServer(config)
     await nserver.start({ isClusterWorker: !!isWorker })
     global.nodelink = nserver
-    return nserver
-  })()
 
-  if (isWorker) {
-    logger('info', 'Cluster', `Worker process started (PID ${process.pid})`)
-    // Worker process listens for global stats from master
-    process.on('message', (message) => {
-      if (message.type === 'globalStats') {
-        nserver.statistics.players = message.stats.players;
-        nserver.statistics.playingPlayers = message.stats.playingPlayers;
-        // Update other global stats if necessary
-      }
-    });
-  } else {
-    logger('info', 'Server', `Single-process server running (PID ${process.pid})`)
-  }
-  
+    if (isWorker) {
+      process.on('message', (message) => {
+        if (message.type === 'globalStats') {
+          nserver.statistics.players = message.stats.players;
+          nserver.statistics.playingPlayers = message.stats.playingPlayers;
+        }
+      });
+    } else { 
+      logger('info', 'Server', `Single-process server running (PID ${process.pid})`)
+    }
+
+    return nserver
+  })(); 
+
   await serverInstancePromise
 }
