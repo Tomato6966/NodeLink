@@ -447,8 +447,16 @@ export class Player {
   stop() {
     if (!this.track) return false
     logger('debug', 'Player', `Stopping player for guild ${this.guildId}`)
-    if (this.connection?.audioStream) {
-      this.connection.stop(EndReasons.STOPPED)
+    if (this.connection) {
+      if (this.connection.audioStream) {
+        this.connection.stop(EndReasons.STOPPED)
+      } else {
+        this.emitEvent(GatewayEvents.TRACK_END, {
+          track: this.track,
+          reason: EndReasons.STOPPED
+        })
+        this._resetTrack()
+      }
     } else {
       this.emitEvent(GatewayEvents.TRACK_END, {
         track: this.track,
