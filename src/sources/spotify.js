@@ -267,22 +267,49 @@ export default class SpotifySource {
   }
 
   async getTrackUrl(decodedTrack) {
-    const query = `${decodedTrack.title} - ${decodedTrack.author}`
+    const spotifyTitle = decodedTrack.title.toLowerCase();
+    const spotifyAuthor = decodedTrack.author.toLowerCase();
+    const spotifyDuration = decodedTrack.length;
+
+    const query = `${decodedTrack.title} ${decodedTrack.author} official audio`;
 
     try {
-      const searchResult = await this.nodelink.sources.searchWithDefault(query)
-      if (
-        searchResult.loadType !== 'search' ||
-        searchResult.data.length === 0
-      ) {
-        throw new Error('No alternative stream found via default search.')
+      const searchResult = await this.nodelink.sources.searchWithDefault(query);
+
+      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+        return { exception: { message: 'No alternative stream found via default search.', severity: 'fault' } };
       }
 
-      const newTrack = searchResult.data[0]
-      const streamInfo = await this.nodelink.sources.getTrackUrl(newTrack.info)
-      return { newTrack: newTrack, ...streamInfo }
+      let bestMatch = null;
+      let minDurationDiff = Infinity;
+
+      for (const ytTrack of searchResult.data) {
+        const ytTitle = ytTrack.info.title.toLowerCase();
+        const ytDuration = ytTrack.info.length;
+
+        const durationDifference = Math.abs(ytDuration - spotifyDuration);
+        const allowedDeviation = spotifyDuration * 0.15;
+
+        if (durationDifference > allowedDeviation) {
+          continue;
+        }
+
+        if (durationDifference < minDurationDiff) {
+          minDurationDiff = durationDifference;
+          bestMatch = ytTrack;
+        }
+      }
+
+      if (!bestMatch) {
+        return { exception: { message: 'No suitable alternative stream found after filtering.', severity: 'fault' } };
+      }
+
+      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info);
+      return { newTrack: bestMatch, ...streamInfo };
+
     } catch (e) {
-      return { exception: { message: e.message, severity: 'fault' } }
+      logger('warn', 'Spotify', `Search for "${query}" failed: ${e.message}`);
+      return { exception: { message: e.message, severity: 'fault' } };
     }
   }
 }
