@@ -11,7 +11,7 @@
     "@ecliptia/faad2-wasm": "^2.11.2-ecliptia.2",
     "@ecliptia/seekeable-node": "^1.1.1-ecliptia.2",
     "@performanc/pwsl-server": "github:performanc/internals#PWSL-server",
-    "@performanc/voice": "^2.1.0",
+    "@performanc/voice": "github:PerformanC/voice",
     "@wasm-audio-decoders/flac": "^0.2.8",
     "@wasm-audio-decoders/ogg-vorbis": "^0.1.18",
     "mp4box": "^2.1.2",

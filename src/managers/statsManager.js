@@ -11,11 +11,7 @@ export default class StatsManager {
       sources: {}, // { youtube: { success: 10, failure: 1 }, ... }
       playback: {
         events: {}, // { TrackStartEvent: 10, ... }
-        recovery: {
-          attempts: 0,
-          successes: 0,
-          failures: 0
-        }
+
       }
     }
     logger('info', 'StatsManager', 'Initialized.')
@@ -55,15 +51,5 @@ export default class StatsManager {
       (this.stats.playback.events[eventType] || 0) + 1
   }
 
-  incrementRecoveryAttempt() {
-    this.stats.playback.recovery.attempts++
-  }
 
-  incrementRecoverySuccess() {
-    this.stats.playback.recovery.successes++
-  }
-
-  incrementRecoveryFailure() {
-    this.stats.playback.recovery.failures++
-  }
 }

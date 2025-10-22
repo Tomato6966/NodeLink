@@ -34,8 +34,8 @@ export default class SessionManager {
       for (const player of connection.players.players.values()) {
         player?.destroy()
       }
-      connection?.socket?.destroy()
       this.connections.delete(sessionId)
+      connection?.socket?.destroy()
       logger(
         'debug',
         'SessionManager',

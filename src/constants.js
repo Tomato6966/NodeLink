@@ -14,7 +14,6 @@ export const GatewayEvents = {
   TRACK_START: 'TrackStartEvent',
   TRACK_STUCK: 'TrackStuckEvent',
   TRACK_EXCEPTION: 'TrackExceptionEvent',
-  TRACK_RECOVERY_NEEDED: 'TrackRecoveryNeededEvent',
   PLAYER_UPDATE: 'playerUpdate',
   CONNECTION_STATUS: 'ConnectionStatusEvent',
   VOLUME_CHANGED: 'VolumeChangedEvent',

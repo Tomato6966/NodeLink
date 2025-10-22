@@ -143,7 +143,7 @@ class NodelinkServer {
                     logger(
                       'info',
                       'Server',
-                      `Session with ID: ${sessionId} has not been resumed, deleting session`
+                      `Session with ID: ${sessionId} has not been resumed, deleting session due to timeout`
                     )
                     this.sessions.delete(sessionId)
                   } else
