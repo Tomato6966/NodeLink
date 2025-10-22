@@ -450,7 +450,8 @@ if (clusterEnabled && cluster.isPrimary) {
 
   const masterServer = net.createServer({ pauseOnConnect: true }, (socket) => {
     const addr = socket.remoteAddress || ''
-    const index = ipHash(addr) % workerIds.length
+    const port = socket.remotePort || 0
+    const index = ipHash(`${addr}:${port}`) % workerIds.length
     const workerId = workerIds[index]
     const worker = cluster.workers[workerId]
     if (!worker) {
