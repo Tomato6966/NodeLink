@@ -137,6 +137,7 @@ setInterval(() => {
   }
   process.send({
     type: 'workerStats',
+    pid: process.pid,
     stats: {
       players: localPlayers,
       playingPlayers: localPlayingPlayers

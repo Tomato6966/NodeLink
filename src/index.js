@@ -355,7 +355,40 @@ class NodelinkServer {
         const session = this.sessions.get(sessionId);
         session?.socket?.send(data);
     } else if (msg.type === 'workerStats') {
-        // This could be expanded to a full stats manager
+        if (this.workerManager) {
+            const worker = this.workerManager.workers.find(w => w.process.pid === msg.pid);
+            if (worker) {
+                this.workerManager.workerLoad.set(worker.id, msg.stats.players);
+            }
+        }
+    } else if (msg.type === 'workerFailed') {
+        const { workerId, affectedGuilds } = msg.payload;
+        logger('warn', 'Cluster', `Worker ${workerId} failed. Notifying clients for affected guilds: ${affectedGuilds.join(', ')}`);
+
+        const sessionsToNotify = new Map();
+
+        for (const guildId of affectedGuilds) {
+            for (const session of this.sessions.values()) {
+                if (session.players.isGuildAssigned(guildId)) {
+                    if (!sessionsToNotify.has(session.id)) {
+                        sessionsToNotify.set(session.id, new Set());
+                    }
+                    sessionsToNotify.get(session.id).add(guildId);
+                }
+            }
+        }
+
+        for (const [sessionId, guildsInSession] of sessionsToNotify.entries()) {
+            const session = this.sessions.get(sessionId);
+            if (session && session.socket) {
+                session.socket.send(JSON.stringify({
+                    op: 'event',
+                    type: 'WorkerFailedEvent',
+                    affectedGuilds: Array.from(guildsInSession), // Enviar a lista de guilds afetados
+                    message: `Players for guilds ${Array.from(guildsInSession).join(', ')} lost due to worker failure.`
+                }));
+            }
+        }
     }
   }
 
