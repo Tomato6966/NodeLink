@@ -8,10 +8,10 @@
 !src/**
 !.dockerignore
 !.gitignore
-!config.js
 !constants.js
 !Dockerfile
 !LICENSE
 !package.json
 !README.md
 !config.default.js 
+!biome.json
