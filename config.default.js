@@ -5,8 +5,8 @@ export default {
     password: '123'
   },
   cluster: {
-    enabled: false, // active cluster (or use env CLUSTER_ENABLED)
-    workers: 0 // 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
+    enabled: true, // active cluster (or use env CLUSTER_ENABLED)
+    workers: 1 // 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
   },
   logging: {
     level: 'debug',
@@ -113,6 +113,9 @@ export default {
       clientSecret: ''
     },
     nicovideo: {
+      enabled: true
+    },
+    jiosaavn: {
       enabled: true
     }
   },
