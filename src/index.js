@@ -477,7 +477,9 @@ if (clusterEnabled && cluster.isPrimary) {
     await nserver.start({ isClusterPrimary: true });
     global.nodelink = nserver;
 
-    logger('info', 'Server', `Primary process running (PID ${process.pid})`);
+    process.on('beforeExit', () => {
+      workerManager.destroy();
+    });
 
     return nserver;
   })();
