@@ -30,6 +30,7 @@ export class Player {
     this.connection = null
     this.voice = { sessionId: null, token: null, endpoint: null }
     this.streamInfo = null
+    this.streamToDestroy = null
 
     logger(
       'debug',
@@ -143,6 +144,15 @@ export class Player {
       'Player',
       `Player state change for guild ${this.guildId} in session ${this.session.id}: ${state.status} (reason: ${state.reason})`
     )
+
+    if (state.status === 'playing' && this.streamToDestroy) {
+      if (this.streamToDestroy !== this.connection.audioStream) {
+        logger('debug', 'Player', `Destroying old stream after seek for guild ${this.guildId}`);
+        this.streamToDestroy.destroy();
+        this.streamToDestroy = null;
+      }
+    }
+
     if (
       state.status === 'idle' &&
       this.track &&
@@ -258,8 +268,17 @@ export class Player {
       if (this._lastPosition === position) {
         this._stuckTime += this.nodelink.options.playerUpdateInterval
         if (this._stuckTime >= threshold && !this._isRecovering) {
+          const stuckTime = this._stuckTime
           this._stuckTime = 0
-          logger('warn', 'Player', `Player for guild ${this.guildId} is stuck. Attempting to recover...`)
+          logger('warn', 'Player', `Player for guild ${this.guildId} is stuck. Attempting to recover...`, {
+            lastPosition: this._lastPosition,
+            currentPosition: position,
+            stuckTime: stuckTime,
+            threshold: threshold,
+            connStatus: this.connStatus,
+            lastStreamDataTime: this._lastStreamDataTime > 0 ? new Date(this._lastStreamDataTime).toISOString() : 'never',
+            statistics: this.connection?.statistics
+          })
           this._isRecovering = true
 
           this.seek(this._lastPosition).then(success => {
@@ -447,6 +466,11 @@ export class Player {
     this.position = position
 
     try {
+      if (this.streamToDestroy) {
+        this.streamToDestroy.destroy()
+      }
+      this.streamToDestroy = this.connection.audioStream
+
       const url = this.streamInfo.url
 
       const resource = await createSeekeableAudioResource(

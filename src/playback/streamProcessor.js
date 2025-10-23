@@ -951,11 +951,24 @@ class MP4ToAACStream extends Transform {
 
   _flush(callback) {
     try {
-      this.mp4boxFile.flush()
+      if (this.mp4boxFile) {
+        this.mp4boxFile.flush()
+      }
       callback()
     } catch (err) {
       callback()
     }
+  }
+
+  _destroy(err, callback) {
+    if (this.mp4boxFile) {
+      this.mp4boxFile.stop()
+      this.mp4boxFile.onReady = null
+      this.mp4boxFile.onSamples = null
+      this.mp4boxFile.onError = null
+      this.mp4boxFile = null
+    }
+    super._destroy(err, callback)
   }
 }
 

@@ -6,11 +6,11 @@ function handler(nodelink, req, res, sendResponse, parsedUrl) {
     sendResponse(req, res, {
       timestamp: Date.now(),
       status: 400,
-      error: 'missing track parameter',
+      error: 'Bad Request',
       trace: new Error().stack,
-      message: 'track parameter is required',
+      message: 'Missing or invalid track parameter.',
       path: parsedUrl.pathname
-    }, 404)
+    }, 400)
     return
   }
   try {

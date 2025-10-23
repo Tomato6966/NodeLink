@@ -6,12 +6,12 @@ function handler(nodelink, req, res, parsedUrl) {
     // biome-ignore format: off
     sendResponse(req, res, {
       timestamp: Date.now(),
-      status: 404,
-      error: 'missing encodedTrack parameter',
+      status: 400,
+      error: 'Bad Request',
       trace: new Error().stack,
-      message: 'encodedTrack parameter is required',
+      message: 'Missing or invalid encodedTrack parameter.',
       path: parsedUrl.pathname
-    }, 404)
+    }, 400)
     return
   }
 

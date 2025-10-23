@@ -133,7 +133,17 @@ export default class ConnectionManager {
 
       stream.on('error', (err) => {
         this.isChecking = false
-        throw new Error(`Stream error during download: ${err.message}`)
+        const errorMessage = `Stream error during download: ${err.message}`
+        logger(
+          'error',
+          'ConnectionManager',
+          `Connection check failed: ${errorMessage}`
+        )
+        if (this.status !== 'disconnected') {
+          this.status = 'disconnected'
+          this.metrics = { error: errorMessage, timestamp: Date.now() }
+          this.broadcastStatus()
+        }
       })
     } catch (e) {
       this.isChecking = false
