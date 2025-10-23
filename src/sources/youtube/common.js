@@ -556,7 +556,7 @@ export class BaseClient {
     switch (urlType) {
       case YOUTUBE_CONSTANTS.VIDEO:
       case YOUTUBE_CONSTANTS.SHORTS: {
-        const idPattern = /(?:v=|ossovershorts\/|youtu\.be\/)([^&?]+)/
+        const idPattern = /(?:v=|shorts\/|youtu\.be\/)([^&?]+)/
         const videoIdMatch = url.match(idPattern)
         if (!videoIdMatch || !videoIdMatch[1]) {
           logger(
