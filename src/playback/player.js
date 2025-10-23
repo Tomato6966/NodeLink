@@ -555,17 +555,7 @@ export class Player {
       filters
     )
 
-    const newFilterSettings = JSON.parse(
-      JSON.stringify(this.filters.filters || {})
-    )
-    for (const key in filters.filters) {
-      newFilterSettings[key] = {
-        ...(newFilterSettings[key] || {}),
-        ...filters.filters[key]
-      }
-    }
-
-    this.filters = { ...this.filters, filters: newFilterSettings }
+    this.filters = filters;
 
     if (this.connection?.audioStream) {
       this.connection.audioStream.setFilters(this.filters)

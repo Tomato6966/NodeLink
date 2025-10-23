@@ -38,6 +38,10 @@ export default class Timescale {
       return chunk
     }
 
+    if (this.finalRate === 0) {
+      return Buffer.alloc(0);
+    }
+
     this.inputBuffer = Buffer.concat([this.inputBuffer, chunk])
 
     if (this.inputBuffer.length < 16) {
