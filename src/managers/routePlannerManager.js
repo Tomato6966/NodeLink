@@ -1,4 +1,5 @@
 import { logger } from '../utils.js'
+import ip from 'ip'
 
 export default class RoutePlannerManager {
   constructor(nodelink) {
@@ -6,6 +7,7 @@ export default class RoutePlannerManager {
     this.config = nodelink.options.routePlanner
     this.ipBlocks = []
     this.bannedIps = new Map()
+    this.lastUsedIndex = -1
 
     if (this.config?.ipBlocks?.length > 0) {
       this._loadIpBlocks()
@@ -36,6 +38,45 @@ export default class RoutePlannerManager {
   getIP() {
     if (this.ipBlocks.length === 0) return null
 
+    const strategy = this.config.strategy || 'RoundRobin'
+
+    switch (strategy) {
+      case 'RoundRobin':
+        return this._getRoundRobinIp()
+      case 'RotateOnBan':
+        return this._getRotateOnBanIp()
+      case 'LoadBalance':
+        return this._getRandomIp()
+      default:
+        return this._getRoundRobinIp()
+    }
+  }
+
+  _getRoundRobinIp() {
+    if (this.ipBlocks.length === 0) return null
+    this.lastUsedIndex = (this.lastUsedIndex + 1) % this.ipBlocks.length
+    return this.ipBlocks[this.lastUsedIndex]
+  }
+
+  _getRotateOnBanIp() {
+    if (this.ipBlocks.length === 0) return null
+
+    const now = Date.now()
+    for (let i = 0; i < this.ipBlocks.length; i++) {
+      this.lastUsedIndex = (this.lastUsedIndex + 1) % this.ipBlocks.length
+      const ip = this.ipBlocks[this.lastUsedIndex]
+      const bannedUntil = this.bannedIps.get(ip)
+
+      if (!bannedUntil || now > bannedUntil) {
+        return ip
+      }
+    }
+
+    logger('warn', 'RoutePlanner', 'All IPs are currently banned.')
+    return null
+  }
+
+  _getRandomIp() {
     const now = Date.now()
     const availableIps = this.ipBlocks.filter((ip) => {
       const bannedUntil = this.bannedIps.get(ip)

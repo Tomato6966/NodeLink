@@ -14,6 +14,7 @@
     "@performanc/voice": "github:PerformanC/voice",
     "@wasm-audio-decoders/flac": "^0.2.8",
     "@wasm-audio-decoders/ogg-vorbis": "^0.1.18",
+    "ip": "^2.0.1",
     "mp4box": "^2.1.2",
     "mpg123-decoder": "^1.0.2",
     "opusscript": "^0.0.8",
