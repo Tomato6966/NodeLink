@@ -1344,15 +1344,22 @@ class StreamAudioResource extends BaseAudioResource {
       stream.on('finishBuffering', () => this.stream.emit('finishBuffering'))
 
       stream.on('error', (err) => {
+        console.error(`Error in input stream:`, err)
         this.stream.emit('error', err)
       })
 
       for (const pipe of this.pipes) {
+        if (pipe === this.stream) continue;
         pipe.on?.('error', (err) => {
           console.error(`Error in stream pipe ${pipe.constructor.name}:`, err)
-          stream.emit('error', err)
+          this.stream.emit('error', err)
         })
       }
+
+      this.stream.on('error', (err) => {
+        console.error(`Error in opus encoder:`, err)
+        this._end()
+      })
     } catch (err) {
       throw new Error(`Failed to create audio resource: ${err.message}`)
     }
