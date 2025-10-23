@@ -39,7 +39,7 @@ export class FiltersManager extends Transform {
       timescale: new Timescale()
     }
 
-    this.update({})
+    this.update(options)
   }
 
   update(filters) {
