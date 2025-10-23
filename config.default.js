@@ -1,8 +1,8 @@
 export default {
   server: {
-    host: 'localhost',
+    host: '0.0.0.0',
     port: 3000,
-    password: '123'
+    password: 'youshallnotpass'
   },
   cluster: {
     enabled: true, // active cluster (or use env CLUSTER_ENABLED)
@@ -23,7 +23,7 @@ export default {
       path: 'logs'
     },
     debug: {
-      all: true,
+      all: false,
       request: true,
       session: true,
       player: true,
