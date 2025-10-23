@@ -16,7 +16,7 @@ export default class Vibrato {
   update(filters) {
     const vibratoSettings = filters.vibrato || {}
     const frequency = vibratoSettings.frequency || 0
-    let depth = vibratoSettings.depth ?? vibratoSettings.death ?? 0
+    let depth = vibratoSettings.depth ?? 0
 
     depth = Math.max(0, Math.min(depth, 2.0))
 

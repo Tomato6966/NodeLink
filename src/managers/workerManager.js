@@ -124,10 +124,9 @@ export default class WorkerManager {
             }
         }
 
-        if (affectedGuilds.length > 0 && process.connected) {
-            process.send({ type: 'workerFailed', payload: { workerId: worker.id, affectedGuilds } });
-        }
-        
+              if (affectedGuilds.length > 0) {
+                global.nodelink.handleIPCMessage({ type: 'workerFailed', payload: { workerId: worker.id, affectedGuilds } });
+              }        
         try {
             worker.process.kill();
             logger('info', 'Cluster', `Terminated worker ${worker.process.pid} (id: ${worker.id})`);

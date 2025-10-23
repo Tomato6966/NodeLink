@@ -32,8 +32,8 @@ function handler(nodelink, req, res, sendResponse, parsedUrl) {
             }, 500)
       return
     }
-    sendResponse(req, res, encodedTracks, 200)
   }
+  sendResponse(req, res, encodedTracks, 200)
 }
 
 export default {
