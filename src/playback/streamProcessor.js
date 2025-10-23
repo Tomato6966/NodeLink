@@ -146,7 +146,7 @@ class MpegDecoderStream extends Transform {
         callback()
       }
     } catch (e) {
-      callback()
+      callback(e)
     }
   }
 

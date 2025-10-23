@@ -66,6 +66,7 @@ export class Player {
     this._lastPosition = 0
     this._stuckTime = 0
     this._lastStreamDataTime = 0
+    this._isRecovering = false
     this._initConnection()
   }
 
@@ -237,7 +238,7 @@ export class Player {
   }
 
   _sendUpdate() {
-    if (!this.connection || this.isPaused) return false
+    if (!this.connection || this.isPaused || this.connStatus === 'destroyed') return false
 
     const position = this._realPosition()
 
@@ -245,12 +246,40 @@ export class Player {
     if (threshold > 0) {
       if (this._lastPosition === position) {
         this._stuckTime += this.nodelink.options.playerUpdateInterval
-        if (this._stuckTime >= threshold) {
+        if (this._stuckTime >= threshold && !this._isRecovering) {
           this._stuckTime = 0
-          this.stop()
+          logger('warn', 'Player', `Player for guild ${this.guildId} is stuck. Attempting to recover...`)
+          this._isRecovering = true
+
+          this.seek(this._lastPosition).then(success => {
+            if (success) {
+              logger('info', 'Player', `Player for guild ${this.guildId} recovered successfully.`)
+            } else {
+              logger('error', 'Player', `Player for guild ${this.guildId} recovery failed. Stopping track.`)
+              this.emitEvent(GatewayEvents.TRACK_STUCK, {
+                guildId: this.guildId,
+                track: this.track,
+                thresholdMs: threshold,
+                reason: 'Recovery attempt failed'
+              })
+              this.stop()
+            }
+            this._isRecovering = false
+          }).catch(err => {
+            logger('error', 'Player', `Player for guild ${this.guildId} recovery attempt threw an error: ${err.message}. Stopping track.`)
+            this.emitEvent(GatewayEvents.TRACK_STUCK, {
+              guildId: this.guildId,
+              track: this.track,
+              thresholdMs: threshold,
+              reason: `Recovery attempt failed: ${err.message}`
+            })
+            this.stop()
+            this._isRecovering = false
+          })
         }
       } else {
         this._stuckTime = 0
+        this._isRecovering = false
       }
     }
 
@@ -460,8 +489,7 @@ export class Player {
 
   stop() {
     if (!this.track) return false
-    logger('debug', 'Player', `Stopping player for guild ${this.guildId}`)
-    if (this.connection) {
+    if (this.connection && this.connStatus !== 'destroyed') {
       if (this.connection.audioStream) {
         this.connection.stop(EndReasons.STOPPED)
       } else {
