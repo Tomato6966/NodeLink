@@ -150,7 +150,7 @@ class NodelinkServer {
               'Server',
               `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m disconnected with code ${code} and reason: ${reason || 'without reason'}`
             )
-            if (!session.resuming) this.sessions.delete(sessionId)
+            if (!session.resuming) this.sessions.delete(sessionId, true)
             else {
               logger(
                 'info',
@@ -166,7 +166,7 @@ class NodelinkServer {
                       'Server',
                       `Session with ID: ${sessionId} has not been resumed, deleting session due to timeout`
                     )
-                    this.sessions.delete(sessionId)
+                    this.sessions.delete(sessionId, true)
                   } else
                     logger(
                       'info',

@@ -30,7 +30,7 @@ export default class SessionManager {
   has(sessionId) {
     return this.connections.has(sessionId)
   }
-  async delete(sessionId) { 
+  async delete(sessionId, isSocketClosing = false) {
     const connection = this.connections.get(sessionId)
     if (connection) {
       if (this.nodelink.workerManager) {
@@ -43,7 +43,7 @@ export default class SessionManager {
         }
       } else {
         for (const player of connection.players.players.values()) {
-          player?.destroy();
+          player?.destroy(!isSocketClosing);
         }
       }
       this.connections.delete(sessionId)

@@ -173,6 +173,11 @@ export class Player {
 
   _onError(error) {
     if (this.track) {
+      if (error.message.includes('ECONNRESET')) {
+        logger('warn', 'Player', `Voice connection reset for guild ${this.guildId}. The library will attempt to reconnect.`);
+        return;
+      }
+
       const isStreamError =
         error.message.includes('stream') ||
         error.message.includes('timeout') ||
