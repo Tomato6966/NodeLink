@@ -49,11 +49,16 @@ export class FiltersManager extends Transform {
       const filter = this.availableFilters[filterName]
 
       if (filters.filters?.[filterName]) {
-        logger('debug', 'Filters', `Enabling filter: ${filterName}`)
         this.activeFilters.push(filter)
       }
 
       filter.update(filters.filters || filters)
+    }
+
+    this.activeFilters.sort((a, b) => (a.priority || 99) - (b.priority || 99));
+
+    if (this.activeFilters.length > 0) {
+        logger('debug', 'Filters', `Active filter order: ${this.activeFilters.map(f => f.constructor.name).join(', ')}`);
     }
   }
 

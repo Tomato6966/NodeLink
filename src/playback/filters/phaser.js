@@ -7,6 +7,7 @@ const MAX_STAGES = 12
 
 export default class Phaser {
   constructor() {
+    this.priority = 10;
     this.leftLfo = new LFO('SINE')
     this.rightLfo = new LFO('SINE')
     this.rightLfo.phase = Math.PI / 2

@@ -15,6 +15,7 @@ function cubicInterpolate(p0, p1, p2, p3, t) {
 
 export default class Timescale {
   constructor() {
+    this.priority = 1;
     this.speed = 1.0
     this.pitch = 1.0
     this.rate = 1.0

@@ -2,6 +2,7 @@ import { clamp16Bit } from './dsp/clamp16Bit.js'
 
 export default class Highpass {
   constructor() {
+    this.priority = 10;
     this.smoothing = 0
     this.smoothingFactor = 0
     this.prevLeftInput = 0

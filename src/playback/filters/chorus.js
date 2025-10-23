@@ -8,6 +8,7 @@ const bufferSize = Math.ceil((SAMPLE_RATE * MAX_DELAY_MS) / 1000)
 
 export default class Chorus {
   constructor() {
+    this.priority = 10;
     this.lfos = [
       new LFO('SINE'),
       new LFO('SINE'),

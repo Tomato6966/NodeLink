@@ -2,6 +2,7 @@ import { clamp16Bit } from './dsp/clamp16Bit.js'
 
 export default class ChannelMix {
   constructor() {
+    this.priority = 10;
     this.leftToLeft = 1.0
     this.leftToRight = 0.0
     this.rightToLeft = 0.0

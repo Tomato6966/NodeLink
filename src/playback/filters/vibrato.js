@@ -8,6 +8,7 @@ const bufferSize = Math.ceil((SAMPLE_RATE * MAX_DELAY_MS) / 1000)
 
 export default class Vibrato {
   constructor() {
+    this.priority = 10;
     this.lfo = new LFO('SINE')
     this.leftDelay = new DelayLine(bufferSize)
     this.rightDelay = new DelayLine(bufferSize)

@@ -4,6 +4,7 @@ const MAX_INT_16 = 32767
 
 export default class Distortion {
   constructor() {
+    this.priority = 10;
     this.sinOffset = 0
     this.sinScale = 0
     this.cosOffset = 0
