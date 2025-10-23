@@ -555,7 +555,25 @@ export class Player {
       filters
     )
 
-    this.filters = filters;
+    if (filters.filters && Object.keys(filters.filters).length === 0) {
+        this.filters = {};
+    } else {
+        const newFilterSettings = JSON.parse(
+          JSON.stringify(this.filters.filters || {})
+        );
+
+        for (const key in filters.filters) {
+          if (filters.filters[key] === null || filters.filters[key] === undefined) {
+            delete newFilterSettings[key];
+          } else {
+            newFilterSettings[key] = {
+              ...(newFilterSettings[key] || {}),
+              ...filters.filters[key]
+            };
+          }
+        }
+        this.filters = { ...this.filters, filters: newFilterSettings };
+    }
 
     if (this.connection?.audioStream) {
       this.connection.audioStream.setFilters(this.filters)
