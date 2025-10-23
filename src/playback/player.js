@@ -119,6 +119,12 @@ export class Player {
           `Unpaused track on reconnection for guild ${this.guildId}`
         )
       }
+    } else if (state.status === 'reconnecting') {
+      logger(
+        'info',
+        'Player',
+        `Voice connection is reconnecting for guild ${this.guildId}`
+      )
     } else if (state.status === 'disconnected') {
       this.emitEvent(GatewayEvents.WEBSOCKET_CLOSED, {
         code: state.code,

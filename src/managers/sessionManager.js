@@ -15,6 +15,7 @@ export default class SessionManager {
       `New session created with ID ${sessionId}`
     )
     this.connections.set(sessionId, {
+      id: sessionId,
       clientInfo,
       userId: request.headers['user-id'],
       request,
