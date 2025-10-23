@@ -55,37 +55,37 @@ export default class Timescale {
 
     let outputPos = 0
     while (outputPos < finalOutputLength) {
-      const inputIndex = (outputPos / 2) * this.finalRate
-      const i1 = Math.floor(inputIndex)
-      const frac = inputIndex - i1
+      const inputFrame = (outputPos / 4) * this.finalRate
+      const i1 = Math.floor(inputFrame)
+      const frac = inputFrame - i1
 
       const p0_idx = i1 - 1;
       const p1_idx = i1;
       const p2_idx = i1 + 1;
       const p3_idx = i1 + 2;
 
-      if (p3_idx * 2 + 3 >= this.inputBuffer.length) {
+      if ((p3_idx + 1) * 4 > this.inputBuffer.length) {
         break;
       }
 
-      const p0_L = p0_idx < 0 ? this.inputBuffer.readInt16LE(p1_idx * 2) : this.inputBuffer.readInt16LE(p0_idx * 2);
-      const p1_L = this.inputBuffer.readInt16LE(p1_idx * 2);
-      const p2_L = this.inputBuffer.readInt16LE(p2_idx * 2);
-      const p3_L = this.inputBuffer.readInt16LE(p3_idx * 2);
+      const p0_L = p0_idx < 0 ? this.inputBuffer.readInt16LE(p1_idx * 4) : this.inputBuffer.readInt16LE(p0_idx * 4);
+      const p1_L = this.inputBuffer.readInt16LE(p1_idx * 4);
+      const p2_L = this.inputBuffer.readInt16LE(p2_idx * 4);
+      const p3_L = this.inputBuffer.readInt16LE(p3_idx * 4);
       const out_L = cubicInterpolate(p0_L, p1_L, p2_L, p3_L, frac);
       outputBuffer.writeInt16LE(clamp16Bit(out_L), outputPos);
 
-      const p0_R = p0_idx < 0 ? this.inputBuffer.readInt16LE(p1_idx * 2 + 2) : this.inputBuffer.readInt16LE(p0_idx * 2 + 2);
-      const p1_R = this.inputBuffer.readInt16LE(p1_idx * 2 + 2);
-      const p2_R = this.inputBuffer.readInt16LE(p2_idx * 2 + 2);
-      const p3_R = this.inputBuffer.readInt16LE(p3_idx * 2 + 2);
+      const p0_R = p0_idx < 0 ? this.inputBuffer.readInt16LE(p1_idx * 4 + 2) : this.inputBuffer.readInt16LE(p0_idx * 4 + 2);
+      const p1_R = this.inputBuffer.readInt16LE(p1_idx * 4 + 2);
+      const p2_R = this.inputBuffer.readInt16LE(p2_idx * 4 + 2);
+      const p3_R = this.inputBuffer.readInt16LE(p3_idx * 4 + 2);
       const out_R = cubicInterpolate(p0_R, p1_R, p2_R, p3_R, frac);
       outputBuffer.writeInt16LE(clamp16Bit(out_R), outputPos + 2);
 
       outputPos += 4
     }
 
-    const consumedInputBytes = Math.floor((outputPos / 2) * this.finalRate) * 2
+    const consumedInputBytes = Math.floor((outputPos / 4) * this.finalRate) * 4
     this.inputBuffer = this.inputBuffer.slice(consumedInputBytes)
 
     return outputBuffer.slice(0, outputPos)
