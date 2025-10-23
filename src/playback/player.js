@@ -145,6 +145,8 @@ export class Player {
         EndReasons.LOAD_FAILED
       ].includes(state.reason)
     ) {
+      this.connection.audioStream?.destroy()
+
       this.emitEvent(GatewayEvents.TRACK_END, {
         track: this.track,
         reason: state.reason
@@ -359,10 +361,17 @@ export class Player {
   async seek(position, endTime) {
     if (!this.track) return false
     if (!this.track.info.isSeekable && !this.track.info.isStream) return false
+
+    const seekPosition = (position === null || position === undefined) ? this._realPosition() : position;
+
+    if (seekPosition === 0 && this._realPosition() < 1000) {
+      logger('debug', 'Player', 'Ignoring seek to 0 as track has just started.');
+      return false;
+    }
+
     if (
-      position < 0 ||
-      position > this.track.info.length ||
-      (position === 0 && position === this.position)
+      seekPosition < 0 ||
+      (this.track.info.length > 0 && seekPosition > this.track.info.length)
     )
       return false
 
@@ -372,12 +381,12 @@ export class Player {
     let seekPromise
     if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
       seekPromise = this._seekeableSeek(
-        position,
+        seekPosition,
         endTime !== undefined ? endTime : this.track.endTime
       )
     } else {
       seekPromise = this._legacySeek(
-        position,
+        seekPosition,
         endTime !== undefined ? endTime : this.track.endTime
       )
     }
