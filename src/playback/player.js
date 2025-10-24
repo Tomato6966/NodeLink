@@ -1,5 +1,6 @@
 import discordVoice from '@performanc/voice'
 import { EndReasons, GatewayEvents } from '../constants.js'
+import { SeekeableError } from '@ecliptia/seekeable-node'
 import { logger } from '../utils.js'
 import {
   createAudioResource,
@@ -147,9 +148,13 @@ export class Player {
 
     if (state.status === 'playing' && this.streamToDestroy) {
       if (this.streamToDestroy !== this.connection.audioStream) {
-        logger('debug', 'Player', `Destroying old stream after seek for guild ${this.guildId}`);
-        this.streamToDestroy.destroy();
-        this.streamToDestroy = null;
+        logger(
+          'debug',
+          'Player',
+          `Destroying old stream after seek for guild ${this.guildId}`
+        )
+        this.streamToDestroy.destroy()
+        this.streamToDestroy = null
       }
     }
 
@@ -184,8 +189,12 @@ export class Player {
   _onError(error) {
     if (this.track) {
       if (error.message.includes('ECONNRESET')) {
-        logger('warn', 'Player', `Voice connection reset for guild ${this.guildId}. The library will attempt to reconnect.`);
-        return;
+        logger(
+          'warn',
+          'Player',
+          `Voice connection reset for guild ${this.guildId}. The library will attempt to reconnect.`
+        )
+        return
       }
 
       const isStreamError =
@@ -259,7 +268,8 @@ export class Player {
   }
 
   _sendUpdate() {
-    if (!this.connection || this.isPaused || this.connStatus === 'destroyed') return false
+    if (!this.connection || this.isPaused || this.connStatus === 'destroyed')
+      return false
 
     const position = this._realPosition()
 
@@ -270,42 +280,64 @@ export class Player {
         if (this._stuckTime >= threshold && !this._isRecovering) {
           const stuckTime = this._stuckTime
           this._stuckTime = 0
-          logger('warn', 'Player', `Player for guild ${this.guildId} is stuck. Attempting to recover...`, {
-            lastPosition: this._lastPosition,
-            currentPosition: position,
-            stuckTime: stuckTime,
-            threshold: threshold,
-            connStatus: this.connStatus,
-            lastStreamDataTime: this._lastStreamDataTime > 0 ? new Date(this._lastStreamDataTime).toISOString() : 'never',
-            statistics: this.connection?.statistics
-          })
+          logger(
+            'warn',
+            'Player',
+            `Player for guild ${this.guildId} is stuck. Attempting to recover...`,
+            {
+              lastPosition: this._lastPosition,
+              currentPosition: position,
+              stuckTime: stuckTime,
+              threshold: threshold,
+              connStatus: this.connStatus,
+              lastStreamDataTime:
+                this._lastStreamDataTime > 0
+                  ? new Date(this._lastStreamDataTime).toISOString()
+                  : 'never',
+              statistics: this.connection?.statistics
+            }
+          )
           this._isRecovering = true
 
-          this.seek(this._lastPosition).then(success => {
-            if (success) {
-              logger('info', 'Player', `Player for guild ${this.guildId} recovered successfully.`)
-            } else {
-              logger('error', 'Player', `Player for guild ${this.guildId} recovery failed. Stopping track.`)
+          this.seek(this._lastPosition)
+            .then((success) => {
+              if (success) {
+                logger(
+                  'info',
+                  'Player',
+                  `Player for guild ${this.guildId} recovered successfully.`
+                )
+              } else {
+                logger(
+                  'error',
+                  'Player',
+                  `Player for guild ${this.guildId} recovery failed. Stopping track.`
+                )
+                this.emitEvent(GatewayEvents.TRACK_STUCK, {
+                  guildId: this.guildId,
+                  track: this.track,
+                  thresholdMs: threshold,
+                  reason: 'Recovery attempt failed'
+                })
+                this.stop()
+              }
+              this._isRecovering = false
+            })
+            .catch((err) => {
+              logger(
+                'error',
+                'Player',
+                `Player for guild ${this.guildId} recovery attempt threw an error: ${err.message}. Stopping track.`
+              )
               this.emitEvent(GatewayEvents.TRACK_STUCK, {
                 guildId: this.guildId,
                 track: this.track,
                 thresholdMs: threshold,
-                reason: 'Recovery attempt failed'
+                reason: `Recovery attempt failed: ${err.message}`
               })
               this.stop()
-            }
-            this._isRecovering = false
-          }).catch(err => {
-            logger('error', 'Player', `Player for guild ${this.guildId} recovery attempt threw an error: ${err.message}. Stopping track.`)
-            this.emitEvent(GatewayEvents.TRACK_STUCK, {
-              guildId: this.guildId,
-              track: this.track,
-              thresholdMs: threshold,
-              reason: `Recovery attempt failed: ${err.message}`
+              this._isRecovering = false
             })
-            this.stop()
-            this._isRecovering = false
-          })
         }
       } else {
         this._stuckTime = 0
@@ -421,11 +453,14 @@ export class Player {
     if (!this.track) return false
     if (!this.track.info.isSeekable && !this.track.info.isStream) return false
 
-    const seekPosition = (position === null || position === undefined) ? this._realPosition() : position;
+    const seekPosition =
+      position === null || position === undefined
+        ? this._realPosition()
+        : position
 
     if (seekPosition === 0 && this._realPosition() < 1000) {
-      logger('debug', 'Player', 'Ignoring seek to 0 as track has just started.');
-      return false;
+      logger('debug', 'Player', 'Ignoring seek to 0 as track has just started.')
+      return false
     }
 
     if (
@@ -478,7 +513,8 @@ export class Player {
         position,
         endTime,
         this.nodelink,
-        this.filters
+        this.filters,
+        this // Pass the player object
       )
 
       if (this.volumePercent !== 100) {
@@ -490,6 +526,26 @@ export class Player {
 
       return true
     } catch (e) {
+      if (e instanceof SeekeableError) {
+        logger(
+          'error',
+          'Player',
+          `Seekeable seek failed for guild ${this.guildId}: ${e.message} (Code: ${e.code}, URL: ${e.url || 'N/A'}). Falling back to old method.`
+        )
+        this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
+          track: this.track,
+          exception: {
+            message: e.message,
+            severity: 'fault',
+            cause: `SeekeableError: ${e.code}`
+          }
+        })
+        this.emitEvent(GatewayEvents.TRACK_END, {
+          track: this.track,
+          reason: EndReasons.LOAD_FAILED
+        })
+        return this._legacySeek(position, endTime)
+      }
       logger(
         'error',
         'Player',
@@ -585,23 +641,26 @@ export class Player {
     )
 
     if (filters.filters && Object.keys(filters.filters).length === 0) {
-        this.filters = {};
+      this.filters = {}
     } else {
-        const newFilterSettings = JSON.parse(
-          JSON.stringify(this.filters.filters || {})
-        );
+      const newFilterSettings = JSON.parse(
+        JSON.stringify(this.filters.filters || {})
+      )
 
-        for (const key in filters.filters) {
-          if (filters.filters[key] === null || filters.filters[key] === undefined) {
-            delete newFilterSettings[key];
-          } else {
-            newFilterSettings[key] = {
-              ...(newFilterSettings[key] || {}),
-              ...filters.filters[key]
-            };
+      for (const key in filters.filters) {
+        if (
+          filters.filters[key] === null ||
+          filters.filters[key] === undefined
+        ) {
+          delete newFilterSettings[key]
+        } else {
+          newFilterSettings[key] = {
+            ...(newFilterSettings[key] || {}),
+            ...filters.filters[key]
           }
         }
-        this.filters = { ...this.filters, filters: newFilterSettings };
+      }
+      this.filters = { ...this.filters, filters: newFilterSettings }
     }
 
     if (this.connection?.audioStream) {
