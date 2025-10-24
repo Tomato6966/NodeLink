@@ -207,7 +207,8 @@ export default class SpotifySource {
         }
 
         case 'playlist': {
-          const playlistData = await this._apiRequest(`/playlists/${id}`)
+          const fields = 'name,tracks(items(track(id,name,artists,duration_ms,external_urls,external_ids,album(images))),total)'
+          const playlistData = await this._apiRequest(`/playlists/${id}?fields=${fields}`)
           if (!playlistData)
             return {
               loadType: 'error',
@@ -219,29 +220,36 @@ export default class SpotifySource {
             allItems.push(...playlistData.tracks.items)
           }
 
-          let next = playlistData.tracks?.next || null
-          let pagesFetched = 1
+          const totalTracks = playlistData.tracks.total
+          const limit = 100
+          let pagesToFetch = Math.ceil(totalTracks / limit)
 
-          // if playlistLoadLimit = 0 or null → no limit
-          const maxPages =
-            this.playlistLoadLimit && this.playlistLoadLimit > 0
-              ? this.playlistLoadLimit
-              : Infinity
+          if (this.playlistLoadLimit > 0) {
+            pagesToFetch = Math.min(pagesToFetch, this.playlistLoadLimit)
+          }
+          
+          const promises = []
+          // Start from page 1, as page 0 is already fetched
+          for (let i = 1; i < pagesToFetch; i++) {
+            const offset = i * limit
+            promises.push(this._apiRequest(`/playlists/${id}/tracks?offset=${offset}&limit=${limit}&fields=items(track(id,name,artists,duration_ms,external_urls,external_ids,album(images)))`))
+          }
 
-          while (next && pagesFetched < maxPages) {
-            const page = await this._apiRequest(next)
-            if (!page || !Array.isArray(page.items)) {
-              logger(
-                'warn',
-                'Spotify',
-                `Failed to fetch playlist page: ${next}`
-              )
-              break
+          if (promises.length > 0) {
+            const batchSize = 20
+            for (let i = 0; i < promises.length; i += batchSize) {
+              const batch = promises.slice(i, i + batchSize)
+              try {
+                const results = await Promise.all(batch)
+                for (const page of results) {
+                  if (page && page.items) {
+                    allItems.push(...page.items)
+                  }
+                }
+              } catch (e) {
+                logger('warn', 'Spotify', `Failed to fetch a batch of playlist pages: ${e.message}`)
+              }
             }
-
-            allItems.push(...page.items)
-            next = page.next || null
-            pagesFetched++
           }
 
           const tracks = allItems
@@ -255,9 +263,7 @@ export default class SpotifySource {
           logger(
             'info',
             'Spotify',
-            `Loaded ${tracks.length} tracks from playlist "${playlistData.name}" (limit: ${
-              maxPages === Infinity ? 'full' : pagesFetched * 100
-            })`
+            `Loaded ${tracks.length} of ${totalTracks} tracks from playlist "${playlistData.name}".`
           )
 
           return {
