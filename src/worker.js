@@ -5,6 +5,7 @@ import LyricsManager from './managers/lyricsManager.js'
 import StatsManager from './managers/statsManager.js'
 import RoutePlannerManager from './managers/routePlannerManager.js'
 import ConnectionManager from './managers/connectionManager.js'
+import { GatewayEvents } from './constants.js'
 
 let config
 try {
@@ -154,6 +155,9 @@ process.on('message', (msg) => {
   setImmediate(processQueue)
 })
 
+const updateInterval = config?.playerUpdateInterval ?? 5000
+const zombieThreshold = config?.zombieThresholdMs ?? 60000
+
 setInterval(() => {
   if (!process.connected) return
 
@@ -164,7 +168,28 @@ setInterval(() => {
     if (!player.isPaused && player.track) {
       localPlayingPlayers++
     }
+
+    if (player?.track && !player.isPaused && player.connection) {
+      if (
+        player._lastStreamDataTime > 0 &&
+        Date.now() - player._lastStreamDataTime >= zombieThreshold
+      ) {
+        logger(
+          'warn',
+          'Player',
+          `Player for guild ${player.guildId} detected as zombie (no stream data).`
+        )
+        player.emitEvent(GatewayEvents.TRACK_STUCK, {
+          guildId: player.guildId,
+          track: player.track,
+          reason: 'no_stream_data',
+          thresholdMs: zombieThreshold
+        })
+      }
+      player._sendUpdate()
+    }
   }
+
   process.send({
     type: 'workerStats',
     pid: process.pid,
@@ -174,4 +199,4 @@ setInterval(() => {
       commandQueueLength: commandQueue.length
     }
   })
-}, 5000)
+}, updateInterval)
