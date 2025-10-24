@@ -181,6 +181,19 @@ export default class WorkerManager {
     }
 
     if (affectedGuilds.length > 0) {
+      for (const guildId of affectedGuilds) {
+        for (const session of global.nodelink.sessions.values()) {
+          if (session.players.players.has(guildId)) {
+            session.players.players.delete(guildId)
+            logger(
+              'debug',
+              'Cluster',
+              `Removed stale player placeholder for guild ${guildId} from session ${session.id}`
+            )
+          }
+        }
+      }
+
       global.nodelink.handleIPCMessage({
         type: 'workerFailed',
         payload: { workerId: worker.id, affectedGuilds }
