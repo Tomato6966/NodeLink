@@ -120,7 +120,8 @@ export default {
     spotify: {
       enabled: true,
       clientId: '',
-      clientSecret: ''
+      clientSecret: '',
+      playlistLoadLimit: 1 // 0 means no limit (loads all tracks), 1 = 100 tracks, 2 = 100 and so on!
     },
     nicovideo: {
       enabled: true
