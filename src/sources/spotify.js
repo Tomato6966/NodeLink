@@ -14,6 +14,7 @@ export default class SpotifySource {
     this.accessToken = null
     this.clientId = null
     this.clientSecret = null
+    this.playlistLoadLimit = 0 // added field
     this.tokenInitialized = false
   }
 
@@ -23,6 +24,8 @@ export default class SpotifySource {
     try {
       this.clientId = this.config.sources.spotify?.clientId
       this.clientSecret = this.config.sources.spotify?.clientSecret
+      this.playlistLoadLimit =
+        this.config.sources.spotify?.playlistLoadLimit ?? 0
 
       if (!this.clientId || !this.clientSecret) {
         logger(
@@ -62,7 +65,11 @@ export default class SpotifySource {
 
       this.accessToken = tokenData.access_token
       this.tokenInitialized = true
-      logger('info', 'Spotify', 'Tokens initialized successfully')
+      logger(
+        'info',
+        'Spotify',
+        `Tokens initialized successfully (playlistLoadLimit: ${this.playlistLoadLimit === 0 ? 'unlimited' : `${this.playlistLoadLimit * 100} tracks max`})`
+      )
       return true
     } catch (e) {
       logger(
@@ -77,9 +84,8 @@ export default class SpotifySource {
   async _apiRequest(path) {
     if (!this.tokenInitialized) {
       const success = await this.setup()
-      if (!success) {
+      if (!success)
         throw new Error('Failed to initialize Spotify for API request.')
-      }
     }
 
     try {
@@ -182,6 +188,7 @@ export default class SpotifySource {
             }
           return { loadType: 'track', data: this.buildTrack(data) }
         }
+
         case 'album': {
           const data = await this._apiRequest(`/albums/${id}`)
           if (!data)
@@ -198,22 +205,70 @@ export default class SpotifySource {
             data: { info: { name: data.name, selectedTrack: 0 }, tracks }
           }
         }
+
         case 'playlist': {
-          const data = await this._apiRequest(`/playlists/${id}`)
-          if (!data)
+          const playlistData = await this._apiRequest(`/playlists/${id}`)
+          if (!playlistData)
             return {
               loadType: 'error',
               data: { message: 'Playlist not found.', severity: 'common' }
             }
 
-          const tracks = data.tracks.items.map((item) =>
-            this.buildTrack(item.track)
+          const allItems = []
+          if (playlistData.tracks && Array.isArray(playlistData.tracks.items)) {
+            allItems.push(...playlistData.tracks.items)
+          }
+
+          let next = playlistData.tracks?.next || null
+          let pagesFetched = 1
+
+          // if playlistLoadLimit = 0 or null → no limit
+          const maxPages =
+            this.playlistLoadLimit && this.playlistLoadLimit > 0
+              ? this.playlistLoadLimit
+              : Infinity
+
+          while (next && pagesFetched < maxPages) {
+            const page = await this._apiRequest(next)
+            if (!page || !Array.isArray(page.items)) {
+              logger(
+                'warn',
+                'Spotify',
+                `Failed to fetch playlist page: ${next}`
+              )
+              break
+            }
+
+            allItems.push(...page.items)
+            next = page.next || null
+            pagesFetched++
+          }
+
+          const tracks = allItems
+            .map((item) => {
+              const t = item.track || item
+              if (!t || !t.id) return null
+              return this.buildTrack(t)
+            })
+            .filter(Boolean)
+
+          logger(
+            'info',
+            'Spotify',
+            `Loaded ${tracks.length} tracks from playlist "${playlistData.name}" (limit: ${
+              maxPages === Infinity ? 'full' : pagesFetched * 100
+            })`
           )
+
           return {
             loadType: 'playlist',
-            data: { info: { name: data.name, selectedTrack: 0 }, tracks }
+            data: {
+              info: { name: playlistData.name, selectedTrack: 0 },
+              tracks
+            }
           }
         }
+
         case 'artist': {
           const artist = await this._apiRequest(`/artists/${id}`)
           if (!artist)
@@ -240,11 +295,12 @@ export default class SpotifySource {
           return {
             loadType: 'artist',
             data: {
-              info: { name: `${artist.name}\'s Top Tracks`, selectedTrack: 0 },
+              info: { name: `${artist.name}'s Top Tracks`, selectedTrack: 0 },
               tracks
             }
           }
         }
+
         case 'episode':
         case 'show': {
           return {
@@ -255,6 +311,7 @@ export default class SpotifySource {
             }
           }
         }
+
         default:
           return { loadType: 'empty', data: {} }
       }
@@ -292,16 +349,10 @@ export default class SpotifySource {
       let minDurationDiff = Infinity
 
       for (const ytTrack of searchResult.data) {
-        const ytTitle = ytTrack.info.title.toLowerCase()
         const ytDuration = ytTrack.info.length
-
         const durationDifference = Math.abs(ytDuration - spotifyDuration)
         const allowedDeviation = spotifyDuration * 0.15
-
-        if (durationDifference > allowedDeviation) {
-          continue
-        }
-
+        if (durationDifference > allowedDeviation) continue
         if (durationDifference < minDurationDiff) {
           minDurationDiff = durationDifference
           bestMatch = ytTrack

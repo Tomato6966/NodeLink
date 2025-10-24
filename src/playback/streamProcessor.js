@@ -8,10 +8,16 @@ import { FLACDecoder } from '@wasm-audio-decoders/flac'
 import { OggVorbisDecoder } from '@wasm-audio-decoders/ogg-vorbis'
 import { SeekeableNode, SeekeableError } from '@ecliptia/seekeable-node'
 import { SupportedFormats, normalizeFormat } from '../constants.js'
+import { http1makeRequest } from '../utils.js'
 
 const require = createRequire(import.meta.url)
 const { MPEGDecoder } = require('mpg123-decoder')
 const LibSampleRate = require('@alexanderolsen/libsamplerate-js')
+
+// Custom makeRequest function for SeekeableNode
+const customSeekeableMakeRequest = async (url, options, nodelinkInstance) => {
+  return http1makeRequest(url, { ...options, nodelink: nodelinkInstance })
+}
 
 class BaseAudioResource {
   constructor() {
@@ -1430,17 +1436,25 @@ export const createSeekeableAudioResource = async (
   }
 
   try {
-    await seekeable.load(url, seekLoadOptions)
+    await seekeable.load(url, {
+      ...seekLoadOptions,
+      makeRequest: (reqUrl, reqOptions) =>
+        customSeekeableMakeRequest(reqUrl, reqOptions, nodelink)
+    })
   } catch (err) {
-    if (err instanceof SeekeableError) {
-      nodelink.logger(
-        'error',
-        'SeekeableNode',
-        `Seekeable load failed for ${player.track?.info?.title}: ${err.message} (Code: ${err.code}, URL: ${err.url || 'N/A'})`
-      )
-      throw new Error(`Seekeable load failed: ${err.message}`)
+    nodelink.logger(
+      'error',
+      'SeekeableNode',
+      `Seekeable load failed for ${player.track?.info?.title}: ${err.message} (Code: ${err instanceof SeekeableError ? err.code : 'UNKNOWN'}, URL: ${err.url || 'N/A'}).`
+    )
+    seekeable.destroy()
+    return {
+      exception: {
+        message: err.message,
+        severity: 'fault',
+        cause: err instanceof SeekeableError ? err.code : 'UNKNOWN'
+      }
     }
-    throw err
   }
 
   const { stream: demuxerStream, type } = seekeable.createAVStream(
@@ -1458,14 +1472,62 @@ export const createSeekeableAudioResource = async (
     packetStream.emit('finishBuffering')
     seekeable.destroy()
   })
-  demuxerStream.on('error', (err) => {
+  demuxerStream.on('error', async (err) => {
     nodelink.logger(
       'error',
       'SeekeableNode-Stream',
       `Error in demuxer stream for ${player.track?.info?.title}: ${err.message}`,
       err
     )
-    packetStream.emit('error', err)
+
+    if (
+      err instanceof SeekeableError &&
+      err.code === 'NETWORK_ERROR' &&
+      err.message.includes('401 Unauthorized')
+    ) {
+      nodelink.logger(
+        'warn',
+        'SeekeableNode-Stream',
+        `401 Unauthorized during streaming for ${player.track?.info?.title}. Attempting to renew URL...`
+      )
+      try {
+        const newStreamInfo = await nodelink.sources.getTrackUrl(
+          player.track.info
+        )
+        if (newStreamInfo?.url) {
+          nodelink.logger(
+            'info',
+            'SeekeableNode-Stream',
+            `Stream URL successfully renewed to: ${newStreamInfo.url}. SeekeableNode will retry.`
+          )
+          player.streamInfo.url = newStreamInfo.url
+        } else {
+          nodelink.logger(
+            'error',
+            'SeekeableNode-Stream',
+            `Failed to renew stream URL after 401 during streaming for ${player.track?.info?.title}.`
+          )
+          throw new SeekeableError(
+            'NETWORK_ERROR',
+            'Failed to renew stream URL after 401 Unauthorized.',
+            err.url
+          )
+        }
+      } catch (renewErr) {
+        nodelink.logger(
+          'error',
+          'SeekeableNode-Stream',
+          `Exception during stream URL renewal for ${player.track?.info?.title}: ${renewErr.message}`
+        )
+        throw new SeekeableError(
+          'NETWORK_ERROR',
+          `Failed to renew stream URL: ${renewErr.message}`,
+          err.url
+        )
+      }
+    } else {
+      packetStream.emit('error', err)
+    }
     seekeable.destroy()
   })
 

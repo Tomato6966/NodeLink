@@ -31,7 +31,6 @@ export class Player {
     this.connection = null
     this.voice = { sessionId: null, token: null, endpoint: null }
     this.streamInfo = null
-    this.streamToDestroy = null
 
     logger(
       'debug',
@@ -145,18 +144,6 @@ export class Player {
       'Player',
       `Player state change for guild ${this.guildId} in session ${this.session.id}: ${state.status} (reason: ${state.reason})`
     )
-
-    if (state.status === 'playing' && this.streamToDestroy) {
-      if (this.streamToDestroy !== this.connection.audioStream) {
-        logger(
-          'debug',
-          'Player',
-          `Destroying old stream after seek for guild ${this.guildId}`
-        )
-        this.streamToDestroy.destroy()
-        this.streamToDestroy = null
-      }
-    }
 
     if (
       state.status === 'idle' &&
@@ -501,21 +488,35 @@ export class Player {
     this.position = position
 
     try {
-      if (this.streamToDestroy) {
-        this.streamToDestroy.destroy()
-      }
-      this.streamToDestroy = this.connection.audioStream
-
       const url = this.streamInfo.url
 
-      const resource = await createSeekeableAudioResource(
+      const resourceResult = await createSeekeableAudioResource(
         url,
         position,
         endTime,
         this.nodelink,
         this.filters,
-        this // Pass the player object
+        this
       )
+
+      if (resourceResult.exception) {
+        logger(
+          'error',
+          'Player',
+          `Seekeable resource creation failed for guild ${this.guildId}: ${resourceResult.exception.message}. Falling back to old method.`
+        )
+        this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
+          track: this.track,
+          exception: resourceResult.exception
+        })
+        this.emitEvent(GatewayEvents.TRACK_END, {
+          track: this.track,
+          reason: EndReasons.LOAD_FAILED
+        })
+        return this._legacySeek(position, endTime)
+      }
+
+      const resource = resourceResult
 
       if (this.volumePercent !== 100) {
         resource.setVolume(this.volumePercent / 100)
@@ -526,31 +527,23 @@ export class Player {
 
       return true
     } catch (e) {
-      if (e instanceof SeekeableError) {
-        logger(
-          'error',
-          'Player',
-          `Seekeable seek failed for guild ${this.guildId}: ${e.message} (Code: ${e.code}, URL: ${e.url || 'N/A'}). Falling back to old method.`
-        )
-        this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
-          track: this.track,
-          exception: {
-            message: e.message,
-            severity: 'fault',
-            cause: `SeekeableError: ${e.code}`
-          }
-        })
-        this.emitEvent(GatewayEvents.TRACK_END, {
-          track: this.track,
-          reason: EndReasons.LOAD_FAILED
-        })
-        return this._legacySeek(position, endTime)
-      }
       logger(
         'error',
         'Player',
-        `Seekeable seek failed for guild ${this.guildId}: ${e.message}. Falling back to old method.`
+        `An unexpected error occurred during seekeable seek for guild ${this.guildId}: ${e.message}. Falling back to old method.`
       )
+      this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
+        track: this.track,
+        exception: {
+          message: e.message,
+          severity: 'fault',
+          cause: 'UNKNOWN_ERROR'
+        }
+      })
+      this.emitEvent(GatewayEvents.TRACK_END, {
+        track: this.track,
+        reason: EndReasons.LOAD_FAILED
+      })
       return this._legacySeek(position, endTime)
     }
   }
