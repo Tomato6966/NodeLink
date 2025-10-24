@@ -3,7 +3,7 @@ import { clamp16Bit } from './dsp/clamp16Bit.js'
 
 export default class Rotation {
   constructor() {
-    this.priority = 10;
+    this.priority = 10
     this.lfo = new LFO('SINE')
   }
 

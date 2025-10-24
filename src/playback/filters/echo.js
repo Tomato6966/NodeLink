@@ -7,7 +7,7 @@ const bufferSize = Math.ceil(SAMPLE_RATE * MAX_DELAY_S)
 
 export default class Echo {
   constructor() {
-    this.priority = 10;
+    this.priority = 10
     this.delay = 0
     this.feedback = 0
     this.mix = 0

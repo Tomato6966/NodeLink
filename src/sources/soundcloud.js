@@ -43,14 +43,22 @@ export default class {
         /https:\/\/a-v2.sndcdn.com\/assets\/([a-zA-Z0-9-]+).js/gs
       )
       if (!assetIdMatch || !assetIdMatch[5]) {
-        logger('warn', 'Sources', 'SoundCloud asset script URL not found at expected index. Source setup failed.')
+        logger(
+          'warn',
+          'Sources',
+          'SoundCloud asset script URL not found at expected index. Source setup failed.'
+        )
         return false
       }
       const assetId = assetIdMatch[5]
 
       const assetRequest = await http1makeRequest(assetId)
       if (!assetRequest) {
-        logger('error', 'Sources', 'Failed to load SoundCloud asset. Source setup failed.')
+        logger(
+          'error',
+          'Sources',
+          'Failed to load SoundCloud asset. Source setup failed.'
+        )
         return false
       }
       if (assetRequest.error) {
@@ -62,14 +70,24 @@ export default class {
         return false
       }
 
-      const clientIdMatch = assetRequest.body.match(/client_id=([a-zA-Z0-9]{32})/)
+      const clientIdMatch = assetRequest.body.match(
+        /client_id=([a-zA-Z0-9]{32})/
+      )
       if (!clientIdMatch || !clientIdMatch[1]) {
-        logger('warn', 'Sources', 'SoundCloud client_id not found in asset script. Source setup failed.')
+        logger(
+          'warn',
+          'Sources',
+          'SoundCloud client_id not found in asset script. Source setup failed.'
+        )
         return false
       }
       const clientId = clientIdMatch[1]
       if (!clientId) {
-        logger('error', 'Sources', 'Failed to fetch SoundCloud clientId. Source setup failed.')
+        logger(
+          'error',
+          'Sources',
+          'Failed to fetch SoundCloud clientId. Source setup failed.'
+        )
         return false
       }
       logger(

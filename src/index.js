@@ -24,7 +24,7 @@ import {
   getStats
 } from './utils.js'
 import 'dotenv/config'
-import PlayerManager from './managers/playerManager.js';
+import PlayerManager from './managers/playerManager.js'
 
 let config
 
@@ -62,7 +62,6 @@ else if (typeof config.cluster?.workers === 'number')
 initLogger(config)
 await checkForUpdates()
 
-
 class NodelinkServer {
   constructor(options, PlayerManagerClass, isClusterPrimary = false) {
     if (!options || Object.keys(options).length === 0)
@@ -72,11 +71,11 @@ class NodelinkServer {
     this.socket = null
     this.sessions = new sessionManager(this, PlayerManagerClass)
     if (!isClusterPrimary) {
-        this.sources = new sourceManager(this)
-        this.lyrics = new lyricsManager(this)
+      this.sources = new sourceManager(this)
+      this.lyrics = new lyricsManager(this)
     } else {
-        this.sources = null;
-        this.lyrics = null;
+      this.sources = null
+      this.lyrics = null
     }
     this.routePlanner = new routePlannerManager(this)
     this.connectionManager = new connectionManager(this)
@@ -351,44 +350,52 @@ class NodelinkServer {
 
   handleIPCMessage(msg) {
     if (msg.type === 'playerEvent') {
-        const { sessionId, data } = msg.payload;
-        const session = this.sessions.get(sessionId);
-        session?.socket?.send(data);
+      const { sessionId, data } = msg.payload
+      const session = this.sessions.get(sessionId)
+      session?.socket?.send(data)
     } else if (msg.type === 'workerStats') {
-        if (this.workerManager) {
-            const worker = this.workerManager.workers.find(w => w.process.pid === msg.pid);
-            if (worker) {
-                this.workerManager.workerLoad.set(worker.id, msg.stats.players);
-            }
+      if (this.workerManager) {
+        const worker = this.workerManager.workers.find(
+          (w) => w.process.pid === msg.pid
+        )
+        if (worker) {
+          this.workerManager.workerLoad.set(worker.id, msg.stats.players)
         }
+      }
     } else if (msg.type === 'workerFailed') {
-        const { workerId, affectedGuilds } = msg.payload;
-        logger('warn', 'Cluster', `Worker ${workerId} failed. Notifying clients for affected guilds: ${affectedGuilds.join(', ')}`);
+      const { workerId, affectedGuilds } = msg.payload
+      logger(
+        'warn',
+        'Cluster',
+        `Worker ${workerId} failed. Notifying clients for affected guilds: ${affectedGuilds.join(', ')}`
+      )
 
-        const sessionsToNotify = new Map();
+      const sessionsToNotify = new Map()
 
-        for (const guildId of affectedGuilds) {
-            for (const session of this.sessions.values()) {
-                if (session.players.isGuildAssigned(guildId)) {
-                    if (!sessionsToNotify.has(session.id)) {
-                        sessionsToNotify.set(session.id, new Set());
-                    }
-                    sessionsToNotify.get(session.id).add(guildId);
-                }
+      for (const guildId of affectedGuilds) {
+        for (const session of this.sessions.values()) {
+          if (session.players.isGuildAssigned(guildId)) {
+            if (!sessionsToNotify.has(session.id)) {
+              sessionsToNotify.set(session.id, new Set())
             }
+            sessionsToNotify.get(session.id).add(guildId)
+          }
         }
+      }
 
-        for (const [sessionId, guildsInSession] of sessionsToNotify.entries()) {
-            const session = this.sessions.get(sessionId);
-            if (session && session.socket) {
-                session.socket.send(JSON.stringify({
-                    op: 'event',
-                    type: 'WorkerFailedEvent',
-                    affectedGuilds: Array.from(guildsInSession), // Enviar a lista de guilds afetados
-                    message: `Players for guilds ${Array.from(guildsInSession).join(', ')} lost due to worker failure.`
-                }));
-            }
+      for (const [sessionId, guildsInSession] of sessionsToNotify.entries()) {
+        const session = this.sessions.get(sessionId)
+        if (session && session.socket) {
+          session.socket.send(
+            JSON.stringify({
+              op: 'event',
+              type: 'WorkerFailedEvent',
+              affectedGuilds: Array.from(guildsInSession), // Enviar a lista de guilds afetados
+              message: `Players for guilds ${Array.from(guildsInSession).join(', ')} lost due to worker failure.`
+            })
+          )
         }
+      }
     }
   }
 
@@ -419,13 +426,11 @@ class NodelinkServer {
       }
     }
 
-        if (!startOptions.isClusterPrimary) {
+    if (!startOptions.isClusterPrimary) {
+      await this.sources.loadFolder()
 
-          await this.sources.loadFolder()
-
-          await this.lyrics.loadFolder()
-
-        }
+      await this.lyrics.loadFolder()
+    }
     this._createServer()
 
     if (startOptions.isClusterWorker) {
@@ -463,45 +468,42 @@ class NodelinkServer {
   }
 }
 
-import WorkerManager from './managers/workerManager.js';
+import WorkerManager from './managers/workerManager.js'
 
 if (clusterEnabled && cluster.isPrimary) {
-  const workerManager = new WorkerManager(config);
+  const workerManager = new WorkerManager(config)
 
   const serverInstancePromise = (async () => {
-    const nserver = new NodelinkServer(config, PlayerManager, true);
-    nserver.workerManager = workerManager;
+    const nserver = new NodelinkServer(config, PlayerManager, true)
+    nserver.workerManager = workerManager
 
-
-
-    await nserver.start({ isClusterPrimary: true });
-    global.nodelink = nserver;
+    await nserver.start({ isClusterPrimary: true })
+    global.nodelink = nserver
 
     process.on('beforeExit', () => {
-      workerManager.destroy();
-    });
+      workerManager.destroy()
+    })
 
-    return nserver;
-  })();
+    return nserver
+  })()
 
-  await serverInstancePromise;
-
+  await serverInstancePromise
 } else if (clusterEnabled && cluster.isWorker) {
-  await import('./worker.js');
+  await import('./worker.js')
 } else {
   const serverInstancePromise = (async () => {
-    const nserver = new NodelinkServer(config, PlayerManager, false);
-    await nserver.start();
-    global.nodelink = nserver;
+    const nserver = new NodelinkServer(config, PlayerManager, false)
+    await nserver.start()
+    global.nodelink = nserver
 
     logger(
       'info',
       'Server',
       `Single-process server running (PID ${process.pid})`
-    );
+    )
 
-    return nserver;
-  })();
+    return nserver
+  })()
 
-  await serverInstancePromise;
+  await serverInstancePromise
 }

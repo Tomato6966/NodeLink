@@ -10,7 +10,7 @@ const DEFAULT_Q = 1.0
 
 export default class Equalizer {
   constructor() {
-    this.priority = 10;
+    this.priority = 10
     this.filtersState = []
     this.filtersCoefficients = []
   }

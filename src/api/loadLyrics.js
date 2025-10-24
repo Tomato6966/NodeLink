@@ -45,11 +45,13 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       'Lyrics',
       `Request to load lyrics for: ${decodedTrack.info.title}`
     )
-    
-    let lyricsData;
+
+    let lyricsData
     if (nodelink.workerManager) {
-      const worker = nodelink.workerManager.getBestWorker();
-      lyricsData = await nodelink.workerManager.execute(worker, 'loadLyrics', { decodedTrack });
+      const worker = nodelink.workerManager.getBestWorker()
+      lyricsData = await nodelink.workerManager.execute(worker, 'loadLyrics', {
+        decodedTrack
+      })
     } else {
       lyricsData = await nodelink.lyrics.loadLyrics(decodedTrack)
     }

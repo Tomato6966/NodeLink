@@ -3,7 +3,7 @@ import { SAMPLE_RATE } from '../../constants.js'
 
 export default class Karaoke {
   constructor() {
-    this.priority = 10;
+    this.priority = 10
     this.level = 0
     this.monoLevel = 0
     this.filterBand = 0

@@ -26,10 +26,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   }
 
   try {
-    let result;
+    let result
     if (nodelink.workerManager) {
-      const worker = nodelink.workerManager.getBestWorker();
-      result = await nodelink.workerManager.execute(worker, 'loadTracks', { identifier });
+      const worker = nodelink.workerManager.getBestWorker()
+      result = await nodelink.workerManager.execute(worker, 'loadTracks', {
+        identifier
+      })
     } else {
       const re =
         /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>[A-Za-z0-9]+):(?<query>[^/\s].*))$/i

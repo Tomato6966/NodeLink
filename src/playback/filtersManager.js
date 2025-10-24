@@ -55,10 +55,14 @@ export class FiltersManager extends Transform {
       filter.update(filters.filters || filters)
     }
 
-    this.activeFilters.sort((a, b) => (a.priority || 99) - (b.priority || 99));
+    this.activeFilters.sort((a, b) => (a.priority || 99) - (b.priority || 99))
 
     if (this.activeFilters.length > 0) {
-        logger('debug', 'Filters', `Active filter order: ${this.activeFilters.map(f => f.constructor.name).join(', ')}`);
+      logger(
+        'debug',
+        'Filters',
+        `Active filter order: ${this.activeFilters.map((f) => f.constructor.name).join(', ')}`
+      )
     }
   }
 

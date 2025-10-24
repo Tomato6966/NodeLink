@@ -12,7 +12,7 @@ function linearToDb(linear) {
 
 export default class Compressor {
   constructor() {
-    this.priority = 10;
+    this.priority = 10
     this.threshold = 0
     this.ratio = 1
     this.attack = 0

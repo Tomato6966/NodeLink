@@ -53,8 +53,12 @@ export default class CipherManager {
         await this._fetchPlayerScriptFromWatchPage('dQw4w9WgXcQ')
 
       if (!scriptUrl) {
-        logger('warn', 'YouTube-Cipher', 'Failed to obtain player script URL. Cipher manager might not function correctly.')
-        return null;
+        logger(
+          'warn',
+          'YouTube-Cipher',
+          'Failed to obtain player script URL. Cipher manager might not function correctly.'
+        )
+        return null
       }
 
       this.cachedPlayerScript = new CachedPlayerScript(scriptUrl)
@@ -300,7 +304,11 @@ export default class CipherManager {
 
     const jsUrlMatch = watchPage.match(/"jsUrl":"([^"]+)"/)
     if (!jsUrlMatch || !jsUrlMatch[1]) {
-      logger('warn', 'YouTube-Cipher', 'Could not find jsUrl in watch page. Player script fetching failed.')
+      logger(
+        'warn',
+        'YouTube-Cipher',
+        'Could not find jsUrl in watch page. Player script fetching failed.'
+      )
       return null
     }
 

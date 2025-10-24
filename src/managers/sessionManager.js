@@ -36,14 +36,18 @@ export default class SessionManager {
       if (this.nodelink.workerManager) {
         for (const playerInfo of connection.players.players.values()) {
           try {
-            await connection.players.destroy(playerInfo.guildId);
+            await connection.players.destroy(playerInfo.guildId)
           } catch (error) {
-            logger('error', 'SessionManager', `Failed to destroy player for guild ${playerInfo.guildId} during session deletion: ${error.message}`);
+            logger(
+              'error',
+              'SessionManager',
+              `Failed to destroy player for guild ${playerInfo.guildId} during session deletion: ${error.message}`
+            )
           }
         }
       } else {
         for (const player of connection.players.players.values()) {
-          player?.destroy(!isSocketClosing);
+          player?.destroy(!isSocketClosing)
         }
       }
       this.connections.delete(sessionId)
