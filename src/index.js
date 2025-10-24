@@ -87,12 +87,26 @@ class NodelinkServer {
       playingPlayers: 0
     }
     this._globalUpdater = null
+    this.supportedSourcesCache = null
     logger('info', 'Server', `version ${this.version}`)
     logger(
       'info',
       'Server',
       `git branch: ${this.gitInfo.branch}, commit: ${this.gitInfo.commit}, committed on: ${new Date(this.gitInfo.commitTime).toISOString()}`
     )
+  }
+
+  async getSourcesFromWorker() {
+    if (!this.workerManager) {
+      return []
+    }
+    const worker = this.workerManager.getBestWorker()
+    if (!worker) {
+      logger('warn', 'Server', 'No worker available to get sources from.')
+      return []
+    }
+    const sources = await this.workerManager.execute(worker, 'getSources', {})
+    return sources
   }
   _validateConfig() {
     validateProperty(

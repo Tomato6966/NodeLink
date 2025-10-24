@@ -16,7 +16,26 @@ const LibSampleRate = require('@alexanderolsen/libsamplerate-js')
 
 // Custom makeRequest function for SeekeableNode
 const customSeekeableMakeRequest = async (url, options, nodelinkInstance) => {
-  return http1makeRequest(url, { ...options, nodelink: nodelinkInstance })
+  const response = await http1makeRequest(url, {
+    ...options,
+    nodelink: nodelinkInstance,
+    streamOnly: true,
+    disableBodyCompression: true
+  })
+
+  const headers = new Headers()
+  for (const key in response.headers) {
+    if (Object.prototype.hasOwnProperty.call(response.headers, key)) {
+      headers.append(key, response.headers[key])
+    }
+  }
+
+  return {
+    stream: response.stream,
+    statusCode: response.statusCode,
+    headers: headers,
+    error: response.error
+  }
 }
 
 class BaseAudioResource {

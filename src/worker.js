@@ -127,6 +127,10 @@ async function processQueue() {
         result = await nodelink.lyrics.loadLyrics(decodedTrack)
         break
       }
+      case 'getSources': {
+        result = nodelink.sources.getEnabledSourceNames()
+        break
+      }
       default:
         throw new Error(`Unknown command type: ${type}`)
     }

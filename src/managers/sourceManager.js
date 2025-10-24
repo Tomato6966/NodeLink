@@ -248,4 +248,14 @@ export default class SourcesManager {
   getAllSources() {
     return Array.from(this.sources.values())
   }
+
+  getEnabledSourceNames() {
+    const enabledNames = []
+    for (const sourceName in this.nodelink.options.sources) {
+      if (this.nodelink.options.sources[sourceName]?.enabled) {
+        enabledNames.push(sourceName)
+      }
+    }
+    return enabledNames
+  }
 }

@@ -1,7 +1,7 @@
 import process from 'node:process'
 import { getVersion } from '../utils.js'
 
-function handler(nodelink, req, res, sendResponse) {
+async function handler(nodelink, req, res, sendResponse) {
   const enabledFilters = nodelink.options.filters.enabled || {}
   const filters = Object.keys(enabledFilters).filter(
     (key) => enabledFilters[key]
@@ -14,15 +14,20 @@ function handler(nodelink, req, res, sendResponse) {
     },
     buildTime: nodelink.gitInfo.commitTime,
     git: nodelink.gitInfo,
-    jvm: process.version,
-    lavaplayer: 'n/a (Node.js)',
-    sourceManagers: nodelink.sources?.sources
-      ? Array.from(nodelink.sources.sources.keys())
-      : [],
+    node: process.version,
+    voice: {
+      name: '@performanc/voice',
+      version: 'github:PerformanC/voice'
+    },
+    sourceManagers: nodelink.workerManager
+      ? nodelink.supportedSourcesCache ||
+        (nodelink.supportedSourcesCache = await nodelink.getSourcesFromWorker())
+      : nodelink.sources?.sources
+        ? Array.from(nodelink.sources.sources.keys())
+        : [],
     filters,
     plugins: []
   }
-
   sendResponse(req, res, response, 200)
 }
 

@@ -164,6 +164,7 @@ export class Player {
     } else if (
       state.status === 'playing' &&
       this.track &&
+      !this._isSeeking && // Add condition to not emit TrackStart during seek
       ['requested', 'reconnected'].includes(state.reason)
     ) {
       this.emitEvent(GatewayEvents.TRACK_START, { track: this.track })
@@ -523,7 +524,10 @@ export class Player {
       }
       resource.setFilters(this.filters)
 
+      this._isSeeking = true
       this.connection.play(resource)
+      await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
+      this._isSeeking = false
 
       return true
     } catch (e) {
@@ -550,7 +554,11 @@ export class Player {
 
   async _legacySeek(position, endTime) {
     if (!this.track) return false
-    if (position < 0 || position > this.track.info.length) return false
+    if (
+      position < 0 ||
+      (this.track.info.length > 0 && position > this.track.info.length)
+    )
+      return false
 
     logger(
       'debug',
@@ -559,14 +567,74 @@ export class Player {
     )
 
     this.position = position
+    this.track.endTime = endTime
 
-    await this.play({
-      encoded: this.track.encoded,
-      info: this.track.info,
-      startTime: position,
-      endTime: endTime,
-      isSeek: true
-    })
+    const urlData = await this.nodelink.sources.getTrackUrl(this.track.info)
+    this.streamInfo = { ...urlData, trackInfo: this.track.info }
+
+    if (urlData.exception) {
+      const err = new Error(urlData.exception.message)
+      this._onError(err)
+      return false
+    }
+
+    if (!this.connection) {
+      this._initConnection()
+    }
+
+    if (!this.connection.udpInfo?.secretKey) {
+      logger(
+        'debug',
+        'Player',
+        `Waiting for voice connection to be ready for guild ${this.guildId}`
+      )
+      await this.waitEvent(
+        'stateChange',
+        (s) =>
+          s.status === 'connected' &&
+          s.reason === 'ready' &&
+          this.connection.udpInfo?.secretKey
+      )
+    }
+
+    if (!this.connection.udpInfo?.secretKey) {
+      const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`
+      logger('error', 'Player', errorMessage)
+      this._onError(new Error(errorMessage))
+      return false
+    }
+
+    const fetched = await this._fetchResource(
+      this.track.info,
+      urlData,
+      position
+    )
+    if (fetched.exception) {
+      const err = new Error(fetched.exception.message)
+      this._onError(err)
+      return false
+    }
+
+    if (this.connection.audioStream) {
+      this.connection.audioStream?.destroy()
+    }
+
+    const resource = fetched.stream
+    if (this.volumePercent !== 100) {
+      resource.setVolume(this.volumePercent / 100)
+    }
+
+    this.setFilters(this.filters)
+
+    logger(
+      'debug',
+      'Player',
+      `Playing resource for guild ${this.guildId} after legacy seek`
+    )
+    this._isSeeking = true
+    this.connection.play(resource)
+    await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
+    this._isSeeking = false
 
     return true
   }
