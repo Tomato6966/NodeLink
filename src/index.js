@@ -374,7 +374,7 @@ class NodelinkServer {
 
       for (const guildId of affectedGuilds) {
         for (const session of this.sessions.values()) {
-          if (session.players.isGuildAssigned(guildId)) {
+          if (this.workerManager.isGuildAssigned(guildId)) {
             if (!sessionsToNotify.has(session.id)) {
               sessionsToNotify.set(session.id, new Set())
             }
