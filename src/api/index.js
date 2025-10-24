@@ -83,13 +83,13 @@ async function requestHandler(nodelink, req, res) {
       req.on('end', () => {
         try {
           if (req.headers['content-type']?.includes('application/json')) {
-            body = JSON.parse(body)
+            body = JSON.parse(body);
           }
         } catch (error) {
           logger(
             'error',
             'Server',
-            `Failed to parse JSON body: ${error.message}`
+            `Failed to parse JSON body: ${error.message}. Path: ${parsedUrl.pathname}, Content-Type: ${req.headers['content-type'] || 'N/A'}, Raw Body: '${body}', Headers: ${JSON.stringify(req.headers)}`
           )
           sendResponse(
             req,
