@@ -19,16 +19,14 @@ const players = new Map()
 const commandQueue = []
 const nodelink = {
   options: config,
-  logger,
-  statsManager: new StatsManager({}),
-  sources: new SourceManager({
-    options: config,
-    statsManager: new StatsManager({})
-  }),
-  lyrics: new LyricsManager({ options: config }),
-  routePlanner: new RoutePlannerManager({ options: config }),
-  connectionManager: new ConnectionManager({ options: config })
+  logger
 }
+
+nodelink.statsManager = new StatsManager(nodelink)
+nodelink.sources = new SourceManager(nodelink)
+nodelink.lyrics = new LyricsManager(nodelink)
+nodelink.routePlanner = new RoutePlannerManager(nodelink)
+nodelink.connectionManager = new ConnectionManager(nodelink)
 
 async function initialize() {
   await nodelink.sources.loadFolder()
