@@ -14,7 +14,9 @@ export default class SpotifySource {
     this.accessToken = null
     this.clientId = null
     this.clientSecret = null
-    this.playlistLoadLimit = 0 // added field
+    this.playlistLoadLimit = 0
+    this.playlistPageLoadConcurrency = 5
+    this.market = 'US'
     this.tokenInitialized = false
   }
 
@@ -26,6 +28,9 @@ export default class SpotifySource {
       this.clientSecret = this.config.sources.spotify?.clientSecret
       this.playlistLoadLimit =
         this.config.sources.spotify?.playlistLoadLimit ?? 0
+      this.playlistPageLoadConcurrency = 
+        this.config.sources.spotify?.playlistPageLoadConcurrency ?? 5
+      this.market = this.config.sources.spotify?.market || 'US'
 
       if (!this.clientId || !this.clientSecret) {
         logger(
@@ -143,7 +148,7 @@ export default class SpotifySource {
     try {
       const limit = this.config.maxSearchResults || 10
       const data = await this._apiRequest(
-        `/search?q=${encodeURIComponent(query)}&type=track&limit=${limit}&market=US`
+        `/search?q=${encodeURIComponent(query)}&type=track&limit=${limit}&market=${this.market}`
       )
 
       if (!data || data.error) {
@@ -243,7 +248,7 @@ export default class SpotifySource {
           }
 
           if (promises.length > 0) {
-            const batchSize = 20
+            const batchSize = this.playlistPageLoadConcurrency
             for (let i = 0; i < promises.length; i += batchSize) {
               const batch = promises.slice(i, i + batchSize)
               try {
@@ -295,7 +300,7 @@ export default class SpotifySource {
             }
 
           const topTracks = await this._apiRequest(
-            `/artists/${id}/top-tracks?market=US`
+            `/artists/${id}/top-tracks?market=${this.market}`
           )
           if (!topTracks)
             return {
