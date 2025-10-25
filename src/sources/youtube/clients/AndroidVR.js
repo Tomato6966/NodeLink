@@ -224,16 +224,20 @@ export default class AndroidVR extends BaseClient {
 
         const currentVideoId = videoIdMatch?.[1] ?? null
 
+        const requestBody = {
+          context: this.getClient(context),
+          playlistId,
+          contentCheckOk: true,
+          racyCheckOk: true
+        }
+        if (playlistId.startsWith('RD') && currentVideoId) {
+          requestBody.videoId = currentVideoId
+        }
         const { body: playlistResponse, statusCode } = await makeRequest(
           `${apiEndpoint}/youtubei/v1/next`,
           {
             headers: { 'User-Agent': this.getClient(context).client.userAgent },
-            body: {
-              context: this.getClient(context),
-              playlistId,
-              contentCheckOk: true,
-              racyCheckOk: true
-            },
+            body: requestBody,
             method: 'POST',
             disableBodyCompression: true
           }
