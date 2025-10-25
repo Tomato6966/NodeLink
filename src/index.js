@@ -60,6 +60,19 @@ else if (typeof config.cluster?.workers === 'number')
   configuredWorkers = config.cluster.workers
 
 initLogger(config)
+
+if (!cluster.isWorker) {
+  const ascii = `
+   ▄   ████▄ ██▄   ▄███▄   █    ▄█    ▄   █  █▀ 
+    █  █   █ █  █  █▀   ▀  █    ██     █  █▄█   
+██   █ █   █ █   █ ██▄▄    █    ██ ██   █ █▀▄   
+█ █  █ ▀████ █  █  █▄   ▄▀ ███▄ ▐█ █ █  █ █  █  
+█  █ █       ███▀  ▀███▀       ▀ ▐ █  █ █   █   
+█   ██                             █   ██  ▀    v${getVersion()} powered by PerformanC
+`;
+  process.stdout.write(`\x1b[32m${ascii}\x1b[0m\n`);
+}
+
 await checkForUpdates()
 
 class NodelinkServer {
