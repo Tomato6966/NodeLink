@@ -227,7 +227,7 @@ export default class AndroidVR extends BaseClient {
         const { body: playlistResponse, statusCode } = await makeRequest(
           `${apiEndpoint}/youtubei/v1/next`,
           {
-            headers: { 'User-Agent': this.getClient(context).userAgent },
+            headers: { 'User-Agent': this.getClient(context).client.userAgent },
             body: {
               context: this.getClient(context),
               playlistId,
