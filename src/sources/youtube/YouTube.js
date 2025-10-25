@@ -414,9 +414,19 @@ export default class YouTubeSource {
   }
 
   async resolve(url, type) {
+    const isMusicUrl = url.includes('music.youtube.com')
+    const sourceType = isMusicUrl ? 'ytmusic' : 'youtube'
+
+    // Convert music.youtube.com URLs to www.youtube.com format
+    let processUrl = url
+    if (isMusicUrl) {
+      processUrl = url.replace('music.youtube.com', 'www.youtube.com')
+      logger('debug', 'YouTube', `Converted YouTube Music URL to standard format: ${processUrl}`)
+    }
+
     const clientList = this.config.clients.playback
     const clientErrors = []
-    const urlType = checkURLType(url, 'youtube')
+    const urlType = checkURLType(processUrl, sourceType)
 
     // Prioritize Android client for playlists
     if (urlType === YOUTUBE_CONSTANTS.PLAYLIST) {
@@ -429,7 +439,7 @@ export default class YouTubeSource {
             'Attempting to resolve playlist URL with Android client (priority).'
           )
           const result = await androidClient.resolve(
-            url,
+            processUrl,
             type,
             this.ytContext,
             this.cipherManager
@@ -490,7 +500,7 @@ export default class YouTubeSource {
           `Attempting to resolve URL with client: ${clientName}`
         )
         const result = await client.resolve(
-          url,
+          processUrl,
           type,
           this.ytContext,
           this.cipherManager
