@@ -1,20 +1,20 @@
 import { Transform } from 'node:stream'
 import { logger } from '../utils.js'
 
-import Tremolo from './filters/tremolo.js'
-import Vibrato from './filters/vibrato.js'
-import Lowpass from './filters/lowpass.js'
-import Highpass from './filters/highpass.js'
-import Rotation from './filters/rotation.js'
-import Karaoke from './filters/karaoke.js'
-import Distortion from './filters/distortion.js'
 import ChannelMix from './filters/channelMix.js'
-import Equalizer from './filters/equalizer.js'
 import Chorus from './filters/chorus.js'
 import Compressor from './filters/compressor.js'
+import Distortion from './filters/distortion.js'
 import Echo from './filters/echo.js'
+import Equalizer from './filters/equalizer.js'
+import Highpass from './filters/highpass.js'
+import Karaoke from './filters/karaoke.js'
+import Lowpass from './filters/lowpass.js'
 import Phaser from './filters/phaser.js'
+import Rotation from './filters/rotation.js'
 import Timescale from './filters/timescale.js'
+import Tremolo from './filters/tremolo.js'
+import Vibrato from './filters/vibrato.js'
 
 export class FiltersManager extends Transform {
   constructor(nodelink, options = {}) {

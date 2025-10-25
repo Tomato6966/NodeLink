@@ -1,5 +1,5 @@
-import { clamp16Bit } from './dsp/clamp16Bit.js'
 import { SAMPLE_RATE } from '../../constants.js'
+import { clamp16Bit } from './dsp/clamp16Bit.js'
 
 export default class Karaoke {
   constructor() {

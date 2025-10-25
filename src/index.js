@@ -1,27 +1,27 @@
+import cluster from 'node:cluster'
 import http from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
-import cluster from 'node:cluster'
 import WebSocketServer from '@performanc/pwsl-server'
 
 import requestHandler from './api/index.js'
+import connectionManager from './managers/connectionManager.js'
 import lyricsManager from './managers/lyricsManager.js'
+import routePlannerManager from './managers/routePlannerManager.js'
 import sessionManager from './managers/sessionManager.js'
 import sourceManager from './managers/sourceManager.js'
-import routePlannerManager from './managers/routePlannerManager.js'
-import connectionManager from './managers/connectionManager.js'
 import statsManager from './managers/statsManager.js'
 import OAuth from './sources/youtube/OAuth.js'
 import {
-  initLogger,
+  checkForUpdates,
   getGitInfo,
+  getStats,
   getVersion,
+  initLogger,
   logger,
   parseClient,
   validateProperty,
-  verifyDiscordID,
-  checkForUpdates,
-  getStats
+  verifyDiscordID
 } from './utils.js'
 import 'dotenv/config'
 import PlayerManager from './managers/playerManager.js'
@@ -68,9 +68,9 @@ if (!cluster.isWorker) {
 ██   █ █   █ █   █ ██▄▄    █    ██ ██   █ █▀▄   
 █ █  █ ▀████ █  █  █▄   ▄▀ ███▄ ▐█ █ █  █ █  █  v${getVersion()}
 █  █ █       ███▀  ▀███▀       ▀ ▐ █  █ █   █   Powered by PerformanC;
-█   ██                             █   ██  ▀    rewritten by 1Lucas1apk
-`;
-  process.stdout.write(`\x1b[32m${ascii}\x1b[0m\n`);
+█   ██                             █   ██  ▀    rewritten by 1Lucas1.apk;
+`
+  process.stdout.write(`\x1b[32m${ascii}\x1b[0m\n`)
 }
 
 await checkForUpdates()
@@ -412,7 +412,7 @@ class NodelinkServer {
 
       for (const [sessionId, guildsInSession] of sessionsToNotify.entries()) {
         const session = this.sessions.get(sessionId)
-        if (session && session.socket) {
+        if (session?.socket) {
           session.socket.send(
             JSON.stringify({
               op: 'event',
@@ -471,7 +471,7 @@ class NodelinkServer {
         if (!handle) return
         try {
           try {
-            handle.pause && handle.pause()
+            handle.pause?.()
           } catch (e) {}
           this.server.emit('connection', handle)
         } catch (err) {
@@ -481,7 +481,7 @@ class NodelinkServer {
             `Failed to inject socket from master: ${err?.message ?? err}`
           )
           try {
-            handle.destroy && handle.destroy()
+            handle.destroy?.()
           } catch (e) {}
         }
       })

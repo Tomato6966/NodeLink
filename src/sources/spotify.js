@@ -207,8 +207,11 @@ export default class SpotifySource {
         }
 
         case 'playlist': {
-          const fields = 'name,tracks(items(track(id,name,artists,duration_ms,external_urls,external_ids,album(images))),total)'
-          const playlistData = await this._apiRequest(`/playlists/${id}?fields=${fields}`)
+          const fields =
+            'name,tracks(items(track(id,name,artists,duration_ms,external_urls,external_ids,album(images))),total)'
+          const playlistData = await this._apiRequest(
+            `/playlists/${id}?fields=${fields}`
+          )
           if (!playlistData)
             return {
               loadType: 'error',
@@ -227,12 +230,16 @@ export default class SpotifySource {
           if (this.playlistLoadLimit > 0) {
             pagesToFetch = Math.min(pagesToFetch, this.playlistLoadLimit)
           }
-          
+
           const promises = []
           // Start from page 1, as page 0 is already fetched
           for (let i = 1; i < pagesToFetch; i++) {
             const offset = i * limit
-            promises.push(this._apiRequest(`/playlists/${id}/tracks?offset=${offset}&limit=${limit}&fields=items(track(id,name,artists,duration_ms,external_urls,external_ids,album(images)))`))
+            promises.push(
+              this._apiRequest(
+                `/playlists/${id}/tracks?offset=${offset}&limit=${limit}&fields=items(track(id,name,artists,duration_ms,external_urls,external_ids,album(images)))`
+              )
+            )
           }
 
           if (promises.length > 0) {
@@ -242,12 +249,16 @@ export default class SpotifySource {
               try {
                 const results = await Promise.all(batch)
                 for (const page of results) {
-                  if (page && page.items) {
+                  if (page?.items) {
                     allItems.push(...page.items)
                   }
                 }
               } catch (e) {
-                logger('warn', 'Spotify', `Failed to fetch a batch of playlist pages: ${e.message}`)
+                logger(
+                  'warn',
+                  'Spotify',
+                  `Failed to fetch a batch of playlist pages: ${e.message}`
+                )
               }
             }
           }
@@ -352,7 +363,7 @@ export default class SpotifySource {
       }
 
       let bestMatch = null
-      let minDurationDiff = Infinity
+      let minDurationDiff = Number.POSITIVE_INFINITY
 
       for (const ytTrack of searchResult.data) {
         const ytDuration = ytTrack.info.length

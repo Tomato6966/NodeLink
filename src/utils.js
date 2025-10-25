@@ -1,14 +1,14 @@
 import { execSync } from 'node:child_process'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 import http from 'node:http'
 import http2 from 'node:http2'
 import https from 'node:https'
+import os from 'node:os'
+import path from 'node:path'
 import { URL } from 'node:url'
 import util from 'node:util'
 import zlib from 'node:zlib'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 
 import packageJson from '../package.json' with { type: 'json' }
 import {

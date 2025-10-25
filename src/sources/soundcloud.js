@@ -393,7 +393,9 @@ export default class {
         })
 
         if (response.error) {
-          stream.destroy(new Error(`Failed to load stream: ${response.error.message}`))
+          stream.destroy(
+            new Error(`Failed to load stream: ${response.error.message}`)
+          )
           return { stream }
         }
 
@@ -410,7 +412,11 @@ export default class {
           stream.emit('finishBuffering')
         })
       } catch (err) {
-        logger('error', 'Sources', `Failed to load progressive stream: ${err.message}`)
+        logger(
+          'error',
+          'Sources',
+          `Failed to load progressive stream: ${err.message}`
+        )
         stream.destroy(err)
       }
     } else if (protocol === 'hls') {

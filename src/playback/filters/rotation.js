@@ -1,5 +1,5 @@
-import LFO from './dsp/lfo.js'
 import { clamp16Bit } from './dsp/clamp16Bit.js'
+import LFO from './dsp/lfo.js'
 
 export default class Rotation {
   constructor() {

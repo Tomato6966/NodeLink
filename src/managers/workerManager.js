@@ -1,6 +1,6 @@
 import cluster from 'node:cluster'
-import os from 'node:os'
 import crypto from 'node:crypto'
+import os from 'node:os'
 import { logger } from '../utils.js'
 
 export default class WorkerManager {
@@ -253,7 +253,7 @@ export default class WorkerManager {
     }
 
     let bestWorker = null
-    let minLoad = Infinity
+    let minLoad = Number.POSITIVE_INFINITY
 
     for (const worker of this.workers) {
       if (worker.isConnected()) {

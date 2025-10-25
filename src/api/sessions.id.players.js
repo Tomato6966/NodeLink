@@ -34,7 +34,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   }
 
   if (guildId) {
-    let player = session.players.players.get(guildId)
+    const player = session.players.players.get(guildId)
 
     if (req.method === 'GET') {
       await session.players.create(guildId) // Ensure player exists or create it

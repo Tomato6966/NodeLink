@@ -1,5 +1,5 @@
-import { http1makeRequest, logger } from '../utils.js'
 import { GatewayEvents } from '../constants.js'
+import { http1makeRequest, logger } from '../utils.js'
 
 const TEST_FILE_URL = 'http://cachefly.cachefly.net/10mb.test'
 

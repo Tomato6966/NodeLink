@@ -1,6 +1,6 @@
-import DelayLine from './dsp/delay.js'
 import { SAMPLE_RATE } from '../../constants.js'
 import { clamp16Bit } from './dsp/clamp16Bit.js'
+import DelayLine from './dsp/delay.js'
 
 const MAX_DELAY_S = 5
 const bufferSize = Math.ceil(SAMPLE_RATE * MAX_DELAY_S)

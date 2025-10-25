@@ -1,7 +1,7 @@
-import LFO from './dsp/lfo.js'
-import Allpass from './dsp/allpass.js'
 import { SAMPLE_RATE } from '../../constants.js'
+import Allpass from './dsp/allpass.js'
 import { clamp16Bit } from './dsp/clamp16Bit.js'
+import LFO from './dsp/lfo.js'
 
 const MAX_STAGES = 12
 

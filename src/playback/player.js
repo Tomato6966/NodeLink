@@ -1,6 +1,6 @@
+import { SeekeableError } from '@ecliptia/seekeable-node'
 import discordVoice from '@performanc/voice'
 import { EndReasons, GatewayEvents } from '../constants.js'
-import { SeekeableError } from '@ecliptia/seekeable-node'
 import { logger } from '../utils.js'
 import {
   createAudioResource,
@@ -265,7 +265,11 @@ export class Player {
     if (threshold > 0) {
       if (this._lastPosition === position) {
         this._stuckTime += this.nodelink.options.playerUpdateInterval
-        if (this._stuckTime >= threshold && !this._isRecovering) {
+        if (
+          this._stuckTime >= threshold &&
+          !this._isRecovering &&
+          this.connStatus === 'connected'
+        ) {
           const stuckTime = this._stuckTime
           this._stuckTime = 0
           logger(

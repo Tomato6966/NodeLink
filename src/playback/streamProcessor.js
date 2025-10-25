@@ -1,14 +1,14 @@
-import { FiltersManager } from './filtersManager.js'
-import { PassThrough, Readable, Transform } from 'node:stream'
-import prism from 'prism-media'
 import { createRequire } from 'node:module'
-import * as MP4Box from 'mp4box'
+import { PassThrough, Readable, Transform } from 'node:stream'
 import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js'
+import { SeekeableError, SeekeableNode } from '@ecliptia/seekeable-node'
 import { FLACDecoder } from '@wasm-audio-decoders/flac'
 import { OggVorbisDecoder } from '@wasm-audio-decoders/ogg-vorbis'
-import { SeekeableNode, SeekeableError } from '@ecliptia/seekeable-node'
+import * as MP4Box from 'mp4box'
+import prism from 'prism-media'
 import { SupportedFormats, normalizeFormat } from '../constants.js'
 import { http1makeRequest } from '../utils.js'
+import { FiltersManager } from './filtersManager.js'
 
 const require = createRequire(import.meta.url)
 const { MPEGDecoder } = require('mpg123-decoder')
@@ -1369,7 +1369,7 @@ class StreamAudioResource extends BaseAudioResource {
       stream.on('finishBuffering', () => this.stream.emit('finishBuffering'))
 
       stream.on('error', (err) => {
-        console.error(`Error in input stream:`, err)
+        console.error('Error in input stream:', err)
         this.stream.emit('error', err)
       })
 
@@ -1382,7 +1382,7 @@ class StreamAudioResource extends BaseAudioResource {
       }
 
       this.stream.on('error', (err) => {
-        console.error(`Error in opus encoder:`, err)
+        console.error('Error in opus encoder:', err)
         this._end()
       })
     } catch (err) {
@@ -1403,7 +1403,7 @@ export const createSeekeableAudioResource = async (
   seekTime,
   endTime,
   nodelink,
-  initialFilters = {},
+  initialFilters,
   player
 ) => {
   let bufferSize = 32768

@@ -1,5 +1,5 @@
-import { Waveforms } from './waves.js'
 import { SAMPLE_RATE } from '../../../constants.js'
+import { Waveforms } from './waves.js'
 
 export default class LFO {
   constructor(waveform = 'SINE', frequency = 0, depth = 0) {

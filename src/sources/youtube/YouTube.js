@@ -421,7 +421,11 @@ export default class YouTubeSource {
     let processUrl = url
     if (isMusicUrl) {
       processUrl = url.replace('music.youtube.com', 'www.youtube.com')
-      logger('debug', 'YouTube', `Converted YouTube Music URL to standard format: ${processUrl}`)
+      logger(
+        'debug',
+        'YouTube',
+        `Converted YouTube Music URL to standard format: ${processUrl}`
+      )
     }
 
     const clientList = this.config.clients.playback

@@ -1,5 +1,5 @@
-import { encodeTrack, makeRequest, http1makeRequest, logger } from '../utils.js'
 import { PassThrough } from 'node:stream'
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
 
 export default class KwaiSource {
   constructor(nodelink) {

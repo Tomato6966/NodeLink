@@ -1,5 +1,5 @@
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 import { PassThrough } from 'node:stream'
+import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
 async function manageHlsStream(initialUrl, outputStream) {
   const segmentQueue = []

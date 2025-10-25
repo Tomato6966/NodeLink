@@ -224,7 +224,6 @@ export default class Android extends BaseClient {
         const videoIdMatch = url.match(/[?&]v=([\w-]+)/)
         const currentVideoId = videoIdMatch?.[1] ?? null
 
-
         logger(
           'debug',
           'YouTube-Android',

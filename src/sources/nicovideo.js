@@ -1,6 +1,6 @@
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
-import { PassThrough } from 'node:stream'
 import crypto from 'node:crypto'
+import { PassThrough } from 'node:stream'
+import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 async function manageEncryptedHls(url, stream, headers) {
   try {
     const {

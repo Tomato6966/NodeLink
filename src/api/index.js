@@ -83,7 +83,7 @@ async function requestHandler(nodelink, req, res) {
       req.on('end', () => {
         try {
           if (req.headers['content-type']?.includes('application/json')) {
-            body = JSON.parse(body);
+            body = JSON.parse(body)
           }
         } catch (error) {
           logger(

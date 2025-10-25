@@ -40,21 +40,16 @@ export default class PlayerManager {
 
       this.players.set(guildId, { guildId })
       return this.players.get(guildId)
-    } else {
-      logger(
-        'debug',
-        'PlayerManager',
-        `Creating new player for guild ${guildId}`
-      )
-      const player = new Player({
-        nodelink: this.nodelink,
-        session: this.nodelink.sessions.get(this.sessionId),
-        guildId: guildId
-      })
-      this.players.set(guildId, player)
-      this.nodelink.statistics.players++
-      return player
     }
+    logger('debug', 'PlayerManager', `Creating new player for guild ${guildId}`)
+    const player = new Player({
+      nodelink: this.nodelink,
+      session: this.nodelink.sessions.get(this.sessionId),
+      guildId: guildId
+    })
+    this.players.set(guildId, player)
+    this.nodelink.statistics.players++
+    return player
   }
 
   get(guildId) {
@@ -106,11 +101,10 @@ export default class PlayerManager {
         command: 'play',
         args: [trackPayload]
       })
-    } else {
-      const player = this.players.get(guildId)
-      if (!player) throw new Error('Player not found locally.')
-      return player.play(trackPayload)
     }
+    const player = this.players.get(guildId)
+    if (!player) throw new Error('Player not found locally.')
+    return player.play(trackPayload)
   }
 
   async stop(guildId) {
@@ -122,11 +116,10 @@ export default class PlayerManager {
         command: 'stop',
         args: []
       })
-    } else {
-      const player = this.players.get(guildId)
-      if (!player) throw new Error('Player not found locally.')
-      return player.stop()
     }
+    const player = this.players.get(guildId)
+    if (!player) throw new Error('Player not found locally.')
+    return player.stop()
   }
 
   async pause(guildId, shouldPause) {
@@ -138,11 +131,10 @@ export default class PlayerManager {
         command: 'pause',
         args: [shouldPause]
       })
-    } else {
-      const player = this.players.get(guildId)
-      if (!player) throw new Error('Player not found locally.')
-      return player.pause(shouldPause)
     }
+    const player = this.players.get(guildId)
+    if (!player) throw new Error('Player not found locally.')
+    return player.pause(shouldPause)
   }
 
   async seek(guildId, position, endTime) {
@@ -154,11 +146,10 @@ export default class PlayerManager {
         command: 'seek',
         args: [position, endTime]
       })
-    } else {
-      const player = this.players.get(guildId)
-      if (!player) throw new Error('Player not found locally.')
-      return player.seek(position, endTime)
     }
+    const player = this.players.get(guildId)
+    if (!player) throw new Error('Player not found locally.')
+    return player.seek(position, endTime)
   }
 
   async volume(guildId, level) {
@@ -170,11 +161,10 @@ export default class PlayerManager {
         command: 'volume',
         args: [level]
       })
-    } else {
-      const player = this.players.get(guildId)
-      if (!player) throw new Error('Player not found locally.')
-      return player.volume(level)
     }
+    const player = this.players.get(guildId)
+    if (!player) throw new Error('Player not found locally.')
+    return player.volume(level)
   }
 
   async setFilters(guildId, filtersPayload) {
@@ -186,11 +176,10 @@ export default class PlayerManager {
         command: 'setFilters',
         args: [filtersPayload]
       })
-    } else {
-      const player = this.players.get(guildId)
-      if (!player) throw new Error('Player not found locally.')
-      return player.setFilters(filtersPayload)
     }
+    const player = this.players.get(guildId)
+    if (!player) throw new Error('Player not found locally.')
+    return player.setFilters(filtersPayload)
   }
 
   async updateVoice(guildId, voicePayload) {
@@ -202,11 +191,10 @@ export default class PlayerManager {
         command: 'updateVoice',
         args: [voicePayload]
       })
-    } else {
-      const player = this.players.get(guildId)
-      if (!player) throw new Error('Player not found locally.')
-      return player.updateVoice(voicePayload)
     }
+    const player = this.players.get(guildId)
+    if (!player) throw new Error('Player not found locally.')
+    return player.updateVoice(voicePayload)
   }
 
   async toJSON(guildId) {
@@ -218,10 +206,9 @@ export default class PlayerManager {
         command: 'toJSON',
         args: []
       })
-    } else {
-      const player = this.players.get(guildId)
-      if (!player) throw new Error('Player not found locally.')
-      return player.toJSON()
     }
+    const player = this.players.get(guildId)
+    if (!player) throw new Error('Player not found locally.')
+    return player.toJSON()
   }
 }

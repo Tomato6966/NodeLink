@@ -1,10 +1,11 @@
-import { encodeTrack, logger, makeRequest } from '../utils.js'
 import { PassThrough } from 'node:stream'
+import { encodeTrack, logger, makeRequest } from '../utils.js'
 
 export default class GoogleTTSSource {
   constructor(nodelink) {
     this.nodelink = nodelink
-    this.language = this.nodelink.options.sources?.googleTts?.language || 'en-US'
+    this.language =
+      this.nodelink.options.sources?.googleTts?.language || 'en-US'
     this.searchTerms = ['gtts']
     this.baseUrl = 'https://translate.google.com'
   }
@@ -89,18 +90,26 @@ export default class GoogleTTSSource {
   }
 
   async loadStream(decodedTrack, url) {
-    logger('debug', 'Sources', `Loading Google TTS stream for "${decodedTrack.title}"`)
+    logger(
+      'debug',
+      'Sources',
+      `Loading Google TTS stream for "${decodedTrack.title}"`
+    )
     try {
       const response = await makeRequest(url, {
         method: 'GET',
         streamOnly: true,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
         }
       })
 
       if (response.error || !response.stream) {
-        throw response.error || new Error('Failed to get stream, no stream object returned.')
+        throw (
+          response.error ||
+          new Error('Failed to get stream, no stream object returned.')
+        )
       }
 
       const stream = new PassThrough()
@@ -119,7 +128,11 @@ export default class GoogleTTSSource {
 
       return { stream }
     } catch (err) {
-      logger('error', 'Sources', `Failed to load Google TTS stream: ${err.message}`)
+      logger(
+        'error',
+        'Sources',
+        `Failed to load Google TTS stream: ${err.message}`
+      )
       return {
         exception: {
           message: err.message,

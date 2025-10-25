@@ -1,11 +1,11 @@
-import { Player } from './playback/player.js'
-import { logger, initLogger } from './utils.js'
-import SourceManager from './managers/sourceManager.js'
-import LyricsManager from './managers/lyricsManager.js'
-import StatsManager from './managers/statsManager.js'
-import RoutePlannerManager from './managers/routePlannerManager.js'
-import ConnectionManager from './managers/connectionManager.js'
 import { GatewayEvents } from './constants.js'
+import ConnectionManager from './managers/connectionManager.js'
+import LyricsManager from './managers/lyricsManager.js'
+import RoutePlannerManager from './managers/routePlannerManager.js'
+import SourceManager from './managers/sourceManager.js'
+import StatsManager from './managers/statsManager.js'
+import { Player } from './playback/player.js'
+import { initLogger, logger } from './utils.js'
 
 let config
 try {
