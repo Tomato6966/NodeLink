@@ -137,6 +137,9 @@ export default {
     },
     reddit: {
       enabled: true
+    },
+    lastfm: {
+      enabled: true
     }
   },
   lyrics: {
