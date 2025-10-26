@@ -178,9 +178,14 @@ export default class CipherManager {
     }
 
     try {
+      const headers = {}
+      if (this.config.token) {
+        headers.Authorization = this.config.token
+      }
+
       const { statusCode, error } = await http1makeRequest(
         `${this.config.url}/`,
-        { method: 'GET', timeout: 5000 }
+        { method: 'GET', timeout: 5000, headers }
       )
       if (error || statusCode !== 200) {
         logger(
@@ -233,9 +238,11 @@ export default class CipherManager {
     }
 
     const headers = { 'Content-Type': 'application/json' }
+
     if (this.config.token) {
       headers.Authorization = this.config.token
     }
+
     if (context?.client?.userAgent) {
       headers['User-Agent'] = context.client.userAgent
     }
