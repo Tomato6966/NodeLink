@@ -7,11 +7,14 @@ export default class TidalSource {
     this.nodelink = nodelink
     this.config = nodelink.options.sources.tidal
     this.searchTerms = ['tdsearch']
-    this.patterns = [/^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9\-]+)/]
+    this.patterns = [
+      /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9\-]+)/
+    ]
     this.token = this.config?.token
     this.countryCode = this.config?.countryCode || 'US'
-    this.playlistLoadLimit = this.config?.playlistLoadLimit ?? 2;
-    this.playlistPageLoadConcurrency = this.config?.playlistPageLoadConcurrency ?? 5;
+    this.playlistLoadLimit = this.config?.playlistLoadLimit ?? 2
+    this.playlistPageLoadConcurrency =
+      this.config?.playlistPageLoadConcurrency ?? 5
   }
 
   async setup() {
@@ -24,11 +27,11 @@ export default class TidalSource {
 
   async _getJson(endpoint, params = {}) {
     const url = new URL(`${API_BASE}${endpoint}`)
-    params.countryCode = this.countryCode;
+    params.countryCode = this.countryCode
     for (const key in params) {
-      url.searchParams.append(key, params[key]);
+      url.searchParams.append(key, params[key])
     }
-    const finalUrl = url.toString();
+    const finalUrl = url.toString()
 
     const { body, error, statusCode } = await http1makeRequest(finalUrl, {
       headers: {
@@ -38,7 +41,9 @@ export default class TidalSource {
     })
 
     if (error || statusCode !== 200) {
-      throw new Error(`Failed to fetch from Tidal API: ${error?.message || `Status ${statusCode}`}`)
+      throw new Error(
+        `Failed to fetch from Tidal API: ${error?.message || `Status ${statusCode}`}`
+      )
     }
 
     return body
@@ -47,7 +52,11 @@ export default class TidalSource {
   async search(query) {
     try {
       const limit = this.nodelink.options.maxSearchResults || 10
-      const data = await this._getJson('search', { query, limit, types: 'TRACKS' })
+      const data = await this._getJson('search', {
+        query,
+        limit,
+        types: 'TRACKS'
+      })
 
       if (!data || !data.tracks || data.tracks.items.length === 0) {
         return { loadType: 'empty', data: {} }
@@ -56,7 +65,10 @@ export default class TidalSource {
       const tracks = data.tracks.items.map((item) => this._parseTrack(item))
       return { loadType: 'search', data: tracks }
     } catch (e) {
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 
@@ -77,8 +89,11 @@ export default class TidalSource {
         }
         case 'album': {
           const albumData = await this._getJson(`albums/${id}`)
-          const tracksData = await this._getJson(`albums/${id}/tracks`, { limit: 100 })
-          if (!tracksData || tracksData.items.length === 0) return { loadType: 'empty', data: {} }
+          const tracksData = await this._getJson(`albums/${id}/tracks`, {
+            limit: 100
+          })
+          if (!tracksData || tracksData.items.length === 0)
+            return { loadType: 'empty', data: {} }
 
           const tracks = tracksData.items.map((item) => this._parseTrack(item))
           return {
@@ -88,63 +103,88 @@ export default class TidalSource {
         }
         case 'playlist': {
           const playlistData = await this._getJson(`playlists/${id}`)
-          const totalTracks = playlistData.numberOfTracks;
-          if (!totalTracks) return { loadType: 'empty', data: {} };
+          const totalTracks = playlistData.numberOfTracks
+          if (!totalTracks) return { loadType: 'empty', data: {} }
 
-          const firstPageData = await this._getJson(`playlists/${id}/tracks`, { limit: 50, offset: 0 });
-          if (!firstPageData || !firstPageData.items || firstPageData.items.length === 0) {
-              return { loadType: 'empty', data: {} };
+          const firstPageData = await this._getJson(`playlists/${id}/tracks`, {
+            limit: 50,
+            offset: 0
+          })
+          if (
+            !firstPageData ||
+            !firstPageData.items ||
+            firstPageData.items.length === 0
+          ) {
+            return { loadType: 'empty', data: {} }
           }
 
-          const allItems = [...firstPageData.items];
-          const limit = 50;
-          
-          let pagesToFetch = Math.ceil(totalTracks / limit);
+          const allItems = [...firstPageData.items]
+          const limit = 50
+
+          let pagesToFetch = Math.ceil(totalTracks / limit)
           if (this.playlistLoadLimit > 0) {
-              pagesToFetch = Math.min(pagesToFetch, this.playlistLoadLimit);
+            pagesToFetch = Math.min(pagesToFetch, this.playlistLoadLimit)
           }
 
-          const promises = [];
+          const promises = []
           for (let i = 1; i < pagesToFetch; i++) {
-              const offset = i * limit;
-              promises.push(this._getJson(`playlists/${id}/tracks`, { limit, offset }));
+            const offset = i * limit
+            promises.push(
+              this._getJson(`playlists/${id}/tracks`, { limit, offset })
+            )
           }
 
           if (promises.length > 0) {
-              const batchSize = this.playlistPageLoadConcurrency;
-              for (let i = 0; i < promises.length; i += batchSize) {
-                  const batch = promises.slice(i, i + batchSize);
-                  try {
-                      const results = await Promise.all(batch);
-                      for (const page of results) {
-                          if (page?.items) {
-                              allItems.push(...page.items);
-                          }
-                      }
-                  } catch (e) {
-                      logger('warn', 'Tidal', `Failed to fetch a batch of playlist pages: ${e.message}`);
+            const batchSize = this.playlistPageLoadConcurrency
+            for (let i = 0; i < promises.length; i += batchSize) {
+              const batch = promises.slice(i, i + batchSize)
+              try {
+                const results = await Promise.all(batch)
+                for (const page of results) {
+                  if (page?.items) {
+                    allItems.push(...page.items)
                   }
+                }
+              } catch (e) {
+                logger(
+                  'warn',
+                  'Tidal',
+                  `Failed to fetch a batch of playlist pages: ${e.message}`
+                )
               }
+            }
           }
 
-          const tracks = allItems.map((item) => this._parseTrack(item.item || item)).filter(Boolean);
+          const tracks = allItems
+            .map((item) => this._parseTrack(item.item || item))
+            .filter(Boolean)
 
-          logger('info', 'Tidal', `Loaded ${tracks.length} of ${totalTracks} tracks from playlist "${playlistData.title}".`);
+          logger(
+            'info',
+            'Tidal',
+            `Loaded ${tracks.length} of ${totalTracks} tracks from playlist "${playlistData.title}".`
+          )
 
           return {
-              loadType: 'playlist',
-              data: { info: { name: playlistData.title, selectedTrack: 0 }, tracks }
-          };
+            loadType: 'playlist',
+            data: {
+              info: { name: playlistData.title, selectedTrack: 0 },
+              tracks
+            }
+          }
         }
       }
       return { loadType: 'empty', data: {} }
     } catch (e) {
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 
   _parseTrack(item) {
-    if (!item || !item.id) return null;
+    if (!item || !item.id) return null
     const trackInfo = {
       identifier: item.id.toString(),
       isSeekable: true,
@@ -172,8 +212,16 @@ export default class TidalSource {
     try {
       const searchResult = await this.nodelink.sources.searchWithDefault(query)
 
-      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
-        return { exception: { message: 'No matching track found on default source.', severity: 'common' } }
+      if (
+        searchResult.loadType !== 'search' ||
+        searchResult.data.length === 0
+      ) {
+        return {
+          exception: {
+            message: 'No matching track found on default source.',
+            severity: 'common'
+          }
+        }
       }
 
       const tidalDuration = decodedTrack.length
@@ -189,7 +237,11 @@ export default class TidalSource {
       }
 
       if (!bestMatch || minDurationDiff > 5000) {
-        logger('warn', 'Tidal', `No close match found for "${query}". Closest diff: ${minDurationDiff}ms`)
+        logger(
+          'warn',
+          'Tidal',
+          `No close match found for "${query}". Closest diff: ${minDurationDiff}ms`
+        )
         bestMatch = searchResult.data[0]
       }
 
@@ -202,6 +254,8 @@ export default class TidalSource {
   }
 
   async loadStream(track, url, protocol, additionalData) {
-    throw new Error('Tidal source uses mirroring and does not load streams directly.')
+    throw new Error(
+      'Tidal source uses mirroring and does not load streams directly.'
+    )
   }
 }

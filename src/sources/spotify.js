@@ -28,7 +28,7 @@ export default class SpotifySource {
       this.clientSecret = this.config.sources.spotify?.clientSecret
       this.playlistLoadLimit =
         this.config.sources.spotify?.playlistLoadLimit ?? 0
-      this.playlistPageLoadConcurrency = 
+      this.playlistPageLoadConcurrency =
         this.config.sources.spotify?.playlistPageLoadConcurrency ?? 5
       this.market = this.config.sources.spotify?.market || 'US'
 
