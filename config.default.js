@@ -134,6 +134,9 @@ export default {
     },
     nicovideo: {
       enabled: true
+    },
+    reddit: {
+      enabled: true
     }
   },
   lyrics: {
