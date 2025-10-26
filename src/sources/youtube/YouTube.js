@@ -25,6 +25,9 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
   outputStream.on('close', () => {
     stop = true
   })
+  outputStream.on('error', () => {
+    stop = true
+  })
 
   const fetchWithUserAgent = async (url) => {
     return http1makeRequest(url, {
@@ -94,20 +97,27 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
 
       const segmentUrl = segmentQueue.shift()
 
+      if (stop) continue
+
+      let segmentStream = null
       try {
-        const {
-          stream: segmentStream,
-          error,
-          statusCode
-        } = await http1makeRequest(segmentUrl, {
+        const res = await http1makeRequest(segmentUrl, {
           streamOnly: true
         })
-        if (error || statusCode !== 200) {
+        segmentStream = res.stream
+
+        if (res.error || res.statusCode !== 200) {
           logger(
             'warn',
             'YouTube-HLS-Downloader',
-            `Failed segment ${segmentUrl}: ${statusCode}`
+            `Failed segment ${segmentUrl}: ${res.statusCode}`
           )
+          if (segmentStream) segmentStream.destroy()
+          continue
+        }
+
+        if (outputStream.destroyed) {
+          segmentStream.destroy()
           continue
         }
 
@@ -117,11 +127,16 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
           segmentStream.on('error', reject)
         })
       } catch (e) {
-        logger(
-          'error',
-          'YouTube-HLS-Downloader',
-          `Error processing segment ${segmentUrl}: ${e.message}`
-        )
+        if (segmentStream && !segmentStream.destroyed) {
+          segmentStream.destroy()
+        }
+        if (!stop && e.message !== 'aborted') {
+          logger(
+            'error',
+            'YouTube-HLS-Downloader',
+            `Error processing segment ${segmentUrl}: ${e.message}`
+          )
+        }
       }
     }
 
