@@ -92,19 +92,19 @@ class BaseAudioResource {
   }
 
   emit(event, ...args) {
-    this.stream.emit(event, ...args)
+    this.stream?.emit(event, ...args)
   }
   on(event, listener) {
-    this.stream.on(event, listener)
+    this.stream?.on(event, listener)
   }
   off(event, listener) {
-    this.stream.off(event, listener)
+    this.stream?.off(event, listener)
   }
   once(event, listener) {
-    this.stream.once(event, listener)
+    this.stream?.once(event, listener)
   }
   removeListener(event, listener) {
-    this.stream.removeListener(event, listener)
+    this.stream?.removeListener(event, listener)
   }
   removeAllListeners() {
     if (!this.stream?.eventNames) return

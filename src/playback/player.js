@@ -529,8 +529,11 @@ export class Player {
       resource.setFilters(this.filters)
 
       this._isSeeking = true
-      this.connection.play(resource)
+      const oldStream = this.connection.play(resource)
       await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
+      if (oldStream) {
+        oldStream.destroy()
+      }
       this._isSeeking = false
 
       return true
