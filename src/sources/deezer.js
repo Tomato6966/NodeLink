@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
-import { encodeTrack, logger, makeRequest } from '../utils.js'
+import { encodeTrack, logger, makeRequest, http1makeRequest } from '../utils.js'
 
 const IV = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])
 
@@ -11,7 +11,8 @@ export default class DeezerSource {
     this.config = nodelink.options
     this.searchTerms = ['dzsearch']
     this.patterns = [
-      /^https?:\/\/www\.deezer\.com\/(?:[a-z]{2}\/)?(track|album|playlist|artist)\/(\d+)$/
+      /^https?:\/\/(?:www\.)?deezer\.com\/(?:[a-z]+(?:-[a-z]+)?\/)?(track|album|playlist|artist)\/(\d+)$/,
+      /^https?:\/\/link\.deezer\.com\/s\/([a-zA-Z0-9]+)/
     ]
 
     this.cookie = null
@@ -99,7 +100,18 @@ export default class DeezerSource {
   }
 
   async resolve(url) {
-    const match = url.match(this.patterns[0])
+    if (url.includes('link.deezer.com')) {
+      const res = await http1makeRequest(url, { method: 'GET' })
+      const match = res.body.match(/\/(track|album|playlist|artist)\/(\d+)/)
+      if (match) {
+        const [, type, id] = match
+        return await this.resolve(`https://www.deezer.com/${type}/${id}`)
+      }
+      return { loadType: 'empty', data: {} }
+    }
+
+    const pattern = this.patterns[0]
+    const match = url.match(pattern)
     if (!match) return { loadType: 'empty', data: {} }
 
     const [, type, id] = match
@@ -132,41 +144,12 @@ export default class DeezerSource {
         const track = this.buildTrack(body)
         return { loadType: 'track', data: track }
       }
-      case 'album': {
-        const albumData = body
-        const tracklistUrl = `${albumData.tracklist}?limit=${this.config.maxAlbumPlaylistLength || 1000}`
-        const tracksRes = await makeRequest(tracklistUrl)
-
-        if (tracksRes.error || !tracksRes.body?.data) {
-          return {
-            loadType: 'error',
-            data: {
-              message: 'Could not fetch album tracks.',
-              severity: 'common'
-            }
-          }
-        }
-
-        const tracks = tracksRes.body.data.map((item) =>
-          this.buildTrack(item, albumData.cover_xl || albumData.picture_xl)
-        )
-
-        return {
-          loadType: 'album',
-          data: {
-            info: {
-              name: albumData.title,
-              selectedTrack: 0
-            },
-            pluginInfo: {},
-            tracks
-          }
-        }
-      }
+      // forced album to load as a playlist, because the code is not loading album types, but playlist loadType works.
+      case 'album':
       case 'playlist': {
         const playlistData = body
         const tracklistUrl = `${playlistData.tracklist}?limit=${this.config.maxAlbumPlaylistLength || 1000}`
-        const tracksRes = await makeRequest(tracklistUrl)
+        const tracksRes = await makeRequest(tracklistUrl, { method: 'GET' })
 
         if (tracksRes.error || !tracksRes.body?.data) {
           return {
@@ -178,12 +161,15 @@ export default class DeezerSource {
           }
         }
 
-        const tracks = tracksRes.body.data.map((item) =>
-          this.buildTrack(
-            item,
-            playlistData.cover_xl || playlistData.picture_xl
-          )
-        )
+        const tracks = [];
+        for (const item of tracksRes.body.data) {
+          tracks.push(
+            this.buildTrack(
+              item,
+              playlistData.cover_xl || playlistData.picture_xl
+            )
+          );
+        }
 
         return {
           loadType: 'playlist',
