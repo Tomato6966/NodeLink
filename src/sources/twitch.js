@@ -657,7 +657,7 @@ export default class TwitchSource {
   buildTrack(partialInfo) {
     const track = {
       identifier: partialInfo.identifier,
-      isSeekable: partialInfo.isSeekable,
+      isSeekable: false,
       author: partialInfo.author,
       length: partialInfo.length,
       isStream: partialInfo.isStream,

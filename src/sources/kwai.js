@@ -133,7 +133,7 @@ export default class KwaiSource {
       artworkUrl: videoData.thumbnail,
       uri: queryUrl,
       isStream: false,
-      isSeekable: true,
+      isSeekable: false,
       position: 0,
       isrc: null
     }

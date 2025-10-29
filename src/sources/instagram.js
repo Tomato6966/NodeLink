@@ -291,7 +291,7 @@ export default class InstagramSource {
         thumbnail: media.display_url || '',
         title: title,
         isStream: false,
-        isSeekable: true
+        isSeekable: false
       },
       error: null
     }
