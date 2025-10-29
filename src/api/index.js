@@ -65,6 +65,24 @@ async function requestHandler(nodelink, req, res) {
   const isInternal = ['127.0.0.1', '::1', 'localhost'].includes(remoteAddress)
   const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${req.socket.remotePort})`
 
+  if (!nodelink.rateLimitManager.check(req, parsedUrl)) {
+    logger(
+      'warn',
+      'RateLimit',
+      `Rate limit exceeded for ${clientAddress} on ${parsedUrl.pathname}`
+    )
+    sendErrorResponse(
+      req,
+      res,
+      429,
+      'Too Many Requests',
+      'You are sending too many requests. Please try again later.',
+      parsedUrl.pathname,
+      trace
+    )
+    return
+  }
+
   if (
     !req.headers ||
     req.headers.authorization !== nodelink.options.server.password

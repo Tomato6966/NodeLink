@@ -170,5 +170,25 @@ export default {
     strategy: 'RotateOnBan', // RotateOnBan, RoundRobin, LoadBalance
     bannedIpCooldown: 600000, // 10 minutes
     ipBlocks: []
+  },
+  rateLimit: {
+    enabled: true,
+    global: {
+      maxRequests: 1000,
+      timeWindowMs: 60000 // 1 minute
+    },
+    perIp: {
+      maxRequests: 100,
+      timeWindowMs: 10000 // 10 seconds
+    },
+    perUserId: {
+      maxRequests: 50,
+      timeWindowMs: 5000 // 5 seconds
+    },
+    perGuildId: {
+      maxRequests: 20,
+      timeWindowMs: 5000 // 5 seconds
+    },
+    ignorePaths: []
   }
 }
