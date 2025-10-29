@@ -19,7 +19,11 @@ export const GatewayEvents = {
   VOLUME_CHANGED: 'VolumeChangedEvent',
   FILTERS_CHANGED: 'FiltersChangedEvent',
   SEEK: 'SeekEvent',
-  PAUSE: 'PauseEvent'
+  PAUSE: 'PauseEvent',
+  PLAYER_CREATED: 'PlayerCreatedEvent',
+  PLAYER_DESTROYED: 'PlayerDestroyedEvent',
+  PLAYER_RECONNECTING: 'PlayerReconnectingEvent',
+  PLAYER_CONNECTED: 'PlayerConnectedEvent'
 }
 export const EndReasons = {
   STOPPED: 'stopped',

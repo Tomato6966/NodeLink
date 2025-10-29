@@ -243,6 +243,33 @@ This event is emitted in NodeLink when a track gets stuck. This can happen if th
 ### New Events
 NodeLink emits several new events not found in the standard Lavalink specification:
 
+#### `PlayerCreatedEvent`
+Emitted when a new player is successfully created.
+| Field   | Type   | Description                               |
+|---------|--------|-------------------------------------------|
+| guildId | string | The ID of the guild where the player was created. |
+| player  | object | The initial state of the created player.  |
+
+#### `PlayerDestroyedEvent`
+Emitted when a player is destroyed.
+| Field   | Type   | Description                               |
+|---------|--------|-------------------------------------------|
+| guildId | string | The ID of the guild whose player was destroyed. |
+
+#### `PlayerReconnectingEvent`
+Emitted when a player's voice connection is attempting to reconnect.
+| Field   | Type   | Description                               |
+|---------|--------|-------------------------------------------|
+| guildId | string | The ID of the guild whose player is reconnecting. |
+| voice   | object | The current voice state of the player.    |
+
+#### `PlayerConnectedEvent`
+Emitted when a player's voice connection is successfully established.
+| Field   | Type   | Description                               |
+|---------|--------|-------------------------------------------|
+| guildId | string | The ID of the guild whose player connected. |
+| voice   | object | The current voice state of the player.    |
+
 #### `WorkerFailedEvent`
 (Cluster Mode Only) Emitted when a worker process fails, indicating that its players were destroyed.
 | Field          | Type   | Description                               |

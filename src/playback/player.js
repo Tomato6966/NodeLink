@@ -53,6 +53,11 @@ export class Player {
       } catch {}
     }
 
+    this.emitEvent(GatewayEvents.PLAYER_CREATED, {
+      guildId: this.guildId,
+      player: this.toJSON()
+    })
+
     this.waitEvent = (event, filter) =>
       new Promise((resolve) => {
         const handler = (_, payload) => {
@@ -113,6 +118,10 @@ export class Player {
         'Player',
         `Voice connection established for guild ${this.guildId} in session ${this.session.id}`
       )
+      this.emitEvent(GatewayEvents.PLAYER_CONNECTED, {
+        guildId: this.guildId,
+        voice: { ...this.voice }
+      })
       if (this.track && this.isPaused && this.connection.audioStream) {
         this.isPaused = false
         this.connection.unpause('reconnected')
@@ -128,6 +137,10 @@ export class Player {
         'Player',
         `Voice connection is reconnecting for guild ${this.guildId}`
       )
+      this.emitEvent(GatewayEvents.PLAYER_RECONNECTING, {
+        guildId: this.guildId,
+        voice: { ...this.voice }
+      })
     } else if (state.status === 'disconnected') {
       this.emitEvent(GatewayEvents.WEBSOCKET_CLOSED, {
         code: state.code,
@@ -849,6 +862,9 @@ export class Player {
         byRemote: false
       })
     }
+    this.emitEvent(GatewayEvents.PLAYER_DESTROYED, {
+      guildId: this.guildId
+    })
     this._resetTrack()
     this.connStatus = 'destroyed'
     this.volumePercent = this.nodelink.options?.defaultVolume ?? 100
