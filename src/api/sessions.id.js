@@ -1,4 +1,21 @@
-import { decodeTrack, logger } from '../utils.js'
+import Joi from 'joi'
+import {
+  decodeTrack,
+  logger,
+  sendResponse,
+  sendErrorResponse
+} from '../utils.js'
+
+const sessionPatchSchema = Joi.object({
+  resuming: Joi.boolean().optional().messages({
+    'boolean.base': 'The resuming value must be a boolean.'
+  }),
+  timeout: Joi.number().integer().min(0).optional().messages({
+    'number.base': 'The timeout value must be a number.',
+    'number.integer': 'The timeout value must be an integer.',
+    'number.min': 'The timeout value must be a non-negative number.'
+  })
+})
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const parts = parsedUrl.pathname.split('/')
@@ -7,17 +24,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const session = nodelink.sessions.get(sessionId)
 
   if (!session) {
-    return sendResponse(
+    return sendErrorResponse(
       req,
       res,
-      {
-        timestamp: Date.now(),
-        status: 404,
-        error: 'Not Found',
-        message: "The provided sessionId doesn't exist.",
-        path: parsedUrl.pathname
-      },
-      404
+      404,
+      'Not Found',
+      "The provided sessionId doesn't exist.', parsedUrl.pathname"
     )
   }
 
@@ -25,7 +37,25 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     parsedUrl.pathname === `/v4/sessions/${sessionId}` &&
     req.method === 'PATCH'
   ) {
-    const payload = req.body
+    const { error, value } = sessionPatchSchema.validate(req.body)
+
+    if (error) {
+      logger(
+        'warn',
+        'Session',
+        `Invalid PATCH payload for session ${sessionId}: ${error.details[0].message}`
+      )
+      return sendErrorResponse(
+        req,
+        res,
+        400,
+        'Bad Request',
+        error.details[0].message,
+        parsedUrl.pathname
+      )
+    }
+
+    const payload = value
     logger(
       'debug',
       'Session',
@@ -36,48 +66,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     const { resuming, timeout } = payload
 
     if (resuming !== undefined) {
-      if (typeof resuming !== 'boolean') {
-        logger(
-          'warn',
-          'Session',
-          `Invalid resuming value for session ${sessionId}: ${resuming}`
-        )
-        return sendResponse(
-          req,
-          res,
-          {
-            timestamp: Date.now(),
-            status: 400,
-            error: 'Bad Request',
-            message: 'The resuming value must be a boolean.',
-            path: parsedUrl.pathname
-          },
-          400
-        )
-      }
       session.resuming = resuming
     }
 
     if (timeout !== undefined) {
-      if (typeof timeout !== 'number' || timeout < 0) {
-        logger(
-          'warn',
-          'Session',
-          `Invalid timeout value for session ${sessionId}: ${timeout}`
-        )
-        return sendResponse(
-          req,
-          res,
-          {
-            timestamp: Date.now(),
-            status: 400,
-            error: 'Bad Request',
-            message: 'The timeout value must be a non-negative number.',
-            path: parsedUrl.pathname
-          },
-          400
-        )
-      }
       session.timeout = timeout
     }
 

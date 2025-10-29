@@ -18,6 +18,7 @@ export default class {
       /^https?:\/\/(www\.)?soundcloud\.com\/[^/\s]+\/sets\/[^/\s]+$/,
       /^https?:\/\/m\.soundcloud\.com\/[^/\s]+\/sets\/[^/\s]+$/
     ]
+    this.priority = 85
 
     this.clientId = this.nodelink.options?.sources?.clientId ?? null
   }

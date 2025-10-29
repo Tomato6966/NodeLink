@@ -1,22 +1,36 @@
-import { decodeTrack, logger, sendResponse } from '../utils.js'
+import Joi from 'joi'
+import {
+  decodeTrack,
+  logger,
+  sendResponse,
+  sendErrorResponse
+} from '../utils.js'
+
+const loadLyricsSchema = Joi.object({
+  encodedTrack: Joi.string().required().messages({
+    'string.empty': 'encodedTrack parameter cannot be empty.',
+    'any.required': 'Missing encodedTrack parameter.'
+  })
+})
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const encodedTrack = parsedUrl.searchParams.get('encodedTrack')
-  if (!encodedTrack) {
-    logger('warn', 'Lyrics', 'Missing encodedTrack parameter')
-    return sendResponse(
+  const { error, value } = loadLyricsSchema.validate({
+    encodedTrack: parsedUrl.searchParams.get('encodedTrack')
+  })
+
+  if (error) {
+    logger('warn', 'Lyrics', error.details[0].message)
+    return sendErrorResponse(
       req,
       res,
-      {
-        timestamp: Date.now(),
-        status: 400,
-        error: 'Bad Request',
-        message: 'Missing encodedTrack parameter.',
-        path: parsedUrl.pathname
-      },
-      400
+      400,
+      'Bad Request',
+      error.details[0].message,
+      parsedUrl.pathname
     )
   }
+
+  const encodedTrack = value.encodedTrack
 
   try {
     const decodedTrack = decodeTrack(encodedTrack)
@@ -26,17 +40,13 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         'Lyrics',
         `Invalid encoded track received: ${encodedTrack}`
       )
-      return sendResponse(
+      return sendErrorResponse(
         req,
         res,
-        {
-          timestamp: Date.now(),
-          status: 400,
-          error: 'Bad Request',
-          message: 'The provided track is invalid.',
-          path: parsedUrl.pathname
-        },
-        400
+        400,
+        'Bad Request',
+        'The provided track is invalid.',
+        parsedUrl.pathname
       )
     }
 
@@ -57,20 +67,16 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     }
 
     sendResponse(req, res, lyricsData, 200)
-  } catch (error) {
-    logger('error', 'Lyrics', 'Failed to load lyrics:', error)
-    sendResponse(
+  } catch (err) {
+    logger('error', 'Lyrics', 'Failed to load lyrics:', err)
+    sendErrorResponse(
       req,
       res,
-      {
-        timestamp: Date.now(),
-        status: 500,
-        error: 'Internal Server Error',
-        message: error.message || 'Failed to load lyrics.',
-        trace: new Error().stack,
-        path: parsedUrl.pathname
-      },
-      500
+      500,
+      'Internal Server Error',
+      err.message || 'Failed to load lyrics.',
+      parsedUrl.pathname,
+      true
     )
   }
 }

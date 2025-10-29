@@ -713,6 +713,7 @@ async function makeRequest(urlString, options, nodelink) {
             req.close(http2.constants.NGHTTP2_CANCEL)
           }
           closeSessionGracefully()
+          fallbackToHttp1()
           reject(new Error(`HTTP/2 request timeout for ${urlString}`))
         })
       }
@@ -720,6 +721,7 @@ async function makeRequest(urlString, options, nodelink) {
       req.on('error', (err) => {
         if (!reqClosed) reqClosed = true
         closeSessionGracefully()
+        fallbackToHttp1()
         reject(
           new Error(`HTTP/2 request error for ${urlString}: ${err.message}`)
         )
@@ -1033,6 +1035,26 @@ async function checkForUpdates() {
   }
 }
 
+function sendErrorResponse(
+  req,
+  res,
+  status,
+  error,
+  message,
+  path,
+  trace = false
+) {
+  const errorPayload = {
+    timestamp: Date.now(),
+    status,
+    error,
+    trace: trace ? new Error().stack : undefined,
+    message,
+    path
+  }
+  sendResponse(req, res, errorPayload, status, trace)
+}
+
 export {
   initLogger,
   validateProperty,
@@ -1052,5 +1074,6 @@ export {
   loadHLSPlaylist,
   sendResponse,
   loadHLS,
-  checkForUpdates
+  checkForUpdates,
+  sendErrorResponse
 }

@@ -8,6 +8,7 @@ export default class GoogleTTSSource {
       this.nodelink.options.sources?.googleTts?.language || 'en-US'
     this.searchTerms = ['gtts']
     this.baseUrl = 'https://translate.google.com'
+    this.priority = 50
   }
 
   async setup() {
@@ -36,8 +37,7 @@ export default class GoogleTTSSource {
       }
     } catch (e) {
       return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault', cause: 'Exception' }
+        exception: { message: e.message, severity: 'fault', cause: 'Exception' }
       }
     }
   }

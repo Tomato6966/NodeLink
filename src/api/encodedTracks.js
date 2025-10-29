@@ -1,35 +1,62 @@
-import { encodeTrack, logger } from '../utils.js'
+import Joi from 'joi'
+import {
+  encodeTrack,
+  logger,
+  sendResponse,
+  sendErrorResponse
+} from '../utils.js'
+
+const encodedTracksSchema = Joi.array()
+  .items(
+    Joi.object({
+      encoded: Joi.string().required(),
+      info: Joi.object().required()
+    }).unknown(true) // Permitir outras propriedades no objeto track
+  )
+  .min(1)
+  .messages({
+    'array.base': 'tracks parameter must be an array.',
+    'array.empty': 'tracks parameter cannot be an empty array.',
+    'array.min': 'tracks parameter cannot be an empty array.',
+    'string.base': 'Each item in tracks must be a string.',
+    'any.required': 'tracks parameter is required.'
+  })
 
 function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const tracks = req.body // [{ encoded: "", info: {...}}, {}]
-  if (!tracks || !Array.isArray(tracks)) {
-    // biome-ignore format: off
-    sendResponse(req, res, {
-        timestamp: Date.now(),
-        status: 400,
-        error: 'Invalid request',
-        message: 'tracks parameter is required and should be an array',
-        path: parsedUrl.pathname
-      }, 400)
+  const { error, value } = encodedTracksSchema.validate(req.body)
+
+  if (error) {
+    sendErrorResponse(
+      req,
+      res,
+      400,
+      'Invalid request',
+      error.details[0].message,
+      parsedUrl.pathname,
+      true
+    )
     return
   }
+
+  const tracks = value
+
   const encodedTracks = []
   logger('debug', 'Tracks', `Encoding ${tracks.length} tracks.`)
   for (const track of tracks) {
     try {
       const encodedTrack = encodeTrack(track)
       encodedTracks.push(encodedTrack)
-    } catch (error) {
-      logger('error', 'Tracks', `Failed to encode track ${track}:`, error)
-      // biome-ignore format: off
-      sendResponse(req, res, {
-                timestamp: Date.now(),
-                status: 500,
-                trace: new Error().stack,
-                error: 'Failed to encode track',
-                message: error.message || 'Failed to encode track',
-                path: parsedUrl.pathname
-            }, 500)
+    } catch (err) {
+      logger('error', 'Tracks', `Failed to encode track ${track}:`, err)
+      sendErrorResponse(
+        req,
+        res,
+        500,
+        'Failed to encode track',
+        err.message || 'Failed to encode track',
+        parsedUrl.pathname,
+        true
+      )
       return
     }
   }

@@ -54,7 +54,11 @@ export default class SourcesManager {
         if (Array.isArray(instance.patterns)) {
           for (const regex of instance.patterns) {
             if (regex instanceof RegExp) {
-              this.patternMap.push({ regex, sourceName: name })
+              this.patternMap.push({
+                regex,
+                sourceName: name,
+                priority: instance.priority || 0
+              })
             }
           }
         }
@@ -100,7 +104,11 @@ export default class SourcesManager {
         if (Array.isArray(instance.patterns)) {
           for (const regex of instance.patterns) {
             if (regex instanceof RegExp) {
-              this.patternMap.push({ regex, sourceName: name })
+              this.patternMap.push({
+                regex,
+                sourceName: name,
+                priority: instance.priority || 0
+              })
             }
           }
         }
@@ -111,6 +119,7 @@ export default class SourcesManager {
         )
       })
     )
+    this.patternMap.sort((a, b) => b.priority - a.priority) // Ordenar por prioridade
   }
 
   async _instrumentedSourceCall(sourceName, method, ...args) {

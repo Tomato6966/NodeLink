@@ -1298,7 +1298,7 @@ class StreamAudioResource extends BaseAudioResource {
             channels: 2,
             frameSize: 960
           })
-         if (lowerType.includes('webm')) {
+          if (lowerType.includes('webm')) {
             const demuxer = new prism.opus.WebmDemuxer()
             pcmStream = stream.pipe(demuxer).pipe(decoder)
             this.pipes.push(demuxer, decoder)
@@ -1379,18 +1379,13 @@ export const createSeekeableAudioResource = async (
   player
 ) => {
   try {
-    const { stream, meta } = await seekableStream(
-      url,
-      seekTime,
-      endTime,
-      {}
-    )
+    const { stream, meta } = await seekableStream(url, seekTime, endTime, {})
 
     const newStream = new PassThrough()
     stream.on('data', (chunk) => {
       newStream.write(chunk)
     })
-    stream.on('end', () => { 
+    stream.on('end', () => {
       newStream.end()
       newStream.emit('finishBuffering')
     })

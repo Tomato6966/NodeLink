@@ -111,6 +111,7 @@ export default class TwitchSource {
     this.patterns = [
       /^https?:\/\/(?:www\.|go\.|m\.)?twitch\.tv\/(?:[\w_]+\/clip\/[\w%-_]+|videos\/\d+|[\w_]+)/
     ]
+    this.priority = 70
     this.clientId = 'kimne78kx3ncx6brgo4mv6wki5h1ko'
     this.deviceId = null
   }
@@ -275,8 +276,7 @@ export default class TwitchSource {
       const clipData = await this._fetchClipMetadata(slug)
       if (!clipData) {
         return {
-          loadType: 'error',
-          data: { message: 'Clip not found', severity: 'common' }
+          exception: { message: 'Clip not found', severity: 'common' }
         }
       }
 
@@ -294,8 +294,7 @@ export default class TwitchSource {
       return { loadType: 'track', data: track }
     } catch (e) {
       return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault' }
+        exception: { message: e.message, severity: 'fault' }
       }
     }
   }
@@ -321,8 +320,7 @@ export default class TwitchSource {
       const vodData = await this._fetchVodMetadata(vodId)
       if (!vodData) {
         return {
-          loadType: 'error',
-          data: { message: 'VOD not found', severity: 'common' }
+          exception: { message: 'VOD not found', severity: 'common' }
         }
       }
 
@@ -347,8 +345,7 @@ export default class TwitchSource {
       return { loadType: 'track', data: track }
     } catch (e) {
       return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault' }
+        exception: { message: e.message, severity: 'fault' }
       }
     }
   }
@@ -370,7 +367,12 @@ export default class TwitchSource {
       const streamInfo = result?.data?.user?.stream
 
       if (!streamInfo || streamInfo.type !== 'live') {
-        return { loadType: 'empty', data: {} }
+        return {
+          exception: {
+            message: 'Live stream not found or not live.',
+            severity: 'common'
+          }
+        }
       }
 
       const thumbnail = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${channelName}-440x248.jpg`
@@ -388,8 +390,7 @@ export default class TwitchSource {
       return { loadType: 'track', data: track }
     } catch (e) {
       return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault' }
+        exception: { message: e.message, severity: 'fault' }
       }
     }
   }
@@ -646,8 +647,7 @@ export default class TwitchSource {
 
   search(query) {
     return {
-      loadType: 'error',
-      data: {
+      exception: {
         message: 'Search is not supported for Twitch',
         severity: 'common'
       }

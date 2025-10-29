@@ -10,6 +10,7 @@ export default class SpotifySource {
     this.patterns = [
       /https?:\/\/(?:open\.)?spotify\.com\/(?:intl-[a-zA-Z]{2}\/)?(track|album|playlist|artist|episode|show)\/([a-zA-Z0-9]+)/
     ]
+    this.priority = 95
 
     this.accessToken = null
     this.clientId = null
@@ -153,8 +154,7 @@ export default class SpotifySource {
 
       if (!data || data.error) {
         return {
-          loadType: 'error',
-          data: {
+          exception: {
             message: data?.error?.message || 'Search failed on Spotify.',
             severity: 'common'
           }
@@ -170,8 +170,7 @@ export default class SpotifySource {
       return { loadType: 'search', data: tracks }
     } catch (e) {
       return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault' }
+        exception: { message: e.message, severity: 'fault' }
       }
     }
   }
@@ -188,8 +187,7 @@ export default class SpotifySource {
           const data = await this._apiRequest(`/tracks/${id}`)
           if (!data)
             return {
-              loadType: 'error',
-              data: { message: 'Track not found.', severity: 'common' }
+              exception: { message: 'Track not found.', severity: 'common' }
             }
           return { loadType: 'track', data: this.buildTrack(data) }
         }
@@ -198,8 +196,7 @@ export default class SpotifySource {
           const data = await this._apiRequest(`/albums/${id}`)
           if (!data)
             return {
-              loadType: 'error',
-              data: { message: 'Album not found.', severity: 'common' }
+              exception: { message: 'Album not found.', severity: 'common' }
             }
 
           const tracks = data.tracks.items.map((item) =>
@@ -219,8 +216,7 @@ export default class SpotifySource {
           )
           if (!playlistData)
             return {
-              loadType: 'error',
-              data: { message: 'Playlist not found.', severity: 'common' }
+              exception: { message: 'Playlist not found.', severity: 'common' }
             }
 
           const allItems = []
@@ -295,8 +291,7 @@ export default class SpotifySource {
           const artist = await this._apiRequest(`/artists/${id}`)
           if (!artist)
             return {
-              loadType: 'error',
-              data: { message: 'Artist not found.', severity: 'common' }
+              exception: { message: 'Artist not found.', severity: 'common' }
             }
 
           const topTracks = await this._apiRequest(
@@ -304,8 +299,7 @@ export default class SpotifySource {
           )
           if (!topTracks)
             return {
-              loadType: 'error',
-              data: {
+              exception: {
                 message: 'Failed to get artist top tracks.',
                 severity: 'common'
               }
@@ -326,8 +320,7 @@ export default class SpotifySource {
         case 'episode':
         case 'show': {
           return {
-            loadType: 'error',
-            data: {
+            exception: {
               message: 'This source does not support episodes or shows.',
               severity: 'common'
             }
@@ -339,8 +332,7 @@ export default class SpotifySource {
       }
     } catch (e) {
       return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault' }
+        exception: { message: e.message, severity: 'fault' }
       }
     }
   }

@@ -1,14 +1,17 @@
 import { http1makeRequest, logger } from '../utils.js'
 
-
-const LASTFM_PATTERN = /^https?:\/\/(?:www\.)?last\.fm\/(?:[a-z]{2}\/)?music\/.+/
-const YOUTUBE_LINK_PATTERN = /header-new-playlink[^>]*href="([^"]*youtube\.com[^"]+)"/
-const YOUTUBE_URL_PATTERN = /https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/
+const LASTFM_PATTERN =
+  /^https?:\/\/(?:www\.)?last\.fm\/(?:[a-z]{2}\/)?music\/.+/
+const YOUTUBE_LINK_PATTERN =
+  /header-new-playlink[^>]*href="([^"]*youtube\.com[^"]+)"/
+const YOUTUBE_URL_PATTERN =
+  /https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/
 
 export default class LastFMSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.patterns = [LASTFM_PATTERN]
+    this.priority = 40
   }
 
   async setup() {
@@ -21,7 +24,12 @@ export default class LastFMSource {
   }
 
   async search() {
-    return this._createError('Search not supported for Last.fm', 'common')
+    return {
+      exception: {
+        message: 'Search not supported for Last.fm',
+        severity: 'common'
+      }
+    }
   }
 
   async resolve(url) {
@@ -33,25 +41,36 @@ export default class LastFMSource {
     if (!path) return { loadType: 'empty', data: {} }
 
     try {
-      const { body, error, statusCode } = await http1makeRequest(url, { method: 'GET' })
+      const { body, error, statusCode } = await http1makeRequest(url, {
+        method: 'GET'
+      })
 
       if (error || statusCode !== 200) {
-        return this._createError(
-          `Failed to fetch Last.fm page: ${error?.message || statusCode}`,
-          'fault'
-        )
+        return {
+          exception: {
+            message: `Failed to fetch Last.fm page: ${error?.message || statusCode}`,
+            severity: 'fault'
+          }
+        }
       }
 
       const youtubeUrls = this._extractYouTubeUrls(body)
       if (!youtubeUrls.length) {
-        return this._createError('No YouTube URLs found on Last.fm page', 'common')
+        return {
+          exception: {
+            message: 'No YouTube URLs found on Last.fm page',
+            severity: 'common'
+          }
+        }
       }
 
       // Check if it's a track URL (contains '_' separator or has 4+ segments)
       const isTrack = path.includes('_') || path.length >= 4
 
       if (isTrack) {
-        const youtubeResult = await this.nodelink.sources.resolve(youtubeUrls[0])
+        const youtubeResult = await this.nodelink.sources.resolve(
+          youtubeUrls[0]
+        )
         if (youtubeResult.loadType === 'track') {
           return {
             loadType: 'track',
@@ -82,8 +101,14 @@ export default class LastFMSource {
         }
 
         if (tracks.length) {
-          const artist = decodeURIComponent(path[2]?.replace(/\+/g, ' ') || 'Unknown')
-          const album = decodeURIComponent(path[3]?.replace(/\+/g, ' ') || path[1]?.replace(/\+/g, ' ') || 'Unknown')
+          const artist = decodeURIComponent(
+            path[2]?.replace(/\+/g, ' ') || 'Unknown'
+          )
+          const album = decodeURIComponent(
+            path[3]?.replace(/\+/g, ' ') ||
+              path[1]?.replace(/\+/g, ' ') ||
+              'Unknown'
+          )
           return {
             loadType: 'playlist',
             data: {
@@ -95,9 +120,16 @@ export default class LastFMSource {
         }
       }
 
-      return this._createError('Failed to resolve YouTube URLs from Last.fm', 'fault')
+      return {
+        exception: {
+          message: 'Failed to resolve YouTube URLs from Last.fm',
+          severity: 'fault'
+        }
+      }
     } catch (e) {
-      return this._createError(e.message, 'fault')
+      return {
+        exception: { message: e.message, severity: 'fault' }
+      }
     }
   }
 
@@ -149,6 +181,11 @@ export default class LastFMSource {
   }
 
   async loadStream(track, url, protocol, additionalData) {
-    return this.nodelink.sources.loadStream(track, url, protocol, additionalData)
+    return this.nodelink.sources.loadStream(
+      track,
+      url,
+      protocol,
+      additionalData
+    )
   }
 }

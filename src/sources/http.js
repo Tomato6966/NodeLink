@@ -4,6 +4,7 @@ export default class HttpSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.searchTerms = ['http']
+    this.priority = 10
   }
 
   async setup() {
@@ -19,8 +20,7 @@ export default class HttpSource {
       const data = await http1makeRequest(url, { method: 'HEAD' })
       if (data.error) {
         return {
-          loadType: 'error',
-          data: { message: data.error.message, severity: 'common' }
+          exception: { message: data.error.message, severity: 'common' }
         }
       }
 
@@ -37,8 +37,7 @@ export default class HttpSource {
 
       if (!isValidMedia) {
         return {
-          loadType: 'error',
-          data: {
+          exception: {
             message: `Unsupported content type: ${contentType}`,
             severity: 'common'
           }
@@ -53,8 +52,7 @@ export default class HttpSource {
       }
     } catch (err) {
       return {
-        loadType: 'error',
-        data: {
+        exception: {
           message: `Failed to resolve URL: ${err.message}`,
           severity: 'common'
         }

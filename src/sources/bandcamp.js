@@ -9,6 +9,7 @@ export default class BandCampSource {
       /^https?:\/\/([^/]+)\.bandcamp\.com\/(track|album)\/([^/?]+)/
     ]
     this.searchTerms = ['bcsearch']
+    this.priority = 90
   }
 
   async setup() {
@@ -28,8 +29,7 @@ export default class BandCampSource {
       )
       if (request.error || request.statusCode !== 200) {
         return {
-          loadType: 'error',
-          data: {
+          exception: {
             message:
               request.error?.message ||
               `BandCamp returned an invalid status: ${request.statusCode}`,
@@ -105,8 +105,7 @@ export default class BandCampSource {
       }
     } catch (e) {
       return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault', cause: 'Exception' }
+        exception: { message: e.message, severity: 'fault', cause: 'Exception' }
       }
     }
   }
@@ -177,8 +176,7 @@ export default class BandCampSource {
       }
     } catch (e) {
       return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault', cause: 'Exception' }
+        exception: { message: e.message, severity: 'fault', cause: 'Exception' }
       }
     }
   }

@@ -237,6 +237,8 @@ export default class YouTubeSource {
       /^https?:\/\/music\.youtube\.com\/(?:watch\?v=[\w-]+(?:&list=[\w-]+)?|playlist\?list=[\w-]+)/
     ]
 
+    this.priority = 100
+
     this.clients = {}
     this.oauth = null
     this.visitorDataInterval = null
@@ -418,8 +420,7 @@ export default class YouTubeSource {
       'No search results found from any configured client.'
     )
     return {
-      loadType: 'error',
-      data: {
+      exception: {
         message: 'No search results found from any configured client.',
         severity: 'fault',
         cause: 'All clients failed.',
@@ -557,8 +558,7 @@ export default class YouTubeSource {
 
     logger('error', 'YouTube', 'All clients failed to resolve the URL.')
     return {
-      loadType: 'error',
-      data: {
+      exception: {
         message: 'All clients failed to resolve the URL.',
         severity: 'fault',
         cause: 'All clients failed.',

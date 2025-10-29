@@ -8,6 +8,7 @@ export default class InstagramSource {
       /^https?:\/\/(?:www\.)?instagram\.com\/p\/([\w-]+)/,
       /^https?:\/\/(?:www\.)?instagram\.com\/(?:reels?|reel)\/([\w-]+)/
     ]
+    this.priority = 70
 
     this.apiConfig = {
       apiUrl: 'https://www.instagram.com/api/graphql',
@@ -169,7 +170,7 @@ export default class InstagramSource {
     if (!postId) {
       return {
         data: null,
-        error: { message: 'Post ID not provided', severity: 'common' }
+        exception: { message: 'Post ID not provided', severity: 'common' }
       }
     }
 
@@ -207,7 +208,7 @@ export default class InstagramSource {
       )
       return {
         data: null,
-        error: {
+        exception: {
           message: `Internal error during GraphQL request: ${e.message}`,
           severity: 'fault'
         }
@@ -220,7 +221,7 @@ export default class InstagramSource {
         `GraphQL request failed with code ${response.statusCode}`
       return {
         data: null,
-        error: {
+        exception: {
           message: errorMsg,
           severity: 'fault',
           cause: `Status: ${response.statusCode}`
@@ -235,7 +236,7 @@ export default class InstagramSource {
       } catch (e) {
         return {
           data: null,
-          error: {
+          exception: {
             message: 'Invalid JSON response from GraphQL',
             severity: 'fault'
           }
@@ -246,7 +247,7 @@ export default class InstagramSource {
     if (!responseData || !responseData.data) {
       return {
         data: null,
-        error: {
+        exception: {
           message: 'Invalid data structure in GraphQL JSON response',
           severity: 'fault'
         }
@@ -258,7 +259,7 @@ export default class InstagramSource {
     if (media === null) {
       return {
         data: null,
-        error: {
+        exception: {
           message: 'Media not found or unavailable (private/deleted?).',
           severity: 'common'
         }
@@ -267,14 +268,14 @@ export default class InstagramSource {
     if (!media.is_video) {
       return {
         data: null,
-        error: { message: 'This post is not a video.', severity: 'common' }
+        exception: { message: 'This post is not a video.', severity: 'common' }
       }
     }
     const videoUrl = media.video_url
     if (!videoUrl) {
       return {
         data: null,
-        error: {
+        exception: {
           message: 'Video URL not found in API response.',
           severity: 'common'
         }
@@ -305,8 +306,7 @@ export default class InstagramSource {
     } = this._getPostId(queryUrl)
     if (idError) {
       return {
-        loadType: 'error',
-        data: { message: idError, severity: 'common', cause: 'URLParsing' }
+        exception: { message: idError, severity: 'common', cause: 'URLParsing' }
       }
     }
 
@@ -318,7 +318,7 @@ export default class InstagramSource {
       if (fetchError.message?.includes('Media not found')) {
         return { loadType: 'empty', data: {} }
       }
-      return { loadType: 'error', data: { ...fetchError, cause: 'APIRequest' } }
+      return { exception: { ...fetchError, cause: 'APIRequest' } }
     }
 
     const track = this.buildTrack(videoData, queryUrl, postId)
@@ -427,8 +427,11 @@ export default class InstagramSource {
     }
 
     return {
-      loadType: 'empty',
-      data: null
+      exception: {
+        message: 'No results found for the query.',
+        severity: 'common',
+        cause: 'NoResults'
+      }
     }
   }
 }

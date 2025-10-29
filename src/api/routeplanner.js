@@ -1,4 +1,5 @@
-import { sendResponse } from '../utils.js'
+import Joi from 'joi'
+import { sendResponse, sendErrorResponse } from '../utils.js'
 
 function getStatus(nodelink, req, res) {
   const routePlanner = nodelink.routePlanner
@@ -37,23 +38,28 @@ function getStatus(nodelink, req, res) {
   sendResponse(req, res, status, 200)
 }
 
-function freeAddress(nodelink, req, res) {
-  const { address } = req.body
+const freeAddressSchema = Joi.object({
+  address: Joi.string().required().messages({
+    'string.empty': 'The address field cannot be empty.',
+    'any.required': 'The address field is required.'
+  })
+})
 
-  if (!address) {
-    return sendResponse(
+function freeAddress(nodelink, req, res) {
+  const { error, value } = freeAddressSchema.validate(req.body)
+
+  if (error) {
+    return sendErrorResponse(
       req,
       res,
-      {
-        timestamp: Date.now(),
-        status: 400,
-        error: 'Bad Request',
-        message: 'The address field is required.',
-        path: req.url
-      },
-      400
+      400,
+      'Bad Request',
+      error.details[0].message,
+      req.url
     )
   }
+
+  const { address } = value
 
   nodelink.routePlanner.freeIP(address)
   res.writeHead(204)
@@ -87,17 +93,13 @@ function handler(nodelink, req, res, sendResponse, parsedUrl) {
     }
   }
 
-  return sendResponse(
+  return sendErrorResponse(
     req,
     res,
-    {
-      timestamp: Date.now(),
-      status: 404,
-      error: 'Not Found',
-      message: 'The requested route planner endpoint was not found.',
-      path: parsedUrl.pathname
-    },
-    404
+    404,
+    'Not Found',
+    'The requested route planner endpoint was not found.',
+    parsedUrl.pathname
   )
 }
 

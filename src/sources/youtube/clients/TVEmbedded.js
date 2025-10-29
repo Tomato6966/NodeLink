@@ -77,8 +77,7 @@ export default class TVEmbedded extends BaseClient {
             `Could not parse video ID from URL: ${url}`
           )
           return {
-            loadType: 'error',
-            data: {
+            exception: {
               message: 'Invalid video URL.',
               severity: 'common',
               cause: 'Input'
@@ -100,8 +99,7 @@ export default class TVEmbedded extends BaseClient {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
           logger('error', 'YouTube-TVEmbedded', message)
           return {
-            loadType: 'error',
-            data: { message, severity: 'common', cause: 'Upstream' }
+            exception: { message, severity: 'common', cause: 'Upstream' }
           }
         }
 
@@ -121,8 +119,7 @@ export default class TVEmbedded extends BaseClient {
             `Could not parse playlist ID from URL: ${url}`
           )
           return {
-            loadType: 'error',
-            data: {
+            exception: {
               message: 'Invalid playlist URL.',
               severity: 'common',
               cause: 'Input'
@@ -161,8 +158,11 @@ export default class TVEmbedded extends BaseClient {
             `Error loading playlist ${playlistId}: ${errMsg}`
           )
           return {
-            loadType: 'error',
-            data: { message: errMsg, severity: 'common', cause: 'Upstream' }
+            exception: {
+              message: errMsg,
+              severity: 'common',
+              cause: 'Upstream'
+            }
           }
         }
 

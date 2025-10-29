@@ -1,40 +1,57 @@
-import { decodeTrack, logger } from '../utils.js'
+import Joi from 'joi'
+import {
+  decodeTrack,
+  logger,
+  sendResponse,
+  sendErrorResponse
+} from '../utils.js'
+
+const decodeTracksSchema = Joi.array()
+  .items(Joi.string().required())
+  .min(1)
+  .messages({
+    'array.base': 'encodedTracks parameter must be an array.',
+    'array.empty': 'encodedTracks parameter cannot be an empty array.',
+    'array.min': 'encodedTracks parameter cannot be an empty array.',
+    'string.base': 'Each item in encodedTracks must be a string.',
+    'any.required': 'encodedTracks parameter is required.'
+  })
 
 function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const encodedTracks = req.body // ["encodedTrack1", "encodedTrack2"]
-  if (!encodedTracks || !Array.isArray(encodedTracks)) {
-    // biome-ignore format: off
-    sendResponse(req, res, {
-      timestamp: Date.now(),
-      status: 400,
-      error: 'Invalid request',
-      message: 'encodedTracks parameter is required and should be an array',
-      path: parsedUrl.pathname
-    }, 400)
+  const { error, value } = decodeTracksSchema.validate(req.body)
+
+  if (error) {
+    sendErrorResponse(
+      req,
+      res,
+      400,
+      'Invalid request',
+      error.details[0].message,
+      parsedUrl.pathname,
+      true
+    )
     return
   }
+
+  const encodedTracks = value // Joi já validou e retornou o array
+
   const decodedTracks = []
   logger('debug', 'Tracks', `Decoding ${encodedTracks.length} tracks.`)
   for (const encodedTrack of encodedTracks) {
     try {
       const decodedTrack = decodeTrack(encodedTrack)
       decodedTracks.push(decodedTrack)
-    } catch (error) {
-      logger(
-        'error',
-        'Tracks',
-        `Failed to decode track ${encodedTrack}:`,
-        error
+    } catch (err) {
+      logger('error', 'Tracks', `Failed to decode track ${encodedTrack}:`, err)
+      sendErrorResponse(
+        req,
+        res,
+        500,
+        'Failed to decode track',
+        err.message || 'Failed to decode track',
+        parsedUrl.pathname,
+        true
       )
-      // biome-ignore format: off
-      sendResponse(req, res, {
-          timestamp: Date.now(),
-          status: 500,
-          trace: new Error().stack,
-          error: 'Failed to decode track',
-          message: error.message || 'Failed to decode track',
-          path: parsedUrl.pathname
-        }, 500)
       return
     }
   }

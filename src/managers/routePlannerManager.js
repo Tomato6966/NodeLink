@@ -1,4 +1,3 @@
-import ip from 'ip'
 import { logger } from '../utils.js'
 
 export default class RoutePlannerManager {
@@ -14,11 +13,41 @@ export default class RoutePlannerManager {
     }
   }
 
+  _ipToInt(ip) {
+    return (
+      ip.split('.').reduce((acc, oct) => (acc << 8) + parseInt(oct, 10), 0) >>>
+      0
+    )
+  }
+
+  _intToIp(int) {
+    return [
+      (int >>> 24) & 0xff,
+      (int >>> 16) & 0xff,
+      (int >>> 8) & 0xff,
+      int & 0xff
+    ].join('.')
+  }
+
+  _generateIpsFromCidr(cidr) {
+    const [baseIp, maskLength] = cidr.split('/')
+    if (!baseIp || !maskLength) throw new Error(`Invalid CIDR: ${cidr}`)
+
+    const mask = ~(2 ** (32 - parseInt(maskLength)) - 1) >>> 0
+    const baseInt = this._ipToInt(baseIp) & mask
+    const numberOfIps = 2 ** (32 - parseInt(maskLength))
+    const ips = []
+
+    for (let i = 0; i < numberOfIps; i++) {
+      ips.push(this._intToIp(baseInt + i))
+    }
+    return ips
+  }
+
   _loadIpBlocks() {
     for (const block of this.config.ipBlocks) {
       try {
-        const subnet = ip.cidrSubnet(block.cidr)
-        const ips = subnet.map((addr) => addr.address)
+        const ips = this._generateIpsFromCidr(block.cidr)
         this.ipBlocks.push(...ips)
       } catch (e) {
         logger(

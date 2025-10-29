@@ -180,41 +180,68 @@ export class Player {
   _onError(error) {
     if (this.destroying) return
     if (this.track) {
+      let severity = 'fault'
+      let cause = 'UNKNOWN_ERROR'
+      let shouldStop = true
+
       if (error.message.includes('ECONNRESET')) {
         logger(
           'warn',
           'Player',
           `Voice connection reset for guild ${this.guildId}. The library will attempt to reconnect.`
         )
-        return
-      }
-
-      const isStreamError =
+        severity = 'suspicious'
+        cause = 'VOICE_CONNECTION_RESET'
+        shouldStop = false // Não parar imediatamente, a biblioteca tentará reconectar
+      } else if (
         error.message.includes('stream') ||
         error.message.includes('timeout') ||
         error.name === 'AbortError'
-
-      if (isStreamError) {
+      ) {
         logger(
           'warn',
           'Player',
           `Stream error detected for guild ${this.guildId}. Stopping playback.`
         )
-        this.stop()
+        severity = 'common'
+        cause = 'STREAM_ERROR'
+        shouldStop = true
+      } else if (error instanceof SeekError) {
+        logger(
+          'error',
+          'Player',
+          `Seek error for guild ${this.guildId}: ${error.message}. Stopping playback.`
+        )
+        severity = 'fault'
+        cause = 'SEEK_ERROR'
+        shouldStop = true
       } else {
-        this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
-          track: this.track,
-          exception: {
-            message: error.message,
-            severity: 'fault',
-            cause: `${error.name}: ${error.message}`
-          }
-        })
+        logger(
+          'error',
+          'Player',
+          `Unhandled player error for guild ${this.guildId}:`,
+          error
+        )
+        severity = 'fault'
+        cause = `${error.name || 'Error'}: ${error.message}`
+        shouldStop = true
+      }
+
+      this.emitEvent(GatewayEvents.TRACK_EXCEPTION, {
+        track: this.track,
+        exception: {
+          message: error.message,
+          severity: severity,
+          cause: cause
+        }
+      })
+
+      if (shouldStop) {
         this.emitEvent(GatewayEvents.TRACK_END, {
           track: this.track,
           reason: EndReasons.LOAD_FAILED
         })
-        this._resetTrack()
+        this.stop()
       }
     }
   }
@@ -365,7 +392,11 @@ export class Player {
 
   async play({ encoded, info, noReplace = false, startTime = 0, endTime = 0 }) {
     if (this.destroying) {
-      logger('debug', 'Player', `play() aborted for guild ${this.guildId} because player is destroying`)
+      logger(
+        'debug',
+        'Player',
+        `play() aborted for guild ${this.guildId} because player is destroying`
+      )
       return false
     }
     logger('debug', 'Player', `play() called for guild ${this.guildId}`, {
@@ -755,20 +786,40 @@ export class Player {
     return true
   }
 
-  updateVoice({ sessionId, token, endpoint } = {}) {
-    if (this.destroying || !sessionId || !token || !endpoint) return
-    logger('debug', 'Player', `Updating voice state for guild ${this.guildId}`)
-    if (!this.connection) this._initConnection()
-    this.connection.voiceStateUpdate({ session_id: sessionId })
-    this.connection.voiceServerUpdate({ token, endpoint })
-    this.connection.connect(() => {
-      if (this.destroying) return
-      if (this.connection.audioStream && !this.isPaused) {
-        this.connection.unpause('reconnected')
-      }
-    })
+  updateVoice(voicePayload = {}) {
+    if (this.destroying) return
 
-    this.voice = { sessionId, token, endpoint }
+    const { sessionId, token, endpoint } = voicePayload
+
+    if (sessionId !== undefined) this.voice.sessionId = sessionId
+    if (token !== undefined) this.voice.token = token
+    if (endpoint !== undefined) this.voice.endpoint = endpoint
+
+    if (this.voice.sessionId && this.voice.token && this.voice.endpoint) {
+      logger(
+        'debug',
+        'Player',
+        `Updating voice state for guild ${this.guildId}`
+      )
+      if (!this.connection) this._initConnection()
+      this.connection.voiceStateUpdate({ session_id: this.voice.sessionId })
+      this.connection.voiceServerUpdate({
+        token: this.voice.token,
+        endpoint: this.voice.endpoint
+      })
+      this.connection.connect(() => {
+        if (this.destroying) return
+        if (this.connection.audioStream && !this.isPaused) {
+          this.connection.unpause('reconnected')
+        }
+      })
+    } else {
+      logger(
+        'warn',
+        'Player',
+        `Incomplete voice update for guild ${this.guildId}. Missing sessionId, token, or endpoint.`
+      )
+    }
   }
 
   destroy(emitClose = true) {

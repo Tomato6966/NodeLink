@@ -2,7 +2,12 @@ import fs from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PATH_VERSION } from '../constants.js'
-import { logger, sendResponse, verifyMethod } from '../utils.js'
+import {
+  logger,
+  sendResponse,
+  verifyMethod,
+  sendErrorResponse
+} from '../utils.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -82,7 +87,10 @@ async function requestHandler(nodelink, req, res) {
       })
       req.on('end', () => {
         try {
-          if (req.headers['content-type']?.includes('application/json') && body) {
+          if (
+            req.headers['content-type']?.includes('application/json') &&
+            body
+          ) {
             body = JSON.parse(body)
           }
         } catch (error) {
@@ -91,18 +99,13 @@ async function requestHandler(nodelink, req, res) {
             'Server',
             `Failed to parse JSON body: ${error.message}. Path: ${parsedUrl.pathname}, Content-Type: ${req.headers['content-type'] || 'N/A'}, Raw Body: '${body}', Headers: ${JSON.stringify(req.headers)}`
           )
-          sendResponse(
+          sendErrorResponse(
             req,
             res,
-            {
-              timestamp: Date.now(),
-              status: 400,
-              error: 'Invalid JSON',
-              message: error.message || 'Failed to parse JSON body',
-              trace: new Error().stack,
-              path: parsedUrl.pathname
-            },
             400,
+            'Invalid JSON',
+            error.message || 'Failed to parse JSON body',
+            parsedUrl.pathname,
             trace
           )
           return
@@ -156,15 +159,15 @@ async function requestHandler(nodelink, req, res) {
     'Request',
     `${req.method} | ${clientAddress} - ${parsedUrl.pathname} not found (response 404)`
   )
-  // biome-ignore format: off
-  sendResponse(req, res, {
-    timestamp: Date.now(),
-    status: 404,
-    error: 'Not Found',
-    trace: new Error().stack,
-    message: 'The requested route was not found.',
-    path: parsedUrl.pathname,
-  }, 404, trace)
+  sendErrorResponse(
+    req,
+    res,
+    404,
+    'Not Found',
+    'The requested route was not found.',
+    parsedUrl.pathname,
+    trace
+  )
 }
 
 export default requestHandler

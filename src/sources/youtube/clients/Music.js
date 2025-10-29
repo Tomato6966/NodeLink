@@ -60,11 +60,9 @@ export default class Music extends BaseClient {
         `Failed to load results from ${sourceName}. Status: ${statusCode}`
       logger('error', 'YouTube-Music', message)
       return {
-        loadType: 'error',
-        data: { message, severity: 'common', cause: 'Upstream' }
+        exception: { message, severity: 'common', cause: 'Upstream' }
       }
     }
-
     if (searchResult.error) {
       logger(
         'error',
@@ -72,15 +70,13 @@ export default class Music extends BaseClient {
         `Error from ${sourceName} search API: ${searchResult.error.message}`
       )
       return {
-        loadType: 'error',
-        data: {
+        exception: {
           message: searchResult.error.message,
           severity: 'fault',
           cause: 'Upstream'
         }
       }
     }
-
     const tracks = []
     let videos =
       searchResult.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer

@@ -71,6 +71,7 @@ export default class LocalSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.searchTerms = ['local', 'file']
+    this.priority = 20
   }
 
   async setup() {
@@ -92,8 +93,10 @@ export default class LocalSource {
         `Path traversal attempt blocked for local source: "${query}"`
       )
       return {
-        loadType: 'error',
-        data: { message: 'Path traversal is not allowed.', severity: 'common' }
+        exception: {
+          message: 'Path traversal is not allowed.',
+          severity: 'common'
+        }
       }
     }
 

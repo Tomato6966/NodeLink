@@ -1,29 +1,33 @@
-import { logger } from '../utils.js'
+import Joi from 'joi'
+import { logger, sendResponse, sendErrorResponse } from '../utils.js'
+
+const loadTracksSchema = Joi.object({
+  identifier: Joi.string().required().messages({
+    'string.empty': 'identifier parameter cannot be empty.',
+    'any.required': 'identifier parameter is required.'
+  })
+})
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const sendError = (status, error, message) => {
-    // biome-ignore format: off
-    sendResponse(req, res, {
-      timestamp: Date.now(),
-      status,
-      error,
-      trace: new Error().stack,
-      message,
-      path: parsedUrl.pathname,
-    }, status);
-  }
+  const { error, value } = loadTracksSchema.validate({
+    identifier: parsedUrl.searchParams.get('identifier')
+  })
 
-  const identifier = parsedUrl.searchParams.get('identifier')
-  logger('debug', 'Tracks', `Loading tracks with identifier: "${identifier}"`)
-
-  if (!identifier) {
-    logger('warn', 'Tracks', 'Missing identifier parameter')
-    return sendError(
+  if (error) {
+    logger('warn', 'Tracks', error.details[0].message)
+    return sendErrorResponse(
+      req,
+      res,
       400,
       'missing identifier parameter',
-      'identifier parameter is required'
+      error.details[0].message,
+      parsedUrl.pathname,
+      true
     )
   }
+
+  const identifier = value.identifier
+  logger('debug', 'Tracks', `Loading tracks with identifier: "${identifier}"`)
 
   try {
     let result
@@ -38,10 +42,14 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       const match = re.exec(identifier)
       if (!match) {
         logger('warn', 'Tracks', `Invalid identifier: "${identifier}"`)
-        return sendError(
+        return sendErrorResponse(
+          req,
+          res,
           400,
           'invalid identifier parameter',
-          'identifier parameter is invalid'
+          'identifier parameter is invalid',
+          parsedUrl.pathname,
+          true
         )
       }
 
@@ -63,10 +71,14 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       `Failed to load track with identifier "${identifier}":`,
       err
     )
-    return sendError(
+    return sendErrorResponse(
+      req,
+      res,
       500,
       'failed to load track',
-      err.message || 'Failed to load track'
+      err.message || 'Failed to load track',
+      parsedUrl.pathname,
+      true
     )
   }
 }

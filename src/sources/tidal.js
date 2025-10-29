@@ -10,6 +10,7 @@ export default class TidalSource {
     this.patterns = [
       /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9\-]+)/
     ]
+    this.priority = 90
     this.token = this.config?.token
     this.countryCode = this.config?.countryCode || 'US'
     this.playlistLoadLimit = this.config?.playlistLoadLimit ?? 2
@@ -66,8 +67,7 @@ export default class TidalSource {
       return { loadType: 'search', data: tracks }
     } catch (e) {
       return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault' }
+        exception: { message: e.message, severity: 'fault' }
       }
     }
   }
@@ -177,8 +177,7 @@ export default class TidalSource {
       return { loadType: 'empty', data: {} }
     } catch (e) {
       return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault' }
+        exception: { message: e.message, severity: 'fault' }
       }
     }
   }

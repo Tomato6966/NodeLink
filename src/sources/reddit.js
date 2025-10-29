@@ -26,6 +26,7 @@ export default class RedditSource {
       /^https?:\/\/(?:www\.)?reddit\.com\/video\/[^/]+/,
       /^https?:\/\/(?:www\.)?reddit\.com\/r\/[^/]+\/s\/[^/]+/
     ]
+    this.priority = 65
   }
 
   async setup() {
@@ -37,7 +38,12 @@ export default class RedditSource {
   }
 
   async search() {
-    return { loadType: 'empty', data: {} }
+    return {
+      exception: {
+        message: 'Search not supported for Reddit',
+        severity: 'common'
+      }
+    }
   }
 
   async resolve(url) {
@@ -46,8 +52,7 @@ export default class RedditSource {
 
     if (result.error) {
       return {
-        loadType: 'error',
-        data: { message: result.error, severity: 'fault' }
+        exception: { message: result.error, severity: 'fault' }
       }
     }
 

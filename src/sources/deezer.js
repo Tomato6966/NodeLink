@@ -14,6 +14,7 @@ export default class DeezerSource {
       /^https?:\/\/(?:www\.)?deezer\.com\/(?:[a-z]+(?:-[a-z]+)?\/)?(track|album|playlist|artist)\/(\d+)$/,
       /^https?:\/\/link\.deezer\.com\/s\/([a-zA-Z0-9]+)/
     ]
+    this.priority = 80
 
     this.cookie = null
     this.csrfToken = null
@@ -79,8 +80,7 @@ export default class DeezerSource {
 
     if (error || body.error) {
       return {
-        loadType: 'error',
-        data: {
+        exception: {
           message: error?.message || body.error.message,
           severity: 'common'
         }
@@ -131,8 +131,7 @@ export default class DeezerSource {
     if (error || body.error) {
       if (body.error?.code === 800) return { loadType: 'empty', data: {} }
       return {
-        loadType: 'error',
-        data: {
+        exception: {
           message: error?.message || body.error.message,
           severity: 'fault'
         }
@@ -153,22 +152,21 @@ export default class DeezerSource {
 
         if (tracksRes.error || !tracksRes.body?.data) {
           return {
-            loadType: 'error',
-            data: {
+            exception: {
               message: 'Could not fetch playlist tracks.',
               severity: 'common'
             }
           }
         }
 
-        const tracks = [];
+        const tracks = []
         for (const item of tracksRes.body.data) {
           tracks.push(
             this.buildTrack(
               item,
               playlistData.cover_xl || playlistData.picture_xl
             )
-          );
+          )
         }
 
         return {
@@ -191,8 +189,7 @@ export default class DeezerSource {
 
         if (topTracksRes.error || topTracksRes.body.error) {
           return {
-            loadType: 'error',
-            data: {
+            exception: {
               message:
                 topTracksRes.error?.message || topTracksRes.body.error.message,
               severity: 'common'

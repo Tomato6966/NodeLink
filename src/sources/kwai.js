@@ -7,6 +7,7 @@ export default class KwaiSource {
     this.patterns = [
       /^https?:\/\/(?:www\.)?kwai\.com\/(?:@[\w-]+\/)?video\/(\d+)/
     ]
+    this.priority = 60
   }
 
   async setup() {
@@ -95,8 +96,7 @@ export default class KwaiSource {
 
   async search(query) {
     throw {
-      loadType: 'error',
-      data: {
+      exception: {
         message: 'Search not supported for Kwai',
         severity: 'fault',
         cause: 'Kwai Source'
@@ -113,8 +113,7 @@ export default class KwaiSource {
       return { loadType: 'track', data: track }
     } catch (error) {
       return {
-        loadType: 'error',
-        data: {
+        exception: {
           message: error.message || 'Invalid Kwai URL',
           severity: 'fault',
           cause: 'Kwai Source'

@@ -60,11 +60,9 @@ export default class Web extends BaseClient {
         `Failed to load results from ${sourceName}. Status: ${statusCode}`
       logger('error', 'YouTube-Web', message)
       return {
-        loadType: 'error',
-        data: { message, severity: 'common', cause: 'Upstream' }
+        exception: { message, severity: 'common', cause: 'Upstream' }
       }
     }
-
     if (searchResult.error) {
       logger(
         'error',
@@ -72,15 +70,13 @@ export default class Web extends BaseClient {
         `Error from ${sourceName} search API: ${searchResult.error.message}`
       )
       return {
-        loadType: 'error',
-        data: {
+        exception: {
           message: searchResult.error.message,
           severity: 'fault',
           cause: 'Upstream'
         }
       }
     }
-
     const tracks = []
     const allSections = searchResult.contents?.sectionListRenderer?.contents
     const lastIdx = allSections?.length - 1
@@ -144,8 +140,7 @@ export default class Web extends BaseClient {
             `Could not parse video ID from URL: ${url}`
           )
           return {
-            loadType: 'error',
-            data: {
+            exception: {
               message: 'Invalid video URL.',
               severity: 'common',
               cause: 'Input'
@@ -161,8 +156,7 @@ export default class Web extends BaseClient {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
           logger('error', 'youtube-web', message)
           return {
-            loadType: 'error',
-            data: { message, severity: 'common', cause: 'Upstream' }
+            exception: { message, severity: 'common', cause: 'Upstream' }
           }
         }
 
@@ -182,8 +176,7 @@ export default class Web extends BaseClient {
             `Could not parse playlist ID from URL: ${url}`
           )
           return {
-            loadType: 'error',
-            data: {
+            exception: {
               message: 'Invalid playlist URL.',
               severity: 'common',
               cause: 'Input'
@@ -217,16 +210,21 @@ export default class Web extends BaseClient {
           }
         )
 
-        if (statusCode !== 200) {
-          const errMsg = `Failed to fetch playlist. Status: ${statusCode}`
+        if (statusCode !== 200 || playlistResponse?.error) {
+          const errMsg =
+            playlistResponse?.error?.message ||
+            `Failed to fetch playlist. Status: ${statusCode}`
           logger(
             'error',
             'youtube-web',
             `Error loading playlist ${playlistId}: ${errMsg}`
           )
           return {
-            loadType: 'error',
-            data: { message: errMsg, severity: 'common', cause: 'Upstream' }
+            exception: {
+              message: errMsg,
+              severity: 'common',
+              cause: 'Upstream'
+            }
           }
         }
 

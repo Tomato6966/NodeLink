@@ -155,6 +155,7 @@ export default class NicoVideoSource {
       /^https?:\/\/(?:www\.)?nicovideo\.jp\/watch\/(\w+)/,
       /^https?:\/\/nico\.ms\/(\w+)/
     ]
+    this.priority = 75
   }
   async setup() {
     logger('info', 'Sources', 'Loaded NicoVideo source.')
@@ -188,8 +189,7 @@ export default class NicoVideoSource {
     )
     if (error || statusCode !== 200) {
       return {
-        loadType: 'error',
-        data: {
+        exception: {
           message: `Failed to search: ${error?.message || statusCode}`,
           severity: 'fault'
         }
@@ -230,8 +230,7 @@ export default class NicoVideoSource {
     )
     if (error || statusCode !== 200) {
       return {
-        loadType: 'error',
-        data: {
+        exception: {
           message: `Failed to resolve URL: ${error?.message || statusCode}`,
           severity: 'fault'
         }
@@ -243,8 +242,7 @@ export default class NicoVideoSource {
     const videoIdFromApi = body?.data?.response?.client?.watchId
     if (!jsonLd || !videoIdFromApi) {
       return {
-        loadType: 'error',
-        data: {
+        exception: {
           message: 'Could not extract video information.',
           severity: 'common'
         }
