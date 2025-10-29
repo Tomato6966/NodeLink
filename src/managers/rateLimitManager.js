@@ -3,7 +3,7 @@ import { logger } from '../utils.js'
 export default class RateLimitManager {
   constructor(nodelink) {
     this.nodelink = nodelink
-    this.config = nodelink.options.rateLimit
+    this.config = nodelink.options?.rateLimit
     this.store = new Map()
     this.cleanupInterval = setInterval(() => this._cleanup(), this.config.global.timeWindowMs)
   }
