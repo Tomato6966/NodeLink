@@ -47,7 +47,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         await session.players.destroy(guildId)
         return sendResponse(req, res, null, 204)
       } catch (error) {
-        if (error.message.includes('Player not found')) {
+        if (error.message.toLowerCase().includes('not found')) {
           return sendResponse(
             req,
             res,

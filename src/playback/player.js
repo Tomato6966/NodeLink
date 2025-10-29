@@ -68,11 +68,12 @@ export class Player {
     this._stuckTime = 0
     this._lastStreamDataTime = 0
     this._isRecovering = false
+    this.destroying = false
     this._initConnection()
   }
 
   _initConnection() {
-    if (this.connection) return
+    if (this.connection || this.destroying) return
     this.connection = discordVoice.joinVoiceChannel({
       guildId: this.guildId,
       userId: this.session.userId,
@@ -104,6 +105,7 @@ export class Player {
   }
 
   _onConn(state) {
+    if (this.destroying) return
     this.connStatus = state.status
     if (state.status === 'connected') {
       logger(
@@ -139,6 +141,7 @@ export class Player {
   }
 
   _onPlay(state) {
+    if (this.destroying) return
     logger(
       'debug',
       'Player',
@@ -175,6 +178,7 @@ export class Player {
   }
 
   _onError(error) {
+    if (this.destroying) return
     if (this.track) {
       if (error.message.includes('ECONNRESET')) {
         logger(
@@ -256,7 +260,12 @@ export class Player {
   }
 
   _sendUpdate() {
-    if (!this.connection || this.isPaused || this.connStatus === 'destroyed')
+    if (
+      !this.connection ||
+      this.isPaused ||
+      this.connStatus === 'destroyed' ||
+      this.destroying
+    )
       return false
 
     const position = this._realPosition()
@@ -355,6 +364,10 @@ export class Player {
   }
 
   async play({ encoded, info, noReplace = false, startTime = 0, endTime = 0 }) {
+    if (this.destroying) {
+      logger('debug', 'Player', `play() aborted for guild ${this.guildId} because player is destroying`)
+      return false
+    }
     logger('debug', 'Player', `play() called for guild ${this.guildId}`, {
       encoded,
       noReplace,
@@ -442,7 +455,7 @@ export class Player {
   }
 
   async seek(position, endTime) {
-    if (!this.track) return false
+    if (this.destroying || !this.track) return false
     if (!this.track.info.isSeekable && !this.track.info.isStream) return false
 
     const seekPosition =
@@ -461,27 +474,32 @@ export class Player {
     )
       return false
 
-    const sourceName = this.track.info.sourceName
-    const unsupportedSources = ['deezer', 'local']
+    this._isSeeking = true
+    try {
+      const sourceName = this.track.info.sourceName
+      const unsupportedSources = ['deezer', 'local']
 
-    let seekPromise
-    if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
-      seekPromise = this._seekeableSeek(
-        seekPosition,
-        endTime !== undefined ? endTime : this.track.endTime
-      )
-    } else {
-      seekPromise = this._legacySeek(
-        seekPosition,
-        endTime !== undefined ? endTime : this.track.endTime
-      )
-    }
+      let seekPromise
+      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
+        seekPromise = this._seekeableSeek(
+          seekPosition,
+          endTime !== undefined ? endTime : this.track.endTime
+        )
+      } else {
+        seekPromise = this._legacySeek(
+          seekPosition,
+          endTime !== undefined ? endTime : this.track.endTime
+        )
+      }
 
-    const result = await seekPromise
-    if (result) {
-      this.emitEvent(GatewayEvents.SEEK, { position: this.position })
+      const result = await seekPromise
+      if (result) {
+        this.emitEvent(GatewayEvents.SEEK, { position: this.position })
+      }
+      return result
+    } finally {
+      this._isSeeking = false
     }
-    return result
   }
 
   async _seekeableSeek(position, endTime) {
@@ -528,13 +546,11 @@ export class Player {
       }
       resource.setFilters(this.filters)
 
-      this._isSeeking = true
       const oldStream = this.connection.play(resource)
       await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
       if (oldStream) {
         oldStream.destroy()
       }
-      this._isSeeking = false
 
       return true
     } catch (e) {
@@ -638,16 +654,14 @@ export class Player {
       'Player',
       `Playing resource for guild ${this.guildId} after legacy seek`
     )
-    this._isSeeking = true
     this.connection.play(resource)
     await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
-    this._isSeeking = false
 
     return true
   }
 
   stop() {
-    if (!this.track) return false
+    if (this.destroying || !this.track) return false
     if (this.connection && this.connStatus !== 'destroyed') {
       if (this.connection.audioStream) {
         this.connection.stop(EndReasons.STOPPED)
@@ -669,7 +683,7 @@ export class Player {
   }
 
   pause(shouldPause) {
-    if (this.isPaused === shouldPause) return false
+    if (this.destroying || this.isPaused === shouldPause) return false
     logger(
       'debug',
       'Player',
@@ -688,6 +702,7 @@ export class Player {
   }
 
   volume(level) {
+    if (this.destroying) return false
     logger(
       'debug',
       'Player',
@@ -700,7 +715,7 @@ export class Player {
   }
 
   setFilters(filters) {
-    if (!this.track) return false
+    if (this.destroying || !this.track) return false
     logger(
       'debug',
       'Player',
@@ -741,12 +756,13 @@ export class Player {
   }
 
   updateVoice({ sessionId, token, endpoint } = {}) {
-    if (!sessionId || !token || !endpoint) return
+    if (this.destroying || !sessionId || !token || !endpoint) return
     logger('debug', 'Player', `Updating voice state for guild ${this.guildId}`)
     if (!this.connection) this._initConnection()
     this.connection.voiceStateUpdate({ session_id: sessionId })
     this.connection.voiceServerUpdate({ token, endpoint })
     this.connection.connect(() => {
+      if (this.destroying) return
       if (this.connection.audioStream && !this.isPaused) {
         this.connection.unpause('reconnected')
       }
@@ -756,6 +772,9 @@ export class Player {
   }
 
   destroy(emitClose = true) {
+    if (this.destroying) return
+    this.destroying = true
+
     logger('debug', 'Player', `Destroying player for guild ${this.guildId}`)
     if (this.connection) {
       try {
