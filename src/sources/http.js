@@ -1,4 +1,4 @@
-import { encodeTrack, logger, makeRequest } from '../utils.js'
+import { encodeTrack, logger, http1makeRequest } from '../utils.js'
 
 export default class HttpSource {
   constructor(nodelink) {
@@ -16,7 +16,7 @@ export default class HttpSource {
 
   async resolve(url) {
     try {
-      const data = await makeRequest(url, { method: 'HEAD' })
+      const data = await http1makeRequest(url, { method: 'HEAD' })
       if (data.error) {
         return {
           loadType: 'error',
@@ -111,7 +111,7 @@ export default class HttpSource {
         method: 'GET',
         streamOnly: true
       }
-      const response = await makeRequest(url, opts)
+      const response = await http1makeRequest(url, opts)
       if (response.error) throw response.error
 
       const contentType = response.headers?.['content-type'] || ''
