@@ -9,7 +9,6 @@ export default class LastFMSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.patterns = [LASTFM_PATTERN]
-    this.searchTerms = ['lfm']
   }
 
   async setup() {

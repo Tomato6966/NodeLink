@@ -15,16 +15,8 @@ export default class GoogleTTSSource {
     return true
   }
 
-  isLinkMatch(link) {
-    return link.toLowerCase().startsWith('gtts:')
-  }
-
   async search(query) {
-    if (!this.isLinkMatch(query)) {
-      return { loadType: 'empty', data: {} }
-    }
-
-    const text = query.substring(5).trim()
+    const text = query
     if (!text) {
       return { loadType: 'empty', data: {} }
     }
@@ -113,7 +105,9 @@ export default class GoogleTTSSource {
       }
 
       const stream = new PassThrough()
-      response.stream.pipe(stream)
+      response.stream.on('data', (chunk) => {
+        stream.write(chunk)
+      })
 
       response.stream.on('end', () => {
         stream.emit('finishBuffering')

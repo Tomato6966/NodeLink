@@ -26,7 +26,6 @@ export default class RedditSource {
       /^https?:\/\/(?:www\.)?reddit\.com\/video\/[^/]+/,
       /^https?:\/\/(?:www\.)?reddit\.com\/r\/[^/]+\/s\/[^/]+/
     ]
-    this.searchTerms = ['rdsearch']
   }
 
   async setup() {
