@@ -43,7 +43,8 @@ export function normalizeFormat(type) {
   if (!type) return SupportedFormats.UNKNOWN
   const lowerType = type.toLowerCase()
 
-  if (lowerType.includes('opus')) return SupportedFormats.OPUS
+  if (lowerType.includes('opus') || lowerType.includes('webm'))
+    return SupportedFormats.OPUS
   if (
     lowerType.includes('aac') ||
     lowerType.includes('mp4') ||

@@ -8,8 +8,9 @@
   "main": "src/index.js",
   "dependencies": {
     "@alexanderolsen/libsamplerate-js": "^2.1.2",
+    "@discordjs/opus": "^0.10.0",
     "@ecliptia/faad2-wasm": "2.11.2-ecliptia.2",
-    "@ecliptia/seekeable-node": "1.1.1-ecliptia.4",
+    "@ecliptia/seekable-stream": "github:1Lucas1apk/seekable-stream",
     "@performanc/pwsl-server": "github:performanc/internals#PWSL-server",
     "@performanc/voice": "github:PerformanC/voice",
     "@wasm-audio-decoders/flac": "^0.2.10",
@@ -17,7 +18,6 @@
     "ip": "^2.0.1",
     "mp4box": "^2.1.2",
     "mpg123-decoder": "^1.0.3",
-    "opusscript": "^0.0.8",
     "prism-media": "^1.3.5",
     "sodium-native": "^5.0.9"
   },

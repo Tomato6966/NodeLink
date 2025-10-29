@@ -1,4 +1,4 @@
-import { SeekeableError } from '@ecliptia/seekeable-node'
+import { SeekError } from '@ecliptia/seekable-stream'
 import discordVoice from '@performanc/voice'
 import { EndReasons, GatewayEvents } from '../constants.js'
 import { logger } from '../utils.js'

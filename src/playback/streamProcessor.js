@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module'
 import { PassThrough, Readable, Transform } from 'node:stream'
 import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js'
-import { SeekeableError, SeekeableNode } from '@ecliptia/seekeable-node'
+import { seekableStream, SeekError } from '@ecliptia/seekable-stream'
 import { FLACDecoder } from '@wasm-audio-decoders/flac'
 import { OggVorbisDecoder } from '@wasm-audio-decoders/ogg-vorbis'
 import * as MP4Box from 'mp4box'
@@ -13,30 +13,6 @@ import { FiltersManager } from './filtersManager.js'
 const require = createRequire(import.meta.url)
 const { MPEGDecoder } = require('mpg123-decoder')
 const LibSampleRate = require('@alexanderolsen/libsamplerate-js')
-
-// Custom makeRequest function for SeekeableNode
-const customSeekeableMakeRequest = async (url, options, nodelinkInstance) => {
-  const response = await http1makeRequest(url, {
-    ...options,
-    nodelink: nodelinkInstance,
-    streamOnly: true,
-    disableBodyCompression: true
-  })
-
-  const headers = new Headers()
-  for (const key in response.headers) {
-    if (Object.prototype.hasOwnProperty.call(response.headers, key)) {
-      headers.append(key, response.headers[key])
-    }
-  }
-
-  return {
-    stream: response.stream,
-    statusCode: response.statusCode,
-    headers: headers,
-    error: response.error
-  }
-}
 
 class BaseAudioResource {
   constructor() {
@@ -59,9 +35,6 @@ class BaseAudioResource {
 
   destroy() {
     this._end()
-    if (this.seekeable) {
-      this.seekeable.destroy()
-    }
   }
 
   setVolume(volume) {
@@ -1325,8 +1298,7 @@ class StreamAudioResource extends BaseAudioResource {
             channels: 2,
             frameSize: 960
           })
-
-          if (lowerType.includes('webm')) {
+         if (lowerType.includes('webm')) {
             const demuxer = new prism.opus.WebmDemuxer()
             pcmStream = stream.pipe(demuxer).pipe(decoder)
             this.pipes.push(demuxer, decoder)
@@ -1406,155 +1378,48 @@ export const createSeekeableAudioResource = async (
   initialFilters,
   player
 ) => {
-  let bufferSize = 32768
-  const connectionStatus = nodelink.connectionManager?.status
-
-  if (connectionStatus === 'good') {
-    bufferSize = 65536 // 64KB
-  } else if (connectionStatus === 'average') {
-    bufferSize = 32768 // 32KB
-  } else if (
-    connectionStatus === 'bad' ||
-    connectionStatus === 'disconnected'
-  ) {
-    bufferSize = 16384 // 16KB
-  }
-
-  const seekeable = new SeekeableNode()
-
-  const seekLoadOptions = {
-    bufferSize: bufferSize,
-    onAuthError: async (oldUrl) => {
-      nodelink.logger(
-        'warn',
-        'SeekeableNode',
-        `401 Unauthorized for ${oldUrl}. Attempting to renew stream URL for track ${player.track?.info?.title}...`
-      )
-      try {
-        const newStreamInfo = await nodelink.sources.getTrackUrl(
-          player.track.info
-        )
-        if (newStreamInfo?.url) {
-          nodelink.logger(
-            'info',
-            'SeekeableNode',
-            `Stream URL successfully renewed to: ${newStreamInfo.url}`
-          )
-          player.streamInfo.url = newStreamInfo.url
-          return newStreamInfo.url
-        }
-      } catch (err) {
-        nodelink.logger(
-          'error',
-          'SeekeableNode',
-          `Failed to renew stream URL after 401: ${err.message}`
-        )
-      }
-      return null
-    }
-  }
-
   try {
-    await seekeable.load(url, {
-      ...seekLoadOptions,
-      makeRequest: (reqUrl, reqOptions) =>
-        customSeekeableMakeRequest(reqUrl, reqOptions, nodelink)
-    })
-  } catch (err) {
-    nodelink.logger(
-      'error',
-      'SeekeableNode',
-      `Seekeable load failed for ${player.track?.info?.title}: ${err.message} (Code: ${err instanceof SeekeableError ? err.code : 'UNKNOWN'}, URL: ${err.url || 'N/A'}).`
+    const { stream, meta } = await seekableStream(
+      url,
+      seekTime,
+      endTime,
+      {}
     )
-    seekeable.destroy()
+
+    const newStream = new PassThrough()
+    stream.on('data', (chunk) => {
+      newStream.write(chunk)
+    })
+    stream.on('end', () => { 
+      newStream.end()
+      newStream.emit('finishBuffering')
+    })
+    stream.on('error', (err) => {
+      newStream.emit('error', err)
+    })
+
+    return new StreamAudioResource(
+      newStream,
+      meta.codec.container,
+      nodelink,
+      initialFilters
+    )
+  } catch (err) {
+    if (err instanceof SeekError) {
+      return {
+        exception: {
+          message: err.message,
+          severity: 'fault',
+          cause: err.code
+        }
+      }
+    }
     return {
       exception: {
         message: err.message,
         severity: 'fault',
-        cause: err instanceof SeekeableError ? err.code : 'UNKNOWN'
+        cause: 'UNKNOWN'
       }
     }
   }
-
-  const { stream: demuxerStream, type } = seekeable.createAVStream(
-    seekTime / 1000,
-    endTime / 1000
-  )
-
-  const packetStream = new PassThrough()
-  demuxerStream.on('data', (packet) => {
-    if (packet?.data && packet.data.length > 0) {
-      packetStream.write(Buffer.from(packet.data))
-    }
-  })
-  demuxerStream.on('end', () => {
-    packetStream.emit('finishBuffering')
-    seekeable.destroy()
-  })
-  demuxerStream.on('error', async (err) => {
-    nodelink.logger(
-      'error',
-      'SeekeableNode-Stream',
-      `Error in demuxer stream for ${player.track?.info?.title}: ${err.message}`,
-      err
-    )
-
-    if (
-      err instanceof SeekeableError &&
-      err.code === 'NETWORK_ERROR' &&
-      err.message.includes('401 Unauthorized')
-    ) {
-      nodelink.logger(
-        'warn',
-        'SeekeableNode-Stream',
-        `401 Unauthorized during streaming for ${player.track?.info?.title}. Attempting to renew URL...`
-      )
-      try {
-        const newStreamInfo = await nodelink.sources.getTrackUrl(
-          player.track.info
-        )
-        if (newStreamInfo?.url) {
-          nodelink.logger(
-            'info',
-            'SeekeableNode-Stream',
-            `Stream URL successfully renewed to: ${newStreamInfo.url}. SeekeableNode will retry.`
-          )
-          player.streamInfo.url = newStreamInfo.url
-        } else {
-          nodelink.logger(
-            'error',
-            'SeekeableNode-Stream',
-            `Failed to renew stream URL after 401 during streaming for ${player.track?.info?.title}.`
-          )
-          throw new SeekeableError(
-            'NETWORK_ERROR',
-            'Failed to renew stream URL after 401 Unauthorized.',
-            err.url
-          )
-        }
-      } catch (renewErr) {
-        nodelink.logger(
-          'error',
-          'SeekeableNode-Stream',
-          `Exception during stream URL renewal for ${player.track?.info?.title}: ${renewErr.message}`
-        )
-        throw new SeekeableError(
-          'NETWORK_ERROR',
-          `Failed to renew stream URL: ${renewErr.message}`,
-          err.url
-        )
-      }
-    } else {
-      packetStream.emit('error', err)
-    }
-    seekeable.destroy()
-  })
-
-  return new StreamAudioResource(
-    packetStream,
-    type,
-    nodelink,
-    initialFilters,
-    seekeable
-  )
 }
