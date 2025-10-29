@@ -81,7 +81,7 @@ Its modular structure also allows swapping components, adding new sources or fil
 
 ---
 
-### Technical Dependencies
+### Dependencies
 
 Internally, NodeLink combines native and WebAssembly modules for precise audio processing, buffering, and packet handling.
 
