@@ -332,7 +332,7 @@ export default class SoundCloudSource {
 
       res.stream.on('error', onError)
       res.stream.on('end', onEnd)
-      res.stream.pipe(stream)
+      res.stream.on('data', (chunk) => stream.write(chunk))
 
       stream.on('close', () => {
         res.stream.removeListener('error', onError)
