@@ -172,11 +172,12 @@ export class Player {
     ) {
       this.connection.audioStream?.destroy()
 
-      this._resetTrack()
+      const endedTrack = this.track 
       this.emitEvent(GatewayEvents.TRACK_END, {
-        track: this.track,
+        track: endedTrack,
         reason: state.reason
       })
+      this._resetTrack()
     } else if (
       state.status === 'playing' &&
       this.track &&
@@ -455,7 +456,7 @@ export class Player {
       this._initConnection()
     }
 
-    if (!this.connection.udpInfo?.secretKey) {
+    if (!this.connection || !this.connection.udpInfo || !this.connection.udpInfo.secretKey) {
       logger(
         'debug',
         'Player',
@@ -463,11 +464,11 @@ export class Player {
       )
       await this.waitEvent(
         'stateChange',
-        (s) => s.status === 'connected' && this.connection.udpInfo?.secretKey
+        (s) => s.status === 'connected' && this.connection?.udpInfo?.secretKey
       )
     }
 
-    if (!this.connection.udpInfo?.secretKey) {
+    if (!this.connection || !this.connection.udpInfo || !this.connection.udpInfo.secretKey) {
       const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`
       logger('error', 'Player', errorMessage)
       this._onError(new Error(errorMessage))
@@ -804,11 +805,30 @@ export class Player {
 
     const { sessionId, token, endpoint } = voicePayload
 
-    if (sessionId !== undefined) this.voice.sessionId = sessionId
-    if (token !== undefined) this.voice.token = token
-    if (endpoint !== undefined) this.voice.endpoint = endpoint
+    let changed = false
+    if (sessionId !== undefined && this.voice.sessionId !== sessionId) {
+      this.voice.sessionId = sessionId
+      changed = true
+    }
+    if (token !== undefined && this.voice.token !== token) {
+      this.voice.token = token
+      changed = true
+    }
+    if (endpoint !== undefined && this.voice.endpoint !== endpoint) {
+      this.voice.endpoint = endpoint
+      changed = true
+    }
 
     if (this.voice.sessionId && this.voice.token && this.voice.endpoint) {
+      if (!changed) {
+        logger(
+          'debug',
+          'Player',
+          `Voice state for guild ${this.guildId} is unchanged. Skipping update.`
+        )
+        return
+      }
+
       logger(
         'debug',
         'Player',

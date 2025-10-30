@@ -83,13 +83,28 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               400
             )
           }
-          logger(
-            'debug',
-            'PlayerUpdate',
-            `Updating voice for guild ${guildId}:`,
-            payload.voice
-          )
-          await session.players.updateVoice(guildId, payload.voice)
+
+          const currentPlayer = session.players.get(guildId)
+          if (
+            currentPlayer &&
+            currentPlayer.voice.endpoint === endpoint &&
+            currentPlayer.voice.token === token &&
+            currentPlayer.voice.sessionId === voiceSessionId
+          ) {
+            logger(
+              'debug',
+              'PlayerUpdate',
+              `Voice payload for guild ${guildId} is identical to current state. Skipping update.`
+            )
+          } else {
+            logger(
+              'debug',
+              'PlayerUpdate',
+              `Updating voice for guild ${guildId}:`,
+              payload.voice
+            )
+            await session.players.updateVoice(guildId, payload.voice)
+          }
         }
 
         if (payload.encodedTrack) {
