@@ -153,14 +153,6 @@ export default {
     genius: {
       enabled: true
     },
-    spotify: {
-      enabled: true
-      // spDc: ''
-    },
-    deezer: {
-      enabled: true
-      // arl: ''
-    },
     musixmatch: {
       enabled: true
       // signatureSecret: ''
