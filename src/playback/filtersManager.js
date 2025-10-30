@@ -15,6 +15,7 @@ import Rotation from './filters/rotation.js'
 import Timescale from './filters/timescale.js'
 import Tremolo from './filters/tremolo.js'
 import Vibrato from './filters/vibrato.js'
+import Spatial from './filters/spatial.js'
 
 export class FiltersManager extends Transform {
   constructor(nodelink, options = {}) {
@@ -36,7 +37,8 @@ export class FiltersManager extends Transform {
       compressor: new Compressor(),
       echo: new Echo(),
       phaser: new Phaser(),
-      timescale: new Timescale()
+      timescale: new Timescale(),
+      spatial: new Spatial()
     }
 
     this.update(options)
