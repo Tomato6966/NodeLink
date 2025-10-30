@@ -187,7 +187,16 @@ setInterval(() => {
           thresholdMs: zombieThreshold
         })
       }
-      player._sendUpdate()
+      try {
+        player._sendUpdate()
+      } catch (updateError) {
+        logger(
+          'error',
+          'Worker',
+          `Error during player update for guild ${player.guildId}: ${updateError.message}`,
+          updateError
+        )
+      }
     }
   }
 
