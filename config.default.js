@@ -125,7 +125,8 @@ export default {
       playlistLoadLimit: 1, // 0 means no limit (loads all tracks), 1 = 100 tracks, 2 = 100 and so on!
       playlistPageLoadConcurrency: 10, // How many pages to load simultaneously
       albumLoadLimit: 1, // 0 means no limit (loads all tracks), 1 = 50 tracks, 2 = 100 tracks, etc.
-      albumPageLoadConcurrency: 5 // How many pages to load simultaneously
+      albumPageLoadConcurrency: 5, // How many pages to load simultaneously
+      allowExplicit: true // If true plays the explicit version of the song, If false plays the Non-Explicit version of the song. Normal songs are not affected.
     },
     tidal: {
       enabled: true,
