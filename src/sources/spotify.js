@@ -337,7 +337,7 @@ export default class SpotifySource {
           )
 
           return {
-            loadType: 'album',
+            loadType: 'playlist',
             data: {
               info: { name: playlistData.name, selectedTrack: 0 },
               tracks
