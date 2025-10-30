@@ -18,6 +18,7 @@ export default class WorkerManager {
     this.workerLoad = new Map()
     this.idleWorkers = new Map()
     this.scaleCheckInterval = null
+    this.workerFailureHistory = new Map()
 
     logger(
       'info',
@@ -34,6 +35,7 @@ export default class WorkerManager {
         'Cluster',
         `Worker ${worker.process.pid} exited (code=${code}). Respawning...`
       )
+      this._updateWorkerFailureHistory(worker.id, code, signal)
       this.removeWorker(worker.id)
       if (
         this.workers.length < this.minWorkers ||
@@ -140,6 +142,28 @@ export default class WorkerManager {
     }
   }
 
+  _updateWorkerFailureHistory(workerId, code, signal) {
+    if (!this.workerFailureHistory.has(workerId)) {
+      this.workerFailureHistory.set(workerId, {
+        count: 0,
+        lastFailure: null,
+        recentFailures: []
+      })
+    }
+    const history = this.workerFailureHistory.get(workerId)
+    history.count++
+    history.lastFailure = Date.now()
+    history.recentFailures.push({ timestamp: Date.now(), code, signal })
+    if (history.recentFailures.length > 5) {
+      history.recentFailures.shift()
+    }
+    logger(
+      'debug',
+      'Cluster',
+      `Worker ${workerId} failure history updated: ${JSON.stringify(history)}`
+    )
+  }
+
   forkWorker() {
     if (this.workers.length >= this.maxWorkers) {
       logger(
@@ -152,6 +176,7 @@ export default class WorkerManager {
     const worker = cluster.fork()
     this.workers.push(worker)
     this.workerLoad.set(worker.id, 0)
+    this.workerFailureHistory.set(worker.id, { count: 0, lastFailure: null, recentFailures: [] })
     logger('info', 'Cluster', `Spawned worker ${worker.process.pid}`)
 
     worker.on('message', (msg) => this.handleWorkerMessage(worker, msg))
@@ -318,6 +343,8 @@ export default class WorkerManager {
     for (const worker of this.workers) {
       if (worker.isConnected()) {
         worker.process.kill()
+      } else {
+        logger('debug', 'Cluster', `Worker ${worker.id} is not connected, skipping kill.`)
       }
     }
     logger(
@@ -330,7 +357,12 @@ export default class WorkerManager {
   execute(worker, type, payload) {
     return new Promise((resolve, reject) => {
       const requestId = crypto.randomBytes(16).toString('hex')
-      this.pendingRequests.set(requestId, { resolve, reject })
+      const timeout = setTimeout(() => {
+        this.pendingRequests.delete(requestId)
+        reject(new Error(`Worker command timeout for request ${requestId}`))
+      }, 30000) // 30 seconds timeout for worker commands
+
+      this.pendingRequests.set(requestId, { resolve, reject, timeout })
 
       worker.send({ type, requestId, payload })
     })
