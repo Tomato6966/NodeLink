@@ -7,262 +7,203 @@ import {
   makeRequest
 } from '../utils.js'
 
-export default class {
+const BASE_URL = 'https://api-v2.soundcloud.com'
+const SOUNDCLOUD_URL = 'https://soundcloud.com'
+const ASSET_PATTERN = /https:\/\/a-v2\.sndcdn\.com\/assets\/[a-zA-Z0-9-]+\.js/g
+const CLIENT_ID_PATTERN = /client_id=([a-zA-Z0-9]{32})/
+const TRACK_PATTERN = /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:sets\/)?[^/\s]+$/
+const ASSET_INDEX = 5
+const BATCH_SIZE = 50
+const DEFAULT_PRIORITY = 85
+
+export default class SoundCloudSource {
   constructor(nodelink) {
     this.nodelink = nodelink
-    this.baseUrl = 'https://api-v2.soundcloud.com'
+    this.baseUrl = BASE_URL
     this.searchTerms = ['scsearch']
-    this.patterns = [
-      /^https?:\/\/(www\.)?soundcloud\.com\/[^/\s]+\/[^/\s]+$/,
-      /^https?:\/\/m\.soundcloud\.com\/[^/\s]+\/[^/\s]+$/,
-      /^https?:\/\/(www\.)?soundcloud\.com\/[^/\s]+\/sets\/[^/\s]+$/,
-      /^https?:\/\/m\.soundcloud\.com\/[^/\s]+\/sets\/[^/\s]+$/
-    ]
-    this.priority = 85
-
-    this.clientId = this.nodelink.options?.sources?.clientId ?? null
+    this.patterns = [TRACK_PATTERN]
+    this.priority = DEFAULT_PRIORITY
+    this.clientId = nodelink.options?.sources?.clientId ?? null
   }
 
   async setup() {
     if (this.clientId) return true
+
     try {
-      const mainPageRequest = await makeRequest('https://soundcloud.com', {
-        method: 'GET'
-      })
-      if (!mainPageRequest) {
-        logger('error', 'Sources', 'Failed to load SoundCloud main page')
-        return false
-      }
-      if (mainPageRequest.error) {
-        logger(
-          'error',
-          'Sources',
-          `Failed to fetch SoundCloud clientId: ${mainPageRequest.error.message}`
-        )
-        return false
-      }
-      const assetIdMatch = mainPageRequest.body.match(
-        /https:\/\/a-v2.sndcdn.com\/assets\/([a-zA-Z0-9-]+).js/gs
-      )
-      if (!assetIdMatch || !assetIdMatch[5]) {
-        logger(
-          'warn',
-          'Sources',
-          'SoundCloud asset script URL not found at expected index. Source setup failed.'
-        )
-        return false
-      }
-      const assetId = assetIdMatch[5]
-
-      const assetRequest = await http1makeRequest(assetId)
-      if (!assetRequest) {
-        logger(
-          'error',
-          'Sources',
-          'Failed to load SoundCloud asset. Source setup failed.'
-        )
-        return false
-      }
-      if (assetRequest.error) {
-        logger(
-          'error',
-          'Sources',
-          `Failed to fetch SoundCloud assets: ${assetRequest.error.message}. Source setup failed.`
-        )
+      const mainPage = await makeRequest(SOUNDCLOUD_URL, { method: 'GET' })
+      if (!mainPage || mainPage.error) {
+        this._logError('Failed to load SoundCloud main page', mainPage?.error)
         return false
       }
 
-      const clientIdMatch = assetRequest.body.match(
-        /client_id=([a-zA-Z0-9]{32})/
-      )
-      if (!clientIdMatch || !clientIdMatch[1]) {
-        logger(
-          'warn',
-          'Sources',
-          'SoundCloud client_id not found in asset script. Source setup failed.'
-        )
+      const assetMatches = [...mainPage.body.matchAll(ASSET_PATTERN)]
+      if (!assetMatches[ASSET_INDEX]) {
+        logger('warn', 'Sources', 'SoundCloud asset URL not found')
         return false
       }
-      const clientId = clientIdMatch[1]
-      if (!clientId) {
-        logger(
-          'error',
-          'Sources',
-          'Failed to fetch SoundCloud clientId. Source setup failed.'
-        )
+
+      const asset = await http1makeRequest(assetMatches[ASSET_INDEX][0])
+      if (!asset || asset.error) {
+        this._logError('Failed to load asset', asset?.error)
         return false
       }
-      logger(
-        'info',
-        'Sources',
-        `Loaded SoundCloud source (clientId: ${clientId})`
-      )
-      this.clientId = clientId
+
+      const match = asset.body.match(CLIENT_ID_PATTERN)
+      if (!match?.[1]) {
+        logger('warn', 'Sources', 'client_id not found')
+        return false
+      }
+
+      this.clientId = match[1]
+      logger('info', 'Sources', `Loaded SoundCloud (clientId: ${this.clientId})`)
+      return true
     } catch (err) {
-      logger(
-        'error',
-        'Sources',
-        `Error setting up SoundCloud source: ${err.message}`
-      )
+      this._logError('Setup failed', err)
       return false
     }
-    return true
   }
 
   match() {}
 
   async search(query) {
-    const req = await http1makeRequest(
-      `https://api-v2.soundcloud.com/search?q=${encodeURI(query)}&variant_ids=&facet=model&user_id=992000-167630-994991-450103&client_id=${this.clientId}&limit=${this.nodelink.options.maxSearchResults}&offset=0&linked_partitioning=1&app_version=1679652891&app_locale=en`
-    )
-    if (req.error || req.statusCode !== 200) {
-      return {
-        loadType: 'error',
-        data: {
-          message: req.error
-            ? req.error.message
-            : `SoundCloud returned invalid status code: ${req.statusCode}`,
-          severity: 'fault',
-          cause: 'Unknown'
-        }
-      }
-    }
-    const { body } = req
-    if (body.total_results === 0) {
-      logger(
-        'debug',
-        'Sources',
-        `No results found on SoundCloud for: "${query}"`
-      )
-      return {
-        loadType: 'empty',
-        data: {}
-      }
+    if (!this._isValidString(query)) {
+      return this._buildError('Invalid query')
     }
 
-    const tracks = []
-    if (body.collection > this.nodelink.options.maxSearchResults)
-      body.collection = body.collection.filter(
-        (item, index) =>
-          index < this.nodelink.options.maxSearchResults ||
-          item.kind === 'track'
-      )
-    for (const item of body.collection) {
-      if (item.kind !== 'track') continue
-      const track = this._buildTrack(item)
-      tracks.push(track)
-    }
+    try {
+      const params = new URLSearchParams({
+        q: query,
+        client_id: this.clientId,
+        limit: String(this.nodelink.options.maxSearchResults),
+        offset: '0',
+        linked_partitioning: '1',
+        facet: 'model'
+      })
 
-    logger(
-      'debug',
-      'Sources',
-      `Found ${tracks.length} tracks on SoundCloud for "${query}"`
-    )
-    return {
-      loadType: 'search',
-      data: tracks
+      const req = await http1makeRequest(`${BASE_URL}/search?${params}`)
+      if (req.error || req.statusCode !== 200) {
+        return this._buildError(req.error?.message ?? `Status: ${req.statusCode}`)
+      }
+
+      if (!req.body?.total_results) {
+        logger('debug', 'Sources', `No results for "${query}"`)
+        return { loadType: 'empty', data: {} }
+      }
+
+      const tracks = this._processTracks(req.body.collection)
+      logger('debug', 'Sources', `Found ${tracks.length} tracks for "${query}"`)
+
+      return { loadType: 'search', data: tracks }
+    } catch (err) {
+      this._logError('Search failed', err)
+      return this._buildError(err.message)
     }
   }
 
   async resolve(url) {
-    const request = await http1makeRequest(
-      `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(url)}&client_id=${this.clientId}`
-    )
+    if (!this._isValidString(url)) {
+      return this._buildError('Invalid URL')
+    }
 
-    if (request.statusCode === 404) return { loadType: 'empty', data: {} }
+    try {
+      const reqUrl = `${BASE_URL}/resolve?${new URLSearchParams({ url, client_id: this.clientId })}`
+      const req = await http1makeRequest(reqUrl)
 
-    if (request.error || request.statusCode !== 200) {
-      return {
-        loadType: 'error',
-        data: {
-          message:
-            request.error?.message ||
-            `Invalid status code: ${request.statusCode}`,
-          severity: 'fault',
-          cause: 'Unknown'
-        }
+      if (req.statusCode === 404) return { loadType: 'empty', data: {} }
+      if (req.error || req.statusCode !== 200) {
+        return this._buildError(req.error?.message ?? `Status: ${req.statusCode}`)
+      }
+
+      const { body } = req
+      if (!body?.kind) return this._buildError('Invalid response')
+
+      if (body.kind === 'track') {
+        return { loadType: 'track', data: this._buildTrack(body) }
+      }
+
+      if (body.kind === 'playlist') {
+        return await this._resolvePlaylist(body)
+      }
+
+      return { loadType: 'empty', data: {} }
+    } catch (err) {
+      this._logError('Resolve failed', err)
+      return this._buildError(err.message)
+    }
+  }
+
+  async _resolvePlaylist(body) {
+    const complete = []
+    const ids = []
+
+    for (const t of body.tracks ?? []) {
+      if (t?.title && t?.user) {
+        complete.push(t)
+      } else if (t?.id) {
+        ids.push(t.id)
       }
     }
 
-    const { body } = request
-    if (!body || typeof body !== 'object') {
-      return {
-        loadType: 'error',
-        data: {
-          message: 'Invalid SoundCloud response',
-          severity: 'fault',
-          cause: 'Unknown'
-        }
-      }
-    }
+    while (ids.length > 0) {
+      const batch = ids.splice(0, BATCH_SIZE)
+      const batchUrl = `${BASE_URL}/tracks?${new URLSearchParams({
+        ids: batch.join(','),
+        client_id: this.clientId
+      })}`
 
-    if (body.kind === 'track') {
-      return {
-        loadType: 'track',
-        data: this._buildTrack(body)
-      }
-    }
-
-    if (body.kind === 'playlist') {
-      const trackIds = []
-      const completeTracks = []
-
-      for (const t of body.tracks) {
-        if (t?.title && t.user) {
-          completeTracks.push(t)
-        } else if (t?.id) {
-          trackIds.push(t.id)
-        }
-      }
-
-      while (trackIds.length) {
-        const batch = trackIds.splice(0, 50)
-        const res = await http1makeRequest(
-          `https://api-v2.soundcloud.com/tracks?ids=${batch.join('%2C')}&client_id=${this.clientId}`,
-          {
-            method: 'GET'
-          }
-        )
-
+      try {
+        const res = await http1makeRequest(batchUrl, { method: 'GET' })
         if (Array.isArray(res.body)) {
-          completeTracks.push(...res.body)
+          complete.push(...res.body)
         } else {
           break
         }
-      }
-
-      if (completeTracks.length > this.nodelink.options.maxAlbumPlaylistLength)
-        completeTracks.length = this.nodelink.options.maxAlbumPlaylistLength
-
-      const tracks = completeTracks.map((item) => this._buildTrack(item))
-
-      return {
-        loadType: 'playlist',
-        data: {
-          info: {
-            name: body.title || 'Untitled playlist',
-            selectedTrack: 0
-          },
-          pluginInfo: {},
-          tracks
-        }
+      } catch (err) {
+        this._logError('Batch fetch failed', err)
+        break
       }
     }
 
-    return { loadType: 'empty', data: {} }
+    const limit = this.nodelink.options.maxAlbumPlaylistLength
+    const tracks = complete.slice(0, limit).map(t => this._buildTrack(t))
+
+    return {
+      loadType: 'playlist',
+      data: {
+        info: {
+          name: body.title || 'Untitled playlist',
+          selectedTrack: 0
+        },
+        pluginInfo: {},
+        tracks
+      }
+    }
+  }
+
+  _processTracks(collection) {
+    const max = this.nodelink.options.maxSearchResults
+    const tracks = []
+
+    for (let i = 0; i < collection.length && tracks.length < max; i++) {
+      if (collection[i]?.kind === 'track') {
+        tracks.push(this._buildTrack(collection[i]))
+      }
+    }
+
+    return tracks
   }
 
   _buildTrack(item) {
     const info = {
-      title: item.title,
-      author: item.user.username,
-      length: item.duration,
-      identifier: item.id.toString(),
+      title: item.title ?? 'Unknown',
+      author: item.user?.username ?? 'Unknown',
+      length: item.duration ?? 0,
+      identifier: String(item.id ?? ''),
       isSeekable: true,
       isStream: false,
-      uri: item.permalink_url,
-      artworkUrl: item.artwork_url || null,
-      isrc: item.publisher_metadata?.isrc || null,
+      uri: item.permalink_url ?? '',
+      artworkUrl: item.artwork_url ?? null,
+      isrc: item.publisher_metadata?.isrc ?? null,
       sourceName: 'soundcloud',
       position: 0
     }
@@ -275,110 +216,65 @@ export default class {
   }
 
   async getTrackUrl(info) {
-    const req = await http1makeRequest(
-      `https://api-v2.soundcloud.com/resolve?url=https://api.soundcloud.com/tracks/${info.identifier}&client_id=${this.clientId}`
-    )
-    const body = req.body
-    if (req.error || req.statusCode !== 200) {
-      logger(
-        'error',
-        'Sources',
-        `SoundCloud getTrackUrl error: ${req.error?.message}`
-      )
-      return {
-        exception: {
-          message:
-            req.error?.message ||
-            `SoundCloud returned invalid status code: ${req.statusCode}`,
-          severity: 'fault',
-          cause: 'Unknown'
-        }
-      }
-    }
-    if (body.errors) {
-      logger(
-        'error',
-        'Sources',
-        `SoundCloud getTrackUrl error: ${body.errors[0].error_message}`
-      )
-      return {
-        exception: {
-          message: body.errors[0].error_message,
-          severity: 'fault',
-          cause: 'Unknown'
-        }
-      }
+    if (!info?.identifier) {
+      return this._buildException('Invalid track info')
     }
 
-    const mp3Transcoding = body.media.transcodings.find(
-      (transcoding) =>
-        transcoding.format.protocol === 'progressive' &&
-        transcoding.format.mime_type === 'audio/mpeg'
+    try {
+      const trackUrl = `https://api.soundcloud.com/tracks/${info.identifier}`
+      const reqUrl = `${BASE_URL}/resolve?${new URLSearchParams({ url: trackUrl, client_id: this.clientId })}`
+      const req = await http1makeRequest(reqUrl)
+
+      if (req.error || req.statusCode !== 200) {
+        this._logError('getTrackUrl failed', req.error)
+        return this._buildException(req.error?.message ?? `Status: ${req.statusCode}`)
+      }
+
+      if (req.body?.errors?.[0]) {
+        const msg = req.body.errors[0].error_message
+        this._logError('API error', new Error(msg))
+        return this._buildException(msg)
+      }
+
+      return await this._selectTranscoding(req.body)
+    } catch (err) {
+      this._logError('getTrackUrl exception', err)
+      return this._buildException(err.message)
+    }
+  }
+
+  async _selectTranscoding(body) {
+    const transcodings = body.media?.transcodings ?? []
+    if (transcodings.length === 0) {
+      return this._buildException('No transcodings available')
+    }
+
+    const mp3 = transcodings.find(t =>
+      t.format?.protocol === 'progressive' &&
+      t.format?.mime_type === 'audio/mpeg'
     )
 
-    const oggOpus = body.media.transcodings.find(
-      (transcoding) =>
-        transcoding.format.protocol === 'hls' &&
-        transcoding.format.mime_type === 'audio/ogg; codecs="opus"'
+    const opus = transcodings.find(t =>
+      t.format?.protocol === 'hls' &&
+      t.format?.mime_type?.includes('opus')
     )
 
-    const transcoding = mp3Transcoding || oggOpus || body.media.transcodings[0]
+    const selected = mp3 || opus || transcodings[0]
+    const streamUrl = `${selected.url}?client_id=${this.clientId}`
+    const urlReq = await http1makeRequest(streamUrl)
 
-    if (!transcoding) {
-      return {
-        exception: {
-          message: 'No valid transcoding found',
-          severity: 'fault',
-          cause: 'Unknown'
-        }
-      }
+    if (!urlReq.body?.url) {
+      return this._buildException('Failed to resolve stream URL')
     }
 
-    let url = `${transcoding.url}?client_id=${this.clientId}`
-
-    if (transcoding.format.protocol === 'hls') {
-      const urlReq = await http1makeRequest(url)
-      if (urlReq.body?.url) {
-        url = urlReq.body.url
-      } else {
-        return {
-          exception: {
-            message: 'Failed to resolve HLS stream URL',
-            severity: 'fault',
-            cause: 'Unknown'
-          }
-        }
-      }
-    } else if (transcoding.format.protocol === 'progressive') {
-      const urlReq = await http1makeRequest(url)
-      if (urlReq.body?.url) {
-        url = urlReq.body.url
-      } else {
-        return {
-          exception: {
-            message: 'Failed to resolve progressive stream URL',
-            severity: 'fault',
-            cause: 'Unknown'
-          }
-        }
-      }
-    }
-
-    let format = 'arbitrary'
-    if (transcoding.format.mime_type) {
-      const mimeType = transcoding.format.mime_type.toLowerCase()
-      if (mimeType.includes('mpeg')) {
-        format = 'mp3'
-      } else if (mimeType.includes('opus')) {
-        format = 'opus'
-      } else if (mimeType.includes('aac')) {
-        format = 'aac'
-      }
-    }
+    const mimeType = selected.format?.mime_type?.toLowerCase() ?? ''
+    const format = mimeType.includes('mpeg') ? 'mp3' :
+                   mimeType.includes('opus') ? 'opus' :
+                   mimeType.includes('aac') ? 'aac' : 'arbitrary'
 
     return {
-      url,
-      protocol: transcoding.format.protocol,
+      url: urlReq.body.url,
+      protocol: selected.format?.protocol ?? 'progressive',
       format
     }
   }
@@ -387,50 +283,83 @@ export default class {
     const stream = new PassThrough()
 
     if (protocol === 'progressive') {
-      try {
-        const response = await http1makeRequest(url, {
-          method: 'GET',
-          streamOnly: true
-        })
-
-        if (response.error) {
-          stream.destroy(
-            new Error(`Failed to load stream: ${response.error.message}`)
-          )
-          return { stream }
-        }
-
-        response.stream.pipe(stream)
-
-        response.stream.on('error', (err) => {
-          logger('error', 'Sources', `Progressive stream error: ${err.message}`)
-          if (!stream.destroyed) {
-            stream.destroy(err)
-          }
-        })
-
-        response.stream.on('end', () => {
-          stream.emit('finishBuffering')
-        })
-      } catch (err) {
-        logger(
-          'error',
-          'Sources',
-          `Failed to load progressive stream: ${err.message}`
-        )
-        stream.destroy(err)
-      }
+      this._handleProgressive(url, stream)
     } else if (protocol === 'hls') {
-      loadHLS(url, stream, false, true).catch((err) => {
-        logger('error', 'Sources', `HLS stream error: ${err.message}`)
-        if (!stream.destroyed) {
-          stream.destroy(err)
-        }
-      })
+      this._handleHls(url, stream)
     } else {
       stream.destroy(new Error(`Unsupported protocol: ${protocol}`))
     }
 
     return { stream }
+  }
+
+  async _handleProgressive(url, stream) {
+    try {
+      const res = await http1makeRequest(url, { method: 'GET', streamOnly: true })
+
+      if (res.error) {
+        stream.destroy(new Error(`Stream load failed: ${res.error.message}`))
+        return
+      }
+
+      const onError = err => {
+        logger('error', 'Sources', `Progressive error: ${err.message}`)
+        if (!stream.destroyed) stream.destroy(err)
+      }
+
+      const onEnd = () => stream.emit('finishBuffering')
+
+      res.stream.on('error', onError)
+      res.stream.on('end', onEnd)
+      res.stream.pipe(stream)
+
+      // close stream when done, fixes a resource leak
+      stream.on('close', () => {
+        res.stream.removeListener('error', onError)
+        res.stream.removeListener('end', onEnd)
+        if (!res.stream.destroyed) res.stream.destroy()
+      })
+    } catch (err) {
+      this._logError('Progressive stream failed', err)
+      stream.destroy(err)
+    }
+  }
+
+  async _handleHls(url, stream) {
+    try {
+      await loadHLS(url, stream, false, true)
+    } catch (err) {
+      this._logError('HLS stream failed', err)
+      if (!stream.destroyed) stream.destroy(err)
+    }
+  }
+
+  _isValidString(val) {
+    return typeof val === 'string' && val.length > 0
+  }
+
+  _logError(msg, err) {
+    logger('error', 'Sources', `${msg}: ${err?.message ?? 'Unknown'}`)
+  }
+
+  _buildError(message) {
+    return {
+      loadType: 'error',
+      data: {
+        message,
+        severity: 'fault',
+        cause: 'Unknown'
+      }
+    }
+  }
+
+  _buildException(message) {
+    return {
+      exception: {
+        message,
+        severity: 'fault',
+        cause: 'Unknown'
+      }
+    }
   }
 }
