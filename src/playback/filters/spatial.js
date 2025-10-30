@@ -49,8 +49,8 @@ export default class Spatial {
       this.leftDelay.write(clamp16Bit(leftSample + delayedLeft * feedback))
       this.rightDelay.write(clamp16Bit(rightSample + delayedRight * feedback))
 
-      const newLeft = (leftSample * dry) + (delayedRight * wet)
-      const newRight = (rightSample * dry) + (delayedLeft * wet)
+      const newLeft = leftSample * dry + delayedRight * wet
+      const newRight = rightSample * dry + delayedLeft * wet
 
       chunk.writeInt16LE(clamp16Bit(newLeft), i)
       chunk.writeInt16LE(clamp16Bit(newRight), i + 2)

@@ -210,7 +210,7 @@ export default class SpotifySource {
           }
 
           const totalTracks = albumData.tracks.total
-          const limit = 50 
+          const limit = 50
           let pagesToFetch = Math.ceil(totalTracks / limit)
 
           if (this.albumLoadLimit > 0) {
@@ -262,7 +262,7 @@ export default class SpotifySource {
           )
 
           return {
-            loadType: 'playlist',
+            loadType: 'album',
             data: { info: { name: albumData.name, selectedTrack: 0 }, tracks }
           }
         }
