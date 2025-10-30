@@ -58,7 +58,7 @@ async function manageHlsStream(initialUrl, outputStream) {
   }
 
   const segmentDownloader = async () => {
-    while (!stop || segmentQueue.length > 0) {
+    while (!stop) {
       if (segmentQueue.length === 0) {
         await new Promise((resolve) => setTimeout(resolve, 100))
         continue
@@ -80,6 +80,8 @@ async function manageHlsStream(initialUrl, outputStream) {
           )
           continue
         }
+
+        if (outputStream.destroyed) break
 
         await new Promise((resolve, reject) => {
           segmentStream.pipe(outputStream, { end: false })
