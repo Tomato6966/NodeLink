@@ -1,24 +1,81 @@
-import { decodeTrack, logger } from '../utils.js'
+import Joi from 'joi'
+import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
+
+const filtersSchema = Joi.object().unknown(true)
+
+const voiceStateSchema = Joi.object({
+  token: Joi.string().required(),
+  endpoint: Joi.string().required(),
+  sessionId: Joi.string().required()
+}).unknown(true)
+
+const updatePlayerTrackSchema = Joi.object({
+  encoded: Joi.string().allow(null).optional(),
+  identifier: Joi.string().optional(),
+  userData: Joi.object().unknown(true).optional()
+})
+  .xor('encoded', 'identifier')
+  .unknown(true)
+
+const updatePlayerSchema = Joi.object({
+  track: updatePlayerTrackSchema.optional(),
+  encodedTrack: Joi.string().allow(null).optional(),
+  position: Joi.number().integer().min(0).optional(),
+  endTime: Joi.number().integer().min(0).allow(null).optional(),
+  volume: Joi.number().integer().min(0).max(1000).optional(),
+  paused: Joi.boolean().optional(),
+  filters: filtersSchema.optional(),
+  voice: voiceStateSchema.optional()
+})
+  .min(1)
+  .unknown(true)
+
+const queryParamsSchema = Joi.object({
+  noReplace: Joi.boolean().empty(null).default(false)
+}).unknown(true)
+
+const pathSchema = Joi.object({
+  sessionId: Joi.string().required(),
+  guildId: Joi.string().regex(/^\d{17,20}$/).optional() 
+})
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const parts = parsedUrl.pathname.split('/')
-  const sessionId = parts[3]
-  const guildId = parts[5]
+  const pathParams = {
+    sessionId: parts[3],
+    guildId: parts[5]
+  }
 
+  const { error: pathError, value: validatedParams } =
+    pathSchema.validate(pathParams)
+
+  if (pathError) {
+    logger(
+      'warn',
+      'PlayerUpdate',
+      `Invalid path parameters: ${pathError.details[0].message}`
+    )
+    return sendErrorResponse(
+      req,
+      res,
+      400,
+      'Bad Request',
+      pathError.details[0].message,
+      parsedUrl.pathname
+    )
+  }
+
+  const { sessionId, guildId } = validatedParams
   const session = nodelink.sessions.get(sessionId)
 
   if (!session) {
-    return sendResponse(
+    return sendErrorResponse(
       req,
       res,
-      {
-        timestamp: Date.now(),
-        status: 404,
-        error: 'Not Found',
-        message: "The provided sessionId doesn't exist.",
-        path: parsedUrl.pathname
-      },
-      404
+      404,
+      'Not Found',
+      "The provided sessionId doesn't exist.",
+      parsedUrl.pathname
     )
   }
 
@@ -35,10 +92,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
   if (guildId) {
     try {
-      const player = session.players.players.get(guildId)
-
       if (req.method === 'GET') {
-        await session.players.create(guildId) // Ensure player exists or create it
+        await session.players.create(guildId)
         const playerJson = await session.players.toJSON(guildId)
         return sendResponse(req, res, playerJson, 200)
       }
@@ -49,7 +104,44 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       }
 
       if (req.method === 'PATCH') {
-        const payload = req.body
+        const { error: bodyError, value: payload } = updatePlayerSchema.validate(
+          req.body
+        )
+
+        if (bodyError) {
+          logger(
+            'warn',
+            'PlayerUpdate',
+            `Invalid payload for guild ${guildId}:`,
+            bodyError.details[0].message
+          )
+          return sendErrorResponse(
+            req,
+            res,
+            400,
+            'Bad Request',
+            bodyError.details[0].message,
+            parsedUrl.pathname
+          )
+        }
+
+        const { error: queryError, value: query } = queryParamsSchema.validate({
+          noReplace: parsedUrl.searchParams.get('noReplace')
+        })
+
+        if (queryError) {
+          return sendErrorResponse(
+            req,
+            res,
+            400,
+            'Bad Request',
+            queryError.details[0].message,
+            parsedUrl.pathname
+          )
+        }
+
+        const { noReplace } = query
+
         logger(
           'debug',
           'PlayerUpdate',
@@ -57,33 +149,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           payload
         )
 
-        // Ensure player exists or create it
         await session.players.create(guildId)
 
         if (payload.voice) {
           const { endpoint, token, sessionId: voiceSessionId } = payload.voice
-          if (!endpoint || !token || !voiceSessionId) {
-            logger(
-              'warn',
-              'PlayerUpdate',
-              `Received invalid voice object for guild ${guildId}:`,
-              payload.voice
-            )
-            return sendResponse(
-              req,
-              res,
-              {
-                timestamp: Date.now(),
-                status: 400,
-                error: 'Bad Request',
-                message:
-                  'Invalid voice object. Endpoint, token, and sessionId are required.',
-                path: parsedUrl.pathname
-              },
-              400
-            )
-          }
-
           const currentPlayer = session.players.get(guildId)
           if (
             currentPlayer &&
@@ -94,20 +163,26 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             logger(
               'debug',
               'PlayerUpdate',
-              `Voice payload for guild ${guildId} is identical to current state. Skipping update.`
+              `Voice payload for guild ${guildId} is identical. Skipping.`
             )
           } else {
             logger(
               'debug',
               'PlayerUpdate',
-              `Updating voice for guild ${guildId}:`,
-              payload.voice
+              `Updating voice for guild ${guildId}`
             )
             await session.players.updateVoice(guildId, payload.voice)
           }
         }
 
-        if (payload.encodedTrack) {
+        let trackToPlay = null
+        let stopPlayer = false
+        let userData = payload.track?.userData
+
+        const trackPayload = payload.track
+        const legacyEncodedTrack = payload.encodedTrack
+
+        if (legacyEncodedTrack) {
           logger(
             'warn',
             'PlayerUpdate',
@@ -115,68 +190,135 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           )
         }
 
-        const encodedTrack = payload.track?.encoded
-        if (encodedTrack !== undefined) {
-          if (encodedTrack === null) {
-            // The PlayerManager.stop method handles checking if the player is playing.
-            await session.players.stop(guildId)
-          } else {
-            const noReplace = parsedUrl.searchParams.get('noReplace') === 'true'
-            const decodedTrack = decodeTrack(encodedTrack)
-            if (!decodedTrack) {
-              logger(
-                'warn',
-                'PlayerUpdate',
-                `Received invalid track for guild ${guildId}: ${encodedTrack}`
-              )
-              return sendResponse(
-                req,
-                res,
-                {
-                  timestamp: Date.now(),
-                  status: 400,
-                  error: 'Bad Request',
-                  message: 'The provided track is invalid.',
-                  path: parsedUrl.pathname
-                },
-                400
-              )
+        if (trackPayload) {
+          if (trackPayload.encoded !== undefined) {
+            if (trackPayload.encoded === null) {
+              stopPlayer = true
+            } else {
+              const decodedTrack = decodeTrack(trackPayload.encoded)
+              if (!decodedTrack) {
+                return sendErrorResponse(
+                  req,
+                  res,
+                  400,
+                  'Bad Request',
+                  'The provided track is invalid.',
+                  parsedUrl.pathname
+                )
+              }
+              trackToPlay = {
+                encoded: trackPayload.encoded,
+                info: decodedTrack.info
+              }
             }
+          } else if (trackPayload.identifier) {
             logger(
               'debug',
               'PlayerUpdate',
-              `Playing track for guild ${guildId}:`,
-              { track: decodedTrack.info, noReplace }
+              `Resolving identifier: ${trackPayload.identifier}`
             )
-            await session.players.play(guildId, {
-              encoded: encodedTrack,
-              info: decodedTrack.info,
-              noReplace,
-              endTime: payload.endTime
-            })
+
+            if (!nodelink.loadTrack) {
+              logger(
+                'error',
+                'PlayerUpdate',
+                'nodelink.loadTrack is not implemented!'
+              )
+              return sendErrorResponse(
+                req,
+                res,
+                500,
+                'Internal Server Error',
+                'Track identifier loading is not supported.',
+                parsedUrl.pathname
+              )
+            }
+
+            const loadResult = await nodelink.loadTrack(trackPayload.identifier)
+
+            if (loadResult.loadType === 'track') {
+              trackToPlay = {
+                encoded: loadResult.data.encoded,
+                info: loadResult.data.info
+              }
+            } else {
+              const message =
+                loadResult.loadType === 'empty'
+                  ? 'Track identifier resolved to no tracks.'
+                  : `Track identifier resolved to ${loadResult.loadType}, expected 'track'.`
+              return sendErrorResponse(
+                req,
+                res,
+                400,
+                'Bad Request',
+                message,
+                parsedUrl.pathname
+              )
+            }
+          }
+        } else if (legacyEncodedTrack !== undefined) {
+          if (legacyEncodedTrack === null) {
+            stopPlayer = true
+          } else {
+            const decodedTrack = decodeTrack(legacyEncodedTrack)
+            if (!decodedTrack) {
+              return sendErrorResponse(
+                req,
+                res,
+                400,
+                'Bad Request',
+                'The provided track is invalid.',
+                parsedUrl.pathname
+              )
+            }
+            trackToPlay = {
+              encoded: legacyEncodedTrack,
+              info: decodedTrack.info
+            }
           }
         }
 
-        if (payload.volume !== undefined) {
-          if (payload.volume < 0 || payload.volume > 1000) {
+        if (stopPlayer) {
+          const player = session.players.get(guildId)
+          if (player && player.isUpdatingTrack) {
             logger(
-              'warn',
+              'debug',
               'PlayerUpdate',
-              `Received invalid volume for guild ${guildId}: ${payload.volume}. Expected 0-1000.`
+              `Player for guild ${guildId} is updating. Waiting before stopping.`
             )
-            return sendResponse(
-              req,
-              res,
-              {
-                timestamp: Date.now(),
-                status: 400,
-                error: 'Bad Request',
-                message: 'The volume must be between 0 and 1000.',
-                path: parsedUrl.pathname
-              },
-              400
-            )
+            let attempts = 0
+            const maxAttempts = 10
+            while (player.isUpdatingTrack && attempts < maxAttempts) {
+              await new Promise((resolve) => setTimeout(resolve, 100))
+              attempts++
+            }
+            if (player.isUpdatingTrack) {
+              logger(
+                'warn',
+                'PlayerUpdate',
+                `Player for guild ${guildId} still updating. Forcing stop.`
+              )
+            }
           }
+          await session.players.stop(guildId)
+        }
+
+        if (trackToPlay) {
+          logger(
+            'debug',
+            'PlayerUpdate',
+            `Playing track for guild ${guildId}:`,
+            { track: trackToPlay.info, noReplace }
+          )
+          await session.players.play(guildId, {
+            ...trackToPlay,
+            userData,
+            noReplace,
+            endTime: payload.endTime || undefined
+          })
+        }
+
+        if (payload.volume !== undefined) {
           logger(
             'debug',
             'PlayerUpdate',
@@ -186,25 +328,6 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         }
 
         if (payload.paused !== undefined) {
-          if (typeof payload.paused !== 'boolean') {
-            logger(
-              'warn',
-              'PlayerUpdate',
-              `Received invalid paused value for guild ${guildId}: ${payload.paused}. Expected boolean.`
-            )
-            return sendResponse(
-              req,
-              res,
-              {
-                timestamp: Date.now(),
-                status: 400,
-                error: 'Bad Request',
-                message: 'The paused value must be a boolean.',
-                path: parsedUrl.pathname
-              },
-              400
-            )
-          }
           logger(
             'debug',
             'PlayerUpdate',
@@ -214,25 +337,6 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         }
 
         if (payload.position !== undefined) {
-          if (typeof payload.position !== 'number') {
-            logger(
-              'warn',
-              'PlayerUpdate',
-              `Received invalid position for guild ${guildId}: ${payload.position}. Expected number.`
-            )
-            return sendResponse(
-              req,
-              res,
-              {
-                timestamp: Date.now(),
-                status: 400,
-                error: 'Bad Request',
-                message: 'The position value must be a number.',
-                path: parsedUrl.pathname
-              },
-              400
-            )
-          }
           logger(
             'debug',
             'PlayerUpdate',
@@ -242,31 +346,11 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         }
 
         if (payload.endTime !== undefined) {
-          if (typeof payload.endTime !== 'number' || payload.endTime < 0) {
-            logger(
-              'warn',
-              'PlayerUpdate',
-              `Received invalid endTime for guild ${guildId}: ${payload.endTime}. Expected a non-negative number.`
-            )
-            return sendResponse(
-              req,
-              res,
-              {
-                timestamp: Date.now(),
-                status: 400,
-                error: 'Bad Request',
-                message: 'The endTime value must be a non-negative number.',
-                path: parsedUrl.pathname
-              },
-              400
-            )
-          }
           logger(
             'debug',
             'PlayerUpdate',
             `Setting endTime to ${payload.endTime}ms for guild ${guildId}`
           )
-          // Need to get current position from player state
           const playerState = await session.players.toJSON(guildId)
           await session.players.seek(
             guildId,
@@ -276,25 +360,6 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         }
 
         if (payload.filters !== undefined) {
-          if (typeof payload.filters !== 'object') {
-            logger(
-              'warn',
-              'PlayerUpdate',
-              `Received invalid filters value for guild ${guildId}: ${payload.filters}. Expected object.`
-            )
-            return sendResponse(
-              req,
-              res,
-              {
-                timestamp: Date.now(),
-                status: 400,
-                error: 'Bad Request',
-                message: 'The filters value must be an object.',
-                path: parsedUrl.pathname
-              },
-              400
-            )
-          }
           logger(
             'debug',
             'PlayerUpdate',
@@ -312,23 +377,21 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         error.message.toLowerCase().includes('player not found') ||
         error.message.toLowerCase().includes('player not assigned')
       ) {
-        return sendResponse(
+        return sendErrorResponse(
           req,
           res,
-          {
-            timestamp: Date.now(),
-            status: 404,
-            error: 'Not Found',
-            message: error.message,
-            path: parsedUrl.pathname
-          },
-          404
+          404,
+          'Not Found',
+          error.message,
+          parsedUrl.pathname
         )
       }
-      throw error // Re-throw other errors
+      logger('error', 'PlayerUpdate', `Unhandled error: ${error.message}`, error)
+      throw error
     }
   }
 }
+
 export default {
   handler,
   methods: ['GET', 'DELETE', 'PATCH']
