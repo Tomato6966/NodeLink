@@ -1,5 +1,6 @@
 import { URLSearchParams } from 'node:url'
 import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
+import { PassThrough } from 'node:stream'
 
 export default class InstagramSource {
   constructor(nodelink) {
@@ -194,7 +195,7 @@ export default class InstagramSource {
 
     let response
     try {
-      response = await makeRequest(this.apiConfig.apiUrl, {
+      response = await http1makeRequest(this.apiConfig.apiUrl, {
         method: 'POST',
         headers: headers,
         body: encodedData,
@@ -265,13 +266,34 @@ export default class InstagramSource {
         }
       }
     }
-    if (!media.is_video) {
-      return {
-        data: null,
-        exception: { message: 'This post is not a video.', severity: 'common' }
+
+    let videoNode = null
+
+    if (media.is_video) {
+      videoNode = media
+    } else if (
+      media.__typename === 'XDTGraphSidecar' &&
+      media.edge_sidecar_to_children
+    ) {
+      const videoEdge = media.edge_sidecar_to_children.edges.find(
+        (edge) => edge.node.is_video
+      )
+      if (videoEdge) {
+        videoNode = videoEdge.node
       }
     }
-    const videoUrl = media.video_url
+
+    if (!videoNode) {
+      return {
+        data: null,
+        exception: {
+          message: 'This post does not contain a video.',
+          severity: 'common'
+        }
+      }
+    }
+
+    const videoUrl = videoNode.video_url
     if (!videoUrl) {
       return {
         data: null,
@@ -288,13 +310,13 @@ export default class InstagramSource {
       data: {
         videoUrl: videoUrl,
         author: media.owner?.username || 'User Unknown',
-        length: (media.video_duration || 0) * 1000,
-        thumbnail: media.display_url || '',
+        length: (videoNode.video_duration || 0) * 1000,
+        thumbnail: videoNode.display_url || media.display_url || '',
         title: title,
         isStream: false,
         isSeekable: false
       },
-      error: null
+      exception: null
     }
   }
 
@@ -310,10 +332,11 @@ export default class InstagramSource {
       }
     }
 
-    const { data: videoData, error: fetchError } = await this._fetchFromGraphQL(
+    const { data: videoData, exception: fetchError } = await this._fetchFromGraphQL(
       postId,
       pathSegment
     )
+    
     if (fetchError) {
       if (fetchError.message?.includes('Media not found')) {
         return { loadType: 'empty', data: {} }
@@ -330,7 +353,7 @@ export default class InstagramSource {
       identifier: postId,
       title: videoData.title || 'Instagram Video',
       author: videoData.author,
-      length: videoData.length,
+      length: videoData.length || -1,
       sourceName: 'instagram',
       artworkUrl: videoData.thumbnail || videoData.artworkUrl,
       uri: queryUrl,
@@ -400,8 +423,18 @@ export default class InstagramSource {
           new Error('Failed to get stream, no stream object returned.')
         )
       }
-
-      return { stream: response.stream, type: 'video/mp4' }
+      const stream = new PassThrough()
+      response.stream.on('data', (chunk) => {
+        stream.write(chunk)
+      })
+      response.stream.on('end', () => {
+        stream.end()
+        stream.emit('finishBuffering')
+      })
+      response.stream.on('error', (err) => {
+        stream.destroy(err)
+      })
+      return { stream, type: 'video/mp4' }
     } catch (err) {
       return {
         exception: {
