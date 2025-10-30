@@ -650,7 +650,7 @@ export class Player {
       this._initConnection()
     }
 
-    if (!this.connection.udpInfo?.secretKey) {
+    if (!this.connection || !this.connection.udpInfo || !this.connection.udpInfo.secretKey) {
       logger(
         'debug',
         'Player',
@@ -658,14 +658,11 @@ export class Player {
       )
       await this.waitEvent(
         'stateChange',
-        (s) =>
-          s.status === 'connected' &&
-          s.reason === 'ready' &&
-          this.connection.udpInfo?.secretKey
+        (s) => s.status === 'connected' && this.connection?.udpInfo?.secretKey
       )
     }
 
-    if (!this.connection.udpInfo?.secretKey) {
+    if (!this.connection || !this.connection.udpInfo || !this.connection.udpInfo.secretKey) {
       const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`
       logger('error', 'Player', errorMessage)
       this._onError(new Error(errorMessage))

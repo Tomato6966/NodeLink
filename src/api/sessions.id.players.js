@@ -87,9 +87,9 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           const currentPlayer = session.players.get(guildId)
           if (
             currentPlayer &&
-            currentPlayer.voice.endpoint === endpoint &&
-            currentPlayer.voice.token === token &&
-            currentPlayer.voice.sessionId === voiceSessionId
+            currentPlayer.voice?.endpoint === endpoint &&
+            currentPlayer.voice?.token === token &&
+            currentPlayer.voice?.sessionId === voiceSessionId
           ) {
             logger(
               'debug',
