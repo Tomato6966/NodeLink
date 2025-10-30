@@ -421,7 +421,7 @@ class NodelinkServer {
             JSON.stringify({
               op: 'event',
               type: 'WorkerFailedEvent',
-              affectedGuilds: Array.from(guildsInSession), // Enviar a lista de guilds afetados
+              affectedGuilds: Array.from(guildsInSession),
               message: `Players for guilds ${Array.from(guildsInSession).join(', ')} lost due to worker failure.`
             })
           )

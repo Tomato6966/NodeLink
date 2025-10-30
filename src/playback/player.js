@@ -172,15 +172,15 @@ export class Player {
     ) {
       this.connection.audioStream?.destroy()
 
+      this._resetTrack()
       this.emitEvent(GatewayEvents.TRACK_END, {
         track: this.track,
         reason: state.reason
       })
-      this._resetTrack()
     } else if (
       state.status === 'playing' &&
       this.track &&
-      !this._isSeeking && // Add condition to not emit TrackStart during seek
+      !this._isSeeking &&
       ['requested', 'reconnected'].includes(state.reason)
     ) {
       this.emitEvent(GatewayEvents.TRACK_START, { track: this.track })
@@ -205,7 +205,7 @@ export class Player {
         )
         severity = 'suspicious'
         cause = 'VOICE_CONNECTION_RESET'
-        shouldStop = false // Não parar imediatamente, a biblioteca tentará reconectar
+        shouldStop = false 
       } else if (
         error.message.includes('stream') ||
         error.message.includes('timeout') ||

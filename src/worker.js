@@ -99,9 +99,10 @@ async function processQueue() {
         if (player && typeof player[command] === 'function') {
           result = await player[command](...args)
         } else {
-          throw new Error(
-            `Player or command '${command}' not found for guild ${guildId}`
-          )
+          result = {
+            error: `Player or command '${command}' not found for guild ${guildId}`,
+            playerNotFound: true
+          }
         }
         break
       }
