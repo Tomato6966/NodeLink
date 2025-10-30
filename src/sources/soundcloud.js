@@ -249,17 +249,38 @@ export default class SoundCloudSource {
       return this._buildException('No transcodings available')
     }
 
-    const mp3 = transcodings.find(t =>
+    // Priority order: Progressive MP3 > Progressive AAC > HLS MP3 > HLS AAC > Any HLS
+    const progressiveMp3 = transcodings.find(t =>
       t.format?.protocol === 'progressive' &&
       t.format?.mime_type === 'audio/mpeg'
     )
 
-    const opus = transcodings.find(t =>
-      t.format?.protocol === 'hls' &&
-      t.format?.mime_type?.includes('opus')
+    const progressiveAac = transcodings.find(t =>
+      t.format?.protocol === 'progressive' &&
+      t.format?.mime_type?.includes('aac')
     )
 
-    const selected = mp3 || opus || transcodings[0]
+    const hlsMp3 = transcodings.find(t =>
+      t.format?.protocol === 'hls' &&
+      t.format?.mime_type === 'audio/mpeg'
+    )
+
+    const hlsAac = transcodings.find(t =>
+      t.format?.protocol === 'hls' &&
+      (t.format?.mime_type?.includes('aac') || t.format?.mime_type?.includes('mp4'))
+    )
+
+    const anyHls = transcodings.find(t =>
+      t.format?.protocol === 'hls' &&
+      !t.format?.mime_type?.includes('opus')
+    )
+
+    const selected = progressiveMp3 || progressiveAac || hlsMp3 || hlsAac || anyHls || transcodings[0]
+
+    if (selected.format?.mime_type?.includes('opus')) {
+      logger('warn', 'Sources', `Using Opus codec which may cause decoder issues (track: ${body.id})`)
+    }
+
     const streamUrl = `${selected.url}?client_id=${this.clientId}`
     const urlReq = await http1makeRequest(streamUrl)
 
@@ -269,8 +290,8 @@ export default class SoundCloudSource {
 
     const mimeType = selected.format?.mime_type?.toLowerCase() ?? ''
     const format = mimeType.includes('mpeg') ? 'mp3' :
-                   mimeType.includes('opus') ? 'opus' :
-                   mimeType.includes('aac') ? 'aac' : 'arbitrary'
+                   mimeType.includes('aac') || mimeType.includes('mp4') ? 'aac' :
+                   mimeType.includes('opus') ? 'opus' : 'arbitrary'
 
     return {
       url: urlReq.body.url,
@@ -313,7 +334,6 @@ export default class SoundCloudSource {
       res.stream.on('end', onEnd)
       res.stream.pipe(stream)
 
-      // close stream when done, fixes a resource leak
       stream.on('close', () => {
         res.stream.removeListener('error', onError)
         res.stream.removeListener('end', onEnd)
