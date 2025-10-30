@@ -123,7 +123,9 @@ export default {
       clientSecret: '',
       market: 'US',
       playlistLoadLimit: 1, // 0 means no limit (loads all tracks), 1 = 100 tracks, 2 = 100 and so on!
-      playlistPageLoadConcurrency: 10 // How many pages to load simultaneously
+      playlistPageLoadConcurrency: 10, // How many pages to load simultaneously
+      albumLoadLimit: 1, // 0 means no limit (loads all tracks), 1 = 50 tracks, 2 = 100 tracks, etc.
+      albumPageLoadConcurrency: 5 // How many pages to load simultaneously
     },
     tidal: {
       enabled: true,

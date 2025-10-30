@@ -17,6 +17,8 @@ export default class SpotifySource {
     this.clientSecret = null
     this.playlistLoadLimit = 0
     this.playlistPageLoadConcurrency = 5
+    this.albumLoadLimit = 0
+    this.albumPageLoadConcurrency = 5
     this.market = 'US'
     this.tokenInitialized = false
   }
@@ -31,6 +33,9 @@ export default class SpotifySource {
         this.config.sources.spotify?.playlistLoadLimit ?? 0
       this.playlistPageLoadConcurrency =
         this.config.sources.spotify?.playlistPageLoadConcurrency ?? 5
+      this.albumLoadLimit = this.config.sources.spotify?.albumLoadLimit ?? 0
+      this.albumPageLoadConcurrency =
+        this.config.sources.spotify?.albumPageLoadConcurrency ?? 5
       this.market = this.config.sources.spotify?.market || 'US'
 
       if (!this.clientId || !this.clientSecret) {
@@ -74,7 +79,7 @@ export default class SpotifySource {
       logger(
         'info',
         'Spotify',
-        `Tokens initialized successfully (playlistLoadLimit: ${this.playlistLoadLimit === 0 ? 'unlimited' : `${this.playlistLoadLimit * 100} tracks max`})`
+        `Tokens initialized successfully (playlistLoadLimit: ${this.playlistLoadLimit === 0 ? 'unlimited' : `${this.playlistLoadLimit * 100} tracks max`}, albumLoadLimit: ${this.albumLoadLimit === 0 ? 'unlimited' : `${this.albumLoadLimit * 50} tracks max`})`
       )
       return true
     } catch (e) {
@@ -193,18 +198,72 @@ export default class SpotifySource {
         }
 
         case 'album': {
-          const data = await this._apiRequest(`/albums/${id}`)
-          if (!data)
+          const albumData = await this._apiRequest(`/albums/${id}`)
+          if (!albumData)
             return {
               exception: { message: 'Album not found.', severity: 'common' }
             }
 
-          const tracks = data.tracks.items.map((item) =>
-            this.buildTrack(item, data.images[0]?.url)
+          const allItems = []
+          if (albumData.tracks && Array.isArray(albumData.tracks.items)) {
+            allItems.push(...albumData.tracks.items)
+          }
+
+          const totalTracks = albumData.tracks.total
+          const limit = 50 
+          let pagesToFetch = Math.ceil(totalTracks / limit)
+
+          if (this.albumLoadLimit > 0) {
+            pagesToFetch = Math.min(pagesToFetch, this.albumLoadLimit)
+          }
+
+          const promises = []
+          for (let i = 1; i < pagesToFetch; i++) {
+            const offset = i * limit
+            promises.push(
+              this._apiRequest(
+                `/albums/${id}/tracks?offset=${offset}&limit=${limit}`
+              )
+            )
+          }
+
+          if (promises.length > 0) {
+            const batchSize = this.albumPageLoadConcurrency
+            for (let i = 0; i < promises.length; i += batchSize) {
+              const batch = promises.slice(i, i + batchSize)
+              try {
+                const results = await Promise.all(batch)
+                for (const page of results) {
+                  if (page?.items) {
+                    allItems.push(...page.items)
+                  }
+                }
+              } catch (e) {
+                logger(
+                  'warn',
+                  'Spotify',
+                  `Failed to fetch a batch of album pages: ${e.message}`
+                )
+              }
+            }
+          }
+
+          const tracks = allItems
+            .map((item) => {
+              if (!item || !item.id) return null
+              return this.buildTrack(item, albumData.images[0]?.url)
+            })
+            .filter(Boolean)
+
+          logger(
+            'info',
+            'Spotify',
+            `Loaded ${tracks.length} of ${totalTracks} tracks from album "${albumData.name}".`
           )
+
           return {
-            loadType: 'album',
-            data: { info: { name: data.name, selectedTrack: 0 }, tracks }
+            loadType: 'playlist',
+            data: { info: { name: albumData.name, selectedTrack: 0 }, tracks }
           }
         }
 
@@ -233,7 +292,6 @@ export default class SpotifySource {
           }
 
           const promises = []
-          // Start from page 1, as page 0 is already fetched
           for (let i = 1; i < pagesToFetch; i++) {
             const offset = i * limit
             promises.push(
@@ -279,7 +337,7 @@ export default class SpotifySource {
           )
 
           return {
-            loadType: 'playlist',
+            loadType: 'album',
             data: {
               info: { name: playlistData.name, selectedTrack: 0 },
               tracks
