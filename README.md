@@ -61,6 +61,49 @@ Once started, NodeLink runs a Lavalink-compatible WebSocket server, ready for im
 
 ---
 
+## Usage
+
+NodeLink is compatible with most Lavalink clients, as it implements nearly the entire original API.
+However, some clients may not work properly, since NodeLink changes certain behaviors and endpoints.
+
+| Client                                                              | Platform     | v3 supported? | NodeLink Features? | NodeLink major version |
+| ------------------------------------------------------------------- | ------------ | ------------- | ------------------ | ---------------------- |
+| [Lavalink-Client](https://github.com/lavalink-devs/Lavalink-Client) | JVM          | unknown       | No                 | v1 and v2              |
+| [Lavalink.kt](https://github.com/DRSchlaubi/Lavalink.kt)            | Kotlin       | unknown       | No                 | v1                     |
+| [DisGoLink](https://github.com/disgoorg/disgolink)                  | Go           | unknown       | No                 | v1 and v2              |
+| [Lavalink.py](https://github.com/devoxin/lavalink.py)               | Python       | unknown       | No                 | v1 and v2              |
+| [Mafic](https://github.com/ooliver1/mafic)                          | Python       | unknown       | No                 | v1 and v2              |
+| [Wavelink](https://github.com/PythonistaGuild/Wavelink)             | Python       | unknown       | No                 | v1 and v2              |
+| [Pomice](https://github.com/cloudwithax/pomice)                     | Python       | unknown       | No                 | v1 and v2              |
+| [Hikari-ongaku](https://github.com/MPlatypus/hikari-ongaku)         | Python       | unknown       | No                 | v1 and v2              |
+| [Moonlink.js](https://github.com/1Lucas1apk/moonlink.js)            | TypeScript   | unknown       | No                 | v1 and v2              |
+| [Magmastream](https://github.com/Blackfort-Hosting/magmastream)     | TypeScript   | unknown       | No                 | v1                     |
+| [Lavacord](https://github.com/lavacord/Lavacord)                    | TypeScript   | unknown       | No                 | v1 and v2              |
+| [Shoukaku](https://github.com/Deivu/Shoukaku)                       | TypeScript   | unknown       | No                 | v1 and v2              |
+| [Lavalink-Client](https://github.com/tomato6966/Lavalink-Client)    | TypeScript   | unknown       | No                 | v1                     |
+| [Rainlink](https://github.com/RainyXeon/Rainlink)                   | TypeScript   | unknown       | No                 | v1 and v2              |
+| [Poru](https://github.com/parasop/Poru)                             | TypeScript   | unknown       | No                 | v1 and v2              |
+| [Blue.ts](https://github.com/ftrapture/blue.ts)                     | TypeScript   | unknown       | No                 | v1 and v2              |
+| [FastLink](https://github.com/PerformanC/FastLink)                  | Node.js      | unknown       | No                 | v1 and v2              |
+| [Riffy](https://github.com/riffy-team/riffy)                        | Node.js      | unknown       | No                 | v1 and v2              |
+| [TsumiLink](https://github.com/Fyphen1223/TsumiLink)                | Node.js      | unknown       | No                 | v1 and v2              |
+| [AquaLink](https://github.com/ToddyTheNoobDud/AquaLink)             | JavaScript   | unknown       | No                 | v1 and v2              |
+| [DisCatSharp](https://github.com/Aiko-IT-Systems/DisCatSharp)       | .NET         | unknown       | No                 | v1 and v2              |
+| [Lavalink4NET](https://github.com/angelobreuer/Lavalink4NET)        | .NET         | unknown       | No                 | v1 and v2              |
+| [Nomia](https://github.com/DHCPCD9/Nomia)                           | .NET         | unknown       | No                 | v1 and v2              |
+| [CogLink](https://github.com/PerformanC/Coglink)                    | C            | unknown       | No                 | v1 and v2              |
+| [Lavalink-rs](https://gitlab.com/vicky5124/lavalink-rs)             | Rust, Python | unknown       | No                 | v1 and v2              |
+| [nyxx_lavalink](https://github.com/nyxx-discord/nyxx_lavalink)      | Dart         | unknown       | No                 | v1                     |
+
+> [!IMPORTANT]
+> Lack of explicit NodeLink support *usually* means that the client implements the Lavalink API inconsistently, not following its defined formats and fields. Using such clients may lead to unexpected behavior.
+
+> [!NOTE]
+> Data was sourced from the [official Lavalink documentation](https://lavalink.dev/clients#client-libraries) and manually updated.
+> Compatibility information for NodeLink v3 is still being verified.
+
+---
+
 ### Memory Usage
 
 NodeLink is designed to be memory-efficient.
@@ -109,6 +152,12 @@ These modules form the essential foundation that keeps NodeLink’s playback sta
 Pull requests are welcome!
 Feel free to open issues, share suggestions, or join discussions on Discord.
 Every contribution helps make NodeLink more stable, accessible, and well-documented.
+
+---
+
+## Special Thanks
+
+A huge thank you to **@RainyXeon** for generously allowing us to incorporate the NicoVideo streaming logic from [LunaStream](https://github.com/LunaStream/LunaStream). Your contribution made this possible and is greatly appreciated!
 
 ---
 
