@@ -332,11 +332,9 @@ export default class InstagramSource {
       }
     }
 
-    const { data: videoData, exception: fetchError } = await this._fetchFromGraphQL(
-      postId,
-      pathSegment
-    )
-    
+    const { data: videoData, exception: fetchError } =
+      await this._fetchFromGraphQL(postId, pathSegment)
+
     if (fetchError) {
       if (fetchError.message?.includes('Media not found')) {
         return { loadType: 'empty', data: {} }

@@ -21,6 +21,7 @@ export default class SpotifySource {
     this.albumPageLoadConcurrency = 5
     this.market = 'US'
     this.tokenInitialized = false
+    this.allowExplicit = true
   }
 
   async setup() {
@@ -37,6 +38,7 @@ export default class SpotifySource {
       this.albumPageLoadConcurrency =
         this.config.sources.spotify?.albumPageLoadConcurrency ?? 5
       this.market = this.config.sources.spotify?.market || 'US'
+      this.allowExplicit = this.config.sources.spotify?.allowExplicit ?? true
 
       if (!this.clientId || !this.clientSecret) {
         logger(
@@ -137,7 +139,7 @@ export default class SpotifySource {
       isStream: false,
       position: 0,
       title: item.name,
-      uri: item.external_urls.spotify,
+      uri: `${item.external_urls.spotify}?explicit=${item.explicit}`,
       artworkUrl: artworkUrl || item.album?.images[0]?.url,
       isrc: item.external_ids?.isrc || null,
       sourceName: 'spotify'
@@ -171,6 +173,10 @@ export default class SpotifySource {
       }
 
       const tracks = data.tracks.items.map((item) => this.buildTrack(item))
+
+      if (tracks.length === 0) {
+        return { loadType: 'empty', data: {} }
+      }
 
       return { loadType: 'search', data: tracks }
     } catch (e) {
@@ -396,11 +402,32 @@ export default class SpotifySource {
   }
 
   async getTrackUrl(decodedTrack) {
-    const spotifyTitle = decodedTrack.title.toLowerCase()
-    const spotifyAuthor = decodedTrack.author.toLowerCase()
+    const isExplicit =
+      new URL(decodedTrack.uri).searchParams.get('explicit') === 'true'
+
     const spotifyDuration = decodedTrack.length
 
-    const query = `${decodedTrack.title} ${decodedTrack.author} official audio`
+    let query = `${decodedTrack.title} ${decodedTrack.author}`
+
+    if (isExplicit) {
+      if (this.allowExplicit) {
+        logger(
+          'info',
+          'Spotify',
+          `Searching for explicit version of song "${decodedTrack.title}"`
+        )
+        query += ' explicit lyrical'
+      } else {
+        logger(
+          'info',
+          'Spotify',
+          `Searching for non explicit version of song "${decodedTrack.title}"`
+        )
+        query += ' clean non explicit lyrical'
+      }
+    } else {
+      query += ' official lyrical audio'
+    }
 
     try {
       const searchResult = await this.nodelink.sources.searchWithDefault(query)
