@@ -205,7 +205,7 @@ export class Player {
         )
         severity = 'suspicious'
         cause = 'VOICE_CONNECTION_RESET'
-        shouldStop = false 
+        shouldStop = false
       } else if (
         error.message.includes('stream') ||
         error.message.includes('timeout') ||

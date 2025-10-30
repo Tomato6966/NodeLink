@@ -5,7 +5,10 @@ export default class RateLimitManager {
     this.nodelink = nodelink
     this.config = nodelink.options?.rateLimit
     this.store = new Map()
-    this.cleanupInterval = setInterval(() => this._cleanup(), this.config.global.timeWindowMs)
+    this.cleanupInterval = setInterval(
+      () => this._cleanup(),
+      this.config?.global?.timeWindowMs
+    )
   }
 
   _getKey(type, id) {
@@ -22,7 +25,9 @@ export default class RateLimitManager {
 
     const entry = this.store.get(key)
 
-    entry.requests = entry.requests.filter(reqTime => now - reqTime < timeWindowMs)
+    entry.requests = entry.requests.filter(
+      (reqTime) => now - reqTime < timeWindowMs
+    )
 
     if (entry.requests.length >= maxRequests) {
       return false
@@ -37,31 +42,79 @@ export default class RateLimitManager {
       return true
     }
 
-    if (this.config.ignorePaths.some(path => parsedUrl.pathname.startsWith(path))) {
+    if (
+      this.config.ignorePaths.some((path) =>
+        parsedUrl.pathname.startsWith(path)
+      )
+    ) {
       return true
     }
 
     const remoteAddress = req.socket.remoteAddress
     const userId = req.headers['user-id']
-    const guildId = parsedUrl.pathname.includes('/players/') ? parsedUrl.pathname.split('/')[5] : null
+    const guildId = parsedUrl.pathname.includes('/players/')
+      ? parsedUrl.pathname.split('/')[5]
+      : null
 
-    if (!this._checkAndIncrement('global', 'all', this.config.global.maxRequests, this.config.global.timeWindowMs)) {
-      logger('warn', 'RateLimit', `Global rate limit exceeded for ${remoteAddress}`)
+    if (
+      !this._checkAndIncrement(
+        'global',
+        'all',
+        this.config.global.maxRequests,
+        this.config.global.timeWindowMs
+      )
+    ) {
+      logger(
+        'warn',
+        'RateLimit',
+        `Global rate limit exceeded for ${remoteAddress}`
+      )
       return false
     }
 
-    if (!this._checkAndIncrement('ip', remoteAddress, this.config.perIp.maxRequests, this.config.perIp.timeWindowMs)) {
+    if (
+      !this._checkAndIncrement(
+        'ip',
+        remoteAddress,
+        this.config.perIp.maxRequests,
+        this.config.perIp.timeWindowMs
+      )
+    ) {
       logger('warn', 'RateLimit', `IP rate limit exceeded for ${remoteAddress}`)
       return false
     }
 
-    if (userId && !this._checkAndIncrement('userId', userId, this.config.perUserId.maxRequests, this.config.perUserId.timeWindowMs)) {
-      logger('warn', 'RateLimit', `User-Id rate limit exceeded for ${userId} (IP: ${remoteAddress})`)
+    if (
+      userId &&
+      !this._checkAndIncrement(
+        'userId',
+        userId,
+        this.config.perUserId.maxRequests,
+        this.config.perUserId.timeWindowMs
+      )
+    ) {
+      logger(
+        'warn',
+        'RateLimit',
+        `User-Id rate limit exceeded for ${userId} (IP: ${remoteAddress})`
+      )
       return false
     }
 
-    if (guildId && !this._checkAndIncrement('guildId', guildId, this.config.perGuildId.maxRequests, this.config.perGuildId.timeWindowMs)) {
-      logger('warn', 'RateLimit', `Guild-Id rate limit exceeded for ${guildId} (IP: ${remoteAddress}, User: ${userId})`)
+    if (
+      guildId &&
+      !this._checkAndIncrement(
+        'guildId',
+        guildId,
+        this.config.perGuildId.maxRequests,
+        this.config.perGuildId.timeWindowMs
+      )
+    ) {
+      logger(
+        'warn',
+        'RateLimit',
+        `Guild-Id rate limit exceeded for ${guildId} (IP: ${remoteAddress}, User: ${userId})`
+      )
       return false
     }
 
@@ -71,7 +124,9 @@ export default class RateLimitManager {
   _cleanup() {
     const now = Date.now()
     for (const [key, entry] of this.store.entries()) {
-      entry.requests = entry.requests.filter(reqTime => now - reqTime < this.config.global.timeWindowMs)
+      entry.requests = entry.requests.filter(
+        (reqTime) => now - reqTime < this.config.global.timeWindowMs
+      )
 
       if (entry.requests.length === 0) {
         this.store.delete(key)

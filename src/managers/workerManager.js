@@ -176,7 +176,11 @@ export default class WorkerManager {
     const worker = cluster.fork()
     this.workers.push(worker)
     this.workerLoad.set(worker.id, 0)
-    this.workerFailureHistory.set(worker.id, { count: 0, lastFailure: null, recentFailures: [] })
+    this.workerFailureHistory.set(worker.id, {
+      count: 0,
+      lastFailure: null,
+      recentFailures: []
+    })
     logger('info', 'Cluster', `Spawned worker ${worker.process.pid}`)
 
     worker.on('message', (msg) => this.handleWorkerMessage(worker, msg))
@@ -344,7 +348,11 @@ export default class WorkerManager {
       if (worker.isConnected()) {
         worker.process.kill()
       } else {
-        logger('debug', 'Cluster', `Worker ${worker.id} is not connected, skipping kill.`)
+        logger(
+          'debug',
+          'Cluster',
+          `Worker ${worker.id} is not connected, skipping kill.`
+        )
       }
     }
     logger(

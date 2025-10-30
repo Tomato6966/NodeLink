@@ -84,7 +84,7 @@ async function requestHandler(nodelink, req, res) {
     return
   }
   if (dosCheck.delay) {
-    await new Promise(resolve => setTimeout(resolve, dosCheck.delay))
+    await new Promise((resolve) => setTimeout(resolve, dosCheck.delay))
   }
 
   if (!nodelink.rateLimitManager.check(req, parsedUrl)) {

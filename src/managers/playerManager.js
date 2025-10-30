@@ -96,11 +96,15 @@ export default class PlayerManager {
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(guildId)
       if (!worker) throw new Error('Player not assigned to a worker.')
-      const result = await this.nodelink.workerManager.execute(worker, 'playerCommand', {
-        guildId,
-        command: 'play',
-        args: [trackPayload]
-      })
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          guildId,
+          command: 'play',
+          args: [trackPayload]
+        }
+      )
       if (result && result.playerNotFound) {
         throw new Error('Player not found.')
       }
@@ -115,11 +119,15 @@ export default class PlayerManager {
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(guildId)
       if (!worker) throw new Error('Player not assigned to a worker.')
-      const result = await this.nodelink.workerManager.execute(worker, 'playerCommand', {
-        guildId,
-        command: 'stop',
-        args: []
-      })
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          guildId,
+          command: 'stop',
+          args: []
+        }
+      )
       if (result && result.playerNotFound) {
         throw new Error('Player not found.')
       }
@@ -134,11 +142,15 @@ export default class PlayerManager {
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(guildId)
       if (!worker) throw new Error('Player not assigned to a worker.')
-      const result = await this.nodelink.workerManager.execute(worker, 'playerCommand', {
-        guildId,
-        command: 'pause',
-        args: [shouldPause]
-      })
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          guildId,
+          command: 'pause',
+          args: [shouldPause]
+        }
+      )
       if (result && result.playerNotFound) {
         throw new Error('Player not found.')
       }
@@ -153,11 +165,15 @@ export default class PlayerManager {
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(guildId)
       if (!worker) throw new Error('Player not assigned to a worker.')
-      const result = await this.nodelink.workerManager.execute(worker, 'playerCommand', {
-        guildId,
-        command: 'seek',
-        args: [position, endTime]
-      })
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          guildId,
+          command: 'seek',
+          args: [position, endTime]
+        }
+      )
       if (result && result.playerNotFound) {
         throw new Error('Player not found.')
       }
@@ -172,11 +188,15 @@ export default class PlayerManager {
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(guildId)
       if (!worker) throw new Error('Player not assigned to a worker.')
-      const result = await this.nodelink.workerManager.execute(worker, 'playerCommand', {
-        guildId,
-        command: 'volume',
-        args: [level]
-      })
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          guildId,
+          command: 'volume',
+          args: [level]
+        }
+      )
       if (result && result.playerNotFound) {
         throw new Error('Player not found.')
       }
@@ -191,11 +211,15 @@ export default class PlayerManager {
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(guildId)
       if (!worker) throw new Error('Player not assigned to a worker.')
-      const result = await this.nodelink.workerManager.execute(worker, 'playerCommand', {
-        guildId,
-        command: 'setFilters',
-        args: [filtersPayload]
-      })
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          guildId,
+          command: 'setFilters',
+          args: [filtersPayload]
+        }
+      )
       if (result && result.playerNotFound) {
         throw new Error('Player not found.')
       }
@@ -210,11 +234,15 @@ export default class PlayerManager {
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(guildId)
       if (!worker) throw new Error('Player not assigned to a worker.')
-      const result = await this.nodelink.workerManager.execute(worker, 'playerCommand', {
-        guildId,
-        command: 'updateVoice',
-        args: [voicePayload]
-      })
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          guildId,
+          command: 'updateVoice',
+          args: [voicePayload]
+        }
+      )
       if (result && result.playerNotFound) {
         throw new Error('Player not found.')
       }
@@ -229,11 +257,15 @@ export default class PlayerManager {
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(guildId)
       if (!worker) throw new Error('Player not assigned to a worker.')
-      const result = await this.nodelink.workerManager.execute(worker, 'playerCommand', {
-        guildId,
-        command: 'toJSON',
-        args: []
-      })
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          guildId,
+          command: 'toJSON',
+          args: []
+        }
+      )
       if (result && result.playerNotFound) {
         throw new Error('Player not found.')
       }
