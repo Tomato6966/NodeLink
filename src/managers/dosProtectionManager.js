@@ -7,7 +7,7 @@ export default class DosProtectionManager {
     this.ipRequestCounts = new Map()
     this.cleanupInterval = setInterval(
       () => this._cleanup(),
-      this.config?.thresholds?.timeWindowMs
+      Math.max(1, this.config?.thresholds?.timeWindowMs || 1)
     )
   }
 

@@ -314,7 +314,10 @@ class NodelinkServer {
   }
   _startGlobalUpdater() {
     if (this._globalUpdater) return
-    const updateInterval = this.options?.playerUpdateInterval ?? 5000
+    const updateInterval = Math.max(
+      1,
+      this.options?.playerUpdateInterval ?? 5000
+    )
     const zombieThreshold = this.options?.zombieThresholdMs ?? 60000
 
     this._globalUpdater = setInterval(() => {

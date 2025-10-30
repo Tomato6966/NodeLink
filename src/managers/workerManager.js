@@ -48,7 +48,10 @@ export default class WorkerManager {
 
   startScalingCheck() {
     if (this.scaleCheckInterval) return
-    const interval = this.config.cluster.scaling?.checkIntervalMs || 5000
+    const interval = Math.max(
+      1,
+      this.config.cluster.scaling?.checkIntervalMs || 5000
+    )
     this.scaleCheckInterval = setInterval(() => this.scaleWorkers(), interval)
     logger(
       'info',

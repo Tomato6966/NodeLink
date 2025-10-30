@@ -7,7 +7,7 @@ export default class RateLimitManager {
     this.store = new Map()
     this.cleanupInterval = setInterval(
       () => this._cleanup(),
-      this.config?.global?.timeWindowMs
+      Math.max(1, this.config?.global?.timeWindowMs || 1)
     )
   }
 

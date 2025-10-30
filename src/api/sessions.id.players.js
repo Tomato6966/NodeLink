@@ -36,7 +36,9 @@ const queryParamsSchema = Joi.object({
 
 const pathSchema = Joi.object({
   sessionId: Joi.string().required(),
-  guildId: Joi.string().regex(/^\d{17,20}$/).optional() 
+  guildId: Joi.string()
+    .regex(/^\d{17,20}$/)
+    .optional()
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
@@ -104,9 +106,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       }
 
       if (req.method === 'PATCH') {
-        const { error: bodyError, value: payload } = updatePlayerSchema.validate(
-          req.body
-        )
+        const { error: bodyError, value: payload } =
+          updatePlayerSchema.validate(req.body)
 
         if (bodyError) {
           logger(
@@ -386,7 +387,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           parsedUrl.pathname
         )
       }
-      logger('error', 'PlayerUpdate', `Unhandled error: ${error.message}`, error)
+      logger(
+        'error',
+        'PlayerUpdate',
+        `Unhandled error: ${error.message}`,
+        error
+      )
       throw error
     }
   }

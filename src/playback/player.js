@@ -171,9 +171,14 @@ export class Player {
         EndReasons.LOAD_FAILED
       ].includes(state.reason)
     ) {
+      logger(
+        'debug',
+        'Player',
+        `Track ended for guild ${this.guildId}. Reason: ${state.reason}. Current position: ${this.position}`
+      )
       this.connection.audioStream?.destroy()
 
-      const endedTrack = this.track 
+      const endedTrack = this.track
       this.emitEvent(GatewayEvents.TRACK_END, {
         track: endedTrack,
         reason: state.reason
@@ -664,7 +669,11 @@ export class Player {
       this._initConnection()
     }
 
-    if (!this.connection || !this.connection.udpInfo || !this.connection.udpInfo.secretKey) {
+    if (
+      !this.connection ||
+      !this.connection.udpInfo ||
+      !this.connection.udpInfo.secretKey
+    ) {
       logger(
         'debug',
         'Player',
@@ -676,7 +685,11 @@ export class Player {
       )
     }
 
-    if (!this.connection || !this.connection.udpInfo || !this.connection.udpInfo.secretKey) {
+    if (
+      !this.connection ||
+      !this.connection.udpInfo ||
+      !this.connection.udpInfo.secretKey
+    ) {
       const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`
       logger('error', 'Player', errorMessage)
       this._onError(new Error(errorMessage))

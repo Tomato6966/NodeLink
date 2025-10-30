@@ -79,7 +79,7 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
         }
 
         await new Promise((resolve) =>
-          setTimeout(resolve, targetDuration * 1000)
+          setTimeout(resolve, Math.max(1, targetDuration) * 1000)
         )
       } catch (e) {
         logger('error', 'YouTube-HLS-Fetcher', `Error: ${e.message}`)

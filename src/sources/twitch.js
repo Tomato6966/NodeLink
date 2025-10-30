@@ -48,7 +48,7 @@ async function manageHlsStream(initialUrl, outputStream) {
         }
 
         await new Promise((resolve) =>
-          setTimeout(resolve, targetDuration * 1000)
+          setTimeout(resolve, Math.max(1, targetDuration) * 1000)
         )
       } catch (e) {
         logger('error', 'Twitch-HLS-Fetcher', `Error: ${e.message}`)
