@@ -190,5 +190,16 @@ export default {
       timeWindowMs: 5000 // 5 seconds
     },
     ignorePaths: []
+  },
+  dosProtection: {
+    enabled: true,
+    thresholds: {
+      burstRequests: 50,
+      timeWindowMs: 10000 // 10 seconds
+    },
+    mitigation: {
+      delayMs: 500,
+      blockDurationMs: 300000 // 5 minutes
+    }
   }
 }

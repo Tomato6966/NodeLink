@@ -65,6 +65,28 @@ async function requestHandler(nodelink, req, res) {
   const isInternal = ['127.0.0.1', '::1', 'localhost'].includes(remoteAddress)
   const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${req.socket.remotePort})`
 
+  const dosCheck = nodelink.dosProtectionManager.check(req)
+  if (!dosCheck.allowed) {
+    logger(
+      'warn',
+      'DosProtection',
+      `DoS protection triggered for ${clientAddress} on ${parsedUrl.pathname}`
+    )
+    sendErrorResponse(
+      req,
+      res,
+      dosCheck.status,
+      dosCheck.message,
+      dosCheck.message,
+      parsedUrl.pathname,
+      trace
+    )
+    return
+  }
+  if (dosCheck.delay) {
+    await new Promise(resolve => setTimeout(resolve, dosCheck.delay))
+  }
+
   if (!nodelink.rateLimitManager.check(req, parsedUrl)) {
     logger(
       'warn',

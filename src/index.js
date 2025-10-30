@@ -26,6 +26,7 @@ import {
 import 'dotenv/config'
 import PlayerManager from './managers/playerManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
+import DosProtectionManager from './managers/dosProtectionManager.js'
 
 let config
 
@@ -95,6 +96,7 @@ class NodelinkServer {
     this.connectionManager = new connectionManager(this)
     this.statsManager = new statsManager(this)
     this.rateLimitManager = new RateLimitManager(this)
+    this.dosProtectionManager = new DosProtectionManager(this)
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     this.statistics = {
@@ -512,6 +514,7 @@ if (clusterEnabled && cluster.isPrimary) {
     process.on('beforeExit', () => {
       workerManager.destroy()
       nserver.rateLimitManager.destroy()
+      nserver.dosProtectionManager.destroy()
     })
 
     return nserver
@@ -534,6 +537,7 @@ if (clusterEnabled && cluster.isPrimary) {
 
     process.on('beforeExit', () => {
       nserver.rateLimitManager.destroy()
+      nserver.dosProtectionManager.destroy()
     })
 
     return nserver
