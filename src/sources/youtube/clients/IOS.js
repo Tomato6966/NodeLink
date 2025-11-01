@@ -17,7 +17,7 @@ export default class IOS extends BaseClient {
         clientName: 'IOS',
         clientVersion: '20.10.4',
         userAgent:
-          'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;',
+          'com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
         deviceMake: 'Apple',
         deviceModel: 'iPhone16,2',
         osName: 'iPhone',
