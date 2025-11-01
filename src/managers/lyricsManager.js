@@ -110,16 +110,17 @@ export default class LyricsManager {
       }
     }
 
-    const fallbackSourceName = this.nodelink.options.lyrics?.fallbackSource
-    if (fallbackSourceName && fallbackSourceName !== sourceName) {
-      const fallbackSource = this.lyricsSources.get(fallbackSourceName)
-      if (fallbackSource) {
+    for (const [name, source] of this.lyricsSources) {
+      if (name !== sourceName) {
         logger(
           'debug',
           'Lyrics',
-          `No lyrics found on ${sourceName}, trying fallback ${fallbackSourceName} for ${reliableTrackData.data.info.title}.`
+          `Trying lyrics source ${name} for ${reliableTrackData.data.info.title}.`
         )
-        return fallbackSource.getLyrics(reliableTrackData.data.info)
+        const lyrics = await source.getLyrics(reliableTrackData.data.info)
+        if (lyrics && lyrics.loadType !== 'empty') {
+          return lyrics
+        }
       }
     }
 
