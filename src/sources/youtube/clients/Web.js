@@ -15,10 +15,10 @@ export default class Web extends BaseClient {
     return {
       client: {
         clientName: 'WEB',
-        clientVersion: '2.20250403.01.00',
+        clientVersion: '2.20251030.01.00',
         platform: 'DESKTOP',
         userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36,gzip(gfe)',
         hl: context.client.hl,
         gl: context.client.gl
       },
