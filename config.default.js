@@ -156,6 +156,9 @@ export default {
     musixmatch: {
       enabled: true
       // signatureSecret: ''
+    },
+    lrclib: {
+      enabled: true
     }
   },
   audio: {
