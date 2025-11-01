@@ -1,24 +1,36 @@
 import cluster from 'node:cluster'
 import crypto from 'node:crypto'
 import os from 'node:os'
+
 import { logger } from '../utils.js'
 
 export default class WorkerManager {
   constructor(config) {
     this.config = config
     this.workers = []
+    this.workersById = new Map()
     this.guildToWorker = new Map()
+    this.workerToGuilds = new Map()
     this.nextStatelessWorkerIndex = 0
     this.pendingRequests = new Map()
-    this.maxWorkers =
-      config.cluster.workers === 0
-        ? os.cpus().length
-        : Math.max(1, config.cluster.workers || 0)
+    this.maxWorkers = config.cluster.workers === 0
+      ? os.cpus().length
+      : Math.max(1, config.cluster.workers || 0)
     this.minWorkers = 1
     this.workerLoad = new Map()
     this.idleWorkers = new Map()
     this.scaleCheckInterval = null
     this.workerFailureHistory = new Map()
+    this.statsUpdateBatch = new Map()
+    this.statsUpdateTimer = null
+    this.scalingConfig = {
+      maxPlayersPerWorker: config.cluster.scaling?.maxPlayersPerWorker || 20,
+      targetUtilization: config.cluster.scaling?.targetUtilization || 0.7,
+      scaleUpThreshold: config.cluster.scaling?.scaleUpThreshold || 0.75,
+      scaleDownThreshold: config.cluster.scaling?.scaleDownThreshold || 0.3,
+      idleWorkerTimeoutMs: config.cluster.scaling?.idleWorkerTimeoutMs || 60000,
+      checkIntervalMs: config.cluster.scaling?.checkIntervalMs || 5000
+    }
 
     logger(
       'info',
@@ -26,8 +38,8 @@ export default class WorkerManager {
       `Primary PID ${process.pid} - WorkerManager initialized. Max workers: ${this.maxWorkers}`
     )
 
-    this.ensureWorkerAvailability()
-    this.startScalingCheck()
+    this._ensureWorkerAvailability()
+    this._startScalingCheck()
 
     cluster.on('exit', (worker, code, signal) => {
       logger(
@@ -37,30 +49,32 @@ export default class WorkerManager {
       )
       this._updateWorkerFailureHistory(worker.id, code, signal)
       this.removeWorker(worker.id)
-      if (
-        this.workers.length < this.minWorkers ||
-        Array.from(this.guildToWorker.values()).some((wId) => wId === worker.id)
-      ) {
+
+      const shouldRespawn = this.workers.length < this.minWorkers ||
+        Array.from(this.workerToGuilds.get(worker.id) || []).length > 0
+
+      if (shouldRespawn) {
         this.forkWorker()
       }
     })
   }
 
-  startScalingCheck() {
-    if (this.scaleCheckInterval) return
-    const interval = Math.max(
-      1,
-      this.config.cluster.scaling?.checkIntervalMs || 5000
+  _startScalingCheck() {
+    if (this.scaleCheckInterval) return;
+
+    this.scaleCheckInterval = setInterval(
+      () => this._scaleWorkers(),
+      this.scalingConfig.checkIntervalMs
     )
-    this.scaleCheckInterval = setInterval(() => this.scaleWorkers(), interval)
+
     logger(
       'info',
       'Cluster',
-      `Scaling check started with interval: ${interval}ms`
+      `Scaling check started with interval: ${this.scalingConfig.checkIntervalMs}ms`
     )
   }
 
-  stopScalingCheck() {
+  _stopScalingCheck() {
     if (this.scaleCheckInterval) {
       clearInterval(this.scaleCheckInterval)
       this.scaleCheckInterval = null
@@ -68,76 +82,68 @@ export default class WorkerManager {
     }
   }
 
-  scaleWorkers() {
-    const activeWorkers = this.workers.filter((w) => w.isConnected())
-    const totalPlayers = Array.from(this.workerLoad.values()).reduce(
-      (sum, load) => sum + load,
-      0
-    )
+  _scaleWorkers() {
+    let activeCount = 0
+    let totalPlayers = 0
+    const metrics = []
 
-    const scalingConfig = this.config.cluster.scaling || {}
-    const maxPlayersPerWorker = scalingConfig.maxPlayersPerWorker || 20
-    const targetUtilization = scalingConfig.targetUtilization || 0.7
-    const scaleUpThreshold = scalingConfig.scaleUpThreshold || 0.75
-    const scaleDownThreshold = scalingConfig.scaleDownThreshold || 0.3
-    const idleWorkerTimeoutMs = scalingConfig.idleWorkerTimeoutMs || 60000
+    for (const worker of this.workers) {
+      if (worker.isConnected()) {
+        activeCount++
+        const load = this.workerLoad.get(worker.id) || 0
+        totalPlayers += load
+        metrics.push({ worker, load })
+      }
+    }
 
-    const clusterCapacity = activeWorkers.length * maxPlayersPerWorker
-    const currentUtilization =
-      clusterCapacity > 0 ? totalPlayers / clusterCapacity : 0
+    const { maxPlayersPerWorker, scaleUpThreshold, scaleDownThreshold, idleWorkerTimeoutMs } = this.scalingConfig
+    const clusterCapacity = activeCount * maxPlayersPerWorker
+    const currentUtilization = clusterCapacity > 0 ? totalPlayers / clusterCapacity : 0
 
-    if (
-      currentUtilization > scaleUpThreshold &&
-      activeWorkers.length < this.maxWorkers
-    ) {
+    if (currentUtilization > scaleUpThreshold && activeCount < this.maxWorkers) {
       logger(
         'info',
         'Cluster',
         `Scaling up: Current utilization ${currentUtilization.toFixed(2)} > ${scaleUpThreshold}. Forking new worker.`
       )
       this.forkWorker()
-    } else if (
-      currentUtilization < scaleDownThreshold &&
-      activeWorkers.length > this.minWorkers
-    ) {
-      for (const [workerId, _] of this.workerLoad.entries()) {
-        const worker = this.workers.find((w) => w.id === workerId)
-        if (
-          worker &&
-          this.workerLoad.get(worker.id) === 0 &&
-          activeWorkers.length > this.minWorkers
-        ) {
-          if (!this.idleWorkers.has(worker.id)) {
-            this.idleWorkers.set(worker.id, Date.now())
+      return;
+    }
+
+    if (currentUtilization < scaleDownThreshold && activeCount > this.minWorkers) {
+      const now = Date.now()
+
+      for (const { worker, load } of metrics) {
+        if (load === 0 && activeCount > this.minWorkers) {
+          const idleTime = this.idleWorkers.get(worker.id)
+
+          if (!idleTime) {
+            this.idleWorkers.set(worker.id, now)
             logger(
               'debug',
               'Cluster',
               `Worker ${worker.id} became idle. Start timeout for removal.`
             )
-          } else if (
-            Date.now() - this.idleWorkers.get(worker.id) >
-            idleWorkerTimeoutMs
-          ) {
+          } else if (now - idleTime > idleWorkerTimeoutMs) {
             logger(
               'info',
               'Cluster',
               `Scaling down: Worker ${worker.id} idle for > ${idleWorkerTimeoutMs}ms. Removing worker.`
             )
             this.removeWorker(worker.id)
+            activeCount--
             break
           }
-        } else if (
-          this.idleWorkers.has(worker.id) &&
-          this.workerLoad.get(worker.id) > 0
-        ) {
-          this.idleWorkers.delete(worker.id)
-          logger('debug', 'Cluster', `Worker ${worker.id} is no longer idle.`)
+        } else if (load > 0) {
+          if (this.idleWorkers.has(worker.id)) {
+            this.idleWorkers.delete(worker.id)
+            logger('debug', 'Cluster', `Worker ${worker.id} is no longer idle.`)
+          }
         }
       }
     } else {
-      for (const [workerId, timestamp] of this.idleWorkers.entries()) {
-        const worker = this.workers.find((w) => w.id === workerId)
-        if (worker && this.workerLoad.get(worker.id) > 0) {
+      for (const { worker, load } of metrics) {
+        if (load > 0 && this.idleWorkers.has(worker.id)) {
           this.idleWorkers.delete(worker.id)
           logger('debug', 'Cluster', `Worker ${worker.id} is no longer idle.`)
         }
@@ -146,20 +152,25 @@ export default class WorkerManager {
   }
 
   _updateWorkerFailureHistory(workerId, code, signal) {
-    if (!this.workerFailureHistory.has(workerId)) {
-      this.workerFailureHistory.set(workerId, {
+    let history = this.workerFailureHistory.get(workerId)
+
+    if (!history) {
+      history = {
         count: 0,
         lastFailure: null,
         recentFailures: []
-      })
+      }
+      this.workerFailureHistory.set(workerId, history)
     }
-    const history = this.workerFailureHistory.get(workerId)
+
     history.count++
     history.lastFailure = Date.now()
     history.recentFailures.push({ timestamp: Date.now(), code, signal })
+
     if (history.recentFailures.length > 5) {
-      history.recentFailures.shift()
+      history.recentFailures = history.recentFailures.slice(-5)
     }
+
     logger(
       'debug',
       'Cluster',
@@ -176,40 +187,47 @@ export default class WorkerManager {
       )
       return null
     }
+
     const worker = cluster.fork()
+
     this.workers.push(worker)
+    this.workersById.set(worker.id, worker)
     this.workerLoad.set(worker.id, 0)
+    this.workerToGuilds.set(worker.id, new Set())
     this.workerFailureHistory.set(worker.id, {
       count: 0,
       lastFailure: null,
       recentFailures: []
     })
+
     logger('info', 'Cluster', `Spawned worker ${worker.process.pid}`)
 
-    worker.on('message', (msg) => this.handleWorkerMessage(worker, msg))
+    worker.on('message', (msg) => this._handleWorkerMessage(worker, msg))
+
     return worker
   }
 
   removeWorker(workerId) {
-    const worker = this.workers.find((w) => w.id === workerId)
-    if (!worker) return
+    const worker = this.workersById.get(workerId)
+    if (!worker) return;
 
-    const index = this.workers.findIndex((w) => w.id === workerId)
+    const index = this.workers.indexOf(worker)
     if (index !== -1) this.workers.splice(index, 1)
+
+    this.workersById.delete(workerId)
     this.workerLoad.delete(workerId)
     this.idleWorkers.delete(workerId)
 
-    const affectedGuilds = []
-    for (const [guildId, wId] of this.guildToWorker.entries()) {
-      if (wId === workerId) {
-        affectedGuilds.push(guildId)
-        this.guildToWorker.delete(guildId)
-        logger(
-          'warn',
-          'Cluster',
-          `Guild ${guildId} unassigned due to worker ${workerId} exit. Will be reassigned on next request.`
-        )
-      }
+    const affectedGuilds = Array.from(this.workerToGuilds.get(workerId) || [])
+    this.workerToGuilds.delete(workerId)
+
+    for (const guildId of affectedGuilds) {
+      this.guildToWorker.delete(guildId)
+      logger(
+        'warn',
+        'Cluster',
+        `Guild ${guildId} unassigned due to worker ${workerId} exit. Will be reassigned on next request.`
+      )
     }
 
     if (affectedGuilds.length > 0) {
@@ -231,6 +249,7 @@ export default class WorkerManager {
         payload: { workerId: worker.id, affectedGuilds }
       })
     }
+
     try {
       worker.process.kill()
       logger(
@@ -247,7 +266,7 @@ export default class WorkerManager {
     }
   }
 
-  handleWorkerMessage(worker, msg) {
+  _handleWorkerMessage(worker, msg) {
     if (msg.type === 'commandResult') {
       const callback = this.pendingRequests.get(msg.requestId)
       if (callback) {
@@ -257,29 +276,49 @@ export default class WorkerManager {
         else callback.resolve(msg.payload)
       }
     } else if (msg.type === 'workerStats') {
-      this.workerLoad.set(worker.id, msg.stats.players)
-      if (msg.stats.players === 0 && !this.idleWorkers.has(worker.id)) {
-        this.idleWorkers.set(worker.id, Date.now())
-      } else if (msg.stats.players > 0 && this.idleWorkers.has(worker.id)) {
-        this.idleWorkers.delete(worker.id)
+      this.statsUpdateBatch.set(worker.id, msg.stats.players)
+
+      if (!this.statsUpdateTimer) {
+        this.statsUpdateTimer = setTimeout(() => {
+          this._flushStatsUpdates()
+        }, 100)
       }
     } else if (global.nodelink) {
       global.nodelink.handleIPCMessage(msg)
     }
   }
 
+  _flushStatsUpdates() {
+    for (const [workerId, players] of this.statsUpdateBatch) {
+      this.workerLoad.set(workerId, players)
+
+      if (players === 0 && !this.idleWorkers.has(workerId)) {
+        this.idleWorkers.set(workerId, Date.now())
+      } else if (players > 0) {
+        this.idleWorkers.delete(workerId)
+      }
+    }
+
+    this.statsUpdateBatch.clear()
+    this.statsUpdateTimer = null
+  }
+
   getWorkerForGuild(guildId) {
     if (this.guildToWorker.has(guildId)) {
       const workerId = this.guildToWorker.get(guildId)
-      const worker = this.workers.find((w) => w.id === workerId)
+      const worker = this.workersById.get(workerId)
+
       if (worker?.isConnected()) return worker
+
       this.guildToWorker.delete(guildId)
+      this.workerToGuilds.get(workerId)?.delete(guildId)
     }
 
     if (this.workers.length === 0 && this.maxWorkers > 0) {
       const worker = this.forkWorker()
-      if (!worker)
+      if (!worker) {
         throw new Error('No workers available and cannot fork new ones.')
+      }
       this.assignGuildToWorker(guildId, worker)
       return worker
     }
@@ -311,18 +350,36 @@ export default class WorkerManager {
   getBestWorker() {
     if (this.workers.length === 0) {
       const worker = this.forkWorker()
-      if (!worker)
+      if (!worker) {
         throw new Error('No workers available and cannot fork new ones.')
+      }
       return worker
     }
-    const worker = this.workers[this.nextStatelessWorkerIndex]
-    this.nextStatelessWorkerIndex =
-      (this.nextStatelessWorkerIndex + 1) % this.workers.length
-    return worker
+
+    let bestWorker = null
+    let minLoad = Number.POSITIVE_INFINITY
+
+    for (const worker of this.workers) {
+      if (worker.isConnected()) {
+        const load = this.workerLoad.get(worker.id) || 0
+        if (load < minLoad) {
+          minLoad = load
+          bestWorker = worker
+        }
+      }
+    }
+
+    return bestWorker || this.forkWorker()
   }
 
   assignGuildToWorker(guildId, worker) {
     this.guildToWorker.set(guildId, worker.id)
+
+    if (!this.workerToGuilds.has(worker.id)) {
+      this.workerToGuilds.set(worker.id, new Set())
+    }
+    this.workerToGuilds.get(worker.id).add(guildId)
+
     logger(
       'debug',
       'Cluster',
@@ -331,14 +388,19 @@ export default class WorkerManager {
   }
 
   unassignGuild(guildId) {
+    const workerId = this.guildToWorker.get(guildId)
     this.guildToWorker.delete(guildId)
+
+    if (workerId && this.workerToGuilds.has(workerId)) {
+      this.workerToGuilds.get(workerId).delete(guildId)
+    }
   }
 
   isGuildAssigned(guildId) {
     return this.guildToWorker.has(guildId)
   }
 
-  ensureWorkerAvailability() {
+  _ensureWorkerAvailability() {
     if (this.workers.length === 0 && this.maxWorkers > 0) {
       logger('info', 'Cluster', 'No workers available, forking initial worker.')
       this.forkWorker()
@@ -346,7 +408,13 @@ export default class WorkerManager {
   }
 
   destroy() {
-    this.stopScalingCheck()
+    this._stopScalingCheck()
+
+    if (this.statsUpdateTimer) {
+      clearTimeout(this.statsUpdateTimer)
+      this._flushStatsUpdates()
+    }
+
     for (const worker of this.workers) {
       if (worker.isConnected()) {
         worker.process.kill()
@@ -358,6 +426,7 @@ export default class WorkerManager {
         )
       }
     }
+
     logger(
       'info',
       'Cluster',
@@ -371,7 +440,7 @@ export default class WorkerManager {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(requestId)
         reject(new Error(`Worker command timeout for request ${requestId}`))
-      }, 30000) // 30 seconds timeout for worker commands
+      }, 30000)
 
       this.pendingRequests.set(requestId, { resolve, reject, timeout })
 
