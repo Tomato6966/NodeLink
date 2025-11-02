@@ -41,6 +41,15 @@ async function initialize() {
 
 initialize()
 
+process.on('uncaughtException', (err) => {
+  logger('error', 'Worker-Crash', `Uncaught Exception: ${err.stack || err.message}`)
+  process.exit(1)
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger('error', 'Worker-Crash', `Unhandled Rejection at: ${promise}, reason: ${reason}`)
+})
+
 async function processQueue() {
   if (commandQueue.length === 0) return
 
@@ -55,17 +64,20 @@ async function processQueue() {
           result = { created: false, reason: 'Player already exists' }
           break
         }
-
         const mockSession = {
           id: sessionId,
           userId: userId,
           socket: {
             send: (data) => {
               if (process.connected) {
-                process.send({
-                  type: 'playerEvent',
-                  payload: { sessionId, guildId, data }
-                })
+                try {
+                  process.send({
+                    type: 'playerEvent',
+                    payload: { sessionId, guildId, data }
+                  })
+                } catch (e) {
+                  logger('error', 'Worker-IPC', `Failed to send playerEvent for guild ${guildId}: ${e.message}`)
+                }
               }
             }
           }
@@ -88,10 +100,14 @@ async function processQueue() {
           players.delete(guildId)
           
           if (process.connected) {
-            process.send({
-              type: 'playerDestroyed',
-              payload: { guildId }
-            })
+            try {
+              process.send({
+                type: 'playerDestroyed',
+                payload: { guildId }
+              })
+            } catch (e) {
+              logger('error', 'Worker-IPC', `Failed to send playerDestroyed for guild ${guildId}: ${e.message}`)
+            }
           }
           
           result = { destroyed: true }
@@ -113,10 +129,14 @@ async function processQueue() {
           socket: {
             send: (data) => {
               if (process.connected) {
-                process.send({
-                  type: 'playerEvent',
-                  payload: { sessionId, guildId, data }
-                })
+                try {
+                  process.send({
+                    type: 'playerEvent',
+                    payload: { sessionId, guildId, data }
+                  })
+                } catch (e) {
+                  logger('error', 'Worker-IPC', `Failed to send playerEvent for guild ${guildId}: ${e.message}`)
+                }
               }
             }
           }
@@ -131,7 +151,7 @@ async function processQueue() {
         if (filters && Object.keys(filters).length > 0) player.setFilters(filters)
         
         if (track) {
-          await player.play({ track, startTime: position })
+          await player.play({ ...track, startTime: position })
           if (isPaused) {
             player.pause(true)
           }
@@ -185,11 +205,19 @@ async function processQueue() {
     }
 
     if (process.connected) {
-      process.send({ type: 'commandResult', requestId, payload: result })
+      try {
+        process.send({ type: 'commandResult', requestId, payload: result })
+      } catch (e) {
+        logger('error', 'Worker-IPC', `Failed to send commandResult for ${requestId}: ${e.message}`)
+      }
     }
   } catch (e) {
     if (process.connected) {
-      process.send({ type: 'commandResult', requestId, error: e.message })
+      try {
+        process.send({ type: 'commandResult', requestId, error: e.message })
+      } catch (e) {
+        logger('error', 'Worker-IPC', `Failed to send commandResult (error) for ${requestId}: ${e.message}`)
+      }
     }
   } finally {
     if (commandQueue.length > 0) {
@@ -201,7 +229,11 @@ async function processQueue() {
 process.on('message', (msg) => {
   if (msg.type === 'ping') {
     if (process.connected) {
-      process.send({ type: 'pong', timestamp: msg.timestamp })
+      try {
+        process.send({ type: 'pong', timestamp: msg.timestamp })
+      } catch (e) {
+        logger('error', 'Worker-IPC', `Failed to send pong: ${e.message}`)
+      }
     }
     return
   }
@@ -220,7 +252,11 @@ const zombieThreshold = config?.zombieThresholdMs ?? 60000
 
 setTimeout(() => {
   if (process.connected) {
-    process.send({ type: 'ready', pid: process.pid })
+    try {
+      process.send({ type: 'ready', pid: process.pid })
+    } catch (e) {
+      logger('error', 'Worker-IPC', `Failed to send ready: ${e.message}`)
+    }
   }
 }, 1000)
 
@@ -265,32 +301,40 @@ setInterval(() => {
     }
     
     if (player.track && !player._isRestoring) {
-      process.send({
-        type: 'playerSnapshot',
-        payload: {
-          guildId: player.guildId,
-          playerState: {
-            sessionId: player.session.id,
-            userId: player.session.userId,
-            track: player.track,
-            position: player._realPosition(),
-            isPaused: player.isPaused,
-            volume: player.volumePercent,
-            filters: player.filters,
-            voice: player.voice
+      try {
+        process.send({
+          type: 'playerSnapshot',
+          payload: {
+            guildId: player.guildId,
+            playerState: {
+              sessionId: player.session.id,
+              userId: player.session.userId,
+              track: player.track,
+              position: player._realPosition(),
+              isPaused: player.isPaused,
+              volume: player.volumePercent,
+              filters: player.filters,
+              voice: player.voice
+            }
           }
-        }
-      })
+        })
+      } catch (e) {
+        logger('error', 'Worker-IPC', `Failed to send playerSnapshot for guild ${player.guildId}: ${e.message}`)
+      }
     }
   }
 
-  process.send({
-    type: 'workerStats',
-    pid: process.pid,
-    stats: {
-      players: localPlayers,
-      playingPlayers: localPlayingPlayers,
-      commandQueueLength: commandQueue.length
-    }
-  })
+  try {
+    process.send({
+      type: 'workerStats',
+      pid: process.pid,
+      stats: {
+        players: localPlayers,
+        playingPlayers: localPlayingPlayers,
+        commandQueueLength: commandQueue.length
+      }
+    })
+  } catch (e) {
+    logger('error', 'Worker-IPC', `Failed to send workerStats: ${e.message}`)
+  }
 }, updateInterval)
