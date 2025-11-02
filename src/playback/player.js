@@ -2,10 +2,16 @@ import { SeekError } from '@ecliptia/seekable-stream'
 import discordVoice from '@performanc/voice'
 import { EndReasons, GatewayEvents } from '../constants.js'
 import { logger } from '../utils.js'
-import {
-  createAudioResource,
-  createSeekeableAudioResource
-} from './streamProcessor.js'
+let createAudioResource
+let createSeekeableAudioResource
+
+async function getStreamProcessor() {
+  if (createAudioResource) return
+
+  const processor = await import('./streamProcessor.js')
+  createAudioResource = processor.createAudioResource
+  createSeekeableAudioResource = processor.createSeekeableAudioResource
+}
 
 export class Player {
   constructor(options) {
@@ -291,6 +297,8 @@ export class Player {
   }
 
   async _fetchResource(info, urlData, startTime) {
+    await getStreamProcessor()
+
     if (startTime)
       urlData.additionalData = { startTime, ...urlData.additionalData }
 
@@ -572,6 +580,8 @@ export class Player {
   }
 
   async _seekeableSeek(position, endTime) {
+    await getStreamProcessor()
+
     logger(
       'debug',
       'Player',

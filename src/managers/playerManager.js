@@ -1,4 +1,3 @@
-import { Player } from '../playback/player.js'
 import { logger } from '../utils.js'
 
 export default class PlayerManager {
@@ -41,6 +40,7 @@ export default class PlayerManager {
       this.players.set(guildId, { guildId })
       return this.players.get(guildId)
     }
+    const { Player } = await import('../playback/player.js')
     logger('debug', 'PlayerManager', `Creating new player for guild ${guildId}`)
     const player = new Player({
       nodelink: this.nodelink,
