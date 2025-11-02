@@ -190,8 +190,13 @@ export class Player {
       !this._isSeeking &&
       ['requested', 'reconnected'].includes(state.reason)
     ) {
-      this.emitEvent(GatewayEvents.TRACK_START, { track: this.track })
+      // Only emit TRACK_START if we were not paused before (new track, not resume)
+      const wasResuming = this.isPaused
       this.isPaused = false
+      
+      if (!wasResuming) {
+        this.emitEvent(GatewayEvents.TRACK_START, { track: this.track })
+      }
     } else if (state.status === 'paused') {
       this.isPaused = true
     }
