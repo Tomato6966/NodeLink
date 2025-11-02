@@ -190,8 +190,8 @@ export class Player {
       !this._isSeeking &&
       ['requested', 'reconnected'].includes(state.reason)
     ) {
-      // Only emit TRACK_START if we were not paused before (new track, not resume)
-      const wasResuming = this.isPaused
+      const wasResuming = this._isResuming
+      this._isResuming = false
       this.isPaused = false
       
       if (!wasResuming) {
@@ -768,7 +768,11 @@ export class Player {
       'Player',
       `Setting pause to ${shouldPause} for guild ${this.guildId}`
     )
+    
+    const wasResuming = this.isPaused && !shouldPause
     this.isPaused = shouldPause
+    this._isResuming = wasResuming
+    
     if (this.connection?.audioStream) {
       if (shouldPause) {
         this.connection.pause('requested')
