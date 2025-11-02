@@ -150,14 +150,30 @@ async function processQueue() {
 }
 
 process.on('message', (msg) => {
+  if (msg.type === 'ping') {
+    if (process.connected) {
+      process.send({ type: 'pong', timestamp: msg.timestamp })
+    }
+    return
+  }
+  
   if (!msg.type || !msg.requestId) return
 
   commandQueue.push(msg)
-  setImmediate(processQueue)
+  
+  if (commandQueue.length === 1) {
+    setImmediate(processQueue)
+  }
 })
 
 const updateInterval = config?.playerUpdateInterval ?? 5000
 const zombieThreshold = config?.zombieThresholdMs ?? 60000
+
+setTimeout(() => {
+  if (process.connected) {
+    process.send({ type: 'ready', pid: process.pid })
+  }
+}, 1000)
 
 setInterval(() => {
   if (!process.connected) return

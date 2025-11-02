@@ -16,13 +16,17 @@ export default class WorkerManager {
     this.maxWorkers = config.cluster.workers === 0
       ? os.cpus().length
       : Math.max(1, config.cluster.workers || 0)
-    this.minWorkers = 1
+    this.minWorkers = Math.max(1, config.cluster?.minWorkers || 1)
     this.workerLoad = new Map()
     this.idleWorkers = new Map()
     this.scaleCheckInterval = null
     this.workerFailureHistory = new Map()
     this.statsUpdateBatch = new Map()
     this.statsUpdateTimer = null
+    this.workerHealth = new Map()
+    this.commandTimeout = config.cluster?.commandTimeout || 45000
+    this.fastCommandTimeout = config.cluster?.fastCommandTimeout || 10000
+    this.maxRetries = config.cluster?.maxRetries || 2
     this.scalingConfig = {
       maxPlayersPerWorker: config.cluster.scaling?.maxPlayersPerWorker || 20,
       targetUtilization: config.cluster.scaling?.targetUtilization || 0.7,
@@ -35,28 +39,94 @@ export default class WorkerManager {
     logger(
       'info',
       'Cluster',
-      `Primary PID ${process.pid} - WorkerManager initialized. Max workers: ${this.maxWorkers}`
+      `Primary PID ${process.pid} - WorkerManager initialized. Min: ${this.minWorkers}, Max: ${this.maxWorkers} workers`
     )
 
     this._ensureWorkerAvailability()
     this._startScalingCheck()
+    this._startHealthCheck()
 
     cluster.on('exit', (worker, code, signal) => {
       logger(
         'warn',
         'Cluster',
-        `Worker ${worker.process.pid} exited (code=${code}). Respawning...`
+        `Worker ${worker.process.pid} exited (code=${code}, signal=${signal})`
       )
       this._updateWorkerFailureHistory(worker.id, code, signal)
+      
+      const affectedGuilds = Array.from(this.workerToGuilds.get(worker.id) || [])
+      this._retryPendingRequestsForWorker(worker.id)
       this.removeWorker(worker.id)
 
-      const shouldRespawn = this.workers.length < this.minWorkers ||
-        Array.from(this.workerToGuilds.get(worker.id) || []).length > 0
+      const shouldRespawn = this._shouldRespawnWorker(worker.id, code, affectedGuilds.length)
 
       if (shouldRespawn) {
-        this.forkWorker()
+        logger('info', 'Cluster', 'Respawning worker...')
+        setTimeout(() => this.forkWorker(), 500)
       }
     })
+  }
+
+  _shouldRespawnWorker(workerId, exitCode, affectedGuildsCount) {
+    if (this.workers.length < this.minWorkers) return true
+    if (affectedGuildsCount > 0) return true
+
+    const history = this.workerFailureHistory.get(workerId)
+    if (history) {
+      const recentFailures = history.recentFailures.filter(
+        f => Date.now() - f.timestamp < 30000
+      )
+      
+      if (recentFailures.length >= 3) {
+        logger(
+          'error',
+          'Cluster',
+          `Worker ${workerId} crashed ${recentFailures.length} times in 30s. Preventing crash loop.`
+        )
+        return false
+      }
+    }
+
+    return true
+  }
+
+  _startHealthCheck() {
+    setInterval(() => {
+      const now = Date.now()
+      for (const worker of this.workers) {
+        if (worker.isConnected()) {
+          const lastSeen = this.workerHealth.get(worker.id) || 0
+          if (now - lastSeen > 30000) {
+            logger('warn', 'Cluster', `Worker ${worker.id} unresponsive (${Math.floor((now - lastSeen) / 1000)}s)`)
+          }
+          worker.send({ type: 'ping', timestamp: now })
+        }
+      }
+    }, 10000)
+  }
+
+  _retryPendingRequestsForWorker(workerId) {
+    for (const [requestId, request] of this.pendingRequests.entries()) {
+      if (request.workerId === workerId) {
+        clearTimeout(request.timeout)
+        this.pendingRequests.delete(requestId)
+        
+        if (request.retryCount < this.maxRetries) {
+          logger('debug', 'Cluster', `Retrying command after worker ${workerId} exit (attempt ${request.retryCount + 1})`)
+          
+          setTimeout(() => {
+            const newWorker = this.getBestWorker()
+            if (newWorker) {
+              this._executeCommand(newWorker, request.type, request.payload, request.resolve, request.reject, request.retryCount + 1, request.isFast)
+            } else {
+              request.reject(new Error('No workers available for retry'))
+            }
+          }, 500 * Math.pow(2, request.retryCount))
+        } else {
+          request.reject(new Error(`Worker ${workerId} exited before completing request`))
+        }
+      }
+    }
   }
 
   _startScalingCheck() {
@@ -194,15 +264,20 @@ export default class WorkerManager {
     this.workersById.set(worker.id, worker)
     this.workerLoad.set(worker.id, 0)
     this.workerToGuilds.set(worker.id, new Set())
+    this.workerHealth.set(worker.id, Date.now())
     this.workerFailureHistory.set(worker.id, {
       count: 0,
       lastFailure: null,
       recentFailures: []
     })
 
-    logger('info', 'Cluster', `Spawned worker ${worker.process.pid}`)
+    logger('info', 'Cluster', `Spawned worker ${worker.process.pid} (id: ${worker.id})`)
 
     worker.on('message', (msg) => this._handleWorkerMessage(worker, msg))
+    
+    worker.on('error', (error) => {
+      logger('error', 'Cluster', `Worker ${worker.id} error: ${error.message}`)
+    })
 
     return worker
   }
@@ -283,6 +358,11 @@ export default class WorkerManager {
           this._flushStatsUpdates()
         }, 100)
       }
+    } else if (msg.type === 'pong') {
+      this.workerHealth.set(worker.id, Date.now())
+    } else if (msg.type === 'ready') {
+      this.workerHealth.set(worker.id, Date.now())
+      logger('info', 'Cluster', `Worker ${worker.id} (PID ${worker.process.pid}) ready`)
     } else if (global.nodelink) {
       global.nodelink.handleIPCMessage(msg)
     }
@@ -401,8 +481,10 @@ export default class WorkerManager {
   }
 
   _ensureWorkerAvailability() {
-    if (this.workers.length === 0 && this.maxWorkers > 0) {
-      logger('info', 'Cluster', 'No workers available, forking initial worker.')
+    const neededWorkers = Math.max(this.minWorkers - this.workers.length, 0)
+
+    for (let i = 0; i < neededWorkers && this.workers.length < this.maxWorkers; i++) {
+      logger('info', 'Cluster', `Forking worker ${this.workers.length + 1}/${this.minWorkers}`)
       this.forkWorker()
     }
   }
@@ -434,17 +516,79 @@ export default class WorkerManager {
     )
   }
 
-  execute(worker, type, payload) {
+  execute(worker, type, payload, options = {}) {
     return new Promise((resolve, reject) => {
-      const requestId = crypto.randomBytes(16).toString('hex')
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(requestId)
-        reject(new Error(`Worker command timeout for request ${requestId}`))
-      }, 30000)
+      this._executeCommand(worker, type, payload, resolve, reject, 0, options.fast || false)
+    })
+  }
 
-      this.pendingRequests.set(requestId, { resolve, reject, timeout })
+  _executeCommand(worker, type, payload, resolve, reject, retryCount, isFast) {
+    const requestId = crypto.randomBytes(16).toString('hex')
+    const timeoutMs = isFast ? this.fastCommandTimeout : this.commandTimeout
+    
+    const timeout = setTimeout(() => {
+      this.pendingRequests.delete(requestId)
+      
+      if (retryCount < this.maxRetries && worker.isConnected()) {
+        logger('warn', 'Cluster', `Command timeout (${timeoutMs}ms), retrying... (${retryCount + 1}/${this.maxRetries})`)
+        
+        setTimeout(() => {
+          const newWorker = this.getBestWorker() || worker
+          this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast)
+        }, 500)
+      } else {
+        reject(new Error(`Worker command timeout after ${retryCount + 1} attempts`))
+      }
+    }, timeoutMs)
+
+    this.pendingRequests.set(requestId, {
+      resolve,
+      reject,
+      timeout,
+      workerId: worker.id,
+      type,
+      payload,
+      retryCount,
+      isFast,
+      startTime: Date.now()
+    })
+
+    try {
+      if (!worker.isConnected()) {
+        clearTimeout(timeout)
+        this.pendingRequests.delete(requestId)
+        
+        if (retryCount < this.maxRetries) {
+          const newWorker = this.getBestWorker()
+          if (newWorker) {
+            this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast)
+          } else {
+            reject(new Error('No workers available'))
+          }
+        } else {
+          reject(new Error('Worker disconnected and max retries reached'))
+        }
+        return
+      }
 
       worker.send({ type, requestId, payload })
-    })
+    } catch (error) {
+      clearTimeout(timeout)
+      this.pendingRequests.delete(requestId)
+      
+      if (retryCount < this.maxRetries) {
+        logger('error', 'Cluster', `Send error: ${error.message}, retrying...`)
+        setTimeout(() => {
+          const newWorker = this.getBestWorker()
+          if (newWorker) {
+            this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast)
+          } else {
+            reject(error)
+          }
+        }, 500)
+      } else {
+        reject(error)
+      }
+    }
   }
 }
