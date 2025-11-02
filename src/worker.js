@@ -86,10 +86,59 @@ async function processQueue() {
         if (player) {
           player.destroy(false)
           players.delete(guildId)
+          
+          if (process.connected) {
+            process.send({
+              type: 'playerDestroyed',
+              payload: { guildId }
+            })
+          }
+          
           result = { destroyed: true }
         } else {
           result = { destroyed: false, reason: 'Player not found in worker' }
         }
+        break
+      }
+
+      case 'restorePlayer': {
+        const { snapshot } = payload
+        const { guildId, sessionId, userId, track, position, isPaused, volume, filters, voice } = snapshot
+        
+        logger('info', 'Worker', `Restoring player for guild ${guildId} (position: ${position}ms, paused: ${isPaused})`)
+        
+        const mockSession = {
+          id: sessionId,
+          userId: userId,
+          socket: {
+            send: (data) => {
+              if (process.connected) {
+                process.send({
+                  type: 'playerEvent',
+                  payload: { sessionId, guildId, data }
+                })
+              }
+            }
+          }
+        }
+
+        const player = new Player({ nodelink, session: mockSession, guildId })
+        player._isRestoring = true
+        players.set(guildId, player)
+
+        if (voice) player.updateVoice(voice)
+        if (volume) player.volume(volume)
+        if (filters && Object.keys(filters).length > 0) player.setFilters(filters)
+        
+        if (track) {
+          await player.play({ track, startTime: position })
+          if (isPaused) {
+            player.pause(true)
+          }
+        }
+        
+        player._isRestoring = false
+        result = { restored: true }
         break
       }
 
@@ -213,6 +262,25 @@ setInterval(() => {
           updateError
         )
       }
+    }
+    
+    if (player.track && !player._isRestoring) {
+      process.send({
+        type: 'playerSnapshot',
+        payload: {
+          guildId: player.guildId,
+          playerState: {
+            sessionId: player.session.id,
+            userId: player.session.userId,
+            track: player.track,
+            position: player._realPosition(),
+            isPaused: player.isPaused,
+            volume: player.volumePercent,
+            filters: player.filters,
+            voice: player.voice
+          }
+        }
+      })
     }
   }
 

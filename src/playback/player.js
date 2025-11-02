@@ -194,7 +194,7 @@ export class Player {
       this._isResuming = false
       this.isPaused = false
       
-      if (!wasResuming) {
+      if (!wasResuming && !this._isRestoring) {
         this.emitEvent(GatewayEvents.TRACK_START, { track: this.track })
       }
     } else if (state.status === 'paused') {
