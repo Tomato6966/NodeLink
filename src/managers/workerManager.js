@@ -21,6 +21,7 @@ export default class WorkerManager {
     this.workerLoad = new Map()
     this.idleWorkers = new Map()
     this.scaleCheckInterval = null
+    this.healthCheckInterval = null
     this.workerFailureHistory = new Map()
     this.statsUpdateBatch = new Map()
     this.statsUpdateTimer = null
@@ -55,10 +56,10 @@ export default class WorkerManager {
         `Worker ${worker.process.pid} exited (code=${code}, signal=${signal})`
       )
       this._updateWorkerFailureHistory(worker.id, code, signal)
-      
+
       const affectedGuilds = Array.from(this.workerToGuilds.get(worker.id) || [])
       const snapshots = this.backupManager.getWorkerSnapshots(worker.id)
-      
+
       this._retryPendingRequestsForWorker(worker.id)
       this.removeWorker(worker.id)
 
@@ -85,7 +86,7 @@ export default class WorkerManager {
       const recentFailures = history.recentFailures.filter(
         f => Date.now() - f.timestamp < 30000
       )
-      
+
       if (recentFailures.length >= 3) {
         logger(
           'error',
@@ -100,7 +101,7 @@ export default class WorkerManager {
   }
 
   _startHealthCheck() {
-    setInterval(() => {
+    this.healthCheckInterval = setInterval(() => {
       const now = Date.now()
       for (const worker of this.workers) {
         if (worker.isConnected()) {
@@ -114,15 +115,23 @@ export default class WorkerManager {
     }, 10000)
   }
 
+  _stopHealthCheck() {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval)
+      this.healthCheckInterval = null
+      logger('info', 'Cluster', 'Health check stopped')
+    }
+  }
+
   _retryPendingRequestsForWorker(workerId) {
     for (const [requestId, request] of this.pendingRequests.entries()) {
       if (request.workerId === workerId) {
         clearTimeout(request.timeout)
         this.pendingRequests.delete(requestId)
-        
+
         if (request.retryCount < this.maxRetries) {
           logger('debug', 'Cluster', `Retrying command after worker ${workerId} exit (attempt ${request.retryCount + 1})`)
-          
+
           setTimeout(() => {
             const newWorker = this.getBestWorker()
             if (newWorker) {
@@ -283,7 +292,7 @@ export default class WorkerManager {
     logger('info', 'Cluster', `Spawned worker ${worker.process.pid} (id: ${worker.id})`)
 
     worker.on('message', (msg) => this._handleWorkerMessage(worker, msg))
-    
+
     worker.on('error', (error) => {
       logger('error', 'Cluster', `Worker ${worker.id} error: ${error.message}`)
     })
@@ -506,35 +515,42 @@ export default class WorkerManager {
 
   async _restorePlayers(worker, snapshots) {
     logger('info', 'Cluster', `Restoring ${snapshots.length} players to worker ${worker.id}`)
-    
+
     for (const snapshot of snapshots) {
       try {
         this.assignGuildToWorker(snapshot.guildId, worker)
-        
+
         await this.execute(worker, 'restorePlayer', {
           snapshot
         })
-        
+
         logger('debug', 'Cluster', `Restored player for guild ${snapshot.guildId}`)
       } catch (error) {
         logger('error', 'Cluster', `Failed to restore player for guild ${snapshot.guildId}: ${error.message}`)
       }
     }
-    
+
     logger('info', 'Cluster', `Restoration complete for worker ${worker.id}`)
   }
 
   destroy() {
     this._stopScalingCheck()
+    this._stopHealthCheck()
 
     if (this.statsUpdateTimer) {
       clearTimeout(this.statsUpdateTimer)
       this._flushStatsUpdates()
     }
-    
+
     if (this.backupManager) {
       this.backupManager.destroy()
     }
+
+    this.pendingRequests.clear()
+    this.workerFailureHistory.clear()
+    this.statsUpdateBatch.clear()
+    this.workerHealth.clear()
+    this.idleWorkers.clear()
 
     for (const worker of this.workers) {
       if (worker.isConnected()) {
@@ -564,13 +580,13 @@ export default class WorkerManager {
   _executeCommand(worker, type, payload, resolve, reject, retryCount, isFast) {
     const requestId = crypto.randomBytes(16).toString('hex')
     const timeoutMs = isFast ? this.fastCommandTimeout : this.commandTimeout
-    
+
     const timeout = setTimeout(() => {
       this.pendingRequests.delete(requestId)
-      
+
       if (retryCount < this.maxRetries && worker.isConnected()) {
         logger('warn', 'Cluster', `Command timeout (${timeoutMs}ms), retrying... (${retryCount + 1}/${this.maxRetries})`)
-        
+
         setTimeout(() => {
           const newWorker = this.getBestWorker() || worker
           this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast)
@@ -596,7 +612,7 @@ export default class WorkerManager {
       if (!worker.isConnected()) {
         clearTimeout(timeout)
         this.pendingRequests.delete(requestId)
-        
+
         if (retryCount < this.maxRetries) {
           const newWorker = this.getBestWorker()
           if (newWorker) {
@@ -614,7 +630,7 @@ export default class WorkerManager {
     } catch (error) {
       clearTimeout(timeout)
       this.pendingRequests.delete(requestId)
-      
+
       if (retryCount < this.maxRetries) {
         logger('error', 'Cluster', `Send error: ${error.message}, retrying...`)
         setTimeout(() => {
