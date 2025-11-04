@@ -22,11 +22,26 @@ async function handler(nodelink, req, res, sendResponse) {
     sourceManagers: nodelink.workerManager
       ? nodelink.supportedSourcesCache ||
         (nodelink.supportedSourcesCache = await nodelink.getSourcesFromWorker())
-      : nodelink.sources?.sources
-        ? Array.from(nodelink.sources.sources.keys())
-        : [],
+      : (nodelink.sources?.sources && Array.from(nodelink.sources.sources.keys())) || [],
     filters,
-    plugins: []
+    plugins: (() => {
+      const pm = nodelink.pluginManager
+      // Prefer detailed list if available
+      if (pm && Array.isArray(pm.plugins)) {
+        return pm.plugins.map((p) => {
+          if (typeof p === 'string') return { name: p, version: 'unknown', description: 'unknown' }
+          return {
+            name: p?.name || 'unknown',
+            version: p?.version || 'unknown',
+            description: p?.description || 'unknown'
+          }
+        })
+      }
+      if (pm && typeof pm.getPluginList === 'function') {
+        return pm.getPluginList().map((name) => ({ name, version: 'unknown', description: 'unknown' }))
+      }
+      return []
+    })()
   }
   sendResponse(req, res, response, 200)
 }

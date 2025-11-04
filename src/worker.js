@@ -5,13 +5,14 @@ import RoutePlannerManager from './managers/routePlannerManager.js'
 import SourceManager from './managers/sourceManager.js'
 import StatsManager from './managers/statsManager.js'
 import { Player } from './playback/player.js'
+import PluginManager from './plugins/pluginManager.js'
 import { initLogger, logger } from './utils.js'
 
 let config
 try {
   config = (await import('../config.js')).default
 } catch {
-  config = (await import('../config.default.js')).default
+  config = (await import('../config.js')).default
 }
 
 initLogger(config)
@@ -28,10 +29,12 @@ nodelink.sources = new SourceManager(nodelink)
 nodelink.lyrics = new LyricsManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(nodelink)
 nodelink.connectionManager = new ConnectionManager(nodelink)
+nodelink.pluginManager = new PluginManager(nodelink)
 
 async function initialize() {
   await nodelink.sources.loadFolder()
   await nodelink.lyrics.loadFolder()
+  await nodelink.pluginManager.loadAll()
   logger(
     'info',
     'Worker',

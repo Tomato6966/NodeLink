@@ -9,6 +9,13 @@ export default class LyricsManager {
     this.lyricsSources = new Map()
   }
 
+  addLyricsSource(name, instance) {
+    if (!name || !instance) return false
+    this.lyricsSources.set(name, instance)
+    logger('info', 'Lyrics', `Registered lyrics source: ${name}`)
+    return true
+  }
+
   async loadFolder() {
     const __filename = fileURLToPath(import.meta.url)
     const __dirname = path.dirname(__filename)
@@ -43,7 +50,7 @@ export default class LyricsManager {
 
         const instance = new Mod(this.nodelink)
         if (await instance.setup()) {
-          this.lyricsSources.set(name, instance)
+          this.addLyricsSource(name, instance)
           logger('info', 'Lyrics', `Loaded lyrics source: ${name}`)
         } else {
           logger(
