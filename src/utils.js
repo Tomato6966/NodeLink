@@ -1055,6 +1055,17 @@ function sendErrorResponse(
   sendResponse(req, res, errorPayload, status, trace)
 }
 
+export function cleanupHttpAgents() {
+  try {
+    httpAgent.destroy()
+    httpsAgent.destroy()
+    http2FailedHosts.clear()
+    logger('info', 'Utils', 'HTTP agents cleaned up successfully')
+  } catch (error) {
+    logger('error', 'Utils', `Error cleaning up HTTP agents: ${error.message}`)
+  }
+}
+
 export {
   initLogger,
   validateProperty,

@@ -741,13 +741,31 @@ export default class YouTubeSource {
 
       const stream = new PassThrough()
 
-      response.stream.on('data', (chunk) => stream.write(chunk))
-      response.stream.on('end', () => stream.emit('finishBuffering'))
-      response.stream.on('error', (error) => {
+      const cleanupListeners = () => {
+        response.stream.removeListener('data', dataHandler)
+        response.stream.removeListener('end', endHandler)
+        response.stream.removeListener('error', errorHandler)
+      }
+
+      const dataHandler = (chunk) => stream.write(chunk)
+      const endHandler = () => {
+        cleanupListeners()
+        stream.emit('finishBuffering')
+      }
+      const errorHandler = (error) => {
         logger('error', 'YouTube', `Upstream stream error: ${error.message}`)
+        cleanupListeners()
         stream.emit('error', error)
         stream.emit('finishBuffering')
-      })
+      }
+
+      response.stream.on('data', dataHandler)
+      response.stream.on('end', endHandler)
+      response.stream.on('error', errorHandler)
+
+      stream.on('end', cleanupListeners)
+      stream.on('error', cleanupListeners)
+      stream.on('close', cleanupListeners)
 
       return { stream }
     } catch (e) {
