@@ -14,6 +14,7 @@ import statsManager from './managers/statsManager.js'
 import OAuth from './sources/youtube/OAuth.js'
 import {
   checkForUpdates,
+  cleanupHttpAgents,
   getGitInfo,
   getStats,
   getVersion,
@@ -66,8 +67,8 @@ initLogger(config)
 
 if (!cluster.isWorker) {
   const ascii = `
-   ▄   ████▄ ██▄   ▄███▄   █    ▄█    ▄   █  █▀ 
-    █  █   █ █  █  █▀   ▀  █    ██     █  █▄█   
+   ▄   ████▄ ██▄   ▄███▄   █    ▄█    ▄   █  █▀
+    █  █   █ █  █  █▀   ▀  █    ██     █  █▄█
 ██   █ █   █ █   █ ██▄▄    █    ██ ██   █ █▀▄   ${clusterEnabled ? 'Cluster Mode' : 'Single Process'}
 █ █  █ ▀████ █  █  █▄   ▄▀ ███▄ ▐█ █ █  █ █  █  v${getVersion()}
 █  █ █       ███▀  ▀███▀       ▀ ▐ █  █ █   █   Powered by PerformanC;
@@ -146,6 +147,9 @@ class NodelinkServer {
       requestHandler(this, req, res)
     )
     this.socket = new WebSocketServer({ noServer: true })
+    this.socket.on('error', (error) => {
+      logger('error', 'WebSocket', `WebSocket server error: ${error.message}`)
+    })
     this.socket.on(
       '/v4/websocket',
       (socket, request, clientInfo, oldSessionId) => {
@@ -384,6 +388,17 @@ class NodelinkServer {
     }
   }
 
+  _cleanupWebSocketServer() {
+    if (this.socket) {
+      try {
+        this.socket.close()
+        logger('info', 'WebSocket', 'WebSocket server closed successfully')
+      } catch (error) {
+        logger('error', 'WebSocket', `Error closing WebSocket server: ${error.message}`)
+      }
+    }
+  }
+
   handleIPCMessage(msg) {
     if (msg.type === 'playerEvent') {
       const { sessionId, data } = msg.payload
@@ -520,6 +535,8 @@ if (clusterEnabled && cluster.isPrimary) {
 
     process.on('beforeExit', () => {
       workerManager.destroy()
+      nserver._cleanupWebSocketServer()
+      cleanupHttpAgents()
       nserver.rateLimitManager.destroy()
       nserver.dosProtectionManager.destroy()
     })
@@ -543,6 +560,8 @@ if (clusterEnabled && cluster.isPrimary) {
     )
 
     process.on('beforeExit', () => {
+      nserver._cleanupWebSocketServer()
+      cleanupHttpAgents()
       nserver.rateLimitManager.destroy()
       nserver.dosProtectionManager.destroy()
     })
