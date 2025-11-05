@@ -2,13 +2,46 @@
 ## Table of Contents
 
 1. [Introduction](#introduction)
+    - [What is a Plugin?](#what-is-a-plugin)
+    - [Why Use Plugins?](#why-use-plugins)
+    - [What Can Plugins Do?](#what-can-plugins-do)
 2. [Core Concepts](#core-concepts)
+    - [Plugin Lifecycle](#plugin-lifecycle)
+    - [Plugin Structure](#plugin-structure)
 3. [Getting Started](#getting-started)
+    - [Creating Your First Plugin](#creating-your-first-plugin)
+      - [Step 1: Choose Your Development Method](#step-1-choose-your-development-method)
+        - [Option A: Local Development](#option-a-local-development)
+        - [Option B: Package Development](#option-b-package-development)
+      - [Step 2: Write Your Plugin](#step-2-write-your-plugin)
+      - [Step 3: Test Your Plugin](#step-3-test-your-plugin)
 4. [Plugin API Reference](#plugin-api-reference)
+    - [Entry Point Formats](#entry-point-formats)
+      - [Format 1: Default Export Function (Recommended)](#format-1-default-export-function-recommended)
+      - [Format 2: Object with register Method](#format-2-object-with-register-method)
+      - [Format 3: Object with init Method](#format-3-object-with-init-method)
+    - [Parameters Explained](#parameters-explained)
+      - [nodelink - The NodeLink Instance](#nodelink---the-nodelink-instance)
+      - [pluginApi - The Plugin API](#pluginapi---the-plugin-api)
 5. [Advanced Features](#advanced-features)
+    - [Accessing NodeLink Internals](#accessing-nodelink-internals)
+    - [Error Handling](#error-handling)
+    - [Async Operations](#async-operations)
 6. [Configuration](#configuration)
+    - [Plugin Configuration Structure](#plugin-configuration-structure)
+    - [Accessing Configuration in Plugins](#accessing-configuration-in-plugins)
+    - [Environment Variables](#environment-variables)
 7. [Best Practices](#best-practices)
+    - [1. Naming Conventions](#1-naming-conventions)
+    - [2. Logging](#2-logging)
+    - [3. Performance](#3-performance)
+    - [4. Metadata Best Practices](#4-metadata-best-practices)
 8. [Troubleshooting](#troubleshooting)
+    - [Plugin Not Loading](#plugin-not-loading)
+    - [Routes Not Working](#routes-not-working)
+    - [Stream Interceptor Not Firing](#stream-interceptor-not-firing)
+    - [Configuration Not Loading](#configuration-not-loading)
+    - [Memory Leaks](#memory-leaks)
 
 ---
 
@@ -180,11 +213,11 @@ Specialized methods for safe plugin integration:
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| addRoute | `addRoute(pattern, handler, methods = ['GET'])` | Register custom HTTP endpoints under NodeLink's API. |
-| registerSource | `registerSource(name, sourceImplementation)` | Add a custom audio source that can search/resolve tracks and provide streams. |
-| registerLyricsSource | `registerLyricsSource(name, lyricsImplementation)` | Add a lyrics provider for fetching song lyrics. |
-| registerStreamInterceptor | `registerStreamInterceptor(interceptorFunction)` | Intercept/modify audio streams before they reach the player. |
-| registerBeforePlay | `registerBeforePlay(hookFunction)` | Run logic just before a track starts playing. |
+| [addRoute](#1-http-routes-addroute) | `addRoute(pattern, handler, methods = ['GET'])` | Register custom HTTP endpoints under NodeLink's API. |
+| [registerSource](#2-audio-sources-registersource) | `registerSource(name, sourceImplementation)` | Add a custom audio source that can search/resolve tracks and provide streams. |
+| [registerLyricsSource](#3-lyrics-providers-registerlyricssource) | `registerLyricsSource(name, lyricsImplementation)` | Add a lyrics provider for fetching song lyrics. |
+| [registerStreamInterceptor](#4-stream-interceptors-registerstreaminterceptor) | `registerStreamInterceptor(interceptorFunction)` | Intercept/modify audio streams before they reach the player. |
+| [registerBeforePlay](#5-before-play-hook-registerbeforeplay) | `registerBeforePlay(hookFunction)` | Run logic just before a track starts playing. |
 
 ### 1. HTTP Routes: `addRoute()`
 
@@ -342,7 +375,7 @@ pluginApi.registerSource(name, sourceImplementation)
 | --- | --- | --- | --- |
 | setup | — | `boolean` | Optional initializer. Return `true` to enable, `false` to skip registering the source. |
 | search | `(query: string, options?: object)` | `{ loadType, data: Track[] }` | Search for tracks matching a query string. |
-| resolve | `(url: string)` | `{ loadType, data: Track | Track[] | Playlist }` | Resolve a URL to a track, list of tracks, or playlist. |
+| resolve | `(url: string)` | `{ loadType, data: Track OR Track[] OR Playlist }` | Resolve a URL to a track, list of tracks, or playlist. |
 | loadStream | `(track, url, protocol, additionalData)` | `ReadableStream` or `{ stream: ReadableStream, type?: string }` | Provide the playable audio stream (optionally with a content type). |
 
 #### Example: Custom Audio Source
