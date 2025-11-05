@@ -12,7 +12,7 @@ let config
 try {
   config = (await import('../config.js')).default
 } catch {
-  config = (await import('../config.js')).default
+  config = (await import('../config.default.js')).default
 }
 
 initLogger(config)
