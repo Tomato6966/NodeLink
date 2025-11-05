@@ -16,6 +16,12 @@ function nowMs() {
   return Date.now()
 }
 
+export const pluginInfo = {
+  name: 'audio-cache',
+  description: 'Caches audio streams to disk with TTL and size limits',
+  version: '1.0.0'
+}
+
 export default async function audioCachePlugin(nodelink, api) {
   const cfg = api.config?.plugins?.audioCache || {}
   const cacheDir = path.resolve(process.cwd(), cfg.dir || path.join('cache', 'audio'))
@@ -24,7 +30,6 @@ export default async function audioCachePlugin(nodelink, api) {
     ? cfg.cleanupIntervalHours
     : 12
 
-  // Optional maximum cache size (bytes). Accepts number or string like '10GB'.
   const maxSizeBytes = (() => {
     const v = cfg.maxSizeBytes ?? cfg.maxSize
     if (v == null) return null
@@ -41,14 +46,12 @@ export default async function audioCachePlugin(nodelink, api) {
     return null
   })()
 
-  // Optional: protect recently used files from eviction (minutes)
   const protectRecentMs = (() => {
     const v = cfg.protectRecentMinutes
     if (typeof v === 'number' && Number.isFinite(v) && v > 0) return Math.floor(v * 60 * 1000)
     return 0
   })()
 
-  // Optional: if all files are in-use or recently used, allow exceeding the cap
   const allowExceedWhenAllRecent = Boolean(cfg.allowExceedWhenAllRecent)
 
   await ensureDir(cacheDir)
@@ -211,13 +214,12 @@ export default async function audioCachePlugin(nodelink, api) {
         api.logger('info', 'Plugin-Cache', `Trim skipped: all files are recent; allowing overflow (total=${total}, target=${target})`)
         return { removed: 0, bytesFreed: 0 }
       }
-      // Enforce cap by evicting least-recent not-in-use files (even if within protect window)
       files = notInUse
     } else {
       files = candidates
     }
 
-    files.sort((a, b) => (a.atime || 0) - (b.atime || 0)) // oldest first
+    files.sort((a, b) => (a.atime || 0) - (b.atime || 0))
     let removed = 0
     let bytesFreed = 0
     for (const f of files) {
@@ -271,7 +273,6 @@ export default async function audioCachePlugin(nodelink, api) {
 
     let original
     try {
-      // Try to enforce cap before starting a new write
       await trimToMax()
       original = await next()
     } catch (e) {
@@ -338,3 +339,6 @@ export default async function audioCachePlugin(nodelink, api) {
 
   api.logger('info', 'Plugin-Cache', `audio-cache-plugin initialized at ${cacheDir} (ttlDays=${ttlDays})`)
 }
+
+// Attach metadata for discovery
+audioCachePlugin.pluginInfo = pluginInfo

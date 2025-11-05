@@ -2,6 +2,12 @@
 // Export either a default function (nodelink, api) => void
 // or an object with register(nodelink, api)
 
+export const pluginInfo = {
+  name: 'example-plugin',
+  description: 'Example plugin demonstrating the public API',
+  version: '1.0.0'
+}
+
 export default async function examplePlugin(nodelink, api) {
   // Add a simple GET route: /v4/example-plugin/ping
   api.addRoute(`/v4/example-plugin/ping`, (server, req, res, sendResponse) => {
@@ -12,3 +18,5 @@ export default async function examplePlugin(nodelink, api) {
   api.logger('info', 'Plugin', 'example-plugin initialized')
 }
 
+// Also attach metadata to the default export for discovery
+examplePlugin.pluginInfo = pluginInfo

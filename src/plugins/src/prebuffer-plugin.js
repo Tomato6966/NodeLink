@@ -15,6 +15,12 @@ function parseSize(input, fallback = 0) {
   return fallback
 }
 
+export const pluginInfo = {
+  name: 'prebuffer',
+  description: 'Buffers initial bytes of non-live streams for smoother start',
+  version: '1.0.0'
+}
+
 export default async function prebufferPlugin(nodelink, api) {
   const cfg = api.config?.plugins?.prebuffer || {}
   if (!cfg.enabled) {
@@ -27,7 +33,6 @@ export default async function prebufferPlugin(nodelink, api) {
   const highWaterMark = parseSize(cfg.highWaterMark, 1 << 20) || (1 << 20)
 
   api.registerStreamInterceptor(async (server, track, url, protocol, additionalData, next) => {
-    // Skip obvious live/continuous streams to avoid extra latency
     const isLive = Boolean(track?.info?.isStream)
     if (isLive || targetBytes <= 0) {
       return next()
@@ -66,7 +71,6 @@ export default async function prebufferPlugin(nodelink, api) {
       }
     }
 
-    // Wire events
     input.on('data', (chunk) => {
       if (released) {
         out.write(chunk)
@@ -82,31 +86,25 @@ export default async function prebufferPlugin(nodelink, api) {
     })
 
     input.on('end', () => {
-      // Flush anything we have and close
       release()
       out.end()
       out.emit('finishBuffering')
     })
 
     input.on('close', () => {
-      // Make sure to flush and end if closed before end
       release()
       out.end()
     })
 
     input.on('error', (err) => {
-      // Propagate error
       if (!out.destroyed) out.emit('error', err)
     })
 
-    // Forward finishBuffering marker from upstream if any
     input.on?.('finishBuffering', () => {
-      // If upstream indicates done buffering, ensure we release
       release()
       out.emit('finishBuffering')
     })
 
-    // If consumer destroys our out stream, stop reading
     out.on('close', () => {
       try { input.destroy?.() } catch {}
     })
@@ -118,3 +116,5 @@ export default async function prebufferPlugin(nodelink, api) {
   api.logger('info', 'Plugin-Prebuffer', `Initialized (bytes=${targetBytes}, timeoutMs=${timeoutMs}, hwm=${highWaterMark})`)
 }
 
+// Attach metadata for discovery
+prebufferPlugin.pluginInfo = pluginInfo
