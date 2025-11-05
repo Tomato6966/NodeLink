@@ -70,15 +70,6 @@ export default async function audioCachePlugin(nodelink, api) {
     return path.join(cacheDir, shard, `${key}.dat`)
   }
 
-  async function exists(p) {
-    try {
-      await fsp.access(p)
-      return true
-    } catch {
-      return false
-    }
-  }
-
   async function existsNonEmpty(p) {
     try {
       const st = await fsp.stat(p)
@@ -232,7 +223,7 @@ export default async function audioCachePlugin(nodelink, api) {
         bytesFreed += f.size
       } catch { }
     }
-    api.logger('info', 'Plugin-Cache', `Trimmed cache: removed ${removed}, freed ${bytesFreed} bytes, totalâ‰ˆ${total}`)
+    api.logger('info', 'Plugin-Cache', `Trimmed cache: removed ${removed}, freed ${bytesFreed} bytes, total~=${total}`)
     return { removed, bytesFreed }
   }
 
