@@ -34,6 +34,10 @@ export default class PluginManager {
     return this.plugins.map((p) => p.name)
   }
 
+  getPlugins() {
+    return this.plugins.slice()
+  }
+
   registerStreamInterceptor(fn) {
     if (typeof fn !== 'function') throw new Error('Stream interceptor must be a function')
     this.streamInterceptors.push(fn)
@@ -84,10 +88,9 @@ export default class PluginManager {
     try {
       const __filename = fileURLToPath(import.meta.url)
       const __dirname = path.dirname(__filename)
-      const pluginsDir = path.join(__dirname) // src/plugins
-      const pluginsSrcDir = path.join(pluginsDir, 'src') // src/plugins/src
+      const pluginsDir = path.join(__dirname)
+      const pluginsSrcDir = path.join(pluginsDir, 'src')
 
-      // Only search for plugin files in src/plugins/src/ as requested.
       const pluginFiles = []
       try {
         const files = await fs.readdir(pluginsSrcDir)
@@ -175,11 +178,48 @@ export default class PluginManager {
         )
         return
       }
-      this.plugins.push({ name })
+      const meta = this.#extractMetadata(mod, plugin, name)
+      this.plugins.push(meta)
       logger('info', 'Plugin', `Loaded plugin: ${name}`)
     } catch (e) {
       logger('error', 'Plugin', `Plugin '${name}' initialization failed: ${e.message}`)
     }
+  }
+
+  #extractMetadata(mod, plugin, fallbackName) {
+    const tryMeta = (obj) => {
+      if (!obj || typeof obj !== 'object') return null
+      const { name, description, version } = obj
+      if (!(name || description || version)) return null
+      return {
+        name: typeof name === 'string' && name.trim() ? name.trim() : undefined,
+        description:
+          typeof description === 'string' && description.trim()
+            ? description.trim()
+            : undefined,
+        version:
+          typeof version === 'string' && version.trim() ? version.trim() : undefined
+      }
+    }
+
+    let meta = null
+    if (typeof plugin === 'function') {
+      meta = tryMeta(plugin.pluginInfo) || tryMeta(plugin.meta) || null
+    }
+    meta = meta || tryMeta(mod?.pluginInfo) || tryMeta(mod?.meta) || null
+    if (!meta && plugin && typeof plugin === 'object' && (plugin.name || plugin.description || plugin.version)) {
+      meta = tryMeta(plugin)
+    }
+
+    return {
+      name: meta?.name || String(fallbackName),
+      description: meta?.description || 'unknown',
+      version: meta?.version || 'unknown'
+    }
+  }
+
+  async initialize(mod, name = 'unknown') {
+    return this.#initializePluginModule(mod, name)
   }
 
   #buildApi() {
