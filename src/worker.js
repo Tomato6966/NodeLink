@@ -60,7 +60,9 @@ async function processQueue() {
     switch (type) {
       case 'createPlayer': {
         const { sessionId, guildId, userId, voice } = payload
-        if (players.has(guildId)) {
+        const playerKey = `${guildId}:${userId}`
+        
+        if (players.has(playerKey)) {
           result = { created: false, reason: 'Player already exists' }
           break
         }
@@ -84,7 +86,7 @@ async function processQueue() {
         }
 
         const player = new Player({ nodelink, session: mockSession, guildId })
-        players.set(guildId, player)
+        players.set(playerKey, player)
 
         if (voice) player.updateVoice(voice)
 
@@ -93,17 +95,19 @@ async function processQueue() {
       }
 
       case 'destroyPlayer': {
-        const { guildId } = payload
-        const player = players.get(guildId)
+        const { guildId, userId } = payload
+        const playerKey = `${guildId}:${userId}`
+        const player = players.get(playerKey)
+        
         if (player) {
           player.destroy(false)
-          players.delete(guildId)
+          players.delete(playerKey)
           
           if (process.connected) {
             try {
               process.send({
                 type: 'playerDestroyed',
-                payload: { guildId }
+                payload: { guildId, userId }
               })
             } catch (e) {
               logger('error', 'Worker-IPC', `Failed to send playerDestroyed for guild ${guildId}: ${e.message}`)
@@ -120,8 +124,9 @@ async function processQueue() {
       case 'restorePlayer': {
         const { snapshot } = payload
         const { guildId, sessionId, userId, track, position, isPaused, volume, filters, voice } = snapshot
+        const playerKey = `${guildId}:${userId}`
         
-        logger('info', 'Worker', `Restoring player for guild ${guildId} (position: ${position}ms, paused: ${isPaused})`)
+        logger('info', 'Worker', `Restoring player for guild ${guildId} (bot: ${userId}) (position: ${position}ms, paused: ${isPaused})`)
         
         const mockSession = {
           id: sessionId,
@@ -144,7 +149,7 @@ async function processQueue() {
 
         const player = new Player({ nodelink, session: mockSession, guildId })
         player._isRestoring = true
-        players.set(guildId, player)
+        players.set(playerKey, player)
 
         if (voice) player.updateVoice(voice)
         if (volume) player.volume(volume)
@@ -163,13 +168,15 @@ async function processQueue() {
       }
 
       case 'playerCommand': {
-        const { guildId, command, args } = payload
-        const player = players.get(guildId)
+        const { guildId, userId, command, args } = payload
+        const playerKey = `${guildId}:${userId}`
+        const player = players.get(playerKey)
+        
         if (player && typeof player[command] === 'function') {
           result = await player[command](...args)
         } else {
           result = {
-            error: `Player or command '${command}' not found for guild ${guildId}`,
+            error: `Player or command '${command}' not found for guild ${guildId} (bot: ${userId})`,
             playerNotFound: true
           }
         }
@@ -302,10 +309,11 @@ setInterval(() => {
     
     if (player.track && !player._isRestoring) {
       try {
+        const playerKey = `${player.guildId}:${player.session.userId}`
         process.send({
           type: 'playerSnapshot',
           payload: {
-            guildId: player.guildId,
+            playerKey,
             playerState: {
               sessionId: player.session.id,
               userId: player.session.userId,
