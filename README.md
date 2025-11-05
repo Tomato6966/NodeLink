@@ -75,9 +75,13 @@ See `docs/plugins.md` for the full API and examples.
 ```js
 plugins: {
   audioCache: {
-    dir: 'cache/audio',           // cache directory
-    ttlDays: 7,                   // days to keep inactive files
-    cleanupIntervalHours: 12      // periodic cleanup interval
+    enabled: true,
+    dir: 'cache/audio',               // cache directory
+    ttlDays: 7,                       // days to keep inactive files
+    cleanupIntervalHours: 12,         // periodic cleanup interval
+    maxSize: '1GB',                   // or maxSizeBytes: 10 * 1024 * 1024 * 1024
+    protectRecentMinutes: 60,         // Do not evict files accessed within this window (minutes)
+    allowExceedWhenAllRecent: true    // If all files are in-use or recently used, allow exceeding max size
   }
 }
 ```
