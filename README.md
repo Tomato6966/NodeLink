@@ -65,7 +65,7 @@ Once started, NodeLink runs a Lavalink-compatible WebSocket server, ready for im
 
 NodeLink now supports a simple plugin system so you can add custom HTTP routes and register new sources or lyrics providers without modifying core files.
 
-- Local development: add files under `src/plugins/*.js`.
+- Local development: add files under `src/plugins/src/*.js`.
 - Package plugins: install NPM packages named `nodelink-plugin-*`.
 
 See `docs/plugins.md` for the full API and examples.

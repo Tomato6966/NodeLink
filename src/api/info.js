@@ -26,7 +26,7 @@ async function handler(nodelink, req, res, sendResponse) {
         ? Array.from(nodelink.sources.sources.keys())
         : [],
     filters,
-    plugins: await nodelink.pluginManager.getPluginList() || []
+    plugins: await nodelink.pluginManager.getPlugins() || []
   }
   sendResponse(req, res, response, 200)
 }
