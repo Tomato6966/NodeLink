@@ -21,12 +21,12 @@ async function handler(nodelink, req, res, sendResponse) {
     },
     sourceManagers: nodelink.workerManager
       ? nodelink.supportedSourcesCache ||
-        (nodelink.supportedSourcesCache = await nodelink.getSourcesFromWorker())
+      (nodelink.supportedSourcesCache = await nodelink.getSourcesFromWorker())
       : nodelink.sources?.sources
         ? Array.from(nodelink.sources.sources.keys())
         : [],
     filters,
-    plugins: []
+    plugins: await nodelink.pluginManager.getPlugins() || []
   }
   sendResponse(req, res, response, 200)
 }

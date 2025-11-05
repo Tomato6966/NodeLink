@@ -473,6 +473,13 @@ export class Player {
         return false
       }
 
+      try {
+        await this.nodelink?.pluginManager?.runBeforePlay?.(this, {
+          info,
+          urlData
+        })
+      } catch {}
+
       if (!this.connection) {
         this._initConnection()
       }
