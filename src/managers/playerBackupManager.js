@@ -13,12 +13,13 @@ export default class PlayerBackupManager {
     this._startCleanup()
   }
 
-  storeSnapshot(guildId, workerId, playerState) {
+  storeSnapshot(playerKey, workerId, playerState) {
     try {
+      const [guildId, userId] = playerKey.split(':')
       const snapshot = {
         guildId,
+        userId,
         sessionId: playerState.sessionId,
-        userId: playerState.userId,
         track: playerState.track,
         position: playerState.position || 0,
         isPaused: playerState.isPaused || false,
@@ -31,17 +32,17 @@ export default class PlayerBackupManager {
       const json = JSON.stringify(snapshot)
       const compressed = gzipSync(Buffer.from(json))
       
-      this.snapshots.set(guildId, compressed)
-      this.workerAssignments.set(guildId, workerId)
-      this.lastUpdate.set(guildId, Date.now())
+      this.snapshots.set(playerKey, compressed)
+      this.workerAssignments.set(playerKey, workerId)
+      this.lastUpdate.set(playerKey, Date.now())
     } catch (error) {
-      logger('error', 'PlayerBackup', `Failed to store snapshot for guild ${guildId}: ${error.message}`)
+      logger('error', 'PlayerBackup', `Failed to store snapshot for ${playerKey}: ${error.message}`)
     }
   }
 
-  getSnapshot(guildId) {
+  getSnapshot(playerKey) {
     try {
-      const compressed = this.snapshots.get(guildId)
+      const compressed = this.snapshots.get(playerKey)
       if (!compressed) return null
 
       const decompressed = gunzipSync(compressed)
@@ -49,7 +50,7 @@ export default class PlayerBackupManager {
       
       return snapshot
     } catch (error) {
-      logger('error', 'PlayerBackup', `Failed to get snapshot for guild ${guildId}: ${error.message}`)
+      logger('error', 'PlayerBackup', `Failed to get snapshot for ${playerKey}: ${error.message}`)
       return null
     }
   }
@@ -57,9 +58,9 @@ export default class PlayerBackupManager {
   getWorkerSnapshots(workerId) {
     const snapshots = []
     
-    for (const [guildId, assignedWorkerId] of this.workerAssignments.entries()) {
+    for (const [playerKey, assignedWorkerId] of this.workerAssignments.entries()) {
       if (assignedWorkerId === workerId) {
-        const snapshot = this.getSnapshot(guildId)
+        const snapshot = this.getSnapshot(playerKey)
         if (snapshot) {
           snapshots.push(snapshot)
         }
@@ -70,18 +71,18 @@ export default class PlayerBackupManager {
     return snapshots
   }
 
-  removeSnapshot(guildId) {
-    this.snapshots.delete(guildId)
-    this.workerAssignments.delete(guildId)
-    this.lastUpdate.delete(guildId)
+  removeSnapshot(playerKey) {
+    this.snapshots.delete(playerKey)
+    this.workerAssignments.delete(playerKey)
+    this.lastUpdate.delete(playerKey)
   }
 
   clearWorkerSnapshots(workerId) {
     let cleared = 0
     
-    for (const [guildId, assignedWorkerId] of this.workerAssignments.entries()) {
+    for (const [playerKey, assignedWorkerId] of this.workerAssignments.entries()) {
       if (assignedWorkerId === workerId) {
-        this.removeSnapshot(guildId)
+        this.removeSnapshot(playerKey)
         cleared++
       }
     }
@@ -95,9 +96,9 @@ export default class PlayerBackupManager {
       const now = Date.now()
       let cleaned = 0
 
-      for (const [guildId, lastUpdate] of this.lastUpdate.entries()) {
+      for (const [playerKey, lastUpdate] of this.lastUpdate.entries()) {
         if (now - lastUpdate > this.snapshotTTL) {
-          this.removeSnapshot(guildId)
+          this.removeSnapshot(playerKey)
           cleaned++
         }
       }

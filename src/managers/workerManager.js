@@ -314,24 +314,26 @@ export default class WorkerManager {
     const affectedGuilds = Array.from(this.workerToGuilds.get(workerId) || [])
     this.workerToGuilds.delete(workerId)
 
-    for (const guildId of affectedGuilds) {
-      this.guildToWorker.delete(guildId)
+    for (const playerKey of affectedGuilds) {
+      this.guildToWorker.delete(playerKey)
       logger(
         'warn',
         'Cluster',
-        `Guild ${guildId} unassigned due to worker ${workerId} exit. Will be reassigned on next request.`
+        `Player ${playerKey} unassigned due to worker ${workerId} exit. Will be reassigned on next request.`
       )
     }
 
     if (affectedGuilds.length > 0) {
-      for (const guildId of affectedGuilds) {
+      for (const playerKey of affectedGuilds) {
+        const [guildId] = playerKey.split(':')
         for (const session of global.nodelink.sessions.values()) {
-          if (session.players.players.has(guildId)) {
-            session.players.players.delete(guildId)
+          const sessionKey = `${guildId}:${session.userId}`
+          if (session.players.players.has(sessionKey)) {
+            session.players.players.delete(sessionKey)
             logger(
               'debug',
               'Cluster',
-              `Removed stale player placeholder for guild ${guildId} from session ${session.id}`
+              `Removed stale player placeholder for ${playerKey} from session ${session.id}`
             )
           }
         }
@@ -369,11 +371,13 @@ export default class WorkerManager {
         else callback.resolve(msg.payload)
       }
     } else if (msg.type === 'playerSnapshot') {
-      const { guildId, playerState } = msg.payload
-      this.backupManager.storeSnapshot(guildId, worker.id, playerState)
+      const { playerKey, playerState } = msg.payload
+      playerState.guildId = playerKey.split(':')[0]
+      this.backupManager.storeSnapshot(playerKey, worker.id, playerState)
     } else if (msg.type === 'playerDestroyed') {
-      const { guildId } = msg.payload
-      this.backupManager.removeSnapshot(guildId)
+      const { guildId, userId } = msg.payload
+      const playerKey = `${guildId}:${userId}`
+      this.backupManager.removeSnapshot(playerKey)
     } else if (msg.type === 'workerStats') {
       this.statsUpdateBatch.set(worker.id, msg.stats.players)
 
@@ -407,15 +411,15 @@ export default class WorkerManager {
     this.statsUpdateTimer = null
   }
 
-  getWorkerForGuild(guildId) {
-    if (this.guildToWorker.has(guildId)) {
-      const workerId = this.guildToWorker.get(guildId)
+  getWorkerForGuild(playerKey) {
+    if (this.guildToWorker.has(playerKey)) {
+      const workerId = this.guildToWorker.get(playerKey)
       const worker = this.workersById.get(workerId)
 
       if (worker?.isConnected()) return worker
 
-      this.guildToWorker.delete(guildId)
-      this.workerToGuilds.get(workerId)?.delete(guildId)
+      this.guildToWorker.delete(playerKey)
+      this.workerToGuilds.get(workerId)?.delete(playerKey)
     }
 
     if (this.workers.length === 0 && this.maxWorkers > 0) {
@@ -423,7 +427,7 @@ export default class WorkerManager {
       if (!worker) {
         throw new Error('No workers available and cannot fork new ones.')
       }
-      this.assignGuildToWorker(guildId, worker)
+      this.assignGuildToWorker(playerKey, worker)
       return worker
     }
 
@@ -447,7 +451,7 @@ export default class WorkerManager {
       }
     }
 
-    this.assignGuildToWorker(guildId, bestWorker)
+    this.assignGuildToWorker(playerKey, bestWorker)
     return bestWorker
   }
 
@@ -476,32 +480,32 @@ export default class WorkerManager {
     return bestWorker || this.forkWorker()
   }
 
-  assignGuildToWorker(guildId, worker) {
-    this.guildToWorker.set(guildId, worker.id)
+  assignGuildToWorker(playerKey, worker) {
+    this.guildToWorker.set(playerKey, worker.id)
 
     if (!this.workerToGuilds.has(worker.id)) {
       this.workerToGuilds.set(worker.id, new Set())
     }
-    this.workerToGuilds.get(worker.id).add(guildId)
+    this.workerToGuilds.get(worker.id).add(playerKey)
 
     logger(
       'debug',
       'Cluster',
-      `Assigned guild ${guildId} to worker ${worker.id}`
+      `Assigned player ${playerKey} to worker ${worker.id}`
     )
   }
 
-  unassignGuild(guildId) {
-    const workerId = this.guildToWorker.get(guildId)
-    this.guildToWorker.delete(guildId)
+  unassignGuild(playerKey) {
+    const workerId = this.guildToWorker.get(playerKey)
+    this.guildToWorker.delete(playerKey)
 
     if (workerId && this.workerToGuilds.has(workerId)) {
-      this.workerToGuilds.get(workerId).delete(guildId)
+      this.workerToGuilds.get(workerId).delete(playerKey)
     }
   }
 
-  isGuildAssigned(guildId) {
-    return this.guildToWorker.has(guildId)
+  isGuildAssigned(playerKey) {
+    return this.guildToWorker.has(playerKey)
   }
 
   _ensureWorkerAvailability() {
@@ -518,15 +522,16 @@ export default class WorkerManager {
 
     for (const snapshot of snapshots) {
       try {
-        this.assignGuildToWorker(snapshot.guildId, worker)
+        const playerKey = `${snapshot.guildId}:${snapshot.userId}`
+        this.assignGuildToWorker(playerKey, worker)
 
         await this.execute(worker, 'restorePlayer', {
           snapshot
         })
 
-        logger('debug', 'Cluster', `Restored player for guild ${snapshot.guildId}`)
+        logger('debug', 'Cluster', `Restored player for ${playerKey}`)
       } catch (error) {
-        logger('error', 'Cluster', `Failed to restore player for guild ${snapshot.guildId}: ${error.message}`)
+        logger('error', 'Cluster', `Failed to restore player for guild ${snapshot.guildId} (bot: ${snapshot.userId}): ${error.message}`)
       }
     }
 

@@ -418,14 +418,15 @@ class NodelinkServer {
       logger(
         'warn',
         'Cluster',
-        `Worker ${workerId} failed. Notifying clients for affected guilds: ${affectedGuilds.join(', ')}`
+        `Worker ${workerId} failed. Notifying clients for affected players: ${affectedGuilds.join(', ')}`
       )
 
       const sessionsToNotify = new Map()
 
-      for (const guildId of affectedGuilds) {
+      for (const playerKey of affectedGuilds) {
+        const [guildId, userId] = playerKey.split(':')
         for (const session of this.sessions.values()) {
-          if (this.workerManager.isGuildAssigned(guildId)) {
+          if (session.userId === userId) {
             if (!sessionsToNotify.has(session.id)) {
               sessionsToNotify.set(session.id, new Set())
             }
