@@ -2,7 +2,8 @@
   "name": "nodelink",
   "version": "3.0.0",
   "scripts": {
-    "start": "node --dns-result-order=ipv4first --openssl-legacy-provider src/index.js"
+    "start": "node --dns-result-order=ipv4first --openssl-legacy-provider src/index.js",
+    "test": "node --test"
   },
   "type": "module",
   "main": "src/index.js",
