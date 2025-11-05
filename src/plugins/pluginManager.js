@@ -15,6 +15,15 @@ export default class PluginManager {
     this.beforePlayHooks = []
   }
 
+  /**
+   * Register an HTTP route exposed by a plugin.
+   * - Static routes use an exact string path (e.g., `/v4/my-plugin/health`).
+   * - Dynamic routes can be registered with a RegExp to match multiple paths.
+   * The handler receives `(nodelink, req, res, sendResponse, parsedUrl)`.
+   * @param {string|RegExp} pathnameOrRegex
+   * @param {Function} handler
+   * @param {string[]} [methods=['GET']]
+   */
   addRoute(pathnameOrRegex, handler, methods = ['GET']) {
     const routeData = { handler, methods }
     if (pathnameOrRegex instanceof RegExp) {
@@ -26,34 +35,48 @@ export default class PluginManager {
     }
   }
 
+  /**
+   * Return the full route registry for plugins.
+   * - `static`: Map<string, {handler, methods}>
+   * - `dynamic`: Array<[RegExp, {handler, methods}]>
+   */
   getRoutes() {
     return this.routes
   }
 
+  /**
+   * Return the list of loaded plugin names.
+   * If a plugin does not declare metadata, a fallback name is used.
+   * @returns {string[]}
+   */
   getPluginList() {
     return this.plugins.map((p) => p.name)
   }
 
+  /**
+   * Return shallow copies of loaded plugin descriptors.
+   * Each entry contains at least `{ name, description, version }`.
+   */
   getPlugins() {
     return this.plugins.slice()
   }
 
-  registerStreamInterceptor(fn) {
-    if (typeof fn !== 'function') throw new Error('Stream interceptor must be a function')
-    this.streamInterceptors.push(fn)
+  registerStreamInterceptor(interceptor) {
+    if (typeof interceptor !== 'function') throw new Error('Stream interceptor must be a function')
+    this.streamInterceptors.push(interceptor)
   }
 
-  registerBeforePlay(fn) {
-    if (typeof fn !== 'function') throw new Error('Before-play hook must be a function')
-    this.beforePlayHooks.push(fn)
+  registerBeforePlay(hook) {
+    if (typeof hook !== 'function') throw new Error('Before-play hook must be a function')
+    this.beforePlayHooks.push(hook)
   }
 
   async runStreamPipeline(track, url, protocol, additionalData, finalHandler) {
-    let idx = -1
-    const dispatch = async (i) => {
-      if (i <= idx) throw new Error('next() called multiple times')
-      idx = i
-      const interceptor = this.streamInterceptors[i]
+    let currentIndex = -1
+    const dispatch = async (index) => {
+      if (index <= currentIndex) throw new Error('next() called multiple times')
+      currentIndex = index
+      const interceptor = this.streamInterceptors[index]
       if (interceptor) {
         return interceptor(
           this.nodelink,
@@ -61,7 +84,7 @@ export default class PluginManager {
           url,
           protocol,
           additionalData,
-          () => dispatch(i + 1)
+          () => dispatch(index + 1)
         )
       }
       return finalHandler()
@@ -73,8 +96,8 @@ export default class PluginManager {
     for (const hook of this.beforePlayHooks) {
       try {
         await hook(this.nodelink, player, context)
-      } catch (e) {
-        logger('warn', 'Plugin', `beforePlay hook error: ${e.message}`)
+      } catch (error) {
+        logger('warn', 'Plugin', `beforePlay hook error: ${error.message}`)
       }
     }
   }
@@ -112,33 +135,33 @@ export default class PluginManager {
 
   async #loadPackagePlugins() {
     // Discover installed packages that look like nodelink plugins
-    let pkgJson
+    let packageJson
     try {
-      const pkgUrl = pathToFileURL(path.resolve(process.cwd(), 'package.json'))
-      pkgJson = (await import(pkgUrl)).default
-    } catch (e) {
+      const packageUrl = pathToFileURL(path.resolve(process.cwd(), 'package.json'))
+      packageJson = (await import(packageUrl)).default
+    } catch (error) {
       logger('debug', 'Plugin', 'No package.json found for plugin discovery')
       return
     }
 
-    const deps = {
-      ...(pkgJson.dependencies || {}),
-      ...(pkgJson.devDependencies || {})
+    const dependencies = {
+      ...(packageJson.dependencies || {}),
+      ...(packageJson.devDependencies || {})
     }
 
-    const pluginNames = Object.keys(deps).filter((name) =>
+    const pluginNames = Object.keys(dependencies).filter((name) =>
       name.toLowerCase().startsWith('nodelink-plugin-')
     )
 
     for (const name of pluginNames) {
       try {
-        const mod = await import(name)
-        await this.#initializePluginModule(mod, name)
-      } catch (e) {
+        const moduleData = await import(name)
+        await this.#initializePluginModule(moduleData, name)
+      } catch (error) {
         logger(
           'error',
           'Plugin',
-          `Failed to load package plugin '${name}': ${e.message}`
+          `Failed to load package plugin '${name}': ${error.message}`
         )
       }
     }
@@ -147,29 +170,29 @@ export default class PluginManager {
   async #loadPluginModule(filePath) {
     try {
       const fileUrl = pathToFileURL(filePath)
-      const mod = await import(fileUrl)
+      const moduleData = await import(fileUrl)
       const name = path.basename(filePath)
-      await this.#initializePluginModule(mod, name)
-    } catch (e) {
-      logger('error', 'Plugin', `Failed to load plugin '${filePath}': ${e.message}`)
+      await this.#initializePluginModule(moduleData, name)
+    } catch (error) {
+      logger('error', 'Plugin', `Failed to load plugin '${filePath}': ${error.message}`)
     }
   }
 
-  async #initializePluginModule(mod, name = 'unknown') {
-    const plugin = mod?.default || mod
+  async #initializePluginModule(moduleData, name = 'unknown') {
+    const plugin = moduleData?.default || moduleData
     if (!plugin) {
       logger('warn', 'Plugin', `Plugin '${name}' has no default export`)
       return
     }
 
-    const api = this.#buildApi()
+    const pluginApi = this.#buildPluginApi()
     try {
       if (typeof plugin === 'function') {
-        await plugin(this.nodelink, api)
+        await plugin(this.nodelink, pluginApi)
       } else if (plugin && typeof plugin.register === 'function') {
-        await plugin.register(this.nodelink, api)
+        await plugin.register(this.nodelink, pluginApi)
       } else if (plugin && typeof plugin.init === 'function') {
-        await plugin.init(this.nodelink, api)
+        await plugin.init(this.nodelink, pluginApi)
       } else {
         logger(
           'warn',
@@ -178,16 +201,16 @@ export default class PluginManager {
         )
         return
       }
-      const meta = this.#extractMetadata(mod, plugin, name)
+      const meta = this.#extractMetadata(moduleData, plugin, name)
       this.plugins.push(meta)
       logger('info', 'Plugin', `Loaded plugin: ${name}`)
-    } catch (e) {
-      logger('error', 'Plugin', `Plugin '${name}' initialization failed: ${e.message}`)
+    } catch (error) {
+      logger('error', 'Plugin', `Plugin '${name}' initialization failed: ${error.message}`)
     }
   }
 
-  #extractMetadata(mod, plugin, fallbackName) {
-    const tryMeta = (obj) => {
+  #extractMetadata(moduleData, plugin, fallbackName) {
+    const tryMetadata = (obj) => {
       if (!obj || typeof obj !== 'object') return null
       const { name, description, version } = obj
       if (!(name || description || version)) return null
@@ -202,27 +225,27 @@ export default class PluginManager {
       }
     }
 
-    let meta = null
+    let metadata = null
     if (typeof plugin === 'function') {
-      meta = tryMeta(plugin.pluginInfo) || tryMeta(plugin.meta) || null
+      metadata = tryMetadata(plugin.pluginInfo) || tryMetadata(plugin.meta) || null
     }
-    meta = meta || tryMeta(mod?.pluginInfo) || tryMeta(mod?.meta) || null
-    if (!meta && plugin && typeof plugin === 'object' && (plugin.name || plugin.description || plugin.version)) {
-      meta = tryMeta(plugin)
+    metadata = metadata || tryMetadata(moduleData?.pluginInfo) || tryMetadata(moduleData?.meta) || null
+    if (!metadata && plugin && typeof plugin === 'object' && (plugin.name || plugin.description || plugin.version)) {
+      metadata = tryMetadata(plugin)
     }
 
     return {
-      name: meta?.name || String(fallbackName),
-      description: meta?.description || 'unknown',
-      version: meta?.version || 'unknown'
+      name: metadata?.name || String(fallbackName),
+      description: metadata?.description || 'unknown',
+      version: metadata?.version || 'unknown'
     }
   }
 
-  async initialize(mod, name = 'unknown') {
-    return this.#initializePluginModule(mod, name)
+  async initialize(moduleData, name = 'unknown') {
+    return this.#initializePluginModule(moduleData, name)
   }
 
-  #buildApi() {
+  #buildPluginApi() {
     return {
       // HTTP routes
       addRoute: (pathnameOrRegex, handler, methods) =>
@@ -232,8 +255,8 @@ export default class PluginManager {
         this.nodelink?.sources?.addSource?.(name, instance),
       registerLyricsSource: (name, instance) =>
         this.nodelink?.lyrics?.addLyricsSource?.(name, instance),
-      registerStreamInterceptor: (fn) => this.registerStreamInterceptor(fn),
-      registerBeforePlay: (fn) => this.registerBeforePlay(fn),
+      registerStreamInterceptor: (interceptor) => this.registerStreamInterceptor(interceptor),
+      registerBeforePlay: (hook) => this.registerBeforePlay(hook),
       // Utilities
       logger,
       config: this.nodelink?.options,
