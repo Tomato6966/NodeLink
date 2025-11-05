@@ -8,7 +8,7 @@ export default class PlayerBackupManager {
     this.lastUpdate = new Map()
     this.cleanupInterval = null
     this.snapshotTTL = 300000
-    
+
     logger('info', 'PlayerBackup', 'Backup manager initialized')
     this._startCleanup()
   }
@@ -31,12 +31,16 @@ export default class PlayerBackupManager {
 
       const json = JSON.stringify(snapshot)
       const compressed = gzipSync(Buffer.from(json))
-      
+
       this.snapshots.set(playerKey, compressed)
       this.workerAssignments.set(playerKey, workerId)
       this.lastUpdate.set(playerKey, Date.now())
     } catch (error) {
-      logger('error', 'PlayerBackup', `Failed to store snapshot for ${playerKey}: ${error.message}`)
+      logger(
+        'error',
+        'PlayerBackup',
+        `Failed to store snapshot for ${playerKey}: ${error.message}`
+      )
     }
   }
 
@@ -47,18 +51,25 @@ export default class PlayerBackupManager {
 
       const decompressed = gunzipSync(compressed)
       const snapshot = JSON.parse(decompressed.toString())
-      
+
       return snapshot
     } catch (error) {
-      logger('error', 'PlayerBackup', `Failed to get snapshot for ${playerKey}: ${error.message}`)
+      logger(
+        'error',
+        'PlayerBackup',
+        `Failed to get snapshot for ${playerKey}: ${error.message}`
+      )
       return null
     }
   }
 
   getWorkerSnapshots(workerId) {
     const snapshots = []
-    
-    for (const [playerKey, assignedWorkerId] of this.workerAssignments.entries()) {
+
+    for (const [
+      playerKey,
+      assignedWorkerId
+    ] of this.workerAssignments.entries()) {
       if (assignedWorkerId === workerId) {
         const snapshot = this.getSnapshot(playerKey)
         if (snapshot) {
@@ -66,8 +77,12 @@ export default class PlayerBackupManager {
         }
       }
     }
-    
-    logger('info', 'PlayerBackup', `Retrieved ${snapshots.length} snapshots for worker ${workerId}`)
+
+    logger(
+      'info',
+      'PlayerBackup',
+      `Retrieved ${snapshots.length} snapshots for worker ${workerId}`
+    )
     return snapshots
   }
 
@@ -79,15 +94,22 @@ export default class PlayerBackupManager {
 
   clearWorkerSnapshots(workerId) {
     let cleared = 0
-    
-    for (const [playerKey, assignedWorkerId] of this.workerAssignments.entries()) {
+
+    for (const [
+      playerKey,
+      assignedWorkerId
+    ] of this.workerAssignments.entries()) {
       if (assignedWorkerId === workerId) {
         this.removeSnapshot(playerKey)
         cleared++
       }
     }
-    
-    logger('info', 'PlayerBackup', `Cleared ${cleared} snapshots for worker ${workerId}`)
+
+    logger(
+      'info',
+      'PlayerBackup',
+      `Cleared ${cleared} snapshots for worker ${workerId}`
+    )
     return cleared
   }
 
@@ -128,11 +150,11 @@ export default class PlayerBackupManager {
       clearInterval(this.cleanupInterval)
       this.cleanupInterval = null
     }
-    
+
     this.snapshots.clear()
     this.workerAssignments.clear()
     this.lastUpdate.clear()
-    
+
     logger('info', 'PlayerBackup', 'Backup manager destroyed')
   }
 }

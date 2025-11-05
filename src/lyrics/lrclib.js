@@ -8,7 +8,8 @@ const CLEAN_PATTERNS = [
 ]
 // this clears titles like [Official] or (Official), etc... this improves the accuary of the lyrics
 
-const FEAT_PATTERN = /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
+const FEAT_PATTERN =
+  /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
 
 const SEPARATORS = [' - ', ' – ', ' — ']
 
@@ -19,7 +20,7 @@ const _clean = (text, removeFeat = false) => {
   return result.trim()
 }
 
-const _parse = query => {
+const _parse = (query) => {
   const cleaned = _clean(query, true)
   for (const sep of SEPARATORS) {
     const idx = cleaned.indexOf(sep)
@@ -62,9 +63,9 @@ export default class LRCLIBLyrics {
   _parsePlainLyrics(lyrics) {
     return lyrics
       .split('\n')
-      .map(line => line.trim())
-      .filter(line => line)
-      .map(text => ({ text, time: 0, duration: 0 }))
+      .map((line) => line.trim())
+      .filter((line) => line)
+      .map((text) => ({ text, time: 0, duration: 0 }))
   }
 
   async getLyrics(trackInfo) {
@@ -91,7 +92,7 @@ export default class LRCLIBLyrics {
       let bestMatch = null
 
       bestMatch = results.find(
-        r =>
+        (r) =>
           _clean(r.trackName, true).toLowerCase() === titleLower &&
           _clean(r.artistName, false).toLowerCase() === authorLower &&
           !r.instrumental
@@ -99,14 +100,14 @@ export default class LRCLIBLyrics {
 
       if (!bestMatch) {
         bestMatch = results.find(
-          r =>
+          (r) =>
             _clean(r.trackName, true).toLowerCase() === titleLower &&
             !r.instrumental
         )
       }
 
       if (!bestMatch) {
-        bestMatch = results.find(r => !r.instrumental)
+        bestMatch = results.find((r) => !r.instrumental)
       }
 
       if (!bestMatch) {

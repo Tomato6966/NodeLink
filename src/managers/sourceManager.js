@@ -241,8 +241,12 @@ export default class SourcesManager {
 
   async getTrackStream(track, url, protocol, additionalData) {
     const instance = this.sources.get(track.sourceName)
-    const finalHandler = () => instance.loadStream(track, url, protocol, additionalData)
-    if (this.nodelink?.pluginManager?.runStreamPipeline && this.nodelink.pluginManager.streamInterceptors.length > 0) {
+    const finalHandler = () =>
+      instance.loadStream(track, url, protocol, additionalData)
+    if (
+      this.nodelink?.pluginManager?.runStreamPipeline &&
+      this.nodelink.pluginManager.streamInterceptors.length > 0
+    ) {
       return await this.nodelink.pluginManager.runStreamPipeline(
         track,
         url,

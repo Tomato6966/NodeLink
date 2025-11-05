@@ -30,7 +30,10 @@ function createMockServer(password = 'test-pass') {
   return { nodelink, api }
 }
 
-function invoke(nodelink, { method = 'GET', path = '/', body = undefined, headers = {} } = {}) {
+function invoke(
+  nodelink,
+  { method = 'GET', path = '/', body = undefined, headers = {} } = {}
+) {
   return new Promise((resolve) => {
     const req = new (class {
       constructor() {
@@ -49,7 +52,8 @@ function invoke(nodelink, { method = 'GET', path = '/', body = undefined, header
         if (method !== 'GET') {
           process.nextTick(() => {
             if (body !== undefined) {
-              const payload = typeof body === 'string' ? body : JSON.stringify(body)
+              const payload =
+                typeof body === 'string' ? body : JSON.stringify(body)
               this._emit('data', Buffer.from(payload))
             }
             this._emit('end')
@@ -74,10 +78,17 @@ function invoke(nodelink, { method = 'GET', path = '/', body = undefined, header
         resHeaders = headers || {}
       },
       end(chunk) {
-        if (chunk) bodyBufs.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)))
+        if (chunk)
+          bodyBufs.push(
+            Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
+          )
         const raw = Buffer.concat(bodyBufs).toString('utf8')
         let json = null
-        try { json = raw ? JSON.parse(raw) : null } catch { /* not json */ }
+        try {
+          json = raw ? JSON.parse(raw) : null
+        } catch {
+          /* not json */
+        }
         resolve({ status, headers: resHeaders, raw, json })
       }
     }
@@ -86,7 +97,12 @@ function invoke(nodelink, { method = 'GET', path = '/', body = undefined, header
     // eslint-disable-next-line promise/prefer-await-to-then
     Promise.resolve(requestHandler(nodelink, req, res)).catch((err) => {
       // If handler throws, surface as test failure
-      resolve({ status: status || 500, headers: resHeaders, raw: String(err), json: null })
+      resolve({
+        status: status || 500,
+        headers: resHeaders,
+        raw: String(err),
+        json: null
+      })
     })
   })
 }
@@ -95,7 +111,10 @@ test('plugin static route (example-plugin) responds with ok', async () => {
   const { nodelink, api } = createMockServer()
   await examplePlugin(nodelink, api)
 
-  const res = await invoke(nodelink, { method: 'GET', path: '/v4/example-plugin/ping' })
+  const res = await invoke(nodelink, {
+    method: 'GET',
+    path: '/v4/example-plugin/ping'
+  })
   assert.equal(res.status, 200)
   assert.ok(res.json && res.json.ok === true)
   assert.equal(res.json.plugin, 'example-plugin')
@@ -104,15 +123,25 @@ test('plugin static route (example-plugin) responds with ok', async () => {
 test('plugin dynamic route via RegExp matches and responds', async () => {
   const { nodelink, api } = createMockServer()
   // Register a simple dynamic route
-  api.addRoute(/^\/v4\/custom\/item\/\d+$/, (server, req, res, sendResponse) => {
-    sendResponse(req, res, { matched: true }, 200)
-  }, ['GET'])
+  api.addRoute(
+    /^\/v4\/custom\/item\/\d+$/,
+    (server, req, res, sendResponse) => {
+      sendResponse(req, res, { matched: true }, 200)
+    },
+    ['GET']
+  )
 
-  const ok = await invoke(nodelink, { method: 'GET', path: '/v4/custom/item/42' })
+  const ok = await invoke(nodelink, {
+    method: 'GET',
+    path: '/v4/custom/item/42'
+  })
   assert.equal(ok.status, 200)
   assert.deepEqual(ok.json, { matched: true })
 
-  const notFound = await invoke(nodelink, { method: 'GET', path: '/v4/custom/item/abc' })
+  const notFound = await invoke(nodelink, {
+    method: 'GET',
+    path: '/v4/custom/item/abc'
+  })
   assert.equal(notFound.status, 404)
 })
 
@@ -131,7 +160,10 @@ test('audio-cache plugin: method enforcement on /v4/cache/cleanup', async () => 
   const { nodelink, api } = createMockServer()
   await audioCachePlugin(nodelink, api)
 
-  const res = await invoke(nodelink, { method: 'GET', path: '/v4/cache/cleanup' })
+  const res = await invoke(nodelink, {
+    method: 'GET',
+    path: '/v4/cache/cleanup'
+  })
   assert.equal(res.status, 405)
   assert.ok(res.json && res.json.status === 405)
 })
@@ -140,7 +172,10 @@ test('info endpoint includes plugin metadata when initialized via manager', asyn
   const { nodelink } = createMockServer()
   // Load via manager to record metadata
   await nodelink.pluginManager.initialize(examplePlugin, 'example-plugin.js')
-  await nodelink.pluginManager.initialize(audioCachePlugin, 'audio-cache-plugin.js')
+  await nodelink.pluginManager.initialize(
+    audioCachePlugin,
+    'audio-cache-plugin.js'
+  )
 
   const res = await invoke(nodelink, { method: 'GET', path: '/v4/info' })
   assert.equal(res.status, 200)

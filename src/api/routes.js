@@ -23,7 +23,9 @@ async function listBuiltinRoutes() {
         .split('.')
         .map((part) => (part === 'id' ? '(?:id|[A-Za-z0-9]+)' : part))
         .join('/')
-      pathnameOrRegex = new RegExp(`^/${PATH_VERSION}/${parts}(?:/[A-Za-z0-9]+)?/?$`)
+      pathnameOrRegex = new RegExp(
+        `^/${PATH_VERSION}/${parts}(?:/[A-Za-z0-9]+)?/?$`
+      )
     } else {
       pathnameOrRegex = `/${PATH_VERSION}/${routeName}`
     }
@@ -34,7 +36,8 @@ async function listBuiltinRoutes() {
       const filePath = join(__dirname, file)
       const mod = await import(pathToFileURL(filePath))
       const exported = mod?.default
-      if (exported?.methods && Array.isArray(exported.methods)) methods = exported.methods
+      if (exported?.methods && Array.isArray(exported.methods))
+        methods = exported.methods
     } catch {}
 
     if (pathnameOrRegex instanceof RegExp) {
@@ -51,8 +54,18 @@ async function handler(nodelink, req, res) {
   const builtin = await listBuiltinRoutes()
   const pr = nodelink?.pluginManager?.getRoutes?.()
   const plugins = {
-    static: pr ? Array.from(pr.static.entries()).map(([path, data]) => ({ path, methods: data.methods || ['GET'] })) : [],
-    dynamic: pr ? pr.dynamic.map(([regex, data]) => ({ pattern: String(regex), methods: data.methods || ['GET'] })) : []
+    static: pr
+      ? Array.from(pr.static.entries()).map(([path, data]) => ({
+          path,
+          methods: data.methods || ['GET']
+        }))
+      : [],
+    dynamic: pr
+      ? pr.dynamic.map(([regex, data]) => ({
+          pattern: String(regex),
+          methods: data.methods || ['GET']
+        }))
+      : []
   }
 
   return sendResponse(req, res, { builtin, plugins }, 200)
@@ -62,4 +75,3 @@ export default {
   handler,
   methods: ['GET']
 }
-

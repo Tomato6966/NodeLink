@@ -5,7 +5,9 @@ function handler(nodelink, req, res) {
   const names = pluginManager?.getPluginList?.() || []
   const routes = pluginManager?.getRoutes?.()
   const pluginStatic = routes ? Array.from(routes.static.keys()) : []
-  const pluginDynamic = routes ? routes.dynamic.map(([regex]) => String(regex)) : []
+  const pluginDynamic = routes
+    ? routes.dynamic.map(([regex]) => String(regex))
+    : []
 
   return sendResponse(
     req,

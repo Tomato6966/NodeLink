@@ -48,12 +48,20 @@ async function initialize() {
 initialize()
 
 process.on('uncaughtException', (err) => {
-  logger('error', 'Worker-Crash', `Uncaught Exception: ${err.stack || err.message}`)
+  logger(
+    'error',
+    'Worker-Crash',
+    `Uncaught Exception: ${err.stack || err.message}`
+  )
   process.exit(1)
 })
 
 process.on('unhandledRejection', (reason, promise) => {
-  logger('error', 'Worker-Crash', `Unhandled Rejection at: ${promise}, reason: ${reason}`)
+  logger(
+    'error',
+    'Worker-Crash',
+    `Unhandled Rejection at: ${promise}, reason: ${reason}`
+  )
 })
 
 async function processQueue() {
@@ -67,7 +75,7 @@ async function processQueue() {
       case 'createPlayer': {
         const { sessionId, guildId, userId, voice } = payload
         const playerKey = `${guildId}:${userId}`
-        
+
         if (players.has(playerKey)) {
           result = { created: false, reason: 'Player already exists' }
           break
@@ -84,7 +92,11 @@ async function processQueue() {
                     payload: { sessionId, guildId, data }
                   })
                 } catch (e) {
-                  logger('error', 'Worker-IPC', `Failed to send playerEvent for guild ${guildId}: ${e.message}`)
+                  logger(
+                    'error',
+                    'Worker-IPC',
+                    `Failed to send playerEvent for guild ${guildId}: ${e.message}`
+                  )
                 }
               }
             }
@@ -104,11 +116,11 @@ async function processQueue() {
         const { guildId, userId } = payload
         const playerKey = `${guildId}:${userId}`
         const player = players.get(playerKey)
-        
+
         if (player) {
           player.destroy(false)
           players.delete(playerKey)
-          
+
           if (process.connected) {
             try {
               process.send({
@@ -116,10 +128,14 @@ async function processQueue() {
                 payload: { guildId, userId }
               })
             } catch (e) {
-              logger('error', 'Worker-IPC', `Failed to send playerDestroyed for guild ${guildId}: ${e.message}`)
+              logger(
+                'error',
+                'Worker-IPC',
+                `Failed to send playerDestroyed for guild ${guildId}: ${e.message}`
+              )
             }
           }
-          
+
           result = { destroyed: true }
         } else {
           result = { destroyed: false, reason: 'Player not found in worker' }
@@ -129,11 +145,25 @@ async function processQueue() {
 
       case 'restorePlayer': {
         const { snapshot } = payload
-        const { guildId, sessionId, userId, track, position, isPaused, volume, filters, voice } = snapshot
+        const {
+          guildId,
+          sessionId,
+          userId,
+          track,
+          position,
+          isPaused,
+          volume,
+          filters,
+          voice
+        } = snapshot
         const playerKey = `${guildId}:${userId}`
-        
-        logger('info', 'Worker', `Restoring player for guild ${guildId} (bot: ${userId}) (position: ${position}ms, paused: ${isPaused})`)
-        
+
+        logger(
+          'info',
+          'Worker',
+          `Restoring player for guild ${guildId} (bot: ${userId}) (position: ${position}ms, paused: ${isPaused})`
+        )
+
         const mockSession = {
           id: sessionId,
           userId: userId,
@@ -146,7 +176,11 @@ async function processQueue() {
                     payload: { sessionId, guildId, data }
                   })
                 } catch (e) {
-                  logger('error', 'Worker-IPC', `Failed to send playerEvent for guild ${guildId}: ${e.message}`)
+                  logger(
+                    'error',
+                    'Worker-IPC',
+                    `Failed to send playerEvent for guild ${guildId}: ${e.message}`
+                  )
                 }
               }
             }
@@ -159,15 +193,16 @@ async function processQueue() {
 
         if (voice) player.updateVoice(voice)
         if (volume) player.volume(volume)
-        if (filters && Object.keys(filters).length > 0) player.setFilters(filters)
-        
+        if (filters && Object.keys(filters).length > 0)
+          player.setFilters(filters)
+
         if (track) {
           await player.play({ ...track, startTime: position })
           if (isPaused) {
             player.pause(true)
           }
         }
-        
+
         player._isRestoring = false
         result = { restored: true }
         break
@@ -177,7 +212,7 @@ async function processQueue() {
         const { guildId, userId, command, args } = payload
         const playerKey = `${guildId}:${userId}`
         const player = players.get(playerKey)
-        
+
         if (player && typeof player[command] === 'function') {
           result = await player[command](...args)
         } else {
@@ -221,7 +256,11 @@ async function processQueue() {
       try {
         process.send({ type: 'commandResult', requestId, payload: result })
       } catch (e) {
-        logger('error', 'Worker-IPC', `Failed to send commandResult for ${requestId}: ${e.message}`)
+        logger(
+          'error',
+          'Worker-IPC',
+          `Failed to send commandResult for ${requestId}: ${e.message}`
+        )
       }
     }
   } catch (e) {
@@ -229,7 +268,11 @@ async function processQueue() {
       try {
         process.send({ type: 'commandResult', requestId, error: e.message })
       } catch (e) {
-        logger('error', 'Worker-IPC', `Failed to send commandResult (error) for ${requestId}: ${e.message}`)
+        logger(
+          'error',
+          'Worker-IPC',
+          `Failed to send commandResult (error) for ${requestId}: ${e.message}`
+        )
       }
     }
   } finally {
@@ -250,11 +293,11 @@ process.on('message', (msg) => {
     }
     return
   }
-  
+
   if (!msg.type || !msg.requestId) return
 
   commandQueue.push(msg)
-  
+
   if (commandQueue.length === 1) {
     setImmediate(processQueue)
   }
@@ -312,7 +355,7 @@ setInterval(() => {
         )
       }
     }
-    
+
     if (player.track && !player._isRestoring) {
       try {
         const playerKey = `${player.guildId}:${player.session.userId}`
@@ -333,7 +376,11 @@ setInterval(() => {
           }
         })
       } catch (e) {
-        logger('error', 'Worker-IPC', `Failed to send playerSnapshot for guild ${player.guildId}: ${e.message}`)
+        logger(
+          'error',
+          'Worker-IPC',
+          `Failed to send playerSnapshot for guild ${player.guildId}: ${e.message}`
+        )
       }
     }
   }
@@ -345,8 +392,9 @@ setInterval(() => {
     lastCpuTime = now
     lastCpuUsage = process.cpuUsage()
 
-    const nodelinkLoad = elapsedMs > 0 ? ((cpuUsage.user + cpuUsage.system) / 1000) / elapsedMs : 0
-    
+    const nodelinkLoad =
+      elapsedMs > 0 ? (cpuUsage.user + cpuUsage.system) / 1000 / elapsedMs : 0
+
     const mem = process.memoryUsage()
 
     process.send({

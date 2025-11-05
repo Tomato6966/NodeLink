@@ -10,9 +10,18 @@ export const pluginInfo = {
 
 export default async function examplePlugin(nodelink, pluginApi) {
   // Add a simple GET route: /v4/example-plugin/ping
-  pluginApi.addRoute(`/v4/example-plugin/ping`, (server, req, res, sendResponse) => {
-    sendResponse(req, res, { ok: true, plugin: 'example-plugin', pid: process.pid }, 200)
-  }, ['GET'])
+  pluginApi.addRoute(
+    `/v4/example-plugin/ping`,
+    (server, req, res, sendResponse) => {
+      sendResponse(
+        req,
+        res,
+        { ok: true, plugin: 'example-plugin', pid: process.pid },
+        200
+      )
+    },
+    ['GET']
+  )
 
   // Log on load
   pluginApi.logger('info', 'Plugin', 'example-plugin initialized')

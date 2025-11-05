@@ -199,7 +199,7 @@ export class Player {
       const wasResuming = this._isResuming
       this._isResuming = false
       this.isPaused = false
-      
+
       if (!wasResuming && !this._isRestoring) {
         this.emitEvent(GatewayEvents.TRACK_START, { track: this.track })
       }
@@ -785,11 +785,11 @@ export class Player {
       'Player',
       `Setting pause to ${shouldPause} for guild ${this.guildId}`
     )
-    
+
     const wasResuming = this.isPaused && !shouldPause
     this.isPaused = shouldPause
     this._isResuming = wasResuming
-    
+
     if (this.connection?.audioStream) {
       if (shouldPause) {
         this.connection.pause('requested')

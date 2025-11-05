@@ -62,12 +62,14 @@ export default class PluginManager {
   }
 
   registerStreamInterceptor(interceptor) {
-    if (typeof interceptor !== 'function') throw new Error('Stream interceptor must be a function')
+    if (typeof interceptor !== 'function')
+      throw new Error('Stream interceptor must be a function')
     this.streamInterceptors.push(interceptor)
   }
 
   registerBeforePlay(hook) {
-    if (typeof hook !== 'function') throw new Error('Before-play hook must be a function')
+    if (typeof hook !== 'function')
+      throw new Error('Before-play hook must be a function')
     this.beforePlayHooks.push(hook)
   }
 
@@ -117,12 +119,18 @@ export default class PluginManager {
       const pluginFiles = []
       try {
         const files = await fs.readdir(pluginsSrcDir)
-        const jsFiles = files.filter((f) => f.endsWith('.js') && f !== 'pluginManager.js')
+        const jsFiles = files.filter(
+          (f) => f.endsWith('.js') && f !== 'pluginManager.js'
+        )
         for (const f of jsFiles) {
           pluginFiles.push(path.join(pluginsSrcDir, f))
         }
       } catch (err) {
-        logger('debug', 'Plugin', `Skipping plugin dir '${pluginsSrcDir}': ${err.message}`)
+        logger(
+          'debug',
+          'Plugin',
+          `Skipping plugin dir '${pluginsSrcDir}': ${err.message}`
+        )
       }
 
       for (const filePath of pluginFiles) {
@@ -137,7 +145,9 @@ export default class PluginManager {
     // Discover installed packages that look like nodelink plugins
     let packageJson
     try {
-      const packageUrl = pathToFileURL(path.resolve(process.cwd(), 'package.json'))
+      const packageUrl = pathToFileURL(
+        path.resolve(process.cwd(), 'package.json')
+      )
       packageJson = (await import(packageUrl)).default
     } catch (error) {
       logger('debug', 'Plugin', 'No package.json found for plugin discovery')
@@ -174,7 +184,11 @@ export default class PluginManager {
       const name = path.basename(filePath)
       await this.#initializePluginModule(moduleData, name)
     } catch (error) {
-      logger('error', 'Plugin', `Failed to load plugin '${filePath}': ${error.message}`)
+      logger(
+        'error',
+        'Plugin',
+        `Failed to load plugin '${filePath}': ${error.message}`
+      )
     }
   }
 
@@ -205,7 +219,11 @@ export default class PluginManager {
       this.plugins.push(meta)
       logger('info', 'Plugin', `Loaded plugin: ${name}`)
     } catch (error) {
-      logger('error', 'Plugin', `Plugin '${name}' initialization failed: ${error.message}`)
+      logger(
+        'error',
+        'Plugin',
+        `Plugin '${name}' initialization failed: ${error.message}`
+      )
     }
   }
 
@@ -221,16 +239,28 @@ export default class PluginManager {
             ? description.trim()
             : undefined,
         version:
-          typeof version === 'string' && version.trim() ? version.trim() : undefined
+          typeof version === 'string' && version.trim()
+            ? version.trim()
+            : undefined
       }
     }
 
     let metadata = null
     if (typeof plugin === 'function') {
-      metadata = tryMetadata(plugin.pluginInfo) || tryMetadata(plugin.meta) || null
+      metadata =
+        tryMetadata(plugin.pluginInfo) || tryMetadata(plugin.meta) || null
     }
-    metadata = metadata || tryMetadata(moduleData?.pluginInfo) || tryMetadata(moduleData?.meta) || null
-    if (!metadata && plugin && typeof plugin === 'object' && (plugin.name || plugin.description || plugin.version)) {
+    metadata =
+      metadata ||
+      tryMetadata(moduleData?.pluginInfo) ||
+      tryMetadata(moduleData?.meta) ||
+      null
+    if (
+      !metadata &&
+      plugin &&
+      typeof plugin === 'object' &&
+      (plugin.name || plugin.description || plugin.version)
+    ) {
       metadata = tryMetadata(plugin)
     }
 
@@ -255,7 +285,8 @@ export default class PluginManager {
         this.nodelink?.sources?.addSource?.(name, instance),
       registerLyricsSource: (name, instance) =>
         this.nodelink?.lyrics?.addLyricsSource?.(name, instance),
-      registerStreamInterceptor: (interceptor) => this.registerStreamInterceptor(interceptor),
+      registerStreamInterceptor: (interceptor) =>
+        this.registerStreamInterceptor(interceptor),
       registerBeforePlay: (hook) => this.registerBeforePlay(hook),
       // Utilities
       logger,

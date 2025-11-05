@@ -11,7 +11,7 @@ export default class PlayerManager {
   async create(guildId, voice) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${guildId}:${session.userId}`
-    
+
     if (this.players.has(playerKey)) {
       logger(
         'debug',
@@ -44,7 +44,11 @@ export default class PlayerManager {
       return this.players.get(playerKey)
     }
     const { Player } = await import('../playback/player.js')
-    logger('debug', 'PlayerManager', `Creating new player for guild ${guildId} (bot: ${session.userId})`)
+    logger(
+      'debug',
+      'PlayerManager',
+      `Creating new player for guild ${guildId} (bot: ${session.userId})`
+    )
     const player = new Player({
       nodelink: this.nodelink,
       session: session,
@@ -64,7 +68,7 @@ export default class PlayerManager {
   async destroy(guildId) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${guildId}:${session.userId}`
-    
+
     if (this.isCluster) {
       if (!this.nodelink.workerManager.isGuildAssigned(playerKey)) {
         throw new Error('Player not found.')
@@ -103,7 +107,7 @@ export default class PlayerManager {
   async play(guildId, trackPayload) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${guildId}:${session.userId}`
-    
+
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
       if (!worker) throw new Error('Player not assigned to a worker.')
@@ -130,7 +134,7 @@ export default class PlayerManager {
   async stop(guildId) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${guildId}:${session.userId}`
-    
+
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
       if (!worker) throw new Error('Player not assigned to a worker.')
@@ -157,7 +161,7 @@ export default class PlayerManager {
   async pause(guildId, shouldPause) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${guildId}:${session.userId}`
-    
+
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
       if (!worker) throw new Error('Player not assigned to a worker.')
@@ -184,7 +188,7 @@ export default class PlayerManager {
   async seek(guildId, position, endTime) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${guildId}:${session.userId}`
-    
+
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
       if (!worker) throw new Error('Player not assigned to a worker.')
@@ -211,7 +215,7 @@ export default class PlayerManager {
   async volume(guildId, level) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${guildId}:${session.userId}`
-    
+
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
       if (!worker) throw new Error('Player not assigned to a worker.')
@@ -238,7 +242,7 @@ export default class PlayerManager {
   async setFilters(guildId, filtersPayload) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${guildId}:${session.userId}`
-    
+
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
       if (!worker) throw new Error('Player not assigned to a worker.')
@@ -265,7 +269,7 @@ export default class PlayerManager {
   async updateVoice(guildId, voicePayload) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${guildId}:${session.userId}`
-    
+
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
       if (!worker) throw new Error('Player not assigned to a worker.')
@@ -292,7 +296,7 @@ export default class PlayerManager {
   async toJSON(guildId) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${guildId}:${session.userId}`
-    
+
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
       if (!worker) throw new Error('Player not assigned to a worker.')
