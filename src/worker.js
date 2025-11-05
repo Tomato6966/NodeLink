@@ -1,4 +1,7 @@
 import { GatewayEvents } from './constants.js'
+
+let lastCpuUsage = process.cpuUsage()
+let lastCpuTime = Date.now()
 import ConnectionManager from './managers/connectionManager.js'
 import LyricsManager from './managers/lyricsManager.js'
 import RoutePlannerManager from './managers/routePlannerManager.js'
@@ -333,13 +336,28 @@ setInterval(() => {
   }
 
   try {
+    const now = Date.now()
+    const elapsedMs = now - lastCpuTime
+    const cpuUsage = process.cpuUsage(lastCpuUsage)
+    lastCpuTime = now
+    lastCpuUsage = process.cpuUsage()
+
+    const nodelinkLoad = elapsedMs > 0 ? ((cpuUsage.user + cpuUsage.system) / 1000) / elapsedMs : 0
+    
+    const mem = process.memoryUsage()
+
     process.send({
       type: 'workerStats',
       pid: process.pid,
       stats: {
         players: localPlayers,
         playingPlayers: localPlayingPlayers,
-        commandQueueLength: commandQueue.length
+        commandQueueLength: commandQueue.length,
+        cpu: { nodelinkLoad },
+        memory: {
+          used: mem.heapUsed,
+          allocated: mem.heapTotal
+        }
       }
     })
   } catch (e) {

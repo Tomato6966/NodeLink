@@ -226,41 +226,68 @@ function getGitInfo() {
 }
 
 function getStats(nodelink) {
-  const { players, playingPlayers } = nodelink.statistics
+  let players = 0
+  let playingPlayers = 0
+  let aggregatedNodelinkLoad = 0
+  const memory = {
+    free: os.freemem(),
+    used: 0,
+    allocated: 0,
+    reservable: os.totalmem()
+  }
+
+  if (nodelink.workerManager) {
+    for (const stats of nodelink.workerManager.workerStats.values()) {
+      players += stats.players || 0
+      playingPlayers += stats.playingPlayers || 0
+      if (stats.memory) {
+        memory.used += stats.memory.used || 0
+        memory.allocated += stats.memory.allocated || 0
+      }
+      if (stats.cpu) {
+        aggregatedNodelinkLoad += stats.cpu.nodelinkLoad || 0
+      }
+    }
+    const primaryMem = process.memoryUsage()
+    memory.used += primaryMem.heapUsed
+    memory.allocated += primaryMem.heapTotal
+
+  } else {
+    players = nodelink.statistics.players
+    playingPlayers = nodelink.statistics.playingPlayers
+    const mem = process.memoryUsage()
+    memory.used = mem.heapUsed
+    memory.allocated = mem.heapTotal
+  }
+
   let frameStats = null
   if (players > 0) {
     frameStats = { sent: 0, nulled: 0, deficit: 0, expected: 0 }
-    for (const session of nodelink.sessions.values()) {
-      if (!session.players) continue
-      for (const player of session.players.players.values()) {
-        if (!player.connection) continue
-        const sent = player.connection.statistics.packetsSent || 0
-        const nulled = player.connection.statistics.packetsLost || 0
-        const expectedFrames = player.connection.statistics.packetsExpect || 0
-        frameStats.sent += sent
-        frameStats.nulled += nulled
-        frameStats.expected += expectedFrames
+    if (!nodelink.workerManager) {
+      for (const session of nodelink.sessions.values()) {
+        if (!session.players) continue
+        for (const player of session.players.players.values()) {
+          if (!player.connection) continue
+          const sent = player.connection.statistics.packetsSent || 0
+          const nulled = player.connection.statistics.packetsLost || 0
+          const expectedFrames =
+            player.connection.statistics.packetsExpect || 0
+          frameStats.sent += sent
+          frameStats.nulled += nulled
+          frameStats.expected += expectedFrames
+        }
       }
+      frameStats.deficit += Math.max(0, frameStats.expected - frameStats.sent)
     }
-    frameStats.deficit += Math.max(0, frameStats.expected - frameStats.sent)
-  } else {
-    frameStats = null
   }
 
   const uptime = Math.floor(process.uptime() * 1000)
-  const mem = process.memoryUsage()
-  const memory = {
-    free: os.freemem(),
-    used: mem.heapUsed,
-    allocated: mem.heapTotal,
-    reservable: os.totalmem()
-  }
   const cores = os.cpus().length
   const load = os.loadavg()[0]
   const cpu = {
     cores,
     systemLoad: load,
-    nodelinkLoad: (load / cores).toFixed(2)
+    nodelinkLoad: (aggregatedNodelinkLoad / cores).toFixed(2)
   }
 
   return {

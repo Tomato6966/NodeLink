@@ -19,6 +19,7 @@ export default class WorkerManager {
       : Math.max(1, config.cluster.workers || 0)
     this.minWorkers = Math.max(1, config.cluster?.minWorkers || 1)
     this.workerLoad = new Map()
+    this.workerStats = new Map()
     this.idleWorkers = new Map()
     this.scaleCheckInterval = null
     this.healthCheckInterval = null
@@ -281,6 +282,7 @@ export default class WorkerManager {
     this.workers.push(worker)
     this.workersById.set(worker.id, worker)
     this.workerLoad.set(worker.id, 0)
+    this.workerStats.set(worker.id, { players: 0, playingPlayers: 0, cpu: { nodelinkLoad: 0 }, memory: { used: 0, allocated: 0 } })
     this.workerToGuilds.set(worker.id, new Set())
     this.workerHealth.set(worker.id, Date.now())
     this.workerFailureHistory.set(worker.id, {
@@ -309,6 +311,7 @@ export default class WorkerManager {
 
     this.workersById.delete(workerId)
     this.workerLoad.delete(workerId)
+    this.workerStats.delete(workerId)
     this.idleWorkers.delete(workerId)
 
     const affectedGuilds = Array.from(this.workerToGuilds.get(workerId) || [])
@@ -379,7 +382,7 @@ export default class WorkerManager {
       const playerKey = `${guildId}:${userId}`
       this.backupManager.removeSnapshot(playerKey)
     } else if (msg.type === 'workerStats') {
-      this.statsUpdateBatch.set(worker.id, msg.stats.players)
+      this.statsUpdateBatch.set(worker.id, msg.stats)
 
       if (!this.statsUpdateTimer) {
         this.statsUpdateTimer = setTimeout(() => {
@@ -397,12 +400,13 @@ export default class WorkerManager {
   }
 
   _flushStatsUpdates() {
-    for (const [workerId, players] of this.statsUpdateBatch) {
-      this.workerLoad.set(workerId, players)
+    for (const [workerId, stats] of this.statsUpdateBatch) {
+      this.workerLoad.set(workerId, stats.players)
+      this.workerStats.set(workerId, stats)
 
-      if (players === 0 && !this.idleWorkers.has(workerId)) {
+      if (stats.players === 0 && !this.idleWorkers.has(workerId)) {
         this.idleWorkers.set(workerId, Date.now())
-      } else if (players > 0) {
+      } else if (stats.players > 0) {
         this.idleWorkers.delete(workerId)
       }
     }
