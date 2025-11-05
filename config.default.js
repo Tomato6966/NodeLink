@@ -206,6 +206,7 @@ export default {
   },
   plugins: {
     audioCache: {
+      enabled: false,
       dir: 'cache/audio',
       ttlDays: 7,
       cleanupIntervalHours: 12,
@@ -218,7 +219,7 @@ export default {
     // Start playback only after some data has buffered.
     // Applies to non-live streams. Uses compressed bytes (source stream) as reference.
     prebuffer: {
-      enabled: true,
+      enabled: false,
       // Buffer target before releasing data downstream. Accepts number (bytes) or string: '512KB', '1MB', etc.
       bytes: '512KB',
       // Max time to wait before starting even if bytes not reached (ms). Set 0 to disable.

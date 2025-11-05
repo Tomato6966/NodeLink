@@ -17,3 +17,5 @@
 !README.md
 !config.default.js 
 !biome.json
+!test
+!test/**
