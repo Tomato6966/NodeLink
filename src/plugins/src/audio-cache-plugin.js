@@ -4,15 +4,15 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
 
-function sha1(input) {
+function computeSha1Hex(input) {
   return crypto.createHash('sha1').update(String(input)).digest('hex')
 }
 
-async function ensureDir(dir) {
+async function ensureDirectoryExists(dir) {
   await fsp.mkdir(dir, { recursive: true }).catch(() => { })
 }
 
-function nowMs() {
+function nowMilliseconds() {
   return Date.now()
 }
 
@@ -22,39 +22,39 @@ export const pluginInfo = {
   version: '1.0.0'
 }
 
-export default async function audioCachePlugin(nodelink, api) {
-  const cfg = api.config?.plugins?.audioCache || {}
-  const cacheDir = path.resolve(process.cwd(), cfg.dir || path.join('cache', 'audio'))
-  const ttlDays = Number.isFinite(cfg.ttlDays) ? cfg.ttlDays : 7
-  const cleanupIntervalHours = Number.isFinite(cfg.cleanupIntervalHours)
-    ? cfg.cleanupIntervalHours
+export default async function audioCachePlugin(nodelink, pluginApi) {
+  const configuration = pluginApi.config?.plugins?.audioCache || {}
+  const cacheDir = path.resolve(process.cwd(), configuration.dir || path.join('cache', 'audio'))
+  const ttlDays = Number.isFinite(configuration.ttlDays) ? configuration.ttlDays : 7
+  const cleanupIntervalHours = Number.isFinite(configuration.cleanupIntervalHours)
+    ? configuration.cleanupIntervalHours
     : 12
 
   const maxSizeBytes = (() => {
-    const v = cfg.maxSizeBytes ?? cfg.maxSize
-    if (v == null) return null
-    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v
-    if (typeof v === 'string') {
-      const m = v.trim().match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)?$/i)
-      if (m) {
-        const num = parseFloat(m[1])
-        const unit = (m[2] || 'b').toLowerCase()
-        const mul = unit === 'tb' ? 1024 ** 4 : unit === 'gb' ? 1024 ** 3 : unit === 'mb' ? 1024 ** 2 : unit === 'kb' ? 1024 : 1
-        return Math.max(0, Math.floor(num * mul))
+    const value = configuration.maxSizeBytes ?? configuration.maxSize
+    if (value == null) return null
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value
+    if (typeof value === 'string') {
+      const match = value.trim().match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|tb)?$/i)
+      if (match) {
+        const numberValue = parseFloat(match[1])
+        const unit = (match[2] || 'b').toLowerCase()
+        const multiplier = unit === 'tb' ? 1024 ** 4 : unit === 'gb' ? 1024 ** 3 : unit === 'mb' ? 1024 ** 2 : unit === 'kb' ? 1024 : 1
+        return Math.max(0, Math.floor(numberValue * multiplier))
       }
     }
     return null
   })()
 
-  const protectRecentMs = (() => {
-    const v = cfg.protectRecentMinutes
-    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return Math.floor(v * 60 * 1000)
+  const protectRecentMilliseconds = (() => {
+    const minutes = configuration.protectRecentMinutes
+    if (typeof minutes === 'number' && Number.isFinite(minutes) && minutes > 0) return Math.floor(minutes * 60 * 1000)
     return 0
   })()
 
-  const allowExceedWhenAllRecent = Boolean(cfg.allowExceedWhenAllRecent)
+  const allowExceedWhenAllRecent = Boolean(configuration.allowExceedWhenAllRecent)
 
-  await ensureDir(cacheDir)
+  await ensureDirectoryExists(cacheDir)
 
   const inUse = new Map()
 
@@ -62,7 +62,7 @@ export default async function audioCachePlugin(nodelink, api) {
     const t = track && typeof track === 'object' ? (track.info || track) : {}
     const idCandidate = t.identifier || t.uri || url || JSON.stringify(t)
     const source = t.sourceName || track?.sourceName || 'unknown'
-    return `${source}-${sha1(String(idCandidate))}`
+    return `${source}-${computeSha1Hex(String(idCandidate))}`
   }
 
   function filePathForKey(key) {
@@ -121,7 +121,7 @@ export default async function audioCachePlugin(nodelink, api) {
 
   async function cleanup() {
     const ttlMs = ttlDays * 24 * 60 * 60 * 1000
-    const cutoff = nowMs() - ttlMs
+    const cutoff = nowMilliseconds() - ttlMs
     let removed = 0
     let bytesFreed = 0
     async function walk(dir) {
@@ -153,7 +153,7 @@ export default async function audioCachePlugin(nodelink, api) {
       }
     }
     await walk(cacheDir)
-    api.logger('info', 'Plugin-Cache', `Cleanup finished. Removed ${removed} files, freed ${bytesFreed} bytes`)
+    pluginApi.logger('info', 'Plugin-Cache', `Cleanup finished. Removed ${removed} files, freed ${bytesFreed} bytes`)
     return { removed, bytesFreed }
   }
 
@@ -189,20 +189,20 @@ export default async function audioCachePlugin(nodelink, api) {
     if (total <= target) return { removed: 0, bytesFreed: 0 }
 
     // Build eviction candidates honoring in-use and recent-protection rules
-    const now = nowMs()
+    const now = nowMilliseconds()
     const notInUse = files.filter(f => !inUse.has(f.path))
     let candidates = notInUse
-    if (protectRecentMs > 0) {
-      candidates = candidates.filter(f => (f.atime || 0) < (now - protectRecentMs))
+    if (protectRecentMilliseconds > 0) {
+      candidates = candidates.filter(f => (f.atime || 0) < (now - protectRecentMilliseconds))
     }
 
     if (candidates.length === 0) {
       if (notInUse.length === 0) {
-        api.logger('info', 'Plugin-Cache', `Trim skipped: all files in use; allowing overflow (total=${total}, target=${target})`)
+        pluginApi.logger('info', 'Plugin-Cache', `Trim skipped: all files in use; allowing overflow (total=${total}, target=${target})`)
         return { removed: 0, bytesFreed: 0 }
       }
       if (allowExceedWhenAllRecent) {
-        api.logger('info', 'Plugin-Cache', `Trim skipped: all files are recent; allowing overflow (total=${total}, target=${target})`)
+        pluginApi.logger('info', 'Plugin-Cache', `Trim skipped: all files are recent; allowing overflow (total=${total}, target=${target})`)
         return { removed: 0, bytesFreed: 0 }
       }
       files = notInUse
@@ -223,18 +223,18 @@ export default async function audioCachePlugin(nodelink, api) {
         bytesFreed += f.size
       } catch { }
     }
-    api.logger('info', 'Plugin-Cache', `Trimmed cache: removed ${removed}, freed ${bytesFreed} bytes, total~=${total}`)
+    pluginApi.logger('info', 'Plugin-Cache', `Trimmed cache: removed ${removed}, freed ${bytesFreed} bytes, total~=${total}`)
     return { removed, bytesFreed }
   }
 
-  api.addRoute('/v4/cache/stats', async (server, req, res, sendResponse) => {
+  pluginApi.addRoute('/v4/cache/stats', async (server, req, res, sendResponse) => {
     const s = await getStats()
     const cap = s.maxBytes || null
     const usage = cap ? Math.min(100, Math.round((s.bytes / cap) * 100)) : null
     sendResponse(req, res, { ok: true, files: s.files, bytes: s.bytes, maxBytes: cap, usagePercent: usage }, 200)
   })
 
-  api.addRoute('/v4/cache/cleanup', async (server, req, res, sendResponse) => {
+  pluginApi.addRoute('/v4/cache/cleanup', async (server, req, res, sendResponse) => {
     const result = await cleanup()
     sendResponse(req, res, { ok: true, ...result }, 200)
   }, ['POST'])
@@ -247,19 +247,19 @@ export default async function audioCachePlugin(nodelink, api) {
   }, intervalMs)
   timer.unref?.()
 
-  api.registerStreamInterceptor(async (server, track, url, protocol, additionalData, next) => {
+  pluginApi.registerStreamInterceptor(async (server, track, url, protocol, additionalData, next) => {
     const key = keyFor(track, url)
     const filePath = filePathForKey(key)
-    await ensureDir(path.dirname(filePath))
+    await ensureDirectoryExists(path.dirname(filePath))
 
     if (await existsNonEmpty(filePath)) {
-      api.logger('info', 'Plugin-Cache', `HIT key=${key} file=${filePath}`)
+      pluginApi.logger('info', 'Plugin-Cache', `HIT key=${key} file=${filePath}`)
       await touch(filePath)
       markUse(filePath, 1)
-      const rs = fs.createReadStream(filePath)
-      rs.on('close', () => markUse(filePath, -1))
-      rs.once('end', () => rs.emit('finishBuffering'))
-      return { stream: rs }
+      const readStream = fs.createReadStream(filePath)
+      readStream.on('close', () => markUse(filePath, -1))
+      readStream.once('end', () => readStream.emit('finishBuffering'))
+      return { stream: readStream }
     }
 
     let original
@@ -271,27 +271,27 @@ export default async function audioCachePlugin(nodelink, api) {
     }
 
     try {
-      api.logger('info', 'Plugin-Cache', `MISS key=${key} -> caching to ${filePath}`)
+      pluginApi.logger('info', 'Plugin-Cache', `MISS key=${key} -> caching to ${filePath}`)
       try {
         const st0 = await fsp.stat(filePath)
         if (!st0 || st0.size === 0) await fsp.unlink(filePath).catch(() => { })
       } catch { }
-      const tee = new PassThrough({ highWaterMark: 1 << 20 })
-      const ws = fs.createWriteStream(filePath)
+      const teeStream = new PassThrough({ highWaterMark: 1 << 20 })
+      const writeStream = fs.createWriteStream(filePath)
       let completed = false
 
-      const origStream = original?.stream || original
-      origStream.pipe(tee)
-      tee.pipe(ws)
+      const originalStream = original?.stream || original
+      originalStream.pipe(teeStream)
+      teeStream.pipe(writeStream)
 
-      origStream.on?.('finishBuffering', () => {
-        tee.emit('finishBuffering')
+      originalStream.on?.('finishBuffering', () => {
+        teeStream.emit('finishBuffering')
       })
 
-      tee.on('close', async () => {
+      teeStream.on('close', async () => {
         try {
-          const origStream = original?.stream || original
-          origStream.destroy?.()
+          const originalStream = original?.stream || original
+          originalStream.destroy?.()
         } catch { }
         try {
           if (!completed) {
@@ -301,34 +301,34 @@ export default async function audioCachePlugin(nodelink, api) {
         } catch { }
       })
 
-      const cleanupOnError = (err) => {
-        try { ws.destroy() } catch { }
+      const cleanupOnError = (error) => {
+        try { writeStream.destroy() } catch { }
         fsp.unlink(filePath).catch(() => { })
-        if (!tee.destroyed && err) tee.destroy(err)
+        if (!teeStream.destroyed && error) teeStream.destroy(error)
       }
 
-      origStream.on('error', cleanupOnError)
-      tee.on('error', cleanupOnError)
-      ws.on('error', cleanupOnError)
+      originalStream.on('error', cleanupOnError)
+      teeStream.on('error', cleanupOnError)
+      writeStream.on('error', cleanupOnError)
 
-      ws.on('finish', async () => {
+      writeStream.on('finish', async () => {
         completed = true
         touch(filePath).catch(() => { })
       })
-      ws.on('close', async () => {
+      writeStream.on('close', async () => {
         if (!completed) {
           const st = await fsp.stat(filePath).catch(() => null)
           if (!st || st.size === 0) await fsp.unlink(filePath).catch(() => { })
         }
       })
 
-      return { stream: tee, type: original?.type }
+      return { stream: teeStream, type: original?.type }
     } catch (e) {
       return original
     }
   })
 
-  api.logger('info', 'Plugin-Cache', `audio-cache-plugin initialized at ${cacheDir} (ttlDays=${ttlDays})`)
+  pluginApi.logger('info', 'Plugin-Cache', `audio-cache-plugin initialized at ${cacheDir} (ttlDays=${ttlDays})`)
 }
 
 // Attach metadata for discovery

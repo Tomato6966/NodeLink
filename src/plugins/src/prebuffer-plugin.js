@@ -4,12 +4,12 @@ function parseSize(input, fallback = 0) {
   if (input == null) return fallback
   if (typeof input === 'number' && Number.isFinite(input)) return Math.max(0, input | 0)
   if (typeof input === 'string') {
-    const m = input.trim().match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb)?$/i)
-    if (m) {
-      const num = parseFloat(m[1])
-      const unit = (m[2] || 'b').toLowerCase()
-      const mul = unit === 'gb' ? 1024 ** 3 : unit === 'mb' ? 1024 ** 2 : unit === 'kb' ? 1024 : 1
-      return Math.max(0, Math.floor(num * mul))
+    const match = input.trim().match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb)?$/i)
+    if (match) {
+      const numberValue = parseFloat(match[1])
+      const unit = (match[2] || 'b').toLowerCase()
+      const multiplier = unit === 'gb' ? 1024 ** 3 : unit === 'mb' ? 1024 ** 2 : unit === 'kb' ? 1024 : 1
+      return Math.max(0, Math.floor(numberValue * multiplier))
     }
   }
   return fallback
@@ -21,18 +21,18 @@ export const pluginInfo = {
   version: '1.0.0'
 }
 
-export default async function prebufferPlugin(nodelink, api) {
-  const cfg = api.config?.plugins?.prebuffer || {}
-  if (!cfg.enabled) {
-    api.logger('info', 'Plugin-Prebuffer', 'Disabled by config')
+export default async function prebufferPlugin(nodelink, pluginApi) {
+  const configuration = pluginApi.config?.plugins?.prebuffer || {}
+  if (!configuration.enabled) {
+    pluginApi.logger('info', 'Plugin-Prebuffer', 'Disabled by configuration')
     return
   }
 
-  const targetBytes = parseSize(cfg.bytes, 512 * 1024)
-  const timeoutMs = typeof cfg.timeoutMs === 'number' && cfg.timeoutMs > 0 ? Math.floor(cfg.timeoutMs) : 0
-  const highWaterMark = parseSize(cfg.highWaterMark, 1 << 20) || (1 << 20)
+  const targetBytes = parseSize(configuration.bytes, 512 * 1024)
+  const timeoutMilliseconds = typeof configuration.timeoutMs === 'number' && configuration.timeoutMs > 0 ? Math.floor(configuration.timeoutMs) : 0
+  const highWaterMark = parseSize(configuration.highWaterMark, 1 << 20) || (1 << 20)
 
-  api.registerStreamInterceptor(async (server, track, url, protocol, additionalData, next) => {
+  pluginApi.registerStreamInterceptor(async (server, track, url, protocol, additionalData, next) => {
     const isLive = Boolean(track?.info?.isStream)
     if (isLive || targetBytes <= 0) {
       return next()
@@ -47,7 +47,7 @@ export default async function prebufferPlugin(nodelink, api) {
     let timer = null
     const bufferChunks = []
 
-    const out = new PassThrough({ highWaterMark })
+    const output = new PassThrough({ highWaterMark })
 
     const release = () => {
       if (released) return
@@ -55,7 +55,7 @@ export default async function prebufferPlugin(nodelink, api) {
       try {
         if (timer) { clearTimeout(timer); timer = null }
         for (const chunk of bufferChunks) {
-          if (!out.destroyed) out.write(chunk)
+          if (!output.destroyed) output.write(chunk)
         }
       } finally {
         bufferChunks.length = 0
@@ -63,17 +63,17 @@ export default async function prebufferPlugin(nodelink, api) {
     }
 
     const startTimerIfNeeded = () => {
-      if (timeoutMs > 0 && !timer) {
+      if (timeoutMilliseconds > 0 && !timer) {
         timer = setTimeout(() => {
           release()
-        }, timeoutMs)
+        }, timeoutMilliseconds)
         timer.unref?.()
       }
     }
 
     input.on('data', (chunk) => {
       if (released) {
-        out.write(chunk)
+        output.write(chunk)
         return
       }
       bufferChunks.push(chunk)
@@ -87,33 +87,33 @@ export default async function prebufferPlugin(nodelink, api) {
 
     input.on('end', () => {
       release()
-      out.end()
-      out.emit('finishBuffering')
+      output.end()
+      output.emit('finishBuffering')
     })
 
     input.on('close', () => {
       release()
-      out.end()
+      output.end()
     })
 
-    input.on('error', (err) => {
-      if (!out.destroyed) out.emit('error', err)
+    input.on('error', (error) => {
+      if (!output.destroyed) output.emit('error', error)
     })
 
     input.on?.('finishBuffering', () => {
       release()
-      out.emit('finishBuffering')
+      output.emit('finishBuffering')
     })
 
-    out.on('close', () => {
+    output.on('close', () => {
       try { input.destroy?.() } catch {}
     })
 
-    api.logger('debug', 'Plugin-Prebuffer', `Prebuffering up to ${targetBytes} bytes${timeoutMs ? ` or ${timeoutMs}ms` : ''} (hwm=${highWaterMark})`)
-    return { stream: out, type: original?.type }
+    pluginApi.logger('debug', 'Plugin-Prebuffer', `Prebuffering up to ${targetBytes} bytes${timeoutMilliseconds ? ` or ${timeoutMilliseconds}ms` : ''} (highWaterMark=${highWaterMark})`)
+    return { stream: output, type: original?.type }
   })
 
-  api.logger('info', 'Plugin-Prebuffer', `Initialized (bytes=${targetBytes}, timeoutMs=${timeoutMs}, hwm=${highWaterMark})`)
+  pluginApi.logger('info', 'Plugin-Prebuffer', `Initialized (bytes=${targetBytes}, timeoutMs=${timeoutMilliseconds}, highWaterMark=${highWaterMark})`)
 }
 
 // Attach metadata for discovery

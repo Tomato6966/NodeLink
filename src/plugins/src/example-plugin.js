@@ -8,14 +8,14 @@ export const pluginInfo = {
   version: '1.0.0'
 }
 
-export default async function examplePlugin(nodelink, api) {
+export default async function examplePlugin(nodelink, pluginApi) {
   // Add a simple GET route: /v4/example-plugin/ping
-  api.addRoute(`/v4/example-plugin/ping`, (server, req, res, sendResponse) => {
+  pluginApi.addRoute(`/v4/example-plugin/ping`, (server, req, res, sendResponse) => {
     sendResponse(req, res, { ok: true, plugin: 'example-plugin', pid: process.pid }, 200)
   }, ['GET'])
 
   // Log on load
-  api.logger('info', 'Plugin', 'example-plugin initialized')
+  pluginApi.logger('info', 'Plugin', 'example-plugin initialized')
 }
 
 // Also attach metadata to the default export for discovery
