@@ -6,6 +6,8 @@
 !docs/**
 !src
 !src/**
+!test/
+!test/**
 !.dockerignore
 !.gitignore
 !constants.js
