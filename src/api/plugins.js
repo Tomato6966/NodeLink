@@ -1,9 +1,9 @@
 import { sendResponse } from '../utils.js'
 
 function handler(nodelink, req, res) {
-  const pm = nodelink.pluginManager
-  const names = pm?.getPluginList?.() || []
-  const routes = pm?.getRoutes?.()
+  const pluginManager = nodelink.pluginManager
+  const names = pluginManager?.getPluginList?.() || []
+  const routes = pluginManager?.getRoutes?.()
   const pluginStatic = routes ? Array.from(routes.static.keys()) : []
   const pluginDynamic = routes ? routes.dynamic.map(([regex]) => String(regex)) : []
 
@@ -26,4 +26,3 @@ export default {
   handler,
   methods: ['GET']
 }
-
