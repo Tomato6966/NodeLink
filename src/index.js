@@ -28,7 +28,6 @@ import 'dotenv/config'
 import PlayerManager from './managers/playerManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
 import DosProtectionManager from './managers/dosProtectionManager.js'
-import PluginManager from './plugins/pluginManager.js'
 
 let config
 
@@ -99,7 +98,6 @@ class NodelinkServer {
     this.statsManager = new statsManager(this)
     this.rateLimitManager = new RateLimitManager(this)
     this.dosProtectionManager = new DosProtectionManager(this)
-    this.pluginManager = new PluginManager(this)
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     this.statistics = {
@@ -394,11 +392,7 @@ class NodelinkServer {
         this.socket.close()
         logger('info', 'WebSocket', 'WebSocket server closed successfully')
       } catch (error) {
-        logger(
-          'error',
-          'WebSocket',
-          `Error closing WebSocket server: ${error.message}`
-        )
+        logger('error', 'WebSocket', `Error closing WebSocket server: ${error.message}`)
       }
     }
   }
@@ -484,11 +478,9 @@ class NodelinkServer {
 
     if (!startOptions.isClusterPrimary) {
       await this.sources.loadFolder()
+
       await this.lyrics.loadFolder()
     }
-
-    // Load and initialize plugins (may register routes/sources/lyrics)
-    await this.pluginManager.loadAll()
     this._createServer()
 
     if (startOptions.isClusterWorker) {

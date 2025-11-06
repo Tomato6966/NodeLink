@@ -7,19 +7,6 @@ async function handler(nodelink, req, res, sendResponse) {
     (key) => enabledFilters[key]
   )
 
-  let sourceManagers
-  if (nodelink.workerManager) {
-    sourceManagers = nodelink.supportedSourcesCache
-    if (!sourceManagers) {
-      sourceManagers = await nodelink.getSourcesFromWorker()
-      nodelink.supportedSourcesCache = sourceManagers
-    }
-  } else {
-    sourceManagers = nodelink.sources?.sources
-      ? Array.from(nodelink.sources.sources.keys())
-      : []
-  }
-
   const response = {
     version: {
       semver: `${nodelink.version}`,
@@ -32,9 +19,14 @@ async function handler(nodelink, req, res, sendResponse) {
       name: '@performanc/voice',
       version: 'github:PerformanC/voice'
     },
-    sourceManagers,
+    sourceManagers: nodelink.workerManager
+      ? nodelink.supportedSourcesCache ||
+        (nodelink.supportedSourcesCache = await nodelink.getSourcesFromWorker())
+      : nodelink.sources?.sources
+        ? Array.from(nodelink.sources.sources.keys())
+        : [],
     filters,
-    plugins: (await nodelink.pluginManager.getPlugins()) || []
+    plugins: []
   }
   sendResponse(req, res, response, 200)
 }

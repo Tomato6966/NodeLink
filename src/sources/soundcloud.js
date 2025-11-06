@@ -11,8 +11,7 @@ const BASE_URL = 'https://api-v2.soundcloud.com'
 const SOUNDCLOUD_URL = 'https://soundcloud.com'
 const ASSET_PATTERN = /https:\/\/a-v2\.sndcdn\.com\/assets\/[a-zA-Z0-9-]+\.js/g
 const CLIENT_ID_PATTERN = /client_id=([a-zA-Z0-9]{32})/
-const TRACK_PATTERN =
-  /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:sets\/)?[^/\s]+$/
+const TRACK_PATTERN = /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:sets\/)?[^/\s]+$/
 const ASSET_INDEX = 5
 const BATCH_SIZE = 50
 const DEFAULT_PRIORITY = 85
@@ -56,11 +55,7 @@ export default class SoundCloudSource {
       }
 
       this.clientId = match[1]
-      logger(
-        'info',
-        'Sources',
-        `Loaded SoundCloud (clientId: ${this.clientId})`
-      )
+      logger('info', 'Sources', `Loaded SoundCloud (clientId: ${this.clientId})`)
       return true
     } catch (err) {
       this._logError('Setup failed', err)
@@ -87,9 +82,7 @@ export default class SoundCloudSource {
 
       const req = await http1makeRequest(`${BASE_URL}/search?${params}`)
       if (req.error || req.statusCode !== 200) {
-        return this._buildError(
-          req.error?.message ?? `Status: ${req.statusCode}`
-        )
+        return this._buildError(req.error?.message ?? `Status: ${req.statusCode}`)
       }
 
       if (!req.body?.total_results) {
@@ -118,9 +111,7 @@ export default class SoundCloudSource {
 
       if (req.statusCode === 404) return { loadType: 'empty', data: {} }
       if (req.error || req.statusCode !== 200) {
-        return this._buildError(
-          req.error?.message ?? `Status: ${req.statusCode}`
-        )
+        return this._buildError(req.error?.message ?? `Status: ${req.statusCode}`)
       }
 
       const { body } = req
@@ -174,7 +165,7 @@ export default class SoundCloudSource {
     }
 
     const limit = this.nodelink.options.maxAlbumPlaylistLength
-    const tracks = complete.slice(0, limit).map((t) => this._buildTrack(t))
+    const tracks = complete.slice(0, limit).map(t => this._buildTrack(t))
 
     return {
       loadType: 'playlist',
@@ -236,9 +227,7 @@ export default class SoundCloudSource {
 
       if (req.error || req.statusCode !== 200) {
         this._logError('getTrackUrl failed', req.error)
-        return this._buildException(
-          req.error?.message ?? `Status: ${req.statusCode}`
-        )
+        return this._buildException(req.error?.message ?? `Status: ${req.statusCode}`)
       }
 
       if (req.body?.errors?.[0]) {
@@ -261,49 +250,35 @@ export default class SoundCloudSource {
     }
 
     // Priority order: Progressive MP3 > Progressive AAC > HLS MP3 > HLS AAC > Any HLS
-    const progressiveMp3 = transcodings.find(
-      (t) =>
-        t.format?.protocol === 'progressive' &&
-        t.format?.mime_type === 'audio/mpeg'
+    const progressiveMp3 = transcodings.find(t =>
+      t.format?.protocol === 'progressive' &&
+      t.format?.mime_type === 'audio/mpeg'
     )
 
-    const progressiveAac = transcodings.find(
-      (t) =>
-        t.format?.protocol === 'progressive' &&
-        t.format?.mime_type?.includes('aac')
+    const progressiveAac = transcodings.find(t =>
+      t.format?.protocol === 'progressive' &&
+      t.format?.mime_type?.includes('aac')
     )
 
-    const hlsMp3 = transcodings.find(
-      (t) =>
-        t.format?.protocol === 'hls' && t.format?.mime_type === 'audio/mpeg'
+    const hlsMp3 = transcodings.find(t =>
+      t.format?.protocol === 'hls' &&
+      t.format?.mime_type === 'audio/mpeg'
     )
 
-    const hlsAac = transcodings.find(
-      (t) =>
-        t.format?.protocol === 'hls' &&
-        (t.format?.mime_type?.includes('aac') ||
-          t.format?.mime_type?.includes('mp4'))
+    const hlsAac = transcodings.find(t =>
+      t.format?.protocol === 'hls' &&
+      (t.format?.mime_type?.includes('aac') || t.format?.mime_type?.includes('mp4'))
     )
 
-    const anyHls = transcodings.find(
-      (t) =>
-        t.format?.protocol === 'hls' && !t.format?.mime_type?.includes('opus')
+    const anyHls = transcodings.find(t =>
+      t.format?.protocol === 'hls' &&
+      !t.format?.mime_type?.includes('opus')
     )
 
-    const selected =
-      progressiveMp3 ||
-      progressiveAac ||
-      hlsMp3 ||
-      hlsAac ||
-      anyHls ||
-      transcodings[0]
+    const selected = progressiveMp3 || progressiveAac || hlsMp3 || hlsAac || anyHls || transcodings[0]
 
     if (selected.format?.mime_type?.includes('opus')) {
-      logger(
-        'warn',
-        'Sources',
-        `Using Opus codec which may cause decoder issues (track: ${body.id})`
-      )
+      logger('warn', 'Sources', `Using Opus codec which may cause decoder issues (track: ${body.id})`)
     }
 
     const streamUrl = `${selected.url}?client_id=${this.clientId}`
@@ -314,13 +289,9 @@ export default class SoundCloudSource {
     }
 
     const mimeType = selected.format?.mime_type?.toLowerCase() ?? ''
-    const format = mimeType.includes('mpeg')
-      ? 'mp3'
-      : mimeType.includes('aac') || mimeType.includes('mp4')
-        ? 'aac'
-        : mimeType.includes('opus')
-          ? 'opus'
-          : 'arbitrary'
+    const format = mimeType.includes('mpeg') ? 'mp3' :
+                   mimeType.includes('aac') || mimeType.includes('mp4') ? 'aac' :
+                   mimeType.includes('opus') ? 'opus' : 'arbitrary'
 
     return {
       url: urlReq.body.url,
@@ -345,17 +316,14 @@ export default class SoundCloudSource {
 
   async _handleProgressive(url, stream) {
     try {
-      const res = await http1makeRequest(url, {
-        method: 'GET',
-        streamOnly: true
-      })
+      const res = await http1makeRequest(url, { method: 'GET', streamOnly: true })
 
       if (res.error) {
         stream.destroy(new Error(`Stream load failed: ${res.error.message}`))
         return
       }
 
-      const onError = (err) => {
+      const onError = err => {
         logger('error', 'Sources', `Progressive error: ${err.message}`)
         if (!stream.destroyed) stream.destroy(err)
       }

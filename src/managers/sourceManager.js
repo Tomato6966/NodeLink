@@ -11,36 +11,6 @@ export default class SourcesManager {
     this.patternMap = []
   }
 
-  addSource(name, instance) {
-    if (!name || !instance) return false
-    this.sources.set(name, instance)
-
-    if (Array.isArray(instance.searchTerms)) {
-      for (const term of instance.searchTerms) {
-        this.searchTermMap.set(term, name)
-      }
-    }
-
-    if (Array.isArray(instance.patterns)) {
-      for (const regex of instance.patterns) {
-        if (regex instanceof RegExp) {
-          this.patternMap.push({
-            regex,
-            sourceName: name,
-            priority: instance.priority || 0
-          })
-        }
-      }
-    }
-    this.patternMap.sort((a, b) => b.priority - a.priority)
-    logger(
-      'info',
-      'Sources',
-      `Registered source: ${name} ${instance.searchTerms?.length ? `(terms: ${instance.searchTerms.join(', ')})` : ''}`
-    )
-    return true
-  }
-
   async loadFolder() {
     const __filename = fileURLToPath(import.meta.url)
     const __dirname = path.dirname(__filename)
@@ -73,7 +43,30 @@ export default class SourcesManager {
 
       const instance = new Mod(this.nodelink)
       if (await instance.setup()) {
-        this.addSource(name, instance)
+        this.sources.set(name, instance)
+
+        if (Array.isArray(instance.searchTerms)) {
+          for (const term of instance.searchTerms) {
+            this.searchTermMap.set(term, name)
+          }
+        }
+
+        if (Array.isArray(instance.patterns)) {
+          for (const regex of instance.patterns) {
+            if (regex instanceof RegExp) {
+              this.patternMap.push({
+                regex,
+                sourceName: name,
+                priority: instance.priority || 0
+              })
+            }
+          }
+        }
+        logger(
+          'info',
+          'Sources',
+          `Loaded source: ${name} ${instance.searchTerms?.length ? `(terms: ${instance.searchTerms.join(', ')})` : ''}`
+        )
       } else {
         logger(
           'error',
@@ -92,7 +85,7 @@ export default class SourcesManager {
 
         const instance = new Mod(this.nodelink)
         if (await instance.setup()) {
-          this.addSource(name, instance)
+          this.sources.set(name, instance)
         } else {
           logger(
             'error',
@@ -102,6 +95,23 @@ export default class SourcesManager {
           return
         }
 
+        if (Array.isArray(instance.searchTerms)) {
+          for (const term of instance.searchTerms) {
+            this.searchTermMap.set(term, name)
+          }
+        }
+
+        if (Array.isArray(instance.patterns)) {
+          for (const regex of instance.patterns) {
+            if (regex instanceof RegExp) {
+              this.patternMap.push({
+                regex,
+                sourceName: name,
+                priority: instance.priority || 0
+              })
+            }
+          }
+        }
         logger(
           'info',
           'Sources',
@@ -241,21 +251,7 @@ export default class SourcesManager {
 
   async getTrackStream(track, url, protocol, additionalData) {
     const instance = this.sources.get(track.sourceName)
-    const finalHandler = () =>
-      instance.loadStream(track, url, protocol, additionalData)
-    if (
-      this.nodelink?.pluginManager?.runStreamPipeline &&
-      this.nodelink.pluginManager.streamInterceptors.length > 0
-    ) {
-      return await this.nodelink.pluginManager.runStreamPipeline(
-        track,
-        url,
-        protocol,
-        additionalData,
-        finalHandler
-      )
-    }
-    return await finalHandler()
+    return await instance.loadStream(track, url, protocol, additionalData)
   }
 
   getAllSources() {

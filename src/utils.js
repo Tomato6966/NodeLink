@@ -251,6 +251,7 @@ function getStats(nodelink) {
     const primaryMem = process.memoryUsage()
     memory.used += primaryMem.heapUsed
     memory.allocated += primaryMem.heapTotal
+
   } else {
     players = nodelink.statistics.players
     playingPlayers = nodelink.statistics.playingPlayers
@@ -269,7 +270,8 @@ function getStats(nodelink) {
           if (!player.connection) continue
           const sent = player.connection.statistics.packetsSent || 0
           const nulled = player.connection.statistics.packetsLost || 0
-          const expectedFrames = player.connection.statistics.packetsExpect || 0
+          const expectedFrames =
+            player.connection.statistics.packetsExpect || 0
           frameStats.sent += sent
           frameStats.nulled += nulled
           frameStats.expected += expectedFrames

@@ -6,8 +6,6 @@
 !docs/**
 !src
 !src/**
-!test/
-!test/**
 !.dockerignore
 !.gitignore
 !constants.js
@@ -17,5 +15,3 @@
 !README.md
 !config.default.js 
 !biome.json
-!test
-!test/**

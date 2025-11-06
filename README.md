@@ -61,45 +61,6 @@ Once started, NodeLink runs a Lavalink-compatible WebSocket server, ready for im
 
 ---
 
-## Plugins
-NodeLink now supports a simple plugin system so you can add custom HTTP routes and register new sources or lyrics providers without modifying core files.
-
-- Local development: add files under `src/plugins/src/*.js`.
-- Package plugins: install NPM packages named `nodelink-plugin-*`.
-
-See `docs/plugins.md` for the full API and examples. Prefer descriptive names over abbreviations in plugins (e.g., `pluginApi`, `configuration`).
-
-### Audio Cache Plugin Settings
-- Configure in `config.js` under `plugins.audioCache`:
-```js
-plugins: {
-  audioCache: {
-    enabled: true,
-    dir: 'cache/audio',               // cache directory
-    ttlDays: 7,                       // days to keep inactive files
-    cleanupIntervalHours: 12,         // periodic cleanup interval
-    maxSize: '1GB',                   // or maxSizeBytes: 10 * 1024 * 1024 * 1024
-    protectRecentMinutes: 60,         // Do not evict files accessed within this window (minutes)
-    allowExceedWhenAllRecent: true    // If all files are in-use or recently used, allow exceeding max size
-  }
-}
-```
-
-### Prebuffer Plugin Settings
-- Configure in `config.js` under `plugins.prebuffer`:
-```js
-plugins: {
-  prebuffer: {
-    enabled: true,
-    bytes: '512 KB',        // target initial buffered bytes
-    timeoutMs: 2000,        // optional maximum wait for prebuffer
-    highWaterMark: '1 MB'   // internal stream buffer size
-  }
-}
-```
-
----
-
 ## Usage
 
 NodeLink is compatible with most Lavalink clients, as it implements nearly the entire original API.

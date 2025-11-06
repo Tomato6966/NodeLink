@@ -25,22 +25,18 @@ const CLEAN_PATTERNS = [
   /VEVO$/i
 ]
 
-const FEAT_PATTERN =
-  /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
+const FEAT_PATTERN = /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
 
 const SEPARATORS = [' - ', ' – ', ' — ']
 
-const _guid = () =>
-  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
-  })
+const _guid = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+  const r = Math.random() * 16 | 0
+  return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+})
 
 const _buildUrl = (base, params) => {
   const url = new URL(base)
-  Object.entries(params).forEach(
-    ([k, v]) => v !== undefined && url.searchParams.set(k, String(v))
-  )
+  Object.entries(params).forEach(([k, v]) => v !== undefined && url.searchParams.set(k, String(v)))
   return url.toString()
 }
 
@@ -51,7 +47,7 @@ const _clean = (text, removeFeat = false) => {
   return result.trim()
 }
 
-const _parse = (query) => {
+const _parse = query => {
   const cleaned = _clean(query, true)
   for (const sep of SEPARATORS) {
     const idx = cleaned.indexOf(sep)
@@ -79,15 +75,10 @@ export default class MusixmatchLyrics {
   }
 
   async setup() {
-    const signatureSecret =
-      this.nodelink.options.lyrics?.musixmatch?.signatureSecret
+    const signatureSecret = this.nodelink.options.lyrics?.musixmatch?.signatureSecret
     this.useManualToken = !!signatureSecret
 
-    logger(
-      'info',
-      'Lyrics',
-      `Musixmatch using ${this.useManualToken ? 'signature' : 'automatic token'} authentication`
-    )
+    logger('info', 'Lyrics', `Musixmatch using ${this.useManualToken ? 'signature' : 'automatic token'} authentication`)
 
     if (!this.useManualToken) {
       this.tokenData = await this._readToken()
@@ -125,10 +116,7 @@ export default class MusixmatchLyrics {
 
     const dt = new Date()
     const timestamp = `${dt.getUTCFullYear()}${String(dt.getUTCMonth() + 1).padStart(2, '0')}${String(dt.getUTCDate()).padStart(2, '0')}`
-    const signature = crypto
-      .createHmac('sha1', secret)
-      .update(url + timestamp)
-      .digest('base64')
+    const signature = crypto.createHmac('sha1', secret).update(url + timestamp).digest('base64')
 
     return `${url}&signature=${encodeURIComponent(signature)}&signature_protocol=sha1`
   }
@@ -136,27 +124,21 @@ export default class MusixmatchLyrics {
   _parseCookies(headers) {
     if (!headers) return
     const list = Array.isArray(headers) ? headers : [headers]
-    list.forEach((h) => {
+    list.forEach(h => {
       const parts = h.split(';')[0].split('=')
       if (parts.length === 2) this.cookies.set(parts[0].trim(), parts[1].trim())
     })
   }
 
   _getCookies() {
-    return this.cookies.size === 0
-      ? ''
-      : Array.from(this.cookies, ([k, v]) => `${k}=${v}`).join('; ')
+    return this.cookies.size === 0 ? '' : Array.from(this.cookies, ([k, v]) => `${k}=${v}`).join('; ')
   }
 
   async _readToken() {
     try {
       const data = await readFile(this.tokenFile, 'utf-8')
       const parsed = JSON.parse(data)
-      if (
-        parsed?.value &&
-        typeof parsed.expires === 'number' &&
-        parsed.expires > Date.now()
-      ) {
+      if (parsed?.value && typeof parsed.expires === 'number' && parsed.expires > Date.now()) {
         return parsed
       }
     } catch {}
@@ -165,11 +147,7 @@ export default class MusixmatchLyrics {
 
   async _saveToken(token, expires) {
     try {
-      await writeFile(
-        this.tokenFile,
-        JSON.stringify({ value: token, expires }),
-        'utf-8'
-      )
+      await writeFile(this.tokenFile, JSON.stringify({ value: token, expires }), 'utf-8')
     } catch {}
   }
 
@@ -180,10 +158,8 @@ export default class MusixmatchLyrics {
       headers: {
         accept: '*/*',
         'accept-language': 'en',
-        cookie:
-          'AWSELB=unknown; x-mxm-user-id=undefined; x-mxm-token-guid=undefined; mxm-encrypted-token=',
-        'user-agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
+        cookie: 'AWSELB=unknown; x-mxm-user-id=undefined; x-mxm-token-guid=undefined; mxm-encrypted-token=',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
       }
     })
 
@@ -220,17 +196,14 @@ export default class MusixmatchLyrics {
       this.tokenData.expires = now + TOKEN_TTL
       if (now - this.lastTokenPersist > TOKEN_PERSIST_INTERVAL) {
         this.lastTokenPersist = now
-        this._saveToken(this.tokenData.value, this.tokenData.expires).catch(
-          () => {}
-        )
+        this._saveToken(this.tokenData.value, this.tokenData.expires).catch(() => {})
       }
       return this.tokenData.value
     }
 
     if (!this.tokenData && !force) {
       this.tokenData = await this._readToken()
-      if (this.tokenData && now < this.tokenData.expires)
-        return this.tokenData.value
+      if (this.tokenData && now < this.tokenData.expires) return this.tokenData.value
     }
 
     if (this.tokenPromise) return this.tokenPromise
@@ -252,8 +225,7 @@ export default class MusixmatchLyrics {
       return token
     } catch (err) {
       const isCaptcha = err.message?.toLowerCase().includes('captcha')
-      const isAuth =
-        err.message?.includes('401') || err.message?.includes('403')
+      const isAuth = err.message?.includes('401') || err.message?.includes('403')
 
       if (isCaptcha || isAuth) {
         this.cookies.clear()
@@ -270,12 +242,7 @@ export default class MusixmatchLyrics {
 
   async _request(endpoint, params) {
     const token = this.useManualToken ? null : await this._getToken()
-    let url = _buildUrl(endpoint, {
-      ...params,
-      app_id: APP_ID,
-      ...(token ? { usertoken: token } : {}),
-      guid: this.guid
-    })
+    let url = _buildUrl(endpoint, { ...params, app_id: APP_ID, ...(token ? { usertoken: token } : {}), guid: this.guid })
 
     if (this.useManualToken) url = this._signUrl(url)
 
@@ -283,8 +250,7 @@ export default class MusixmatchLyrics {
       method: 'GET',
       headers: {
         accept: 'application/json',
-        'user-agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         cookie: this._getCookies()
       }
     })
@@ -295,46 +261,26 @@ export default class MusixmatchLyrics {
     const apiStatus = parsed?.message?.header?.status_code
     const apiHint = parsed?.message?.header?.hint
 
-    if (
-      statusCode === 401 ||
-      statusCode === 403 ||
-      apiStatus === 401 ||
-      apiStatus === 403
-    ) {
+    if (statusCode === 401 || statusCode === 403 || apiStatus === 401 || apiStatus === 403) {
       if (!this.useManualToken) {
         const isCaptcha = apiHint?.toLowerCase().includes('captcha')
         await this._resetToken(isCaptcha)
         const newToken = await this._getToken(true)
-        const retryUrl = _buildUrl(endpoint, {
-          ...params,
-          app_id: APP_ID,
-          usertoken: newToken,
-          guid: this.guid
-        })
+        const retryUrl = _buildUrl(endpoint, { ...params, app_id: APP_ID, usertoken: newToken, guid: this.guid })
 
-        const {
-          statusCode: retryStatus,
-          headers: retryHeaders,
-          body: retryBody
-        } = await http1makeRequest(retryUrl, {
+        const { statusCode: retryStatus, headers: retryHeaders, body: retryBody } = await http1makeRequest(retryUrl, {
           method: 'GET',
           headers: {
             accept: 'application/json',
-            'user-agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             cookie: this._getCookies()
           }
         })
 
         this._parseCookies(retryHeaders['set-cookie'])
-        const retryParsed =
-          typeof retryBody === 'string' ? JSON.parse(retryBody) : retryBody
+        const retryParsed = typeof retryBody === 'string' ? JSON.parse(retryBody) : retryBody
 
-        if (
-          retryStatus !== 200 ||
-          retryParsed?.message?.header?.status_code !== 200
-        )
-          return null
+        if (retryStatus !== 200 || retryParsed?.message?.header?.status_code !== 200) return null
 
         return retryParsed.message.body
       }
@@ -349,15 +295,10 @@ export default class MusixmatchLyrics {
     if (artist) params.q_artist = artist
     if (title) params.q_track = title
 
-    const body = await this._request(ENDPOINTS.SEARCH, {
-      ...params,
-      page_size: '3',
-      page: '1',
-      s_track_rating: 'desc'
-    })
+    const body = await this._request(ENDPOINTS.SEARCH, { ...params, page_size: '3', page: '1', s_track_rating: 'desc' })
     if (!body?.track_list) return null
 
-    const tracks = body.track_list.map((item) => {
+    const tracks = body.track_list.map(item => {
       const track = item.track
       const tTitle = track.track_name.toLowerCase()
       const tArtist = track.artist_name.toLowerCase()
@@ -389,10 +330,7 @@ export default class MusixmatchLyrics {
   }
 
   async _getSubtitles(trackId) {
-    const body = await this._request(ENDPOINTS.SUBTITLES, {
-      track_id: trackId,
-      subtitle_format: 'mxm'
-    })
+    const body = await this._request(ENDPOINTS.SUBTITLES, { track_id: trackId, subtitle_format: 'mxm' })
     const subBody = body?.subtitle?.subtitle_body
     if (!subBody) return null
 
@@ -401,7 +339,7 @@ export default class MusixmatchLyrics {
       const arr = Array.isArray(parsed) ? parsed : []
       if (arr.length === 0) return null
 
-      return arr.map((item) => ({
+      return arr.map(item => ({
         text: String(item?.text ?? ''),
         time: Math.round((item?.time?.total || 0) * 1000),
         duration: Math.round((item?.time?.duration || 0) * 1000)
@@ -421,13 +359,10 @@ export default class MusixmatchLyrics {
     }
 
     if (lyrics) {
-      const lines = lyrics
-        .split('\n')
-        .map((line) => {
-          const trimmed = line.trim()
-          return trimmed ? { text: trimmed, time: 0, duration: 0 } : null
-        })
-        .filter(Boolean)
+      const lines = lyrics.split('\n').map(line => {
+        const trimmed = line.trim()
+        return trimmed ? { text: trimmed, time: 0, duration: 0 } : null
+      }).filter(Boolean)
 
       return {
         synced: false,
@@ -485,11 +420,7 @@ export default class MusixmatchLyrics {
         return result
       }
 
-      logger(
-        'info',
-        'Lyrics',
-        `Found: "${track.track_name}" by ${track.artist_name}`
-      )
+      logger('info', 'Lyrics', `Found: "${track.track_name}" by ${track.artist_name}`)
 
       const [subtitles, lyrics] = await Promise.allSettled([
         this._getSubtitles(track.track_id),
@@ -506,11 +437,7 @@ export default class MusixmatchLyrics {
         return result
       }
 
-      logger(
-        'info',
-        'Lyrics',
-        `Success: ${formatted.lines.length} lines (synced: ${formatted.synced})`
-      )
+      logger('info', 'Lyrics', `Success: ${formatted.lines.length} lines (synced: ${formatted.synced})`)
 
       const result = {
         loadType: 'lyrics',
@@ -523,12 +450,10 @@ export default class MusixmatchLyrics {
 
       this._setCache(cacheKey, result)
       return result
+
     } catch (e) {
       logger('error', 'Lyrics', `Failed: ${e.message}`)
-      return {
-        loadType: 'error',
-        data: { message: e.message, severity: 'fault' }
-      }
+      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
     }
   }
 }

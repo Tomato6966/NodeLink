@@ -370,10 +370,3 @@ A dynamic range compressor that reduces the volume of loud sounds or amplifies q
 | attack?    | float | The attack time in milliseconds.                  |
 | release?   | float | The release time in milliseconds.                 |
 | gain?      | float | The makeup gain in dB.                            |
-
-
-### Cache Plugin Endpoints
-
-- GET /v4/cache/stats: Returns cache file count, total bytes, optional maxBytes, and usagePercent if a cap is configured.
-- POST /v4/cache/cleanup: Triggers TTL cleanup immediately.
-
