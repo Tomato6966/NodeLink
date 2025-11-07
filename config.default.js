@@ -54,6 +54,9 @@ export default {
   playerUpdateInterval: 2000,
   trackStuckThresholdMs: 10000,
   zombieThresholdMs: 60000,
+  enableHoloTracks: false,
+  resolveExternalLinks: false,
+  fetchChannelInfo: false,
   filters: {
     enabled: {
       tremolo: true,
@@ -99,8 +102,9 @@ export default {
       hl: 'en',
       gl: 'US',
       clients: {
-        search: ['Android'],
-        playback: ['AndroidVR', 'TV', 'TVEmbedded', 'IOS'],
+        search: ['Android'], // Clients used for searching tracks
+        playback: ['AndroidVR', 'TV', 'TVEmbedded', 'IOS'], // Clients used for playback/streaming
+        resolve: ['Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
         settings: {
           TV: {
             refreshToken: ''

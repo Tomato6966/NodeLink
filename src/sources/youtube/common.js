@@ -12,6 +12,886 @@ export const YOUTUBE_CONSTANTS = {
   UNKNOWN: -1
 }
 
+function formatDuration(ms) {
+  if (!ms || ms === 0) return { ms: 0, formatted: '🔴 LIVE', hms: '🔴 LIVE' }
+  const seconds = Math.floor(ms / 1000)
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+  const s = seconds % 60
+  const m = minutes % 60
+  const formatted =
+    hours > 0
+      ? `${hours}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : `${m}:${String(s).padStart(2, '0')}`
+  const hms = `${hours}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`
+  return { ms, formatted, hms }
+}
+
+function formatNumber(num) {
+  if (num >= 1000000000) return `${(num / 1000000000).toFixed(1)}B`
+  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
+  if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
+  return String(num)
+}
+
+function parsePublishedAt(publishedText) {
+  if (!publishedText) return null
+
+  const date = new Date(publishedText);
+  if (!isNaN(date.getTime())) { // Check if it's a valid date
+    const timestamp = date.getTime();
+    const now = Date.now();
+    const diffMs = now - timestamp;
+
+    const years = Math.floor(diffMs / (365.25 * 24 * 60 * 60 * 1000));
+    const months = Math.floor((diffMs % (365.25 * 24 * 60 * 60 * 1000)) / (30.44 * 24 * 60 * 60 * 1000));
+    const weeks = Math.floor((diffMs % (30.44 * 24 * 60 * 60 * 1000)) / (7 * 24 * 60 * 60 * 1000));
+    const days = Math.floor((diffMs % (7 * 24 * 60 * 60 * 1000)) / (24 * 60 * 60 * 1000));
+    const hours = Math.floor((diffMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+    const minutes = Math.floor((diffMs % (60 * 60 * 1000)) / (60 * 1000));
+    const seconds = Math.floor((diffMs % (60 * 1000)) / 1000);
+
+    const parts = [];
+    if (years > 0) parts.push(`${years} year${years > 1 ? 's' : ''}`);
+    if (months > 0) parts.push(`${months} month${months > 1 ? 's' : ''}`);
+    if (weeks > 0) parts.push(`${weeks} week${weeks > 1 ? 's' : ''}`);
+    if (days > 0) parts.push(`${days} day${days > 1 ? 's' : ''}`);
+    if (hours > 0) parts.push(`${hours} hour${hours > 1 ? 's' : ''}`);
+    if (minutes > 0) parts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`);
+    if (seconds > 0) parts.push(`${seconds} second${seconds > 1 ? 's' : ''}`);
+
+    const readable = parts.length > 0 ? parts.join(' ') + ' ago' : 'just now';
+    const compact = `${years}y ${months}mo ${weeks}w ${days}d ${hours}h ${minutes}m ${seconds}s`;
+
+    return {
+      original: publishedText,
+      timestamp: Math.floor(timestamp),
+      date: date.toISOString(),
+      readable,
+      compact
+    };
+  }
+
+  const text = publishedText.toLowerCase()
+
+  const yearMatch = text.match(/(\d+)\s*year/)
+  const monthMatch = text.match(/(\d+)\s*month/)
+  const weekMatch = text.match(/(\d+)\s*week/)
+  const dayMatch = text.match(/(\d+)\s*day/)
+  const hourMatch = text.match(/(\d+)\s*hour/)
+  const minuteMatch = text.match(/(\d+)\s*minute/)
+  const secondMatch = text.match(/(\d+)\s*second/)
+
+  const years = yearMatch ? Number.parseInt(yearMatch[1], 10) : 0
+  const months = monthMatch ? Number.parseInt(monthMatch[1], 10) : 0
+  const weeks = weekMatch ? Number.parseInt(weekMatch[1], 10) : 0
+  const days = dayMatch ? Number.parseInt(dayMatch[1], 10) : 0
+  const hours = hourMatch ? Number.parseInt(hourMatch[1], 10) : 0
+  const minutes = minuteMatch ? Number.parseInt(minuteMatch[1], 10) : 0
+  const seconds = secondMatch ? Number.parseInt(secondMatch[1], 10) : 0
+
+  const now = Date.now()
+  const msAgo =
+    years * 365.25 * 24 * 60 * 60 * 1000 +
+    months * 30.44 * 24 * 60 * 60 * 1000 +
+    weeks * 7 * 24 * 60 * 60 * 1000 +
+    days * 24 * 60 * 60 * 1000 +
+    hours * 60 * 60 * 1000 +
+    minutes * 60 * 1000 +
+    seconds * 1000
+  const timestamp = now - msAgo
+
+  const parts = []
+  if (years > 0) parts.push(`${years} year${years > 1 ? 's' : ''}`)
+  if (months > 0) parts.push(`${months} month${months > 1 ? 's' : ''}`)
+  if (weeks > 0) parts.push(`${weeks} week${weeks > 1 ? 's' : ''}`)
+  if (days > 0) parts.push(`${days} day${days > 1 ? 's' : ''}`)
+  if (hours > 0) parts.push(`${hours} hour${hours > 1 ? 's' : ''}`)
+  if (minutes > 0) parts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`)
+  if (seconds > 0) parts.push(`${seconds} second${seconds > 1 ? 's' : ''}`)
+
+  const readable = parts.length > 0 ? parts.join(' ') + ' ago' : 'just now'
+
+  const compact = `${years}y ${months}mo ${weeks}w ${days}d ${hours}h ${minutes}m ${seconds}s`
+
+  return {
+    original: publishedText,
+    timestamp: Math.floor(timestamp),
+    date: new Date(timestamp).toISOString(),
+    readable,
+    compact,
+    ago: {
+      years,
+      months,
+      weeks,
+      days,
+      hours,
+      minutes,
+      seconds
+    }
+  }
+}
+
+async function fetchChannelInfo(channelId, makeRequest, context) {
+  if (!channelId) return null
+
+  try {
+    logger(
+      'debug',
+      'fetchChannelInfo',
+      `Fetching info for channel: ${channelId}`
+    )
+
+    const { body: channelResponse, statusCode } = await makeRequest(
+      'https://www.youtube.com/youtubei/v1/browse',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: {
+          context: {
+            client: {
+              clientName: 'WEB',
+              clientVersion: '2.20241106.01.00',
+              hl: context?.client?.hl || 'en',
+              gl: context?.client?.gl || 'US'
+            }
+          },
+          browseId: channelId
+        },
+        disableBodyCompression: true
+      }
+    )
+
+    if (statusCode !== 200 || !channelResponse) {
+      logger('warn', 'fetchChannelInfo', `Bad status code or empty response: ${statusCode}`)
+      return null
+    }
+
+    const header = channelResponse.header?.pageHeaderRenderer?.content?.pageHeaderViewModel
+    if (!header) {
+      logger('warn', 'fetchChannelInfo', 'No pageHeaderViewModel found')
+      return null
+    }
+
+    const channelInfo = {
+      icon: null,
+      banner: null,
+      subscribers: null,
+      verified: false,
+      description: null,
+      links: []
+    }
+
+        const avatarSources = header.image?.decoratedAvatarViewModel?.avatar?.avatarViewModel?.image?.sources;
+
+        channelInfo.icon = Array.isArray(avatarSources) && avatarSources.length > 0
+
+          ? avatarSources[avatarSources.length - 1]?.url?.split('=')[0] || null
+
+          : null;
+
+    
+
+        const bannerSources = header.banner?.imageBannerViewModel?.image?.sources;
+
+        channelInfo.banner = Array.isArray(bannerSources) && bannerSources.length > 0
+
+          ? bannerSources[bannerSources.length - 1]?.url?.split('=')[0] || null
+
+          : null;
+
+    
+
+        const accessibilityLabel = header.title?.dynamicTextViewModel?.rendererContext?.accessibilityContext?.label;
+
+        channelInfo.verified = accessibilityLabel?.includes('Verified') || false;
+
+    
+
+        const metadataRows = header.metadata?.contentMetadataViewModel?.metadataRows;
+
+        if (Array.isArray(metadataRows)) {
+
+          for (const row of metadataRows) {
+
+            if (Array.isArray(row.metadataParts)) {
+
+              for (const part of row.metadataParts) {
+
+                const text = part.text?.content || part.text;
+
+                if (typeof text === 'string') {
+
+                  const lowerText = text.toLowerCase();
+
+                  if (lowerText.includes('subscriber')) {
+
+                    const numStrMatch = lowerText.match(/([\d.,]+)\s*([kmb])?/i);
+
+                    if (numStrMatch) {
+
+                      let count = parseFloat(numStrMatch[1].replace(/,/g, ''));
+
+                      const multiplier = numStrMatch[2]?.toLowerCase();
+
+    
+
+                      if (multiplier === 'k') count *= 1000;
+
+                      else if (multiplier === 'm') count *= 1000000;
+
+                      else if (multiplier === 'b') count *= 1000000000;
+
+    
+
+                      channelInfo.subscribers = {
+
+                        original: text,
+
+                        count: Math.floor(count),
+
+                        formatted: formatNumber(Math.floor(count))
+
+                      };
+
+                    } else {
+
+                      channelInfo.subscribers = {
+
+                        original: text,
+
+                        count: null,
+
+                        formatted: text
+
+                      };
+
+                    }
+
+                  } else if (lowerText.includes('video')) {
+
+                    const match = lowerText.match(/(\d+(?:,\d+)*)\s*video/i);
+
+                    if (match) {
+
+                      const count = parseInt(match[1].replace(/,/g, ''), 10);
+
+                      channelInfo.videoCount = {
+
+                        original: text,
+
+                        count,
+
+                        formatted: formatNumber(count)
+
+                      };
+
+                    } else {
+
+                      channelInfo.videoCount = {
+
+                        original: text,
+
+                        count: null,
+
+                        formatted: text
+
+                      };
+
+                    }
+
+                  }
+
+                }
+
+              }
+
+            }
+
+          }
+
+        }
+
+    
+
+        channelInfo.description = header.description?.descriptionPreviewViewModel?.description?.content || null;
+
+    
+
+        const attribution = header.attribution?.attributionViewModel;
+
+        const mainLink = attribution?.text?.content;
+
+        if (mainLink && !mainLink.includes('and') && !mainLink.includes('more')) {
+
+          channelInfo.links.push(mainLink);
+
+        }
+
+    
+
+        const contents = channelResponse.contents?.singleColumnBrowseResultsRenderer?.tabs;
+
+        if (Array.isArray(contents)) {
+
+          for (const tab of contents) {
+
+            const tabContent = tab.tabRenderer?.content?.sectionListRenderer?.contents;
+
+            if (Array.isArray(tabContent)) {
+
+              for (const section of tabContent) {
+
+                const items = section.itemSectionRenderer?.contents;
+
+                if (Array.isArray(items)) {
+
+                  for (const item of items) {
+
+                    const channelVideoPlayer = item.channelVideoPlayerRenderer;
+
+                    if (channelVideoPlayer?.videoId) {
+
+                      channelInfo.featuredVideo = {
+
+                        id: channelVideoPlayer.videoId,
+
+                        url: `https://www.youtube.com/watch?v=${channelVideoPlayer.videoId}`,
+
+                        title: channelVideoPlayer.title?.runs?.[0]?.text || null,
+
+                        description: channelVideoPlayer.description?.runs?.[0]?.text || null
+
+                      };
+
+                      break;
+
+                    }
+
+                  }
+
+                }
+
+                if (channelInfo.featuredVideo) break;
+
+              }
+
+            }
+
+            if (channelInfo.featuredVideo) break;
+
+          }
+
+        }
+
+    logger(
+      'debug',
+      'fetchChannelInfo',
+      `Channel info: icon=${channelInfo.icon ? 'yes' : 'no'}, subscribers=${channelInfo.subscribers}, verified=${channelInfo.verified}`
+    )
+    return channelInfo
+  } catch (e) {
+    logger(
+      'error',
+      'fetchChannelInfo',
+      `Failed to fetch channel info: ${e.message}`
+    )
+    logger('error', 'fetchChannelInfo', e.stack)
+    return null
+  }
+}
+
+async function resolveExternalLinks(externalLinks, makeRequest) {
+  if (!externalLinks) return null
+
+  const resolved = { ...externalLinks }
+
+  if (
+    resolved.spotify &&
+    (resolved.spotify.includes('smarturl.it') ||
+      resolved.spotify.includes('ffm.to'))
+  ) {
+    try {
+      const response = await makeRequest(resolved.spotify, {
+        method: 'GET',
+        followRedirects: true,
+        maxRedirects: 5
+      })
+      if (response.finalUrl && response.finalUrl.includes('spotify.com')) {
+        resolved.spotify = response.finalUrl
+
+        const match = response.finalUrl.match(
+          /spotify\.com\/(album|track|artist|playlist)\/([a-zA-Z0-9]+)/
+        )
+        if (match) {
+          resolved.spotifyId = {
+            type: match[1],
+            id: match[2]
+          }
+        }
+      }
+    } catch (e) {
+    }
+  }
+
+  if (
+    resolved.appleMusic &&
+    (resolved.appleMusic.includes('smarturl.it') ||
+      resolved.appleMusic.includes('apple'))
+  ) {
+    try {
+      const response = await makeRequest(resolved.appleMusic, {
+        method: 'GET',
+        followRedirects: true,
+        maxRedirects: 5
+      })
+      if (response.finalUrl && response.finalUrl.includes('music.apple.com')) {
+        resolved.appleMusic = response.finalUrl
+      }
+    } catch (e) {
+    }
+  }
+
+  return resolved
+}
+
+function extractExternalLinks(
+  description,
+  resolve = false,
+  makeRequest = null
+) {
+  if (!description) return null
+
+  const links = {
+    spotify: null,
+    appleMusic: null,
+    soundcloud: null,
+    bandcamp: null,
+    deezer: null,
+    tidal: null,
+    amazonMusic: null,
+    youtubeMusic: null,
+    website: null,
+    other: []
+  }
+
+  const urlRegex = /(https?:\/\/[^\s]+)/gi
+  const matches = description.match(urlRegex) || []
+
+  const linkMatchers = [
+    { key: 'spotify', patterns: ['spotify.com', 'open.spotify.com'] },
+    { key: 'appleMusic', patterns: ['apple.com', 'itunes.apple.com', 'music.apple.com'] },
+    { key: 'soundcloud', patterns: ['soundcloud.com'] },
+    { key: 'bandcamp', patterns: ['bandcamp.com'] },
+    { key: 'deezer', patterns: ['deezer.com'] },
+    { key: 'tidal', patterns: ['tidal.com'] },
+    { key: 'amazonMusic', patterns: ['amazon.com/music', 'music.amazon'] },
+    { key: 'youtubeMusic', patterns: ['music.youtube.com'] }
+  ];
+
+  for (let url of matches) {
+    url = url.replace(/[,;)]$/, '');
+
+    let matched = false;
+    for (const matcher of linkMatchers) {
+      if (matcher.patterns.some(pattern => url.includes(pattern))) {
+        links[matcher.key] = url;
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched && !url.includes('youtube.com') && !url.includes('youtu.be')) {
+      if (!links.website && (url.includes('.com') || url.includes('.net') || url.includes('.org') || url.includes('.io'))) {
+        links.website = url;
+      } else {
+        links.other.push(url);
+      }
+    }
+  }
+
+  if (links.other.length === 0) delete links.other
+
+  const hasLinks = Object.values(links).some(
+    (v) => v !== null && (!Array.isArray(v) || v.length > 0)
+  )
+  return hasLinks ? links : null
+}
+
+function extractVideoQualities(streamingData) {
+  if (!streamingData) return []
+
+  const allFormats = [
+    ...(streamingData.formats || []),
+    ...(streamingData.adaptiveFormats || [])
+  ]
+
+  const qualityMap = new Map()
+
+  for (const format of allFormats) {
+    if (
+      format.qualityLabel &&
+      format.bitrate &&
+      format.mimeType?.startsWith('video/')
+    ) {
+      const quality = format.qualityLabel
+
+      if (
+        !qualityMap.has(quality) ||
+        format.bitrate > qualityMap.get(quality).bitrate
+      ) {
+        const codecMatch = format.mimeType.match(/codecs="([^"]+)"/)
+        const codec = codecMatch ? codecMatch[1].split('.')[0] : 'unknown'
+
+        qualityMap.set(quality, {
+          quality,
+          bitrate: format.bitrate,
+          fps: format.fps || null,
+          mimeType: format.mimeType || null,
+          width: format.width || null,
+          height: format.height || null,
+          codec,
+          itag: format.itag,
+          container: format.mimeType?.split(';')[0]?.split('/')[1] || null,
+          averageBitrate: format.averageBitrate || null,
+          contentLength: format.contentLength || null
+        })
+      }
+    }
+  }
+
+  return Array.from(qualityMap.values()).sort((a, b) => {
+    const resA = Number.parseInt(a.quality) || 0
+    const resB = Number.parseInt(b.quality) || 0
+    return resA - resB
+  })
+}
+
+function extractAudioFormats(streamingData) {
+  if (!streamingData) return []
+
+  const allFormats = [
+    ...(streamingData.formats || []),
+    ...(streamingData.adaptiveFormats || [])
+  ]
+
+  const qualityMap = new Map()
+
+  for (const format of allFormats) {
+    if (format.mimeType?.startsWith('audio/') && format.bitrate) {
+      const audioQuality = format.audioQuality || 'UNKNOWN'
+
+      if (
+        !qualityMap.has(audioQuality) ||
+        format.bitrate > qualityMap.get(audioQuality).bitrate
+      ) {
+        const codecMatch = format.mimeType.match(/codecs="([^"]+)"/)
+        const codec = codecMatch ? codecMatch[1] : 'unknown'
+
+        qualityMap.set(audioQuality, {
+          itag: format.itag,
+          mimeType: format.mimeType,
+          bitrate: format.bitrate,
+          averageBitrate: format.averageBitrate || null,
+          audioQuality: format.audioQuality || null,
+          audioSampleRate: format.audioSampleRate || null,
+          audioChannels: format.audioChannels || null,
+          codec,
+          container: format.mimeType?.split(';')[0]?.split('/')[1] || null,
+          contentLength: format.contentLength || null,
+          loudnessDb: format.loudnessDb || null
+        })
+      }
+    }
+  }
+
+  return Array.from(qualityMap.values()).sort((a, b) => b.bitrate - a.bitrate)
+}
+
+export async function buildHoloTrack(
+  trackInfo,
+  itemData,
+  itemType,
+  fullApiResponse = null,
+  config = {}
+) {
+  const duration = formatDuration(trackInfo.length)
+  const sourceName = trackInfo.sourceName
+  const sourceUrl =
+    sourceName === 'ytmusic'
+      ? 'https://music.youtube.com'
+      : 'https://www.youtube.com'
+
+  const getItemValue = (obj, paths, defaultValue = null) => {
+    for (const path of paths) {
+      const value = path.split('.').reduce((o, k) => o?.[k], obj)
+      if (value !== undefined && value !== null) return value
+    }
+    return defaultValue
+  }
+
+  const getRunsText = (runsArray, defaultValue = null) => {
+    if (Array.isArray(runsArray) && runsArray.length > 0) {
+      return runsArray.map((run) => run.text).join('')
+    }
+    return defaultValue
+  }
+
+  let renderer = null;
+  if (itemType === 'ytmusic') {
+    renderer = getItemValue(itemData, [
+      'musicResponsiveListItemRenderer',
+      'playlistPanelVideoRenderer',
+      'musicTwoColumnItemRenderer'
+    ]);
+  } else {
+    renderer =
+      getItemValue(itemData, [
+        'videoRenderer',
+        'compactVideoRenderer',
+        'playlistPanelVideoRenderer',
+        'gridVideoRenderer'
+      ]) || (itemData.videoId ? itemData : null);
+  }
+
+  let channelData = {
+    name: trackInfo.author,
+    id: null,
+    url: null,
+    icon: null,
+    subscribers: null,
+    verified: false,
+    description: null,
+    videoCount: null,
+    featuredVideo: null,
+    links: []
+  };
+  let thumbnails = {};
+  let viewCount = null;
+  let badges = [];
+  let accessibilityLabel = `${trackInfo.title} by ${trackInfo.author}`;
+  let publishedAt = null;
+  let keywords = [];
+  let description = null;
+  let isLive = false;
+  let category = null;
+  let likeCount = null;
+
+  if (fullApiResponse?.videoDetails) {
+    const vd = fullApiResponse.videoDetails
+    viewCount = vd.viewCount ? Number.parseInt(vd.viewCount, 10) : null
+    keywords = vd.keywords || []
+    description = vd.shortDescription || null
+    isLive = vd.isLiveContent || false
+
+    accessibilityLabel = `${trackInfo.title} by ${vd.author || trackInfo.author}`;
+
+    channelData.name = vd.author || trackInfo.author;
+    channelData.id = vd.channelId || null;
+    channelData.url = vd.channelId ? `https://www.youtube.com/channel/${vd.channelId}` : null;
+
+    if (vd.thumbnail?.thumbnails) {
+      const thumbs = vd.thumbnail.thumbnails
+      thumbnails = {
+        default: thumbs[0]?.url?.split('?')[0] || null,
+        medium:
+          thumbs[1]?.url?.split('?')[0] ||
+          thumbs[0]?.url?.split('?')[0] ||
+          null,
+        high: thumbs[thumbs.length - 1]?.url?.split('?')[0] || null
+      }
+    }
+    publishedAt = vd.publishDate || null
+
+    if (publishedAt && typeof publishedAt === 'string') {
+      publishedAt = parsePublishedAt(publishedAt)
+    }
+  }
+
+  if (fullApiResponse?.microformat?.playerMicroformatRenderer) {
+    const micro = fullApiResponse.microformat.playerMicroformatRenderer
+
+    publishedAt = publishedAt || (micro.publishDate ? parsePublishedAt(micro.publishDate) : null) || (micro.uploadDate ? parsePublishedAt(micro.uploadDate) : null);
+    category = category || micro.category || null;
+    likeCount = likeCount || (micro.likeCount ? Number.parseInt(micro.likeCount, 10) : null);
+  }
+
+  if (renderer) {
+    const thumbArray =
+      renderer.thumbnail?.thumbnails ||
+      renderer.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails ||
+      []
+    thumbnails = {
+      default: thumbArray[0]?.url?.split('?')[0] || null,
+      medium:
+        thumbArray[1]?.url?.split('?')[0] ||
+        thumbArray[0]?.url?.split('?')[0] ||
+        null,
+      high: thumbArray[thumbArray.length - 1]?.url?.split('?')[0] || null
+    }
+
+    const viewCountText =
+      getRunsText(
+        getItemValue(renderer, [
+          'viewCountText.runs',
+          'shortViewCountText.runs'
+        ])
+      ) ||
+      getItemValue(renderer, [
+        'viewCountText.simpleText',
+        'shortViewCountText.simpleText'
+      ])
+    if (viewCountText && !viewCount) {
+      const match = viewCountText.match(/[\d,]+/)
+      if (match) viewCount = Number.parseInt(match[0].replace(/,/g, ''), 10)
+    }
+
+    const rendererPublishedAt =
+      getRunsText(getItemValue(renderer, ['publishedTimeText.runs'])) ||
+      getItemValue(renderer, ['publishedTimeText.simpleText'])
+
+    if (rendererPublishedAt && !publishedAt) {
+      publishedAt = parsePublishedAt(rendererPublishedAt)
+    }
+
+    const rendererAccessibility = getItemValue(renderer, [
+      'accessibility.accessibilityData.label',
+      'title.accessibility.accessibilityData.label'
+    ]);
+
+    accessibilityLabel = accessibilityLabel || rendererAccessibility;
+
+    const ownerBadges = renderer.ownerBadges || []
+    badges = ownerBadges
+      .map((b) =>
+        getItemValue(b, [
+          'metadataBadgeRenderer.tooltip',
+          'metadataBadgeRenderer.label'
+        ])
+      )
+      .filter(Boolean)
+
+    if (!channelData.id) { // Only update if not already set from videoDetails
+      const channelName =
+        getRunsText(getItemValue(renderer, ['longBylineText.runs', 'shortBylineText.runs', 'ownerText.runs'])) || trackInfo.author;
+      const channelUrl = getItemValue(renderer, ['longBylineText.runs.0.navigationEndpoint.browseEndpoint.canonicalBaseUrl', 'shortBylineText.runs.0.navigationEndpoint.browseEndpoint.canonicalBaseUrl', 'ownerText.runs.0.navigationEndpoint.browseEndpoint.canonicalBaseUrl']);
+      const channelIdFromRenderer = getItemValue(renderer, ['longBylineText.runs.0.navigationEndpoint.browseEndpoint.browseId', 'shortBylineText.runs.0.navigationEndpoint.browseEndpoint.browseId', 'ownerText.runs.0.navigationEndpoint.browseEndpoint.browseId']);
+
+      channelData.name = channelName;
+      channelData.id = channelIdFromRenderer || null;
+      channelData.url = channelUrl ? `https://www.youtube.com${channelUrl}` : null;
+    }
+  }
+
+
+
+  accessibilityLabel = accessibilityLabel || `${trackInfo.title} by ${channelData.name || trackInfo.author}`;
+
+  if (config.fetchChannelInfo && channelData.id) {
+    try {
+      const channelInfo = await fetchChannelInfo(
+        channelData.id,
+        makeRequest,
+        fullApiResponse?.responseContext
+      )
+      if (channelInfo) {
+        channelData.icon = channelInfo.icon
+        channelData.banner = channelInfo.banner
+        channelData.subscribers = channelInfo.subscribers
+        channelData.verified = channelInfo.verified
+        channelData.description = channelInfo.description
+        channelData.videoCount = channelInfo.videoCount
+        channelData.featuredVideo = channelInfo.featuredVideo || null
+        if (channelInfo.links && channelInfo.links.length > 0) {
+          channelData.links = channelInfo.links
+        }
+      }
+    } catch (e) {
+      logger(
+        'warn',
+        'buildHoloTrack',
+        `Failed to fetch channel info: ${e.message}`
+      );
+    }
+  }
+
+  thumbnails.default = thumbnails.default || trackInfo.artworkUrl;
+  thumbnails.medium = thumbnails.medium || trackInfo.artworkUrl;
+  thumbnails.high = thumbnails.high || trackInfo.artworkUrl;
+
+  let externalLinks = extractExternalLinks(description)
+
+  if (config.resolveExternalLinks && externalLinks) {
+    try {
+      externalLinks = await resolveExternalLinks(externalLinks, makeRequest)
+    } catch (e) {
+      logger(
+        'warn',
+        'buildHoloTrack',
+        `Failed to resolve external links: ${e.message}`
+      )
+    }
+  }
+
+  const videoQualities = fullApiResponse?.streamingData
+    ? extractVideoQualities(fullApiResponse.streamingData)
+    : []
+
+  const audioFormats = fullApiResponse?.streamingData
+    ? extractAudioFormats(fullApiResponse.streamingData)
+    : []
+
+  const holoTrack = {
+    encoded: encodeTrack(trackInfo),
+    title: trackInfo.title,
+    author: trackInfo.author,
+    isHolo: true,
+    isVanilla: false,
+    accessibility: accessibilityLabel,
+    description,
+    keywords,
+    externalLinks,
+    details: {
+      isSeekable: trackInfo.isSeekable,
+      isLive,
+      isExplicit: false,
+      genres:
+        keywords.length > 0 ? keywords.slice(0, 5) : category ? [category] : [],
+      publishedAt
+    },
+    links: {
+      source: trackInfo.uri,
+      preview: `https://www.youtube.com/embed/${trackInfo.identifier}`,
+      artist: channelData?.url || null
+    },
+    ids: {
+      internal: trackInfo.identifier,
+      isrc: trackInfo.isrc
+    },
+    duration,
+    thumbnails,
+    source: {
+      name: sourceName,
+      url: sourceUrl
+    },
+    artists: [],
+    channel: channelData,
+    album: null,
+    chapters: [],
+    stats: {
+      views: viewCount,
+      likes: likeCount,
+      category: category
+    },
+    videoQualities,
+    audioFormats
+  }
+
+  return holoTrack
+}
+
 export function checkURLType(url, type) {
   const source = type === 'ytmusic' ? 'music' : 'www'
   const videoRegex = new RegExp(
@@ -39,11 +919,28 @@ export function checkURLType(url, type) {
   return YOUTUBE_CONSTANTS.UNKNOWN
 }
 
-export function buildTrack(
+function parseLengthAndStream(lengthText, lengthSeconds, isLive) {
+  let lengthMs = 0;
+  let isStream = true;
+
+  if (lengthText && /[:\d]+/.test(lengthText)) {
+    const parts = lengthText.split(':').map(Number);
+    lengthMs = parts.reduce((acc, val) => acc * 60 + val, 0) * 1000;
+    isStream = !Number.isFinite(lengthMs);
+  } else if (lengthSeconds) {
+    lengthMs = Number.parseInt(lengthSeconds, 10) * 1000;
+    isStream = !!isLive;
+  }
+  return { lengthMs, isStream };
+}
+
+export async function buildTrack(
   itemData,
   itemType,
   sourceNameOverride = null,
-  fullApiResponse = null
+  fullApiResponse = null,
+  enableHolo = false,
+  config = {}
 ) {
   let videoId
   let title
@@ -101,26 +998,19 @@ export function buildTrack(
       getItemValue(itemData, ['ownerText.runs.0.text'], 'Unknown Artist')
     )
 
-    const lengthText = getRunsText(
-      getItemValue(renderer, [
-        'fixedColumns.0.musicResponsiveListItemFixedColumnRenderer.text.runs',
-        'lengthText.runs'
-      ]),
-      getItemValue(itemData, ['lengthText.simpleText'])
-    )
-    if (lengthText && /[:\d]+/.test(lengthText)) {
-      const parts = lengthText.split(':').map(Number)
-      lengthMs = parts.reduce((acc, val) => acc * 60 + val, 0) * 1000
-      if (!Number.isFinite(lengthMs)) {
-        lengthMs = 0
-        isStream = true
-      } else {
-        isStream = false
-      }
-    } else if (itemData.lengthSeconds) {
-      lengthMs = Number.parseInt(itemData.lengthSeconds, 10) * 1000
-      isStream = !!itemData.isLive
-    }
+    const { lengthMs: parsedLengthMs, isStream: parsedIsStream } = parseLengthAndStream(
+      getRunsText(
+        getItemValue(renderer, [
+          'fixedColumns.0.musicResponsiveListItemFlexColumnRenderer.text.runs',
+          'lengthText.runs'
+        ]),
+        getItemValue(itemData, ['lengthText.simpleText'])
+      ),
+      itemData.lengthSeconds,
+      itemData.isLive
+    );
+    lengthMs = parsedLengthMs;
+    isStream = parsedIsStream;
 
     artworkUrl = getItemValue(
       renderer,
@@ -138,18 +1028,16 @@ export function buildTrack(
     if (!renderer && itemData.videoId) renderer = itemData
     if (!renderer) return null
 
-    videoId = renderer.videoId
-    if (typeof renderer.title === 'string') {
-      title = renderer.title
-    } else {
-      title = getRunsText(
-        renderer.title?.runs,
-        getItemValue(fullApiResponse, [
-          'videoDetails.endscreen.endscreenRenderer.elements.1.endscreenElementRenderer.title.simpleText'
-        ]),
-        getItemValue(renderer, ['title.simpleText'], 'Unknown Title')
-      )
-    }
+    videoId = renderer.videoId;
+    title = typeof renderer.title === 'string'
+      ? renderer.title
+      : getRunsText(
+          renderer.title?.runs,
+          getItemValue(fullApiResponse, [
+            'videoDetails.endscreen.endscreenRenderer.elements.1.endscreenElementRenderer.title.simpleText'
+          ]),
+          getItemValue(renderer, ['title.simpleText'], 'Unknown Title')
+        );
     author =
       renderer.author ||
       getRunsText(
@@ -162,33 +1050,24 @@ export function buildTrack(
           'videoDetails.endscreen.endscreenRenderer.elements.0.endscreenElementRenderer.title.simpleText'
         ]),
         'Unknown Channel'
-      )
-    const lengthText = getItemValue(
-      renderer,
-      ['lengthText.simpleText'],
-      getRunsText(renderer.lengthText?.runs)
-    )
-    if (lengthText && /[:\d]+/.test(lengthText)) {
-      const parts = lengthText.split(':').map(Number)
-      lengthMs = parts.reduce((acc, val) => acc * 60 + val, 0) * 1000
-      if (!Number.isFinite(lengthMs)) {
-        lengthMs = 0
-        isStream = true
-      } else {
-        isStream = false
-      }
-    } else if (renderer.lengthSeconds) {
-      lengthMs = Number.parseInt(renderer.lengthSeconds, 10) * 1000
-      isStream = !!renderer.isLive
-    }
-    artworkUrl = renderer.thumbnail?.thumbnails?.pop()?.url
-    uri = `https://www.youtube.com/watch?v=${videoId}`
+      );
+    const { lengthMs: parsedLengthMs, isStream: parsedIsStream } = parseLengthAndStream(
+      getItemValue(
+        renderer,
+        ['lengthText.simpleText'],
+        getRunsText(renderer.lengthText?.runs)
+      ),
+      renderer.lengthSeconds,
+      renderer.isLive
+    );
+    lengthMs = parsedLengthMs;
+    isStream = parsedIsStream;
+    artworkUrl = renderer.thumbnail?.thumbnails?.pop()?.url;
+    uri = `https://www.youtube.com/watch?v=${videoId}`;
   }
 
   if (!videoId) return null
-  if (artworkUrl?.includes('?')) {
-    artworkUrl = artworkUrl.split('?')[0]
-  }
+  artworkUrl = artworkUrl?.split('?')[0] || artworkUrl;
 
   const trackInfo = {
     identifier: videoId,
@@ -205,13 +1084,25 @@ export function buildTrack(
       sourceNameOverride || (itemType === 'ytmusic' ? 'ytmusic' : 'youtube')
   }
 
-  return {
+  const basicTrack = {
     encoded: encodeTrack(trackInfo),
     info: trackInfo,
     pluginInfo: {
       captions: fullApiResponse?.captions
     }
   }
+
+  if (enableHolo) {
+    return await buildHoloTrack(
+      trackInfo,
+      itemData,
+      itemType,
+      fullApiResponse,
+      config
+    )
+  }
+
+  return basicTrack
 }
 
 export class BaseClient {
@@ -346,11 +1237,16 @@ export class BaseClient {
       `Player response for ${videoId}: ${JSON.stringify(playerResponse, null, 2)}`
     )
 
-    const track = buildTrack(
+    const track = await buildTrack(
       playerResponse.videoDetails,
       sourceName,
       null,
-      playerResponse
+      playerResponse,
+      this.config.enableHoloTracks,
+      {
+        resolveExternalLinks: this.config.resolveExternalLinks,
+        fetchChannelInfo: this.config.fetchChannelInfo
+      }
     )
     if (!track) {
       return {
@@ -404,12 +1300,30 @@ export class BaseClient {
 
     for (let i = 0; i < Math.min(playlistContent.length, maxLength); i++) {
       const item = playlistContent[i]
-      const track = buildTrack(item, 'youtube')
-      if (track) {
-        tracks.push(track)
-        if (currentVideoId && track.info.identifier === currentVideoId) {
-          selectedTrack = i
+      try {
+        const track = await buildTrack(
+          item,
+          sourceName || 'youtube',
+          null,
+          null,
+          this.config.enableHoloTracks,
+          {
+            fetchChannelInfo: false,
+            resolveExternalLinks: false
+          }
+        )
+        if (track) {
+          tracks.push(track)
+          if (currentVideoId && track.info?.identifier === currentVideoId) {
+            selectedTrack = i
+          }
         }
+      } catch (err) {
+        logger(
+          'warn',
+          `youtube-${this.name}`,
+          `Failed to build track: ${err.message}`
+        )
       }
     }
 

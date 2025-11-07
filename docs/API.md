@@ -76,6 +76,202 @@ To perform a search with a specific source, you can prefix your identifier in th
 > [!NOTE]
 > Using a search prefix for a source that is disabled on the server will result in an error.
 
+#### HoloTrack Structure
+
+NodeLink uses an enhanced track structure called **HoloTrack** that extends the standard Lavalink track format with rich metadata. The response structure varies by load type to optimize performance.
+
+**Load Types:**
+- **`track`**: Single track with full metadata (most detailed)
+- **`search`**: Collection of tracks with basic metadata (performance-optimized)
+- **`playlist`**: Collection with playlist info (performance-optimized)
+- **`album`**: Collection from an album (behaves like playlist)
+- **`artist`**: Collection from an artist (behaves like playlist)
+- **`empty`**: No results found
+- **`error`**: An error occurred
+
+**Track Object (Full Metadata - `loadType: "track"`):**
+
+```typescript
+{
+  loadType: "track",
+  data: {
+    // Required fields
+    encoded: string,              // Base64 encoded track data
+    title: string,                // Track title
+    author: string,               // Track author/artist
+    isHolo: boolean,              // Always true for NodeLink
+    isVanilla: boolean,           // Always false for NodeLink
+    accessibility: string,        // Screen reader friendly description
+    
+    // Optional fields (may be null or omitted)
+    description?: string,         // Track description
+    keywords?: string[],          // Associated keywords
+    externalLinks?: object,       // External platform links
+    
+    details: {
+      isSeekable: boolean,
+      isLive: boolean,
+      isExplicit: boolean,
+      genres: string[],
+      publishedAt?: {             // Optional publication date
+        original: string,         // e.g., "11 years ago"
+        timestamp: number,        // Unix timestamp in ms
+        date: string,             // ISO 8601 date
+        readable: string,
+        compact: string,          // e.g., "4y 2mo 5d"
+        ago: {
+          years: number,
+          months: number,
+          weeks: number,
+          days: number,
+          hours: number,
+          minutes: number,
+          seconds: number
+        }
+      } | null
+    },
+    
+    links: {
+      source: string,             // Source URL
+      preview: string,            // Embeddable preview URL
+      artist?: string             // Artist page URL (optional)
+    },
+    
+    ids: {
+      internal: string,           // Source-specific ID
+      isrc?: string | null        // ISRC code (optional)
+    },
+    
+    duration: {
+      ms: number,                 // Milliseconds
+      formatted: string,          // e.g., "3:45"
+      hms: string                 // e.g., "0h 03m 45s"
+    },
+    
+    thumbnails: {
+      default: string,
+      medium: string,
+      high: string
+    },
+    
+    source: {
+      name: string,               // e.g., "youtube", "spotify"
+      url: string
+    },
+    
+    // Optional rich metadata (only in full track response)
+    artists?: object[],           // Contributing artists
+    channel?: {                   // Channel/uploader info
+      name: string,
+      id: string,
+      url: string,
+      icon?: string | null,
+      subscribers?: {
+        original: string,
+        count: number,
+        formatted: string
+      } | null,
+      verified: boolean,
+      description?: string | null,
+      videoCount?: object | null,
+      featuredVideo?: object | null,
+      links?: string[],
+      banner?: string | null
+    },
+    album?: object | null,        // Album information
+    chapters?: object[],          // Video chapters
+    stats?: {                     // View/like statistics
+      views?: number | null,
+      likes?: number | null,
+      category?: string | null
+    },
+    videoQualities?: object[],    // Available video formats
+    audioFormats?: object[]       // Available audio formats
+  }
+}
+```
+
+**Search/Playlist Results (Performance-Optimized):**
+
+When `loadType` is `search`, `playlist`, `album`, or `artist`, tracks contain minimal metadata for performance:
+
+```typescript
+{
+  loadType: "search",  // or "playlist", "album", "artist"
+  data: [  // For search
+    {
+      // Required basic fields
+      encoded: string,
+      title: string,
+      author: string,
+      isHolo: boolean,
+      isVanilla: boolean,
+      accessibility: string,
+      
+      // Minimal metadata
+      description: null,         // Always null
+      keywords: [],              // Always empty
+      externalLinks: null,       // Always null
+      
+      details: {
+        isSeekable: boolean,
+        isLive: boolean,
+        isExplicit: boolean,
+        genres: [],              // Always empty
+        publishedAt: object | null
+      },
+      
+      links: { source: string, preview: string, artist?: string },
+      ids: { internal: string, isrc: null },
+      duration: object,
+      thumbnails: object,
+      source: object,
+      
+      // Minimal optional fields
+      artists: [],
+      channel: object | null,    // Basic info only
+      album: null,
+      chapters: [],
+      stats: object | null,      // May include views
+      videoQualities: [],
+      audioFormats: []
+    }
+  ]
+}
+```
+
+For `playlist`, `album`, and `artist` responses:
+```typescript
+{
+  loadType: "playlist",  // or "album" or "artist"
+  data: {
+    info: {
+      name: string,              // Playlist/album/artist name
+      selectedTrack: number      // Usually 0
+    },
+    pluginInfo: object,
+    tracks: [
+      // Array of tracks with minimal metadata (same as search)
+    ]
+  }
+}
+```
+
+**Optional Fields Summary:**
+
+The following fields may be `null` or omitted depending on the source and load type:
+- Top-level: `description`, `keywords`, `externalLinks`, `artists`, `channel`, `album`, `chapters`, `stats`, `videoQualities`, `audioFormats`
+- In `details`: `publishedAt`
+- In `links`: `artist`
+- In `ids`: `isrc`
+- In `channel`: `icon`, `subscribers`, `description`, `videoCount`, `featuredVideo`, `links`, `banner`
+- In `stats`: `views`, `likes`, `category`
+
+**Performance Notes:**
+- Use direct track URLs to get full metadata
+- Search queries return minimal metadata for faster responses
+- Load specific tracks to enrich metadata when needed
+
 ### `/routeplanner`
 NodeLink includes a fully functional IP route planner, a feature not present in standard Lavalink. The following endpoints are available for managing it:
 
@@ -310,63 +506,4 @@ Dispatched when a player's pause state is changed.
 
 ---
 
-## Player API Differences
 
-### Update Player (`PATCH /v4/sessions/{sessionId}/players/{guildId}`)
-While the endpoint is largely compatible with Lavalink, there is a key difference in the request body when updating a track:
-
-- **`identifier` field is not supported:** NodeLink does not resolve track identifiers via this endpoint.
-- **`track.encoded` field is required:** You must provide the full, base64-encoded track data in the `track.encoded` field to play a track.
-
-Setting `track` to `null` (or `track.encoded` to `null`) will still stop the player as expected. All other fields like `volume`, `paused`, and `filters` behave as they do in Lavalink.
-
----
-
-## Filters
-NodeLink supports a wider range of audio filters than standard Lavalink. In addition to the standard Lavalink filters, NodeLink adds the following:
-
-### High Pass
-Filters lower frequencies, allowing higher frequencies to pass through.
-| Field      | Type  | Description                    |
-|------------|-------|--------------------------------|
-| smoothing? | float | The smoothing factor (1.0 < x) |
-
-### Chorus
-Creates a thicker sound by playing delayed and pitch-modulated copies of the original audio.
-| Field     | Type  | Description                                       |
-|-----------|-------|---------------------------------------------------|
-| rate?     | float | The modulation rate in Hz.                        |
-| depth?    | float | The modulation depth (0.0 to 1.0).                |
-| delay?    | float | The base delay in milliseconds (1 to 50).         |
-| mix?      | float | The mix between dry and wet signal (0.0 to 1.0).  |
-| feedback? | float | The feedback amount (0.0 to 0.95).                |
-
-### Phaser
-Creates a sweeping effect by applying a series of phase-shifted filters.
-| Field         | Type  | Description                                       |
-|---------------|-------|---------------------------------------------------|
-| stages?       | int   | The number of filter stages (2 to 12).            |
-| rate?         | float | The modulation rate in Hz.                        |
-| depth?        | float | The modulation depth (0.0 to 1.0).                |
-| feedback?     | float | The feedback amount (0.0 to 0.9).                 |
-| mix?          | float | The mix between dry and wet signal (0.0 to 1.0).  |
-| minFrequency? | float | The minimum frequency of the sweep in Hz.         |
-| maxFrequency? | float | The maximum frequency of the sweep in Hz.         |
-
-### Echo
-Creates a repeating, decaying echo effect.
-| Field     | Type  | Description                                       |
-|-----------|-------|---------------------------------------------------|
-| delay?    | float | The delay time in milliseconds (0 to 5000).       |
-| feedback? | float | The feedback amount (0.0 to 1.0).                 |
-| mix?      | float | The mix between dry and wet signal (0.0 to 1.0).  |
-
-### Compressor
-A dynamic range compressor that reduces the volume of loud sounds or amplifies quiet sounds.
-| Field      | Type  | Description                                       |
-|------------|-------|---------------------------------------------------|
-| threshold? | float | The threshold in dB.                              |
-| ratio?     | float | The compression ratio.                            |
-| attack?    | float | The attack time in milliseconds.                  |
-| release?   | float | The release time in milliseconds.                 |
-| gain?      | float | The makeup gain in dB.                            |

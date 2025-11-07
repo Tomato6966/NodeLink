@@ -29,6 +29,7 @@ export class Player {
     this.logger = this.nodelink.logger
 
     this.track = null
+    this.holoTrack = null
     this.isPaused = false
     this.volumePercent = this.nodelink.options?.defaultVolume ?? 100
     this.filters = {}
@@ -184,11 +185,7 @@ export class Player {
       )
       this.connection.audioStream?.destroy()
 
-      const endedTrack = this.track
-      this.emitEvent(GatewayEvents.TRACK_END, {
-        track: endedTrack,
-        reason: state.reason
-      })
+      this._emitTrackEnd(state.reason)
       this._resetTrack()
     } else if (
       state.status === 'playing' &&
@@ -199,9 +196,9 @@ export class Player {
       const wasResuming = this._isResuming
       this._isResuming = false
       this.isPaused = false
-      
+
       if (!wasResuming && !this._isRestoring) {
-        this.emitEvent(GatewayEvents.TRACK_START, { track: this.track })
+        this._emitTrackStart()
       }
     } else if (state.status === 'paused') {
       this.isPaused = true
@@ -268,10 +265,7 @@ export class Player {
       })
 
       if (shouldStop) {
-        this.emitEvent(GatewayEvents.TRACK_END, {
-          track: this.track,
-          reason: EndReasons.LOAD_FAILED
-        })
+        this._emitTrackEnd(EndReasons.LOAD_FAILED)
         this.stop()
       }
     }
@@ -279,8 +273,48 @@ export class Player {
 
   _resetTrack() {
     this.track = null
+    this.holoTrack = null
     this.isPaused = false
     this.position = 0
+  }
+
+  async _emitTrackStart() {
+    const trackToEmit = await this._resolveTrackForEvent(this.track)
+    this.holoTrack = trackToEmit
+
+    this.emitEvent(GatewayEvents.TRACK_START, {
+      track: trackToEmit,
+      playingQuality: this.streamInfo?.format?.itag || null
+    })
+  }
+
+  _emitTrackEnd(reason) {
+    const trackToEmit = this.holoTrack || this.track
+    this.emitEvent(GatewayEvents.TRACK_END, {
+      track: trackToEmit,
+      reason: reason
+    })
+  }
+
+  async _resolveTrackForEvent(track) {
+    if (!this.nodelink.options.enableHoloTracks) {
+      return track
+    }
+
+    try {
+      const source = this.nodelink.sources.getSource(track.info.sourceName)
+      if (source && typeof source.resolveHoloTrack === 'function') {
+        const holoTrack = await source.resolveHoloTrack(track, {
+          fetchChannelInfo: this.nodelink.options.fetchChannelInfo,
+          resolveExternalLinks: this.nodelink.options.resolveExternalLinks
+        })
+        return holoTrack || track
+      }
+    } catch (err) {
+      logger('warn', 'Player', `Failed to resolve Holo track: ${err.message}`)
+    }
+
+    return track
   }
 
   _realPosition() {
@@ -452,10 +486,7 @@ export class Player {
       }
 
       if (this.track) {
-        this.emitEvent(GatewayEvents.TRACK_END, {
-          track: this.track,
-          reason: EndReasons.REPLACED
-        })
+        this._emitTrackEnd(EndReasons.REPLACED)
         this._resetTrack()
       }
 
@@ -611,10 +642,7 @@ export class Player {
           track: this.track,
           exception: resourceResult.exception
         })
-        this.emitEvent(GatewayEvents.TRACK_END, {
-          track: this.track,
-          reason: EndReasons.LOAD_FAILED
-        })
+        this._emitTrackEnd(EndReasons.LOAD_FAILED)
         return this._legacySeek(position, endTime)
       }
 
@@ -646,10 +674,7 @@ export class Player {
           cause: 'UNKNOWN_ERROR'
         }
       })
-      this.emitEvent(GatewayEvents.TRACK_END, {
-        track: this.track,
-        reason: EndReasons.LOAD_FAILED
-      })
+      this._emitTrackEnd(EndReasons.LOAD_FAILED)
       return this._legacySeek(position, endTime)
     }
   }
@@ -752,17 +777,11 @@ export class Player {
         if (this.connection.audioStream) {
           this.connection.stop(EndReasons.STOPPED)
         } else {
-          this.emitEvent(GatewayEvents.TRACK_END, {
-            track: this.track,
-            reason: EndReasons.STOPPED
-          })
+          this._emitTrackEnd(EndReasons.STOPPED)
           this._resetTrack()
         }
       } else {
-        this.emitEvent(GatewayEvents.TRACK_END, {
-          track: this.track,
-          reason: EndReasons.STOPPED
-        })
+        this._emitTrackEnd(EndReasons.STOPPED)
         this._resetTrack()
       }
       return true
@@ -778,11 +797,11 @@ export class Player {
       'Player',
       `Setting pause to ${shouldPause} for guild ${this.guildId}`
     )
-    
+
     const wasResuming = this.isPaused && !shouldPause
     this.isPaused = shouldPause
     this._isResuming = wasResuming
-    
+
     if (this.connection?.audioStream) {
       if (shouldPause) {
         this.connection.pause('requested')

@@ -7,8 +7,8 @@ import {
 } from '../common.js'
 
 export default class Music extends BaseClient {
-  constructor(nodelink) {
-    super(nodelink, 'ANDROID_MUSIC')
+  constructor(nodelink, oauth) {
+    super(nodelink, 'ANDROID_MUSIC', oauth)
   }
 
   getClient(context) {
@@ -106,7 +106,13 @@ export default class Music extends BaseClient {
     }
 
     for (const videoData of videos) {
-      const track = buildTrack(videoData, sourceName)
+      const track = await buildTrack(
+        videoData,
+        sourceName,
+        null,
+        null,
+        this.config.enableHoloTracks
+      )
       if (track) {
         tracks.push(track)
       }

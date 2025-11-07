@@ -392,7 +392,11 @@ class NodelinkServer {
         this.socket.close()
         logger('info', 'WebSocket', 'WebSocket server closed successfully')
       } catch (error) {
-        logger('error', 'WebSocket', `Error closing WebSocket server: ${error.message}`)
+        logger(
+          'error',
+          'WebSocket',
+          `Error closing WebSocket server: ${error.message}`
+        )
       }
     }
   }

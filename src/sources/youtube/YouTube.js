@@ -433,7 +433,6 @@ export default class YouTubeSource {
     const isMusicUrl = url.includes('music.youtube.com')
     const sourceType = isMusicUrl ? 'ytmusic' : 'youtube'
 
-    // Convert music.youtube.com URLs to www.youtube.com format
     let processUrl = url
     if (isMusicUrl) {
       processUrl = url.replace('music.youtube.com', 'www.youtube.com')
@@ -444,11 +443,18 @@ export default class YouTubeSource {
       )
     }
 
-    const clientList = this.config.clients.playback
+    const clientList =
+      this.config.clients.resolve || this.config.clients.playback
+
+    logger(
+      'debug',
+      'YouTube',
+      `Using resolve clients for URL resolution: ${clientList.join(', ')}`
+    )
+
     const clientErrors = []
     const urlType = checkURLType(processUrl, sourceType)
 
-    // Prioritize Android client for playlists
     if (urlType === YOUTUBE_CONSTANTS.PLAYLIST) {
       const androidClient = this.clients.Android
       if (androidClient) {
@@ -509,7 +515,6 @@ export default class YouTubeSource {
     for (const clientName of clientList) {
       const client = this.clients[clientName]
       if (!client) continue
-      // Skip Android if it was already tried for playlist and failed
       if (urlType === YOUTUBE_CONSTANTS.PLAYLIST && clientName === 'Android')
         continue
 
@@ -564,6 +569,52 @@ export default class YouTubeSource {
         cause: 'All clients failed.',
         errors: clientErrors
       }
+    }
+  }
+
+  async resolveHoloTrack(vanillaTrack, options = {}) {
+    try {
+      const { encoded, info } = vanillaTrack
+
+      const webClient = this.clients.Web
+      if (!webClient) {
+        logger(
+          'warn',
+          'YouTube',
+          'Web client not available for Holo resolution'
+        )
+        return vanillaTrack
+      }
+
+      const videoId = info.identifier
+      const playerResponse = await webClient._makePlayerRequest(
+        videoId,
+        this.ytContext,
+        {},
+        this.cipherManager
+      )
+
+      if (!playerResponse || playerResponse.error) {
+        return vanillaTrack
+      }
+
+      const { buildHoloTrack } = await import('./common.js')
+
+      const holoTrack = await buildHoloTrack(
+        info,
+        null, // itemData
+        info.sourceName === 'ytmusic' ? 'ytmusic' : 'youtube',
+        playerResponse,
+        {
+          fetchChannelInfo: options.fetchChannelInfo ?? false,
+          resolveExternalLinks: options.resolveExternalLinks ?? false
+        }
+      )
+
+      return holoTrack
+    } catch (err) {
+      logger('error', 'YouTube', `Failed to resolve Holo track: ${err.message}`)
+      return vanillaTrack
     }
   }
 

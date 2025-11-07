@@ -7,8 +7,8 @@ import {
 } from '../common.js'
 
 export default class Web extends BaseClient {
-  constructor(nodelink) {
-    super(nodelink, 'WEB')
+  constructor(nodelink, oauth) {
+    super(nodelink, 'WEB', oauth)
   }
 
   getClient(context) {
@@ -105,7 +105,13 @@ export default class Web extends BaseClient {
     }
 
     for (const videoData of videos) {
-      const track = buildTrack(videoData, sourceName)
+      const track = await buildTrack(
+        videoData,
+        sourceName,
+        null,
+        null,
+        this.config.enableHoloTracks
+      )
       if (track) {
         tracks.push(track)
       }

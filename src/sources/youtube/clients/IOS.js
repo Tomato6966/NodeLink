@@ -7,8 +7,8 @@ import {
 } from '../common.js'
 
 export default class IOS extends BaseClient {
-  constructor(nodelink) {
-    super(nodelink, 'IOS')
+  constructor(nodelink, oauth) {
+    super(nodelink, 'IOS', oauth)
   }
 
   getClient(context) {

@@ -7,8 +7,8 @@ import {
 } from '../common.js'
 
 export default class AndroidVR extends BaseClient {
-  constructor(nodelink) {
-    super(nodelink, 'ANDROID_VR')
+  constructor(nodelink, oauth, youtubeInstance) {
+    super(nodelink, 'ANDROID_VR', oauth, youtubeInstance)
   }
 
   getClient(context) {
@@ -123,7 +123,13 @@ export default class AndroidVR extends BaseClient {
       }
 
       for (const videoData of videos) {
-        const track = buildTrack(videoData, sourceName)
+        const track = await buildTrack(
+          videoData,
+          sourceName,
+          null,
+          null,
+          this.config.enableHoloTracks
+        )
         if (track) {
           tracks.push(track)
         }

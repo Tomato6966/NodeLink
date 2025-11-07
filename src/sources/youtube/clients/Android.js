@@ -7,8 +7,8 @@ import {
 } from '../common.js'
 
 export default class Android extends BaseClient {
-  constructor(nodelink) {
-    super(nodelink, 'ANDROID')
+  constructor(nodelink, oauth) {
+    super(nodelink, 'ANDROID', oauth)
   }
 
   getClient(context) {
@@ -125,7 +125,13 @@ export default class Android extends BaseClient {
       }
 
       for (const videoData of videos) {
-        const track = buildTrack(videoData, sourceName)
+        const track = await buildTrack(
+          videoData,
+          sourceName,
+          null,
+          null,
+          this.config.enableHoloTracks
+        )
         if (track) {
           tracks.push(track)
         }
@@ -181,7 +187,6 @@ export default class Android extends BaseClient {
 
         const { body: playerResponse, statusCode } =
           await this._makePlayerRequest(videoId, context, {}, cipherManager)
-
         if (statusCode !== 200) {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
           logger('error', 'youtube-android', message)

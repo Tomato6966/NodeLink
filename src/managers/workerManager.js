@@ -14,9 +14,10 @@ export default class WorkerManager {
     this.workerToGuilds = new Map()
     this.nextStatelessWorkerIndex = 0
     this.pendingRequests = new Map()
-    this.maxWorkers = config.cluster.workers === 0
-      ? os.cpus().length
-      : Math.max(1, config.cluster.workers || 0)
+    this.maxWorkers =
+      config.cluster.workers === 0
+        ? os.cpus().length
+        : Math.max(1, config.cluster.workers || 0)
     this.minWorkers = Math.max(1, config.cluster?.minWorkers || 1)
     this.workerLoad = new Map()
     this.workerStats = new Map()
@@ -58,16 +59,26 @@ export default class WorkerManager {
       )
       this._updateWorkerFailureHistory(worker.id, code, signal)
 
-      const affectedGuilds = Array.from(this.workerToGuilds.get(worker.id) || [])
+      const affectedGuilds = Array.from(
+        this.workerToGuilds.get(worker.id) || []
+      )
       const snapshots = this.backupManager.getWorkerSnapshots(worker.id)
 
       this._retryPendingRequestsForWorker(worker.id)
       this.removeWorker(worker.id)
 
-      const shouldRespawn = this._shouldRespawnWorker(worker.id, code, affectedGuilds.length)
+      const shouldRespawn = this._shouldRespawnWorker(
+        worker.id,
+        code,
+        affectedGuilds.length
+      )
 
       if (shouldRespawn) {
-        logger('info', 'Cluster', `Respawning worker and restoring ${snapshots.length} players...`)
+        logger(
+          'info',
+          'Cluster',
+          `Respawning worker and restoring ${snapshots.length} players...`
+        )
         setTimeout(() => {
           const newWorker = this.forkWorker()
           if (newWorker && snapshots.length > 0) {
@@ -85,7 +96,7 @@ export default class WorkerManager {
     const history = this.workerFailureHistory.get(workerId)
     if (history) {
       const recentFailures = history.recentFailures.filter(
-        f => Date.now() - f.timestamp < 30000
+        (f) => Date.now() - f.timestamp < 30000
       )
 
       if (recentFailures.length >= 3) {
@@ -108,7 +119,11 @@ export default class WorkerManager {
         if (worker.isConnected()) {
           const lastSeen = this.workerHealth.get(worker.id) || 0
           if (now - lastSeen > 30000) {
-            logger('warn', 'Cluster', `Worker ${worker.id} unresponsive (${Math.floor((now - lastSeen) / 1000)}s)`)
+            logger(
+              'warn',
+              'Cluster',
+              `Worker ${worker.id} unresponsive (${Math.floor((now - lastSeen) / 1000)}s)`
+            )
           }
           worker.send({ type: 'ping', timestamp: now })
         }
@@ -131,25 +146,39 @@ export default class WorkerManager {
         this.pendingRequests.delete(requestId)
 
         if (request.retryCount < this.maxRetries) {
-          logger('debug', 'Cluster', `Retrying command after worker ${workerId} exit (attempt ${request.retryCount + 1})`)
+          logger(
+            'debug',
+            'Cluster',
+            `Retrying command after worker ${workerId} exit (attempt ${request.retryCount + 1})`
+          )
 
           setTimeout(() => {
             const newWorker = this.getBestWorker()
             if (newWorker) {
-              this._executeCommand(newWorker, request.type, request.payload, request.resolve, request.reject, request.retryCount + 1, request.isFast)
+              this._executeCommand(
+                newWorker,
+                request.type,
+                request.payload,
+                request.resolve,
+                request.reject,
+                request.retryCount + 1,
+                request.isFast
+              )
             } else {
               request.reject(new Error('No workers available for retry'))
             }
           }, 500 * Math.pow(2, request.retryCount))
         } else {
-          request.reject(new Error(`Worker ${workerId} exited before completing request`))
+          request.reject(
+            new Error(`Worker ${workerId} exited before completing request`)
+          )
         }
       }
     }
   }
 
   _startScalingCheck() {
-    if (this.scaleCheckInterval) return;
+    if (this.scaleCheckInterval) return
 
     this.scaleCheckInterval = setInterval(
       () => this._scaleWorkers(),
@@ -185,21 +214,33 @@ export default class WorkerManager {
       }
     }
 
-    const { maxPlayersPerWorker, scaleUpThreshold, scaleDownThreshold, idleWorkerTimeoutMs } = this.scalingConfig
+    const {
+      maxPlayersPerWorker,
+      scaleUpThreshold,
+      scaleDownThreshold,
+      idleWorkerTimeoutMs
+    } = this.scalingConfig
     const clusterCapacity = activeCount * maxPlayersPerWorker
-    const currentUtilization = clusterCapacity > 0 ? totalPlayers / clusterCapacity : 0
+    const currentUtilization =
+      clusterCapacity > 0 ? totalPlayers / clusterCapacity : 0
 
-    if (currentUtilization > scaleUpThreshold && activeCount < this.maxWorkers) {
+    if (
+      currentUtilization > scaleUpThreshold &&
+      activeCount < this.maxWorkers
+    ) {
       logger(
         'info',
         'Cluster',
         `Scaling up: Current utilization ${currentUtilization.toFixed(2)} > ${scaleUpThreshold}. Forking new worker.`
       )
       this.forkWorker()
-      return;
+      return
     }
 
-    if (currentUtilization < scaleDownThreshold && activeCount > this.minWorkers) {
+    if (
+      currentUtilization < scaleDownThreshold &&
+      activeCount > this.minWorkers
+    ) {
       const now = Date.now()
 
       for (const { worker, load } of metrics) {
@@ -282,7 +323,12 @@ export default class WorkerManager {
     this.workers.push(worker)
     this.workersById.set(worker.id, worker)
     this.workerLoad.set(worker.id, 0)
-    this.workerStats.set(worker.id, { players: 0, playingPlayers: 0, cpu: { nodelinkLoad: 0 }, memory: { used: 0, allocated: 0 } })
+    this.workerStats.set(worker.id, {
+      players: 0,
+      playingPlayers: 0,
+      cpu: { nodelinkLoad: 0 },
+      memory: { used: 0, allocated: 0 }
+    })
     this.workerToGuilds.set(worker.id, new Set())
     this.workerHealth.set(worker.id, Date.now())
     this.workerFailureHistory.set(worker.id, {
@@ -291,7 +337,11 @@ export default class WorkerManager {
       recentFailures: []
     })
 
-    logger('info', 'Cluster', `Spawned worker ${worker.process.pid} (id: ${worker.id})`)
+    logger(
+      'info',
+      'Cluster',
+      `Spawned worker ${worker.process.pid} (id: ${worker.id})`
+    )
 
     worker.on('message', (msg) => this._handleWorkerMessage(worker, msg))
 
@@ -304,7 +354,7 @@ export default class WorkerManager {
 
   removeWorker(workerId) {
     const worker = this.workersById.get(workerId)
-    if (!worker) return;
+    if (!worker) return
 
     const index = this.workers.indexOf(worker)
     if (index !== -1) this.workers.splice(index, 1)
@@ -393,7 +443,11 @@ export default class WorkerManager {
       this.workerHealth.set(worker.id, Date.now())
     } else if (msg.type === 'ready') {
       this.workerHealth.set(worker.id, Date.now())
-      logger('info', 'Cluster', `Worker ${worker.id} (PID ${worker.process.pid}) ready`)
+      logger(
+        'info',
+        'Cluster',
+        `Worker ${worker.id} (PID ${worker.process.pid}) ready`
+      )
     } else if (global.nodelink) {
       global.nodelink.handleIPCMessage(msg)
     }
@@ -515,14 +569,26 @@ export default class WorkerManager {
   _ensureWorkerAvailability() {
     const neededWorkers = Math.max(this.minWorkers - this.workers.length, 0)
 
-    for (let i = 0; i < neededWorkers && this.workers.length < this.maxWorkers; i++) {
-      logger('info', 'Cluster', `Forking worker ${this.workers.length + 1}/${this.minWorkers}`)
+    for (
+      let i = 0;
+      i < neededWorkers && this.workers.length < this.maxWorkers;
+      i++
+    ) {
+      logger(
+        'info',
+        'Cluster',
+        `Forking worker ${this.workers.length + 1}/${this.minWorkers}`
+      )
       this.forkWorker()
     }
   }
 
   async _restorePlayers(worker, snapshots) {
-    logger('info', 'Cluster', `Restoring ${snapshots.length} players to worker ${worker.id}`)
+    logger(
+      'info',
+      'Cluster',
+      `Restoring ${snapshots.length} players to worker ${worker.id}`
+    )
 
     for (const snapshot of snapshots) {
       try {
@@ -535,7 +601,11 @@ export default class WorkerManager {
 
         logger('debug', 'Cluster', `Restored player for ${playerKey}`)
       } catch (error) {
-        logger('error', 'Cluster', `Failed to restore player for guild ${snapshot.guildId} (bot: ${snapshot.userId}): ${error.message}`)
+        logger(
+          'error',
+          'Cluster',
+          `Failed to restore player for guild ${snapshot.guildId} (bot: ${snapshot.userId}): ${error.message}`
+        )
       }
     }
 
@@ -582,7 +652,15 @@ export default class WorkerManager {
 
   execute(worker, type, payload, options = {}) {
     return new Promise((resolve, reject) => {
-      this._executeCommand(worker, type, payload, resolve, reject, 0, options.fast || false)
+      this._executeCommand(
+        worker,
+        type,
+        payload,
+        resolve,
+        reject,
+        0,
+        options.fast || false
+      )
     })
   }
 
@@ -594,14 +672,28 @@ export default class WorkerManager {
       this.pendingRequests.delete(requestId)
 
       if (retryCount < this.maxRetries && worker.isConnected()) {
-        logger('warn', 'Cluster', `Command timeout (${timeoutMs}ms), retrying... (${retryCount + 1}/${this.maxRetries})`)
+        logger(
+          'warn',
+          'Cluster',
+          `Command timeout (${timeoutMs}ms), retrying... (${retryCount + 1}/${this.maxRetries})`
+        )
 
         setTimeout(() => {
           const newWorker = this.getBestWorker() || worker
-          this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast)
+          this._executeCommand(
+            newWorker,
+            type,
+            payload,
+            resolve,
+            reject,
+            retryCount + 1,
+            isFast
+          )
         }, 500)
       } else {
-        reject(new Error(`Worker command timeout after ${retryCount + 1} attempts`))
+        reject(
+          new Error(`Worker command timeout after ${retryCount + 1} attempts`)
+        )
       }
     }, timeoutMs)
 
@@ -625,7 +717,15 @@ export default class WorkerManager {
         if (retryCount < this.maxRetries) {
           const newWorker = this.getBestWorker()
           if (newWorker) {
-            this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast)
+            this._executeCommand(
+              newWorker,
+              type,
+              payload,
+              resolve,
+              reject,
+              retryCount + 1,
+              isFast
+            )
           } else {
             reject(new Error('No workers available'))
           }
@@ -645,7 +745,15 @@ export default class WorkerManager {
         setTimeout(() => {
           const newWorker = this.getBestWorker()
           if (newWorker) {
-            this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast)
+            this._executeCommand(
+              newWorker,
+              type,
+              payload,
+              resolve,
+              reject,
+              retryCount + 1,
+              isFast
+            )
           } else {
             reject(error)
           }
