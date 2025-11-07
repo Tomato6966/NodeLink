@@ -124,7 +124,13 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
         await new Promise((resolve, reject) => {
           segmentStream.pipe(outputStream, { end: false })
           segmentStream.on('end', resolve)
-          segmentStream.on('error', reject)
+          segmentStream.on('error', (err) => {
+            if (err.message === 'aborted' || err.code === 'ECONNRESET') {
+              resolve()
+            } else {
+              reject(err)
+            }
+          })
         })
       } catch (e) {
         if (segmentStream && !segmentStream.destroyed) {
@@ -804,10 +810,22 @@ export default class YouTubeSource {
         stream.emit('finishBuffering')
       }
       const errorHandler = (error) => {
-        logger('error', 'YouTube', `Upstream stream error: ${error.message}`)
         cleanupListeners()
-        stream.emit('error', error)
-        stream.emit('finishBuffering')
+        
+        const isClientDisconnect = error.message === 'aborted' || error.code === 'ECONNRESET'
+        if (isClientDisconnect) {
+          logger('debug', 'YouTube', 'Client disconnected from stream')
+          if (!stream.destroyed) {
+            stream.destroy()
+          }
+          return
+        }
+        
+        logger('error', 'YouTube', `Stream error: ${error.message}`)
+        if (!stream.destroyed) {
+          stream.emit('error', new Error(`Stream failed: ${error.message}`))
+          stream.destroy()
+        }
       }
 
       response.stream.on('data', dataHandler)
