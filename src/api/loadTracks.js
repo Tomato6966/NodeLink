@@ -1,32 +1,30 @@
-import Joi from 'joi'
+import myzod from 'myzod'
 import { logger, sendResponse, sendErrorResponse } from '../utils.js'
 
-const loadTracksSchema = Joi.object({
-  identifier: Joi.string().required().messages({
-    'string.empty': 'identifier parameter cannot be empty.',
-    'any.required': 'identifier parameter is required.'
-  })
+const loadTracksSchema = myzod.object({
+  identifier: myzod.string()
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const { error, value } = loadTracksSchema.validate({
+  const result = loadTracksSchema.try({
     identifier: parsedUrl.searchParams.get('identifier')
   })
 
-  if (error) {
-    logger('warn', 'Tracks', error.details[0].message)
+  if (result instanceof myzod.ValidationError) {
+    const errorMessage = result.message || 'identifier parameter is required.'
+    logger('warn', 'Tracks', errorMessage)
     return sendErrorResponse(
       req,
       res,
       400,
       'missing identifier parameter',
-      error.details[0].message,
+      errorMessage,
       parsedUrl.pathname,
       true
     )
   }
 
-  const identifier = value.identifier
+  const identifier = result.identifier
   logger('debug', 'Tracks', `Loading tracks with identifier: "${identifier}"`)
 
   try {

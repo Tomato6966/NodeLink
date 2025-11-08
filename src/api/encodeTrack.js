@@ -1,36 +1,35 @@
-import Joi from 'joi'
+import myzod from 'myzod'
 import {
   encodeTrack,
   logger,
   sendResponse,
   sendErrorResponse
 } from '../utils.js'
-const encodeTrackSchema = Joi.object({
-  track: Joi.string().required().messages({
-    'string.empty': 'track parameter cannot be empty.',
-    'any.required': 'Missing track parameter.'
-  })
+
+const encodeTrackSchema = myzod.object({
+  track: myzod.string()
 })
 
 function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const { error, value } = encodeTrackSchema.validate({
+  const result = encodeTrackSchema.try({
     track: parsedUrl.searchParams.get('track')
   })
 
-  if (error) {
+  if (result instanceof myzod.ValidationError) {
+    const errorMessage = result.message || 'Missing track parameter.'
     sendErrorResponse(
       req,
       res,
       400,
       'Bad Request',
-      error.details[0].message,
+      errorMessage,
       parsedUrl.pathname,
       true
     )
     return
   }
 
-  const track = value.track
+  const track = result.track
 
   try {
     logger('debug', 'Tracks', `Encoding track: ${track}`)

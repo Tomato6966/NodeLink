@@ -1,4 +1,4 @@
-import Joi from 'joi'
+import myzod from 'myzod'
 import { sendResponse, sendErrorResponse } from '../utils.js'
 
 function getStatus(nodelink, req, res) {
@@ -38,28 +38,26 @@ function getStatus(nodelink, req, res) {
   sendResponse(req, res, status, 200)
 }
 
-const freeAddressSchema = Joi.object({
-  address: Joi.string().required().messages({
-    'string.empty': 'The address field cannot be empty.',
-    'any.required': 'The address field is required.'
-  })
+const freeAddressSchema = myzod.object({
+  address: myzod.string()
 })
 
 function freeAddress(nodelink, req, res) {
-  const { error, value } = freeAddressSchema.validate(req.body)
+  const result = freeAddressSchema.try(req.body)
 
-  if (error) {
+  if (result instanceof myzod.ValidationError) {
+    const errorMessage = result.message || 'The address field is required.'
     return sendErrorResponse(
       req,
       res,
       400,
       'Bad Request',
-      error.details[0].message,
+      errorMessage,
       req.url
     )
   }
 
-  const { address } = value
+  const { address } = result
 
   nodelink.routePlanner.freeIP(address)
   res.writeHead(204)

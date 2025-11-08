@@ -1,4 +1,4 @@
-import Joi from 'joi'
+import myzod from 'myzod'
 import {
   decodeTrack,
   logger,
@@ -6,16 +6,10 @@ import {
   sendErrorResponse
 } from '../utils.js'
 
-const sessionPatchSchema = Joi.object({
-  resuming: Joi.boolean().optional().messages({
-    'boolean.base': 'The resuming value must be a boolean.'
-  }),
-  timeout: Joi.number().integer().min(0).optional().messages({
-    'number.base': 'The timeout value must be a number.',
-    'number.integer': 'The timeout value must be an integer.',
-    'number.min': 'The timeout value must be a non-negative number.'
-  })
-})
+const sessionPatchSchema = myzod.object({
+  resuming: myzod.boolean().optional(),
+  timeout: myzod.number().min(0).optional()
+}).allowUnknownKeys()
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const parts = parsedUrl.pathname.split('/')
@@ -37,25 +31,26 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     parsedUrl.pathname === `/v4/sessions/${sessionId}` &&
     req.method === 'PATCH'
   ) {
-    const { error, value } = sessionPatchSchema.validate(req.body)
+    const result = sessionPatchSchema.try(req.body)
 
-    if (error) {
+    if (result instanceof myzod.ValidationError) {
+      const errorMessage = result.message || 'Invalid PATCH payload'
       logger(
         'warn',
         'Session',
-        `Invalid PATCH payload for session ${sessionId}: ${error.details[0].message}`
+        `Invalid PATCH payload for session ${sessionId}: ${errorMessage}`
       )
       return sendErrorResponse(
         req,
         res,
         400,
         'Bad Request',
-        error.details[0].message,
+        errorMessage,
         parsedUrl.pathname
       )
     }
 
-    const payload = value
+    const payload = result
     logger(
       'debug',
       'Session',
