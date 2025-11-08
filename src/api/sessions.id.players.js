@@ -1,44 +1,43 @@
-import Joi from 'joi'
+import myzod from 'myzod'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
-const filtersSchema = Joi.object().unknown(true)
+// Use unknown() instead of object for filters to preserve all properties
+const filtersSchema = myzod.unknown()
 
-const voiceStateSchema = Joi.object({
-  token: Joi.string().required(),
-  endpoint: Joi.string().required(),
-  sessionId: Joi.string().required()
-}).unknown(true)
+const voiceStateSchema = myzod.object({
+  token: myzod.string(),
+  endpoint: myzod.string(),
+  sessionId: myzod.string()
+}).allowUnknownKeys()
 
-const updatePlayerTrackSchema = Joi.object({
-  encoded: Joi.string().allow(null).optional(),
-  identifier: Joi.string().optional(),
-  userData: Joi.object().unknown(true).optional()
-})
-  .xor('encoded', 'identifier')
-  .unknown(true)
+const updatePlayerTrackSchema = myzod.object({
+  encoded: myzod.string().nullable().optional(),
+  identifier: myzod.string().optional(),
+  userData: myzod.unknown().optional()
+}).allowUnknownKeys()
 
-const updatePlayerSchema = Joi.object({
+const updatePlayerSchema = myzod.object({
   track: updatePlayerTrackSchema.optional(),
-  encodedTrack: Joi.string().allow(null).optional(),
-  position: Joi.number().integer().min(0).optional(),
-  endTime: Joi.number().integer().min(0).allow(null).optional(),
-  volume: Joi.number().integer().min(0).max(1000).optional(),
-  paused: Joi.boolean().optional(),
+  encodedTrack: myzod.string().nullable().optional(),
+  position: myzod.number().min(0).optional(),
+  endTime: myzod.number().min(0).nullable().optional(),
+  volume: myzod.number().min(0).max(1000).optional(),
+  paused: myzod.boolean().optional(),
   filters: filtersSchema.optional(),
-  voice: voiceStateSchema.optional()
-})
-  .min(1)
-  .unknown(true)
+  voice: voiceStateSchema.optional(),
+  guildId: myzod.string().optional()
+}).allowUnknownKeys()
 
-const queryParamsSchema = Joi.object({
-  noReplace: Joi.boolean().empty(null).default(false)
-}).unknown(true)
+const queryParamsSchema = myzod.object({
+  noReplace: myzod.string().optional()
+}).allowUnknownKeys()
 
-const pathSchema = Joi.object({
-  sessionId: Joi.string().required(),
-  guildId: Joi.string()
-    .regex(/^\d{17,20}$/)
-    .optional()
+const pathSchema = myzod.object({
+  sessionId: myzod.string(),
+  guildId: myzod.string().withPredicate(
+    (val) => /^\d{17,20}$/.test(val),
+    'guildId must be 17-20 digits'
+  ).optional()
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
@@ -48,26 +47,22 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     guildId: parts[5]
   }
 
-  const { error: pathError, value: validatedParams } =
-    pathSchema.validate(pathParams)
+  const pathResult = pathSchema.try(pathParams)
 
-  if (pathError) {
-    logger(
-      'warn',
-      'PlayerUpdate',
-      `Invalid path parameters: ${pathError.details[0].message}`
-    )
+  if (pathResult instanceof myzod.ValidationError) {
+    const errorMessage = pathResult.message || 'Invalid path parameters'
+    logger('warn', 'PlayerUpdate', `Invalid path parameters: ${errorMessage}`)
     return sendErrorResponse(
       req,
       res,
       400,
       'Bad Request',
-      pathError.details[0].message,
+      errorMessage,
       parsedUrl.pathname
     )
   }
 
-  const { sessionId, guildId } = validatedParams
+  const { sessionId, guildId } = pathResult
   const session = nodelink.sessions.get(sessionId)
 
   if (!session) {
@@ -106,42 +101,43 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       }
 
       if (req.method === 'PATCH') {
-        const { error: bodyError, value: payload } =
-          updatePlayerSchema.validate(req.body)
+        const bodyResult = updatePlayerSchema.try(req.body)
 
-        if (bodyError) {
+        if (bodyResult instanceof myzod.ValidationError) {
+          const errorMessage = bodyResult.message || 'Invalid payload'
           logger(
             'warn',
             'PlayerUpdate',
-            `Invalid payload for guild ${guildId}:`,
-            bodyError.details[0].message
+            `Invalid payload for guild ${guildId}: ${errorMessage}`
           )
           return sendErrorResponse(
             req,
             res,
             400,
             'Bad Request',
-            bodyError.details[0].message,
+            errorMessage,
             parsedUrl.pathname
           )
         }
 
-        const { error: queryError, value: query } = queryParamsSchema.validate({
+        const payload = bodyResult
+
+        const queryResult = queryParamsSchema.try({
           noReplace: parsedUrl.searchParams.get('noReplace')
         })
 
-        if (queryError) {
+        if (queryResult instanceof myzod.ValidationError) {
           return sendErrorResponse(
             req,
             res,
             400,
             'Bad Request',
-            queryError.details[0].message,
+            queryResult.message,
             parsedUrl.pathname
           )
         }
 
-        const { noReplace } = query
+        const noReplace = queryResult.noReplace === 'true'
 
         logger(
           'debug',

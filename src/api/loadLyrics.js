@@ -1,4 +1,4 @@
-import Joi from 'joi'
+import myzod from 'myzod'
 import {
   decodeTrack,
   logger,
@@ -6,31 +6,29 @@ import {
   sendErrorResponse
 } from '../utils.js'
 
-const loadLyricsSchema = Joi.object({
-  encodedTrack: Joi.string().required().messages({
-    'string.empty': 'encodedTrack parameter cannot be empty.',
-    'any.required': 'Missing encodedTrack parameter.'
-  })
+const loadLyricsSchema = myzod.object({
+  encodedTrack: myzod.string()
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const { error, value } = loadLyricsSchema.validate({
+  const result = loadLyricsSchema.try({
     encodedTrack: parsedUrl.searchParams.get('encodedTrack')
   })
 
-  if (error) {
-    logger('warn', 'Lyrics', error.details[0].message)
+  if (result instanceof myzod.ValidationError) {
+    const errorMessage = result.message || 'Missing encodedTrack parameter.'
+    logger('warn', 'Lyrics', errorMessage)
     return sendErrorResponse(
       req,
       res,
       400,
       'Bad Request',
-      error.details[0].message,
+      errorMessage,
       parsedUrl.pathname
     )
   }
 
-  const encodedTrack = value.encodedTrack
+  const encodedTrack = result.encodedTrack
 
   try {
     const decodedTrack = decodeTrack(encodedTrack)

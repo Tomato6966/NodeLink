@@ -1,4 +1,4 @@
-import Joi from 'joi'
+import myzod from 'myzod'
 import {
   encodeTrack,
   logger,
@@ -6,39 +6,33 @@ import {
   sendErrorResponse
 } from '../utils.js'
 
-const encodedTracksSchema = Joi.array()
-  .items(
-    Joi.object({
-      encoded: Joi.string().required(),
-      info: Joi.object().required()
-    }).unknown(true) // Permitir outras propriedades no objeto track
+const encodedTracksSchema = myzod
+  .array(
+    myzod.object({
+      encoded: myzod.string(),
+      info: myzod.object({}).allowUnknownKeys()
+    }).allowUnknownKeys()
   )
   .min(1)
-  .messages({
-    'array.base': 'tracks parameter must be an array.',
-    'array.empty': 'tracks parameter cannot be an empty array.',
-    'array.min': 'tracks parameter cannot be an empty array.',
-    'string.base': 'Each item in tracks must be a string.',
-    'any.required': 'tracks parameter is required.'
-  })
 
 function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const { error, value } = encodedTracksSchema.validate(req.body)
+  const result = encodedTracksSchema.try(req.body)
 
-  if (error) {
+  if (result instanceof myzod.ValidationError) {
+    const errorMessage = result.message || 'tracks parameter must be an array and cannot be empty.'
     sendErrorResponse(
       req,
       res,
       400,
       'Invalid request',
-      error.details[0].message,
+      errorMessage,
       parsedUrl.pathname,
       true
     )
     return
   }
 
-  const tracks = value
+  const tracks = result
 
   const encodedTracks = []
   logger('debug', 'Tracks', `Encoding ${tracks.length} tracks.`)

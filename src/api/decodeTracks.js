@@ -1,4 +1,4 @@
-import Joi from 'joi'
+import myzod from 'myzod'
 import {
   decodeTrack,
   logger,
@@ -6,34 +6,26 @@ import {
   sendErrorResponse
 } from '../utils.js'
 
-const decodeTracksSchema = Joi.array()
-  .items(Joi.string().required())
-  .min(1)
-  .messages({
-    'array.base': 'encodedTracks parameter must be an array.',
-    'array.empty': 'encodedTracks parameter cannot be an empty array.',
-    'array.min': 'encodedTracks parameter cannot be an empty array.',
-    'string.base': 'Each item in encodedTracks must be a string.',
-    'any.required': 'encodedTracks parameter is required.'
-  })
+const decodeTracksSchema = myzod.array(myzod.string()).min(1)
 
 function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const { error, value } = decodeTracksSchema.validate(req.body)
+  const result = decodeTracksSchema.try(req.body)
 
-  if (error) {
+  if (result instanceof myzod.ValidationError) {
+    const errorMessage = result.message || 'encodedTracks parameter must be a non-empty array of strings.'
     sendErrorResponse(
       req,
       res,
       400,
       'Invalid request',
-      error.details[0].message,
+      errorMessage,
       parsedUrl.pathname,
       true
     )
     return
   }
 
-  const encodedTracks = value // Joi já validou e retornou o array
+  const encodedTracks = result
 
   const decodedTracks = []
   logger('debug', 'Tracks', `Decoding ${encodedTracks.length} tracks.`)
