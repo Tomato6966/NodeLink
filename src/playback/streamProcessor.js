@@ -23,6 +23,14 @@ class BaseAudioResource {
   _end() {
     if (!this.pipes) return
 
+    if (this.pipes[0]?.stopHls) {
+      this.pipes[0].stopHls()
+    }
+
+    if (this.pipes[0]?.responseStream && !this.pipes[0].responseStream.destroyed) {
+      this.pipes[0].responseStream.destroy()
+    }
+
     for (const pipe of this.pipes) {
       pipe.unpipe?.()
       pipe.destroy?.()

@@ -20,14 +20,18 @@ import Web from './clients/Web.js'
 async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
   const segmentQueue = []
   const processedSegments = new Set()
-  let stop = false
+  const stopRef = { stop: false }
 
   outputStream.on('close', () => {
-    stop = true
+    stopRef.stop = true
   })
   outputStream.on('error', () => {
-    stop = true
+    stopRef.stop = true
   })
+
+  outputStream.stopHls = () => {
+    stopRef.stop = true
+  }
 
   const fetchWithUserAgent = async (url) => {
     return http1makeRequest(url, {
@@ -36,7 +40,7 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
   }
 
   const playlistFetcher = async (playlistUrl) => {
-    while (!stop) {
+    while (!stopRef.stop) {
       try {
         const {
           body: playlistContent,
@@ -75,7 +79,7 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
         }
 
         if (playlistContent.includes('#EXT-X-ENDLIST')) {
-          stop = true
+          stopRef.stop = true
         }
 
         await new Promise((resolve) =>
@@ -83,13 +87,13 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
         )
       } catch (e) {
         logger('error', 'YouTube-HLS-Fetcher', `Error: ${e.message}`)
-        stop = true
+        stopRef.stop = true
       }
     }
   }
 
   const segmentDownloader = async () => {
-    while (!stop || segmentQueue.length > 0) {
+    while (!stopRef.stop || segmentQueue.length > 0) {
       if (segmentQueue.length === 0) {
         await new Promise((resolve) => setTimeout(resolve, 100))
         continue
@@ -97,7 +101,7 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
 
       const segmentUrl = segmentQueue.shift()
 
-      if (stop) continue
+      if (stopRef.stop) continue
 
       let segmentStream = null
       try {
@@ -136,7 +140,7 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
         if (segmentStream && !segmentStream.destroyed) {
           segmentStream.destroy()
         }
-        if (!stop && e.message !== 'aborted') {
+        if (!stopRef.stop && e.message !== 'aborted') {
           logger(
             'error',
             'YouTube-HLS-Downloader',
@@ -797,11 +801,16 @@ export default class YouTubeSource {
         throw new Error(`HTTP status ${response.statusCode}`)
 
       const stream = new PassThrough()
+      // vou salvar a stream pro streamConnector, dai o codigo consegue se comunicar direito, fechando a stream do youtube
+      stream.responseStream = response.stream
 
       const cleanupListeners = () => {
         response.stream.removeListener('data', dataHandler)
         response.stream.removeListener('end', endHandler)
         response.stream.removeListener('error', errorHandler)
+        if (response.stream && !response.stream.destroyed) {
+          response.stream.destroy()
+        }
       }
 
       const dataHandler = (chunk) => stream.write(chunk)
@@ -811,7 +820,7 @@ export default class YouTubeSource {
       }
       const errorHandler = (error) => {
         cleanupListeners()
-        
+
         const isClientDisconnect = error.message === 'aborted' || error.code === 'ECONNRESET'
         if (isClientDisconnect) {
           logger('debug', 'YouTube', 'Client disconnected from stream')
@@ -820,7 +829,7 @@ export default class YouTubeSource {
           }
           return
         }
-        
+
         logger('error', 'YouTube', `Stream error: ${error.message}`)
         if (!stream.destroyed) {
           stream.emit('error', new Error(`Stream failed: ${error.message}`))
