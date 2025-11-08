@@ -1,6 +1,8 @@
 import { SAMPLE_RATE } from '../../constants.js'
 import { clamp16Bit } from './dsp/clamp16Bit.js'
 
+const MAX_OUTPUT_GAIN = 0.98
+
 export default class Karaoke {
   constructor() {
     this.priority = 10
@@ -17,7 +19,7 @@ export default class Karaoke {
     this.hp_left_x1 = this.hp_left_x2 = this.hp_left_y1 = this.hp_left_y2 = 0
     this.hp_right_x1 = this.hp_right_x2 = this.hp_right_y1 = this.hp_right_y2 = 0
 
-    this._prevGain = 1
+    this._prevGain = MAX_OUTPUT_GAIN
     this._inv32768 = 1 / 32768
   }
 
@@ -28,7 +30,7 @@ export default class Karaoke {
       this.hp_b1 = this.hp_b2 = this.hp_a1 = this.hp_a2 = 0
       return
     }
-    const fc = Math.max(1, Math.min(SAMPLE_RATE * 0.49, this.filterBand)) // peguei essa parte mais pelo nyquist do audacity
+    const fc = Math.max(1, Math.min(SAMPLE_RATE * 0.49, this.filterBand))
     const width = Math.max(1e-6, this.filterWidth)
     const Q = Math.max(0.0001, fc / width)
 
@@ -61,7 +63,6 @@ export default class Karaoke {
     this.hp_b2 /= hpA0
   }
 
-
   update(filters) {
     const { level = 0, monoLevel = 0, filterBand = 0, filterWidth = 0 } = filters.karaoke || {}
     this.level = Math.max(0, Math.min(1, level))
@@ -81,7 +82,6 @@ export default class Karaoke {
     const frames = chunk.length >> 2
     if (frames === 0) return chunk
 
-    // um cache pra rodar a magia
     const inv32768 = this._inv32768
     const lp_b0 = this.lp_b0, lp_b1 = this.lp_b1, lp_b2 = this.lp_b2, lp_a1 = this.lp_a1, lp_a2 = this.lp_a2
     const hp_b0 = this.hp_b0, hp_b1 = this.hp_b1, hp_b2 = this.hp_b2, hp_a1 = this.hp_a1, hp_a2 = this.hp_a2
@@ -112,14 +112,12 @@ export default class Karaoke {
       let right = chunk.readInt16LE(i + 2) * inv32768
 
       if (monoLevel > 0) {
-        const mid = (left + right) * 0.5 // mid
+        const mid = (left + right) * 0.5
         left = left - mid * monoLevel
         right = right - mid * monoLevel
       }
 
       if (doFilter) {
-
-        // chegou aqui, e tanto calculo que eu quero choraro no banho... :-P
         const lowLeft = lp_b0 * left + lp_b1 * lpLx1 + lp_b2 * lpLx2 - lp_a1 * lpLy1 - lp_a2 * lpLy2
         lpLx2 = lpLx1; lpLx1 = left; lpLy2 = lpLy1; lpLy1 = lowLeft
         const lowRight = lp_b0 * right + lp_b1 * lpRx1 + lp_b2 * lpRx2 - lp_a1 * lpRy1 - lp_a2 * lpRy2
@@ -149,19 +147,32 @@ export default class Karaoke {
 
     let gain = 1
     if (processedEnergy > 1e-15) gain = Math.sqrt(Math.max(1e-12, originalEnergy) / processedEnergy)
-    const prev = this._prevGain || 1
-    const smoothedTarget = prev + (gain - prev) * 0.06
+    gain = Math.min(gain, MAX_OUTPUT_GAIN)
+
+    const prev = this._prevGain || MAX_OUTPUT_GAIN
+    const attackFactor = gain > prev ? 0.06 : 0.3
+    const smoothedTarget = prev + (gain - prev) * attackFactor
     let current = prev
     const step = (smoothedTarget - current) / Math.max(1, frames)
+
     let wi = 0
     for (let i = 0; i < chunk.length; i += 4) {
       current += step
-      const outL = processedLeft[wi] * current
-      const outR = processedRight[wi] * current
+      let outL = processedLeft[wi] * current
+      let outR = processedRight[wi] * current
+
+      const peak = Math.max(Math.abs(outL), Math.abs(outR))
+      if (peak > 0.9999) {
+        const limiterScale = 0.9999 / peak
+        outL *= limiterScale
+        outR *= limiterScale
+      }
+
       chunk.writeInt16LE(clamp16Bit(outL * 32768), i)
       chunk.writeInt16LE(clamp16Bit(outR * 32768), i + 2)
       wi++
     }
+
     this.lp_left_x1 = lpLx1; this.lp_left_x2 = lpLx2; this.lp_left_y1 = lpLy1; this.lp_left_y2 = lpLy2
     this.lp_right_x1 = lpRx1; this.lp_right_x2 = lpRx2; this.lp_right_y1 = lpRy1; this.lp_right_y2 = lpRy2
     this.hp_left_x1 = hpLx1; this.hp_left_x2 = hpLx2; this.hp_left_y1 = hpLy1; this.hp_left_y2 = hpLy2
