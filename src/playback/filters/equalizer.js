@@ -67,7 +67,7 @@ export default class Equalizer {
         this.bandGains.fill(0)
       }
       this.isEnabled = false
-      this.makeupGain = DEFAULT_MAKEUP_GAIN 
+      this.makeupGain = DEFAULT_MAKEUP_GAIN
       return
     }
 
@@ -92,8 +92,8 @@ export default class Equalizer {
       }
     }
 
-    if (positiveGainSum > 2.5) { 
-      this.makeupGain = DEFAULT_MAKEUP_GAIN / (1.0 + (positiveGainSum - 2.5) * 0.5)
+    if (positiveGainSum > 1.0) {
+      this.makeupGain = DEFAULT_MAKEUP_GAIN / (1.0 + (positiveGainSum - 1.0) * 0.5)
     } else {
       this.makeupGain = DEFAULT_MAKEUP_GAIN
     }
@@ -135,8 +135,8 @@ export default class Equalizer {
       const outputLeft = resultLeft * this.makeupGain
       const outputRight = resultRight * this.makeupGain
 
-      const finalLeft = Math.min(Math.max(outputLeft, -1.0), 1.0)
-      const finalRight = Math.min(Math.max(outputRight, -1.0), 1.0)
+      const finalLeft = Math.tanh(outputLeft)
+      const finalRight = Math.tanh(outputRight)
 
       chunk.writeInt16LE(Math.round(finalLeft * 32767), offset)
       chunk.writeInt16LE(Math.round(finalRight * 32767), offset + 2)
