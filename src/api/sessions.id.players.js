@@ -29,8 +29,11 @@ const updatePlayerSchema = myzod.object({
 }).allowUnknownKeys()
 
 const queryParamsSchema = myzod.object({
-  noReplace: myzod.string().optional()
+  noReplace: myzod
+    .union([myzod.string(), myzod.null()])
+    .optional()
 }).allowUnknownKeys()
+
 
 const pathSchema = myzod.object({
   sessionId: myzod.string(),
@@ -184,6 +187,14 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             'warn',
             'PlayerUpdate',
             'The `encodedTrack` field is deprecated. Use `track.encoded` instead.'
+          )
+          return sendErrorResponse(
+            req,
+            res,
+            400,
+            'Bad Request',
+            'The `encodedTrack` field is deprecated. Use `track.encoded` instead.',
+            parsedUrl.pathname
           )
         }
 
