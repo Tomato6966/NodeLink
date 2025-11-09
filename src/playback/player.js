@@ -849,9 +849,13 @@ export class Player {
         ) {
           delete newFilterSettings[key]
         } else {
-          newFilterSettings[key] = {
-            ...(newFilterSettings[key] || {}),
-            ...filters.filters[key]
+          if (key === 'equalizer' && Array.isArray(filters.filters[key])) {
+            newFilterSettings[key] = filters.filters[key]
+          } else {
+            newFilterSettings[key] = {
+              ...(newFilterSettings[key] || {}),
+              ...filters.filters[key]
+            }
           }
         }
       }

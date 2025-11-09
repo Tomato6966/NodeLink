@@ -1,5 +1,4 @@
 import { SAMPLE_RATE } from '../../constants.js'
-import { clamp16Bit } from './dsp/clamp16Bit.js'
 
 const BAND_FREQUENCIES = [
   25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000,
@@ -7,173 +6,140 @@ const BAND_FREQUENCIES = [
 ]
 
 const BAND_Q_FACTORS = [
-  1.2, 1.2, 1.1, 1.0, 0.9, 0.9, 0.8, 0.8, 0.9, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4
+  4.32, 4.32, 4.32, 4.32, 4.32, 4.32, 4.32, 4.32, 4.32, 4.32, 4.32, 4.32, 4.32, 4.32, 4.32
 ]
 
-const MAX_GAIN_DB = 12.0
-const MIN_GAIN_DB = -12.0
+const BAND_COUNT = 15
+const DEFAULT_MAKEUP_GAIN = 4.0
 
 export default class Equalizer {
   constructor() {
     this.priority = 10
     this.filtersState = []
     this.filtersCoefficients = []
+    this.bandGains = new Float32Array(BAND_COUNT)
     this.isEnabled = false
+    
+    this.makeupGain = DEFAULT_MAKEUP_GAIN
+    
+    this.initFilters()
+    this.calculateAllBandCoefficients()
   }
 
   initFilters() {
     this.filtersState = []
-    this.filtersCoefficients = []
-    for (let i = 0; i < BAND_FREQUENCIES.length; i++) {
+    for (let i = 0; i < BAND_COUNT; i++) {
       this.filtersState.push({
-        xl1: 0,
-        xl2: 0,
-        yl1: 0,
-        yl2: 0,
-        xr1: 0,
-        xr2: 0,
-        yr1: 0,
-        yr2: 0
-      })
-      this.filtersCoefficients.push({
-        b0: 1,
-        b1: 0,
-        b2: 0,
-        a1: 0,
-        a2: 0
+        l_x1: 0, l_x2: 0, l_y1: 0, l_y2: 0,
+        r_x1: 0, r_x2: 0, r_y1: 0, r_y2: 0
       })
     }
   }
 
-  updateBandCoefficients(bandIndex, gain) {
+  calculateBandpassCoefficients(bandIndex) {
     const freq = BAND_FREQUENCIES[bandIndex]
-    if (!freq) return
-
-    const gainDb = Math.max(MIN_GAIN_DB, Math.min(MAX_GAIN_DB, gain * 15.0))
-
-    if (Math.abs(gainDb) < 0.01) {
-      this.filtersCoefficients[bandIndex] = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }
-      return
-    }
-
-    const A = 10 ** (gainDb / 40)
+    const Q = BAND_Q_FACTORS[bandIndex]
     const omega0 = (2 * Math.PI * freq) / SAMPLE_RATE
     const sin_omega0 = Math.sin(omega0)
     const cos_omega0 = Math.cos(omega0)
-    
-    const Q = BAND_Q_FACTORS[bandIndex]
     const alpha = sin_omega0 / (2 * Q)
-
-    const b0 = 1 + alpha * A
-    const b1 = -2 * cos_omega0
-    const b2 = 1 - alpha * A
-    let a0 = 1 + alpha / A
-    const a1 = -2 * cos_omega0
-    const a2 = 1 - alpha / A
-
-    if (Math.abs(a0) < 1e-10) {
-      a0 = 1e-10
-    }
-
+    const b0 = alpha, b1 = 0, b2 = -alpha
+    const a0 = 1 + alpha, a1 = -2 * cos_omega0, a2 = 1 - alpha
     this.filtersCoefficients[bandIndex] = {
-      b0: b0 / a0,
-      b1: b1 / a0,
-      b2: b2 / a0,
-      a1: a1 / a0,
-      a2: a2 / a0
+      b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0
+    }
+  }
+
+  calculateAllBandCoefficients() {
+    this.filtersCoefficients = []
+    for (let i = 0; i < BAND_COUNT; i++) {
+      this.calculateBandpassCoefficients(i)
     }
   }
 
   update(filters) {
-    if (!this.filtersState.length || !this.filtersCoefficients.length) {
-      this.initFilters()
-    }
-
     const equalizerBands = Array.isArray(filters.equalizer)
       ? filters.equalizer
       : []
 
     if (equalizerBands.length === 0) {
+      if (this.isEnabled) {
+        this.bandGains.fill(0)
+      }
       this.isEnabled = false
+      this.makeupGain = DEFAULT_MAKEUP_GAIN
       return
     }
 
     this.isEnabled = true
+    const updatedBands = new Set(equalizerBands.map(b => b.band))
 
-    for (let i = 0; i < BAND_FREQUENCIES.length; i++) {
-      this.filtersCoefficients[i] = { b0: 1, b1: 0, b2: 0, a1: 0, a2: 0 }
-      this.filtersState[i] = {
-        xl1: 0,
-        xl2: 0,
-        yl1: 0,
-        yl2: 0,
-        xr1: 0,
-        xr2: 0,
-        yr1: 0,
-        yr2: 0
-      }
+    for (let i = 0; i < BAND_COUNT; i++) {
+      if (!updatedBands.has(i)) this.bandGains[i] = 0
     }
 
     for (const bandSetting of equalizerBands) {
       const { band, gain = 0 } = bandSetting
-      if (band >= 0 && band < BAND_FREQUENCIES.length) {
-        this.updateBandCoefficients(band, gain)
+      if (band >= 0 && band < BAND_COUNT) {
+        this.bandGains[band] = Math.max(Math.min(gain, 1.0), -0.25)
       }
+    }
+    
+    let positiveGainSum = 0
+    for (let i = 0; i < BAND_COUNT; i++) {
+      if (this.bandGains[i] > 0) {
+        positiveGainSum += this.bandGains[i]
+      }
+    }
+
+    if (positiveGainSum > 1.0) {
+      this.makeupGain = DEFAULT_MAKEUP_GAIN / (1.0 + (positiveGainSum - 1.0) * 0.5)
+    } else {
+      this.makeupGain = DEFAULT_MAKEUP_GAIN
     }
   }
 
   process(chunk) {
-    if (!this.isEnabled || !this.filtersState.length) {
+    if (!this.isEnabled) {
       return chunk
     }
 
-    for (let i = 0; i < chunk.length; i += 4) {
-      let currentLeftSample = chunk.readInt16LE(i)
-      let currentRightSample = chunk.readInt16LE(i + 2)
+    const samples = chunk.length / 4
 
-      for (let b = 0; b < BAND_FREQUENCIES.length; b++) {
+    for (let i = 0; i < samples; i++) {
+      const offset = i * 4
+      
+      const leftFloat = chunk.readInt16LE(offset) / 32768.0
+      const rightFloat = chunk.readInt16LE(offset + 2) / 32768.0
+
+      let resultLeft = leftFloat * 0.25
+      let resultRight = rightFloat * 0.25
+
+      for (let b = 0; b < BAND_COUNT; b++) {
         const coeffs = this.filtersCoefficients[b]
         const state = this.filtersState[b]
+        const gain = this.bandGains[b]
 
-        const newLeftSample =
-          coeffs.b0 * currentLeftSample +
-          coeffs.b1 * state.xl1 +
-          coeffs.b2 * state.xl2 -
-          coeffs.a1 * state.yl1 -
-          coeffs.a2 * state.yl2
-        
-        if (!Number.isFinite(newLeftSample)) {
-          state.xl1 = state.xl2 = state.yl1 = state.yl2 = 0
-          continue
-        }
-        
-        state.xl2 = state.xl1
-        state.xl1 = currentLeftSample
-        state.yl2 = state.yl1
-        state.yl1 = newLeftSample
-        currentLeftSample = newLeftSample
+        let bandResultLeft = (coeffs.b0 * leftFloat) + (coeffs.b1 * state.l_x1) + (coeffs.b2 * state.l_x2) - (coeffs.a1 * state.l_y1) - (coeffs.a2 * state.l_y2)
+        if (!Number.isFinite(bandResultLeft)) { bandResultLeft = 0; state.l_x1=0; state.l_x2=0; state.l_y1=0; state.l_y2=0; }
+        else { state.l_x2 = state.l_x1; state.l_x1 = leftFloat; state.l_y2 = state.l_y1; state.l_y1 = bandResultLeft; }
 
-        const newRightSample =
-          coeffs.b0 * currentRightSample +
-          coeffs.b1 * state.xr1 +
-          coeffs.b2 * state.xr2 -
-          coeffs.a1 * state.yr1 -
-          coeffs.a2 * state.yr2
-        
-        if (!Number.isFinite(newRightSample)) {
-          state.xr1 = state.xr2 = state.yr1 = state.yr2 = 0
-          continue
-        }
-        
-        state.xr2 = state.xr1
-        state.xr1 = currentRightSample
-        state.yr2 = state.yr1
-        state.yr1 = newRightSample
-        currentRightSample = newRightSample
+        let bandResultRight = (coeffs.b0 * rightFloat) + (coeffs.b1 * state.r_x1) + (coeffs.b2 * state.r_x2) - (coeffs.a1 * state.r_y1) - (coeffs.a2 * state.r_y2)
+        if (!Number.isFinite(bandResultRight)) { bandResultRight = 0; state.r_x1=0; state.r_x2=0; state.r_y1=0; state.r_y2=0; }
+        else { state.r_x2 = state.r_x1; state.r_x1 = rightFloat; state.r_y2 = state.r_y1; state.r_y1 = bandResultRight; }
+
+        resultLeft += bandResultLeft * gain
+        resultRight += bandResultRight * gain
       }
 
-      chunk.writeInt16LE(clamp16Bit(currentLeftSample), i)
-      chunk.writeInt16LE(clamp16Bit(currentRightSample), i + 2)
+      const outputLeft = resultLeft * this.makeupGain
+      const outputRight = resultRight * this.makeupGain
+
+      const finalLeft = Math.tanh(outputLeft)
+      const finalRight = Math.tanh(outputRight)
+
+      chunk.writeInt16LE(Math.round(finalLeft * 32767), offset)
+      chunk.writeInt16LE(Math.round(finalRight * 32767), offset + 2)
     }
 
     return chunk
