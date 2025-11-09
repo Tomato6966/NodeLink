@@ -7,8 +7,8 @@ import { OggVorbisDecoder } from '@wasm-audio-decoders/ogg-vorbis'
 import * as MP4Box from 'mp4box'
 import prism from 'prism-media'
 import { SupportedFormats, normalizeFormat } from '../constants.js'
-import { http1makeRequest } from '../utils.js'
 import { FiltersManager } from './filtersManager.js'
+import { VolumeTransformer } from './VolumeTransformer.js'
 
 const require = createRequire(import.meta.url)
 const { MPEGDecoder } = require('mpg123-decoder')
@@ -49,7 +49,7 @@ class BaseAudioResource {
     if (!this.pipes) return
 
     const volumeTransformer = this.pipes.find(
-      (pipe) => pipe instanceof prism.VolumeTransformer
+      (pipe) => pipe instanceof VolumeTransformer
     )
     if (volumeTransformer) {
       volumeTransformer.setVolume(volume)
@@ -1333,7 +1333,7 @@ class StreamAudioResource extends BaseAudioResource {
         }
       }
 
-      const volume = new prism.VolumeTransformer({ type: 's16le' })
+      const volume = new VolumeTransformer({ type: 's16le' })
       const filters = new FiltersManager(nodelink, initialFilters)
       const opus = new prism.opus.Encoder({
         rate: 48000,
