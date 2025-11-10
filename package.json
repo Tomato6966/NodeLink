@@ -2,8 +2,9 @@
   "name": "nodelink",
   "version": "3.0.0",
   "scripts": {
+    "prebuild": "node scripts/prebuild.js",
     "start": "node --dns-result-order=ipv4first --openssl-legacy-provider src/index.js",
-    "startbun": "bun run --dns-result-order=ipv4first src/index.js"
+    "start:bun": "bun run --dns-result-order=ipv4first src/index.js"
   },
   "type": "module",
   "main": "src/index.js",
