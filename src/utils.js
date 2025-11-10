@@ -153,14 +153,22 @@ function sendResponse(req, res, data, status, trace = false) {
 
   let finalData = data
   if (data.trace && !trace) {
-    const { trace, ...rest } = data
+    const { trace: _, ...rest } = data
     finalData = rest
   }
 
   headers['Content-Type'] = 'application/json'
   const jsonData = JSON.stringify(finalData)
-
+  const buffer = Buffer.from(jsonData)
   const encoding = req.headers['accept-encoding'] || ''
+
+  if (process.isBun) {
+    headers['Content-Length'] = buffer.byteLength
+    res.writeHead(status, headers)
+    res.end(buffer)
+    return
+  }
+
   const compressions = [
     { type: 'br', method: zlib.brotliCompress },
     { type: 'gzip', method: zlib.gzip },
@@ -170,11 +178,14 @@ function sendResponse(req, res, data, status, trace = false) {
   for (const { type, method } of compressions) {
     if (encoding.includes(type)) {
       headers['Content-Encoding'] = type
-      method(jsonData, (err, result) => {
+      method(buffer, (err, result) => {
         if (err) {
-          res.writeHead(500, {})
-          res.end()
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: 'Compression failed' }))
           return
+        }
+        if (process.isBun) {
+          headers['Content-Length'] = result.byteLength
         }
         res.writeHead(status, headers)
         res.end(result)
@@ -183,8 +194,9 @@ function sendResponse(req, res, data, status, trace = false) {
     }
   }
 
+  headers['Content-Length'] = buffer.byteLength
   res.writeHead(status, headers)
-  res.end(jsonData)
+  res.end(buffer)
 }
 
 function getGitInfo() {

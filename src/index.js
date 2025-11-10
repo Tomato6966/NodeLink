@@ -289,10 +289,15 @@ class NodelinkServer {
           'Server',
           `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
         )
-
-        this.socket.handleUpgrade(request, socket, head, {}, (ws) =>
-          this.socket.emit('/v4/websocket', ws, request, clientInfo, sessionId)
-        )
+        if (process.isBun) {
+          this.socket.handleUpgrade(request, socket, head, (ws) =>
+            this.socket.emit('/v4/websocket', ws, request, clientInfo, sessionId)
+          )
+        } else {
+          this.socket.handleUpgrade(request, socket, head, {}, (ws) =>
+            this.socket.emit('/v4/websocket', ws, request, clientInfo, sessionId)
+          )
+        }
       } else {
         logger(
           'warn',
@@ -499,7 +504,7 @@ class NodelinkServer {
         try {
           try {
             handle.pause?.()
-          } catch (e) {}
+          } catch (e) { }
           this.server.emit('connection', handle)
         } catch (err) {
           logger(
@@ -509,7 +514,7 @@ class NodelinkServer {
           )
           try {
             handle.destroy?.()
-          } catch (e) {}
+          } catch (e) { }
         }
       })
     } else {
