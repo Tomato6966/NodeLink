@@ -200,6 +200,17 @@ function sendResponse(req, res, data, status, trace = false) {
 }
 
 function getGitInfo() {
+  const isBun = typeof Bun !== "undefined" && !!process.versions.bun;
+  // bun is too weird
+  if (isBun) {
+    logger("info", "Git", "Skipping update check (compiled build).");
+    return {
+      branch: 'unknown',
+      commit: 'unknown',
+      commitTime: -1
+    }
+  }
+
   if (gitInfoCache) return gitInfoCache
 
   try {
@@ -1041,6 +1052,13 @@ async function loadHLSPlaylist(url, stream) {
 }
 
 async function checkForUpdates() {
+  const isBun = typeof Bun !== "undefined" && !!process.versions.bun;
+  // bun is too weird
+  if (isBun) {
+    logger("info", "Git", "Skipping update check (compiled build).");
+    return;
+  }
+
   logger('info', 'Git', 'Checking for updates...')
   try {
     execSync('git fetch', { stdio: 'ignore' })
