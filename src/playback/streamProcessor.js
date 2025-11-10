@@ -5,10 +5,11 @@ import { seekableStream, SeekError } from '@ecliptia/seekable-stream'
 import { FLACDecoder } from '@wasm-audio-decoders/flac'
 import { OggVorbisDecoder } from '@wasm-audio-decoders/ogg-vorbis'
 import * as MP4Box from 'mp4box'
-import prism from 'prism-media'
 import { SupportedFormats, normalizeFormat } from '../constants.js'
 import { FiltersManager } from './filtersManager.js'
 import { VolumeTransformer } from './VolumeTransformer.js'
+import { Encoder as OpusEncoder, Decoder as OpusDecoder } from './opus/Opus.js'
+import WebmOpusDemuxer from './demuxers/WebmOpus.js'
 
 const require = createRequire(import.meta.url)
 const { MPEGDecoder } = require('mpg123-decoder')
@@ -1301,13 +1302,13 @@ class StreamAudioResource extends BaseAudioResource {
         }
         case SupportedFormats.OPUS: {
           const lowerType = type.toLowerCase()
-          const decoder = new prism.opus.Decoder({
+          const decoder = new OpusDecoder({
             rate: 48000,
             channels: 2,
             frameSize: 960
           })
           if (lowerType.includes('webm')) {
-            const demuxer = new prism.opus.WebmDemuxer()
+            const demuxer = new WebmOpusDemuxer()
             pcmStream = stream.pipe(demuxer).pipe(decoder)
             this.pipes.push(demuxer, decoder)
           } else {
@@ -1335,7 +1336,7 @@ class StreamAudioResource extends BaseAudioResource {
 
       const volume = new VolumeTransformer({ type: 's16le' })
       const filters = new FiltersManager(nodelink, initialFilters)
-      const opus = new prism.opus.Encoder({
+      const opus = new OpusEncoder({
         rate: 48000,
         channels: 2,
         frameSize: 960
