@@ -104,7 +104,7 @@ export default {
       clients: {
         search: ['Android'], // Clients used for searching tracks
         playback: ['AndroidVR', 'TV', 'TVEmbedded', 'IOS'], // Clients used for playback/streaming
-        resolve: ['Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
+        resolve: ['AndroidVR', 'TV', 'TVEmbedded', 'IOS', 'Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
         settings: {
           TV: {
             refreshToken: ''
