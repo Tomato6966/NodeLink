@@ -1,7 +1,5 @@
 import cluster from 'node:cluster'
 import http from 'node:http'
-import net from 'node:net'
-import os from 'node:os'
 import WebSocketServer from '@performanc/pwsl-server'
 
 import requestHandler from './api/index.js'

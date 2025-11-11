@@ -83,5 +83,5 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
 export default {
   handler,
-  methods: ['PATCH']
+  methods: ['PATCH', 'GET']
 }
