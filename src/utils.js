@@ -292,7 +292,7 @@ function getStats(nodelink) {
           if (!player.connection) continue
           const sent = player.connection.statistics.packetsSent || 0
           const nulled = player.connection.statistics.packetsLost || 0
-          const expectedFrames = player.connection.statistics.packetsExpect || 0
+          const expectedFrames = player.connection.statistics.packetsExpected || 0
           frameStats.sent += sent
           frameStats.nulled += nulled
           frameStats.expected += expectedFrames
@@ -308,7 +308,7 @@ function getStats(nodelink) {
   const cpu = {
     cores,
     systemLoad: load,
-    nodelinkLoad: (aggregatedNodelinkLoad / cores).toFixed(2)
+    nodelinkLoad: Number.parseFloat((aggregatedNodelinkLoad / cores).toFixed(2))
   }
 
   return {
