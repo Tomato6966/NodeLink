@@ -52,6 +52,8 @@ async function loadRoutes() {
     }
   }
 
+  dynamicRoutes.sort((a, b) => b[0].source.length - a[0].source.length)
+
   return { staticRoutes, dynamicRoutes }
 }
 

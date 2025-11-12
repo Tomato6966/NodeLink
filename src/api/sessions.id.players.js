@@ -78,16 +78,31 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       parsedUrl.pathname
     )
   }
-
+  
   if (!guildId && parsedUrl.pathname === `/v4/sessions/${sessionId}/players`) {
-    if (req.method === 'GET') {
-      const players = await Promise.all(
-        Array.from(session.players.players.values()).map((player) =>
-          session.players.toJSON(player.guildId)
+      if (req.method === 'GET') {
+        if (nodelink.workerManager) {
+          const playerKeys = Array.from(nodelink.workerManager.guildToWorker.keys());
+          const sessionPlayerKeys = playerKeys.filter(key => key.endsWith(`:${session.userId}`));
+          const guildIds = sessionPlayerKeys.map(key => key.split(':')[0]);
+      
+          const players = await Promise.all(
+            guildIds.map(gid => session.players.toJSON(gid).catch(err => {
+              logger('error', 'PlayerList', `Failed to get player JSON for guild ${gid}: ${err.message}`);
+              return null;
+            }))
+          );
+      
+          return sendResponse(req, res, players.filter(p => p !== null), 200);
+        }
+
+        const players = await Promise.all(
+          Array.from(session.players.players.values()).map((player) =>
+            session.players.toJSON(player.guildId)
+          )
         )
-      )
-      return sendResponse(req, res, players, 200)
-    }
+        return sendResponse(req, res, players, 200)
+      }
   }
 
   if (guildId) {

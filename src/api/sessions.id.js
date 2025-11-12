@@ -16,7 +16,6 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const sessionId = parts[3]
 
   const session = nodelink.sessions.get(sessionId)
-
   if (!session) {
     return sendErrorResponse(
       req,
@@ -83,5 +82,5 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
 export default {
   handler,
-  methods: ['PATCH', 'GET']
+  methods: ['PATCH']
 }
