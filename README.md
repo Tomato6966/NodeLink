@@ -13,7 +13,7 @@
 
 ## Prerequisites
 
-* **Node.js** v18 or higher (v20 recommended)
+* **Node.js** v22 or higher (v24 recommended)
 * **Git**
 
 ---
