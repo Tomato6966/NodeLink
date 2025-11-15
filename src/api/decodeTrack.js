@@ -33,26 +33,7 @@ function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
   try {
     logger('debug', 'Tracks', `Decoding track: ${encodedTrack}`)
-    let decodedTrack
-    try {
-      decodedTrack = decodeTrack(encodedTrack)
-    } catch (err) {
-      logger(
-        'warn',
-        'Tracks',
-        `Invalid encoded track received: ${encodedTrack} - ${err.message}`
-      )
-      sendErrorResponse(
-        req,
-        res,
-        400,
-        'Bad Request',
-        'The provided track is invalid.',
-        parsedUrl.pathname
-      )
-      return
-    }
-
+    const decodedTrack = decodeTrack(encodedTrack)
     sendResponse(req, res, decodedTrack, 200)
   } catch (err) {
     logger('error', 'Tracks', `Failed to decode track ${encodedTrack}:`, err)
