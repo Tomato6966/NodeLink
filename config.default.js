@@ -136,6 +136,16 @@ export default {
       albumPageLoadConcurrency: 5, // How many pages to load simultaneously
       allowExplicit: true // If true plays the explicit version of the song, If false plays the Non-Explicit version of the song. Normal songs are not affected.
     },
+    applemusic: {
+      enabled: true,
+      mediaApiToken: "token_here", // use https://github.com/CycloneAddons/apple-music-token-scraper to get a token
+      market: "US",
+      playlistLoadLimit: 0,
+      albumLoadLimit: 0,
+      playlistPageLoadConcurrency: 5,
+      albumPageLoadConcurrency: 5,
+      allowExplicit: true
+    },
     tidal: {
       enabled: true,
       token: '', //get from tidal web player devtools; using login google account
@@ -167,7 +177,11 @@ export default {
     },
     lrclib: {
       enabled: true
-    }
+    },
+    applemusic: {
+      enabled: true,
+      advanceSearch: true // Uses YTMusic to fetch the correct title and artists instead of relying on messy YouTube video titles, improving lyrics accuracy
+    },
   },
   audio: {
     encryption: 'aead_aes256_gcm_rtpsize'
