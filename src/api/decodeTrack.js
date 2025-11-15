@@ -10,7 +10,7 @@ const decodeTrackSchema = myzod.object({
   encodedTrack: myzod.string()
 })
 
-function handler(nodelink, req, res, parsedUrl) {
+function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const result = decodeTrackSchema.try({
     encodedTrack: parsedUrl.searchParams.get('encodedTrack')
   })
@@ -29,11 +29,30 @@ function handler(nodelink, req, res, parsedUrl) {
     return
   }
 
-  const encodedTrack = result.encodedTrack
+  const encodedTrack = result.encodedTrack.replace(/ /g, '+')
 
   try {
     logger('debug', 'Tracks', `Decoding track: ${encodedTrack}`)
-    const decodedTrack = decodeTrack(encodedTrack)
+    let decodedTrack
+    try {
+      decodedTrack = decodeTrack(encodedTrack)
+    } catch (err) {
+      logger(
+        'warn',
+        'Tracks',
+        `Invalid encoded track received: ${encodedTrack} - ${err.message}`
+      )
+      sendErrorResponse(
+        req,
+        res,
+        400,
+        'Bad Request',
+        'The provided track is invalid.',
+        parsedUrl.pathname
+      )
+      return
+    }
+
     sendResponse(req, res, decodedTrack, 200)
   } catch (err) {
     logger('error', 'Tracks', `Failed to decode track ${encodedTrack}:`, err)
