@@ -179,7 +179,8 @@ export default {
       enabled: true
     },
     applemusic: {
-      enabled: true
+      enabled: true,
+      advanceSearch: true // Uses YTMusic to fetch the correct title and artists instead of relying on messy YouTube video titles, improving lyrics accuracy
     },
   },
   audio: {
