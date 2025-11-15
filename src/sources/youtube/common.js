@@ -1231,11 +1231,7 @@ export class BaseClient {
       }
     }
 
-    logger(
-      'debug',
-      `youtube-${this.name}`,
-      `Player response for ${videoId}: ${JSON.stringify(playerResponse, null, 2)}`
-    )
+
 
     const track = await buildTrack(
       playerResponse.videoDetails,

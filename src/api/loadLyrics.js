@@ -28,7 +28,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  const encodedTrack = result.encodedTrack
+  const encodedTrack = result.encodedTrack.replace(/ /g, '+')
 
   try {
     const decodedTrack = decodeTrack(encodedTrack)
