@@ -167,7 +167,10 @@ export default {
     },
     lrclib: {
       enabled: true
-    }
+    },
+     applemusic: {
+      enabled: true
+    },
   },
   audio: {
     encryption: 'aead_aes256_gcm_rtpsize'
