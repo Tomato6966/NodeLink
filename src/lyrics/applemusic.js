@@ -1,5 +1,4 @@
 import { logger, makeRequest } from '../utils.js'
-import Fuse from 'fuse.js'
 
 
 const APPLE_SEARCH_API = `http://lyrics.paxsenix.dpdns.org/searchAppleMusic.php?q=`
@@ -102,22 +101,119 @@ export default class AppleMusicLyrics {
     }
   }
 
-  async _searchApple(query) {
 
-    const url = APPLE_SEARCH_API + encodeURIComponent(query)
-    const { body: raw_results } = await makeRequest(url, { method: 'GET' })
-    let results = JSON.parse(raw_results)
 
-    if (!Array.isArray(results) || results.length === 0) return null
+  _findBestAppleMatch(results, title, authors) {
+    if (!title) return results[0];
 
-    const fuse = new Fuse(results, {
-      includeScore: true,
-      keys: ['songName', 'artistName'],
-      threshold: 0.4
-    })
+    const normalize = (str) =>
+      str.toLowerCase()
+        .replace(/[^a-z0-9]+/gi, " ")
+        .trim();
 
-    const found = fuse.search(query)
-    return found.length ? found[0].item : results[0]
+    const scoreStrings = (a, b) => {
+      a = normalize(a);
+      b = normalize(b);
+      if (a === b) return 100;
+      let matches = 0;
+      const len = Math.max(a.length, b.length);
+
+      for (let i = 0; i < Math.min(a.length, b.length); i++) {
+        if (a[i] === b[i]) matches++;
+      }
+
+      return Math.round((matches / len) * 100);
+    };
+
+    let bestMatch = null;
+    let bestScore = -1;
+
+    for (const r of results) {
+      const titleScore = scoreStrings(r.songName, title);
+
+      let artistScore = 0;
+
+      if (authors.length) {
+        artistScore = Math.max(
+          ...authors.map(a => scoreStrings(r.artistName, a))
+        );
+      }
+
+      const finalScore = titleScore * 0.7 + artistScore * 0.3;
+
+      r.__matchScore = finalScore;
+
+      if (finalScore > bestScore) {
+        bestScore = finalScore;
+        bestMatch = r;
+      }
+    }
+
+    return bestMatch;
+  }
+
+
+
+  async _searchApple(info) {
+    let title = null;
+    let authors = [];
+
+    if (info.sourceName === "youtube") {
+      try {
+        const { body: res } = await makeRequest(
+          `https://ytm-api-nodelink.vercel.app/api/song-info?videoId=${encodeURIComponent(info.identifier)}`,
+          { method: 'GET', timeout: 4000 }
+        );
+
+        if (res && res.title) {
+         if(info.title !== res.title) { title = res.title } else { title = _clean(info.title, true)};
+          authors = Array.isArray(res.artists) ? res.artists : [];
+        } else {
+          logger('warn', 'Lyrics', "AppleMusic: YTM API returned invalid data, using fallback.");
+        }
+      } catch (err) {
+        logger('error', 'Lyrics', `AppleMusic: YTM API failed (${err.message}), using fallback info.`);
+      }
+    }
+
+
+    const query = (() => {
+      if (title && authors.length) return `${title} ${authors[0]}`;
+      if (title) return title;
+      return `${_clean(info.title, true)} ${_clean(info.author, false)}`;
+    })();
+
+    let results;
+
+    try {
+      const url = APPLE_SEARCH_API + encodeURIComponent(query);
+      const { body: raw_results } = await makeRequest(url, { method: 'GET', timeout: 4000 });
+      results = JSON.parse(raw_results);
+    } catch (err) {
+      logger('error', 'Lyrics', `AppleMusic: Apple search failed (${err.message})`);
+      return null;
+    }
+
+    if (!Array.isArray(results) || results.length === 0) {
+      logger('warn', 'Lyrics', "AppleMusic: No results returned.");
+      return null;
+    }
+
+    let best = null;
+
+    try {
+      best = this._findBestAppleMatch(results, _clean(title), authors);
+    } catch (err) {
+      logger('error', 'Lyrics', `AppleMusic: Matching failed (${err.message})`);
+    }
+
+    if (!best) {
+      logger('warn', 'Lyrics', "AppleMusic: No strong match, falling back to top result.");
+      return results[0];
+    }
+
+    logger('info', 'Lyrics', `AppleMusic: Best Match Selected => ${JSON.stringify(best)}`);
+    return best;
   }
 
   async getLyrics(trackInfo) {
@@ -133,16 +229,7 @@ export default class AppleMusicLyrics {
       }
 
       if (!songID) {
-        const parsed = _parse(trackInfo.title)
-        const cleanAuthor = _clean(trackInfo.author, false)
-
-        const artist = parsed.artist || cleanAuthor
-        const title = parsed.artist ? parsed.title : _clean(trackInfo.title, true)
-        const query = `${title} ${artist}`
-
-        logger('debug', 'Lyrics', `AppleMusic: Searching: ${query}`)
-
-        matchedTrack = await this._searchApple(query)
+        matchedTrack = await this._searchApple(trackInfo)
         if (!matchedTrack) {
           return { loadType: 'empty', data: {} }
         }
