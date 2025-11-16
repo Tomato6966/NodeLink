@@ -138,7 +138,7 @@ export default {
     },
     applemusic: {
       enabled: true,
-      mediaApiToken: "token_here", // use https://github.com/CycloneAddons/apple-music-token-scraper to get a token
+      mediaApiToken: "token_here", //manually | or "token_here" to get a token automatically
       market: "US",
       playlistLoadLimit: 0,
       albumLoadLimit: 0,

@@ -1,9 +1,12 @@
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import fs from 'node:fs/promises'
+import path from 'node:path'
 
 const API_BASE = 'https://api.music.apple.com/v1'
 const MAX_PAGE_ITEMS = 300
 const DURATION_TOLERANCE = 0.15
 const BATCH_SIZE_DEFAULT = 5
+const CACHE_VALIDITY_DAYS = 7
 
 export default class AppleMusicSource {
   constructor(nodelink) {
@@ -31,62 +34,146 @@ export default class AppleMusicSource {
 
     this.tokenInitialized = false
     this.settingUp = false
+    this.tokenCachePath = path.join(process.cwd(), '.cache', 'applemusic_token.json')
   }
 
   async setup() {
-    if (this.tokenInitialized && this._isTokenValid()) return true
-
     if (this.settingUp) return true
     this.settingUp = true
 
     try {
-      const appleMusicConfig = this.config.sources?.applemusic
-      if (!appleMusicConfig) {
-        logger('error', 'AppleMusic', 'Missing config.sources.applemusic')
-        return false
-      }
-
-      this.mediaApiToken = appleMusicConfig.mediaApiToken
+      const appleMusicConfig = this.config.sources?.applemusic || {}
       this.country = appleMusicConfig.market || 'US'
-
       this.playlistPageLimit = appleMusicConfig.playlistLoadLimit ?? 0
       this.albumPageLimit = appleMusicConfig.albumLoadLimit ?? 0
       this.playlistPageLoadConcurrency = appleMusicConfig.playlistPageLoadConcurrency ?? BATCH_SIZE_DEFAULT
       this.albumPageLoadConcurrency = appleMusicConfig.albumPageLoadConcurrency ?? BATCH_SIZE_DEFAULT
       this.allowExplicit = appleMusicConfig.allowExplicit ?? true
 
-      if (!this.mediaApiToken) {
-        logger('error', 'AppleMusic', 'mediaApiToken missing')
-        return false
+      if (this.tokenInitialized && this._isTokenValid()) {
+        return true
       }
 
-      this._parseToken(this.mediaApiToken)
-
-      if (this.tokenExpiry && !this._isTokenValid()) {
-        logger(
-          'error',
-          'AppleMusic',
-          `Token expired (expiresAt: ${new Date(this.tokenExpiry).toISOString()}).`
-        )
-        this.tokenInitialized = false
-        return false
+      const cachedToken = await this._loadTokenFromCache()
+      if (cachedToken) {
+        this.mediaApiToken = cachedToken
+        this._parseToken(this.mediaApiToken)
+        if (this._isTokenValid()) {
+          logger('info', 'AppleMusic', 'Loaded valid token from cache.')
+          this.tokenInitialized = true
+          return true
+        }
       }
 
-      this.tokenInitialized = true
+      const configToken = appleMusicConfig.mediaApiToken
+      if (configToken && configToken !== 'token_here') {
+        this.mediaApiToken = configToken
+        this._parseToken(this.mediaApiToken)
+        if (this._isTokenValid()) {
+          logger('info', 'AppleMusic', 'Loaded valid token from config file.')
+          await this._saveTokenToCache(this.mediaApiToken)
+          this.tokenInitialized = true
+          return true
+        }
+      }
 
-      logger(
-        'info',
-        'AppleMusic',
-        `Token initialized (origin: ${this.tokenOrigin || 'none'}, expiresAt: ${this.tokenExpiry ? new Date(this.tokenExpiry).toISOString() : 'none'
-        })`
-      )
+      const oldToken = this.mediaApiToken
+      const newToken = await this._fetchNewToken()
+      if (newToken) {
+        if (oldToken && newToken === oldToken) {
+          logger('warn', 'AppleMusic', 'Fetched a new token, but it is the same as the old one. The token might be long-lived or the fetching method needs an update.')
+        }
+        this.mediaApiToken = newToken
+        this._parseToken(this.mediaApiToken)
+        await this._saveTokenToCache(this.mediaApiToken)
+        this.tokenInitialized = true
+        return true
+      }
 
-      return true
+      logger('warn', 'AppleMusic', 'Failed to obtain a valid Media API token. Source will be disabled for this session.')
+      this.tokenInitialized = false
+      return false
+
     } catch (error) {
-      logger('error', 'AppleMusic', `setup() error: ${error.message}`)
+      logger('error', 'AppleMusic', `Critical error during setup: ${error.message}`)
       return false
     } finally {
       this.settingUp = false
+    }
+  }
+
+  async _loadTokenFromCache() {
+    try {
+      await fs.mkdir(path.dirname(this.tokenCachePath), { recursive: true })
+      const data = await fs.readFile(this.tokenCachePath, 'utf-8')
+      const { token, timestamp } = JSON.parse(data)
+
+      if (!token || !timestamp) return null
+
+      const cacheAge = Date.now() - timestamp
+      const maxAge = CACHE_VALIDITY_DAYS * 24 * 60 * 60 * 1000
+
+      if (cacheAge > maxAge) {
+        logger('info', 'AppleMusic', 'Cached token has expired.')
+        return null
+      }
+
+      return token
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        logger('warn', 'AppleMusic', `Could not read token cache: ${error.message}`)
+      }
+      return null
+    }
+  }
+
+  async _saveTokenToCache(token) {
+    try {
+      await fs.mkdir(path.dirname(this.tokenCachePath), { recursive: true })
+      const dataToCache = {
+        token: token,
+        timestamp: Date.now()
+      }
+      await fs.writeFile(this.tokenCachePath, JSON.stringify(dataToCache), 'utf-8')
+      logger('info', 'AppleMusic', 'Saved new token to cache file.')
+    } catch (error) {
+      logger('error', 'AppleMusic', `Failed to save token to cache: ${error.message}`)
+    }
+  }
+
+  async _fetchNewToken() {
+    try {
+      logger('info', 'AppleMusic', 'Attempting to fetch a new Media API token...')
+      const { body: html, statusCode } = await http1makeRequest('https://music.apple.com/us/browse')
+      if (statusCode !== 200) {
+        throw new Error(`Failed to fetch HTML: ${statusCode}`)
+      }
+
+      const scriptTagMatch = html.match(/<script\s+type="module"\s+crossorigin\s+src="([^"]+)"/)
+      const scriptTag = scriptTagMatch && scriptTagMatch[1]
+
+      if (!scriptTag) {
+        throw new Error('Module script tag not found in Apple Music HTML.')
+      }
+
+      const scriptUrl = `https://music.apple.com${scriptTag}`
+      const { body: jsData, statusCode: jsStatus } = await http1makeRequest(scriptUrl)
+      if (jsStatus !== 200) {
+        throw new Error(`Failed to fetch JS from ${scriptUrl}: ${jsStatus}`)
+      }
+
+      const tokenMatch = jsData.match(/(?<token>(ey[\w-]+)\.([\w-]+)\.([\w-]+))/)
+      const accessToken = tokenMatch?.groups?.token
+
+      if (accessToken) {
+        logger('info', 'AppleMusic', 'Successfully fetched a new Media API token.')
+        return accessToken
+      } else {
+        throw new Error('Access token not found in JS file.')
+      }
+    } catch (error) {
+      logger('error', 'AppleMusic', `Failed to fetch new token: ${error.message}`)
+      return null
     }
   }
 
