@@ -12,7 +12,9 @@ function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const result = decodeTracksSchema.try(req.body)
 
   if (result instanceof myzod.ValidationError) {
-    const errorMessage = result.message || 'encodedTracks parameter must be a non-empty array of strings.'
+    const errorMessage =
+      result.message ||
+      'encodedTracks parameter must be a non-empty array of strings.'
     sendErrorResponse(
       req,
       res,

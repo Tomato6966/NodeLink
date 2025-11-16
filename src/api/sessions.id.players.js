@@ -4,43 +4,51 @@ import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 // Use unknown() instead of object for filters to preserve all properties
 const filtersSchema = myzod.unknown()
 
-const voiceStateSchema = myzod.object({
-  token: myzod.string(),
-  endpoint: myzod.string(),
-  sessionId: myzod.string()
-}).allowUnknownKeys()
+const voiceStateSchema = myzod
+  .object({
+    token: myzod.string(),
+    endpoint: myzod.string(),
+    sessionId: myzod.string()
+  })
+  .allowUnknownKeys()
 
-const updatePlayerTrackSchema = myzod.object({
-  encoded: myzod.string().nullable().optional(),
-  identifier: myzod.string().optional(),
-  userData: myzod.unknown().optional()
-}).allowUnknownKeys()
+const updatePlayerTrackSchema = myzod
+  .object({
+    encoded: myzod.string().nullable().optional(),
+    identifier: myzod.string().optional(),
+    userData: myzod.unknown().optional()
+  })
+  .allowUnknownKeys()
 
-const updatePlayerSchema = myzod.object({
-  track: updatePlayerTrackSchema.optional(),
-  encodedTrack: myzod.string().nullable().optional(),
-  position: myzod.number().min(0).optional(),
-  endTime: myzod.number().min(0).nullable().optional(),
-  volume: myzod.number().min(0).max(1000).optional(),
-  paused: myzod.boolean().optional(),
-  filters: filtersSchema.optional(),
-  voice: voiceStateSchema.optional(),
-  guildId: myzod.string().optional()
-}).allowUnknownKeys()
+const updatePlayerSchema = myzod
+  .object({
+    track: updatePlayerTrackSchema.optional(),
+    encodedTrack: myzod.string().nullable().optional(),
+    position: myzod.number().min(0).optional(),
+    endTime: myzod.number().min(0).nullable().optional(),
+    volume: myzod.number().min(0).max(1000).optional(),
+    paused: myzod.boolean().optional(),
+    filters: filtersSchema.optional(),
+    voice: voiceStateSchema.optional(),
+    guildId: myzod.string().optional()
+  })
+  .allowUnknownKeys()
 
-const queryParamsSchema = myzod.object({
-  noReplace: myzod
-    .union([myzod.string(), myzod.null()])
-    .optional()
-}).allowUnknownKeys()
-
+const queryParamsSchema = myzod
+  .object({
+    noReplace: myzod.union([myzod.string(), myzod.null()]).optional()
+  })
+  .allowUnknownKeys()
 
 const pathSchema = myzod.object({
   sessionId: myzod.string(),
-  guildId: myzod.string().withPredicate(
-    (val) => /^\d{17,20}$/.test(val),
-    'guildId must be 17-20 digits'
-  ).optional()
+  guildId: myzod
+    .string()
+    .withPredicate(
+      (val) => /^\d{17,20}$/.test(val),
+      'guildId must be 17-20 digits'
+    )
+    .optional()
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
@@ -78,31 +86,46 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       parsedUrl.pathname
     )
   }
-  
+
   if (!guildId && parsedUrl.pathname === `/v4/sessions/${sessionId}/players`) {
-      if (req.method === 'GET') {
-        if (nodelink.workerManager) {
-          const playerKeys = Array.from(nodelink.workerManager.guildToWorker.keys());
-          const sessionPlayerKeys = playerKeys.filter(key => key.endsWith(`:${session.userId}`));
-          const guildIds = sessionPlayerKeys.map(key => key.split(':')[0]);
-      
-          const players = await Promise.all(
-            guildIds.map(gid => session.players.toJSON(gid).catch(err => {
-              logger('error', 'PlayerList', `Failed to get player JSON for guild ${gid}: ${err.message}`);
-              return null;
-            }))
-          );
-      
-          return sendResponse(req, res, players.filter(p => p !== null), 200);
-        }
+    if (req.method === 'GET') {
+      if (nodelink.workerManager) {
+        const playerKeys = Array.from(
+          nodelink.workerManager.guildToWorker.keys()
+        )
+        const sessionPlayerKeys = playerKeys.filter((key) =>
+          key.endsWith(`:${session.userId}`)
+        )
+        const guildIds = sessionPlayerKeys.map((key) => key.split(':')[0])
 
         const players = await Promise.all(
-          Array.from(session.players.players.values()).map((player) =>
-            session.players.toJSON(player.guildId)
+          guildIds.map((gid) =>
+            session.players.toJSON(gid).catch((err) => {
+              logger(
+                'error',
+                'PlayerList',
+                `Failed to get player JSON for guild ${gid}: ${err.message}`
+              )
+              return null
+            })
           )
         )
-        return sendResponse(req, res, players, 200)
+
+        return sendResponse(
+          req,
+          res,
+          players.filter((p) => p !== null),
+          200
+        )
       }
+
+      const players = await Promise.all(
+        Array.from(session.players.players.values()).map((player) =>
+          session.players.toJSON(player.guildId)
+        )
+      )
+      return sendResponse(req, res, players, 200)
+    }
   }
 
   if (guildId) {

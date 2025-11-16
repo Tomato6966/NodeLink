@@ -675,7 +675,9 @@ export default class WorkerManager {
         logger(
           'warn',
           'Cluster',
-          `Command timeout (${timeoutMs}ms) for command '${type}' with payload:`, payload, `, retrying... (${retryCount + 1}/${this.maxRetries})`
+          `Command timeout (${timeoutMs}ms) for command '${type}' with payload:`,
+          payload,
+          `, retrying... (${retryCount + 1}/${this.maxRetries})`
         )
 
         setTimeout(() => {

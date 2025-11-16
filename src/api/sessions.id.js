@@ -6,10 +6,12 @@ import {
   sendErrorResponse
 } from '../utils.js'
 
-const sessionPatchSchema = myzod.object({
-  resuming: myzod.boolean().optional(),
-  timeout: myzod.number().min(0).optional()
-}).allowUnknownKeys()
+const sessionPatchSchema = myzod
+  .object({
+    resuming: myzod.boolean().optional(),
+    timeout: myzod.number().min(0).optional()
+  })
+  .allowUnknownKeys()
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const parts = parsedUrl.pathname.split('/')

@@ -34,7 +34,11 @@ export default class AppleMusicSource {
 
     this.tokenInitialized = false
     this.settingUp = false
-    this.tokenCachePath = path.join(process.cwd(), '.cache', 'applemusic_token.json')
+    this.tokenCachePath = path.join(
+      process.cwd(),
+      '.cache',
+      'applemusic_token.json'
+    )
   }
 
   async setup() {
@@ -46,8 +50,10 @@ export default class AppleMusicSource {
       this.country = appleMusicConfig.market || 'US'
       this.playlistPageLimit = appleMusicConfig.playlistLoadLimit ?? 0
       this.albumPageLimit = appleMusicConfig.albumLoadLimit ?? 0
-      this.playlistPageLoadConcurrency = appleMusicConfig.playlistPageLoadConcurrency ?? BATCH_SIZE_DEFAULT
-      this.albumPageLoadConcurrency = appleMusicConfig.albumPageLoadConcurrency ?? BATCH_SIZE_DEFAULT
+      this.playlistPageLoadConcurrency =
+        appleMusicConfig.playlistPageLoadConcurrency ?? BATCH_SIZE_DEFAULT
+      this.albumPageLoadConcurrency =
+        appleMusicConfig.albumPageLoadConcurrency ?? BATCH_SIZE_DEFAULT
       this.allowExplicit = appleMusicConfig.allowExplicit ?? true
 
       if (this.tokenInitialized && this._isTokenValid()) {
@@ -81,7 +87,11 @@ export default class AppleMusicSource {
       const newToken = await this._fetchNewToken()
       if (newToken) {
         if (oldToken && newToken === oldToken) {
-          logger('warn', 'AppleMusic', 'Fetched a new token, but it is the same as the old one. The token might be long-lived or the fetching method needs an update.')
+          logger(
+            'warn',
+            'AppleMusic',
+            'Fetched a new token, but it is the same as the old one. The token might be long-lived or the fetching method needs an update.'
+          )
         }
         this.mediaApiToken = newToken
         this._parseToken(this.mediaApiToken)
@@ -90,12 +100,19 @@ export default class AppleMusicSource {
         return true
       }
 
-      logger('warn', 'AppleMusic', 'Failed to obtain a valid Media API token. Source will be disabled for this session.')
+      logger(
+        'warn',
+        'AppleMusic',
+        'Failed to obtain a valid Media API token. Source will be disabled for this session.'
+      )
       this.tokenInitialized = false
       return false
-
     } catch (error) {
-      logger('error', 'AppleMusic', `Critical error during setup: ${error.message}`)
+      logger(
+        'error',
+        'AppleMusic',
+        `Critical error during setup: ${error.message}`
+      )
       return false
     } finally {
       this.settingUp = false
@@ -121,7 +138,11 @@ export default class AppleMusicSource {
       return token
     } catch (error) {
       if (error.code !== 'ENOENT') {
-        logger('warn', 'AppleMusic', `Could not read token cache: ${error.message}`)
+        logger(
+          'warn',
+          'AppleMusic',
+          `Could not read token cache: ${error.message}`
+        )
       }
       return null
     }
@@ -134,22 +155,38 @@ export default class AppleMusicSource {
         token: token,
         timestamp: Date.now()
       }
-      await fs.writeFile(this.tokenCachePath, JSON.stringify(dataToCache), 'utf-8')
+      await fs.writeFile(
+        this.tokenCachePath,
+        JSON.stringify(dataToCache),
+        'utf-8'
+      )
       logger('info', 'AppleMusic', 'Saved new token to cache file.')
     } catch (error) {
-      logger('error', 'AppleMusic', `Failed to save token to cache: ${error.message}`)
+      logger(
+        'error',
+        'AppleMusic',
+        `Failed to save token to cache: ${error.message}`
+      )
     }
   }
 
   async _fetchNewToken() {
     try {
-      logger('info', 'AppleMusic', 'Attempting to fetch a new Media API token...')
-      const { body: html, statusCode } = await http1makeRequest('https://music.apple.com/us/browse')
+      logger(
+        'info',
+        'AppleMusic',
+        'Attempting to fetch a new Media API token...'
+      )
+      const { body: html, statusCode } = await http1makeRequest(
+        'https://music.apple.com/us/browse'
+      )
       if (statusCode !== 200) {
         throw new Error(`Failed to fetch HTML: ${statusCode}`)
       }
 
-      const scriptTagMatch = html.match(/<script\s+type="module"\s+crossorigin\s+src="([^"]+)"/)
+      const scriptTagMatch = html.match(
+        /<script\s+type="module"\s+crossorigin\s+src="([^"]+)"/
+      )
       const scriptTag = scriptTagMatch && scriptTagMatch[1]
 
       if (!scriptTag) {
@@ -157,29 +194,40 @@ export default class AppleMusicSource {
       }
 
       const scriptUrl = `https://music.apple.com${scriptTag}`
-      const { body: jsData, statusCode: jsStatus } = await http1makeRequest(scriptUrl)
+      const { body: jsData, statusCode: jsStatus } =
+        await http1makeRequest(scriptUrl)
       if (jsStatus !== 200) {
         throw new Error(`Failed to fetch JS from ${scriptUrl}: ${jsStatus}`)
       }
 
-      const tokenMatch = jsData.match(/(?<token>(ey[\w-]+)\.([\w-]+)\.([\w-]+))/)
+      const tokenMatch = jsData.match(
+        /(?<token>(ey[\w-]+)\.([\w-]+)\.([\w-]+))/
+      )
       const accessToken = tokenMatch?.groups?.token
 
       if (accessToken) {
-        logger('info', 'AppleMusic', 'Successfully fetched a new Media API token.')
+        logger(
+          'info',
+          'AppleMusic',
+          'Successfully fetched a new Media API token.'
+        )
         return accessToken
       } else {
         throw new Error('Access token not found in JS file.')
       }
     } catch (error) {
-      logger('error', 'AppleMusic', `Failed to fetch new token: ${error.message}`)
+      logger(
+        'error',
+        'AppleMusic',
+        `Failed to fetch new token: ${error.message}`
+      )
       return null
     }
   }
 
   _isTokenValid() {
     if (!this.tokenExpiry) return true
-    return Date.now() < (this.tokenExpiry - 10000)
+    return Date.now() < this.tokenExpiry - 10000
   }
 
   _parseToken(token) {
@@ -241,7 +289,8 @@ export default class AppleMusicSource {
     const isExplicit = attributes.contentRating === 'explicit'
     let trackUri = attributes.url || ''
     if (trackUri) {
-      trackUri += (trackUri.includes('?') ? '&' : '?') + `explicit=${isExplicit}`
+      trackUri +=
+        (trackUri.includes('?') ? '&' : '?') + `explicit=${isExplicit}`
     }
 
     const trackInfo = {
@@ -267,7 +316,9 @@ export default class AppleMusicSource {
 
   _parseArtwork(artworkData) {
     if (!artworkData?.url) return null
-    return artworkData.url.replace('{w}', artworkData.width).replace('{h}', artworkData.height)
+    return artworkData.url
+      .replace('{w}', artworkData.width)
+      .replace('{h}', artworkData.height)
   }
 
   async search(query) {
@@ -281,7 +332,7 @@ export default class AppleMusicSource {
       const songs = data?.results?.songs?.data || []
       if (!songs.length) return { loadType: 'empty', data: {} }
 
-      const tracks = songs.map(item => this._buildTrack(item)).filter(Boolean)
+      const tracks = songs.map((item) => this._buildTrack(item)).filter(Boolean)
       return { loadType: 'search', data: tracks }
     } catch (error) {
       return { exception: { message: error.message, severity: 'fault' } }
@@ -302,7 +353,9 @@ export default class AppleMusicSource {
           return await this._resolveTrack(id)
 
         case 'album':
-          return altTrackId ? await this._resolveTrack(altTrackId) : await this._resolveAlbum(id)
+          return altTrackId
+            ? await this._resolveTrack(altTrackId)
+            : await this._resolveAlbum(id)
 
         case 'playlist':
           return await this._resolvePlaylist(id)
@@ -316,7 +369,9 @@ export default class AppleMusicSource {
   }
 
   async _resolveTrack(id) {
-    const data = await this._apiRequest(`/catalog/${this.country}/songs/${id}?extend=artistUrl`)
+    const data = await this._apiRequest(
+      `/catalog/${this.country}/songs/${id}?extend=artistUrl`
+    )
     if (!data?.data?.[0]) {
       return { exception: { message: 'Track not found.', severity: 'common' } }
     }
@@ -325,7 +380,9 @@ export default class AppleMusicSource {
   }
 
   async _resolveAlbum(id) {
-    const albumData = await this._apiRequest(`/catalog/${this.country}/albums/${id}?extend=artistUrl`)
+    const albumData = await this._apiRequest(
+      `/catalog/${this.country}/albums/${id}?extend=artistUrl`
+    )
     if (!albumData?.data?.[0]) {
       return { exception: { message: 'Album not found.', severity: 'common' } }
     }
@@ -334,16 +391,30 @@ export default class AppleMusicSource {
     const baseTracks = album.relationships?.tracks?.data || []
 
     const total = album.relationships?.tracks?.meta?.total || baseTracks.length
-    const extra = await this._paginate(`/catalog/${this.country}/albums/${id}/tracks`, total, this.albumPageLimit)
+    const extra = await this._paginate(
+      `/catalog/${this.country}/albums/${id}/tracks`,
+      total,
+      this.albumPageLimit
+    )
 
     const all = [...baseTracks, ...extra]
 
     const artwork = this._parseArtwork(album.attributes?.artwork)
 
-    const tracks = all.map(item => this._buildTrack(
-      { id: item.id, attributes: { ...item.attributes, artwork: album.attributes.artwork } },
-      artwork
-    )).filter(Boolean)
+    const tracks = all
+      .map((item) =>
+        this._buildTrack(
+          {
+            id: item.id,
+            attributes: {
+              ...item.attributes,
+              artwork: album.attributes.artwork
+            }
+          },
+          artwork
+        )
+      )
+      .filter(Boolean)
 
     return {
       loadType: 'playlist',
@@ -355,15 +426,20 @@ export default class AppleMusicSource {
   }
 
   async _resolvePlaylist(id) {
-    const playlistResponse = await this._apiRequest(`/catalog/${this.country}/playlists/${id}`)
+    const playlistResponse = await this._apiRequest(
+      `/catalog/${this.country}/playlists/${id}`
+    )
     if (!playlistResponse?.data?.[0]) {
-      return { exception: { message: 'Playlist not found.', severity: 'common' } }
+      return {
+        exception: { message: 'Playlist not found.', severity: 'common' }
+      }
     }
 
     const playlist = playlistResponse.data[0]
     const baseTracks = playlist.relationships?.tracks?.data || []
 
-    const total = playlist.relationships?.tracks?.meta?.total || baseTracks.length
+    const total =
+      playlist.relationships?.tracks?.meta?.total || baseTracks.length
     const extra = await this._paginate(
       `/catalog/${this.country}/playlists/${id}/tracks?extend=artistUrl`,
       total,
@@ -374,7 +450,9 @@ export default class AppleMusicSource {
 
     const artwork = this._parseArtwork(playlist.attributes.artwork)
 
-    const tracks = all.map(item => this._buildTrack(item, artwork)).filter(Boolean)
+    const tracks = all
+      .map((item) => this._buildTrack(item, artwork))
+      .filter(Boolean)
 
     return {
       loadType: 'playlist',
@@ -386,16 +464,24 @@ export default class AppleMusicSource {
   }
 
   async _resolveArtist(id) {
-    const topTracksData = await this._apiRequest(`/catalog/${this.country}/artists/${id}/view/top-songs`)
+    const topTracksData = await this._apiRequest(
+      `/catalog/${this.country}/artists/${id}/view/top-songs`
+    )
     if (!topTracksData?.data) {
       return { exception: { message: 'Artist not found.', severity: 'common' } }
     }
 
-    const artistInfo = await this._apiRequest(`/catalog/${this.country}/artists/${id}`)
+    const artistInfo = await this._apiRequest(
+      `/catalog/${this.country}/artists/${id}`
+    )
     const artist = artistInfo?.data?.[0]?.attributes?.name || 'Artist'
-    const artwork = this._parseArtwork(artistInfo?.data?.[0]?.attributes?.artwork)
+    const artwork = this._parseArtwork(
+      artistInfo?.data?.[0]?.attributes?.artwork
+    )
 
-    const tracks = topTracksData.data.map(trackData => this._buildTrack(trackData, artwork)).filter(Boolean)
+    const tracks = topTracksData.data
+      .map((trackData) => this._buildTrack(trackData, artwork))
+      .filter(Boolean)
 
     return {
       loadType: 'playlist',
@@ -415,8 +501,7 @@ export default class AppleMusicSource {
 
     for (let index = 1; index < allowed; index++) {
       const offset = index * MAX_PAGE_ITEMS
-      const path =
-        `${basePath}${basePath.includes('?') ? '&' : '?'}limit=${MAX_PAGE_ITEMS}&offset=${offset}`
+      const path = `${basePath}${basePath.includes('?') ? '&' : '?'}limit=${MAX_PAGE_ITEMS}&offset=${offset}`
 
       const page = await this._apiRequest(path)
       if (page?.data) results.push(...page.data)
@@ -441,13 +526,26 @@ export default class AppleMusicSource {
 
     try {
       const searchResult = await this.nodelink.sources.searchWithDefault(query)
-      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
-        return { exception: { message: 'No alternative found.', severity: 'fault' } }
+      if (
+        searchResult.loadType !== 'search' ||
+        searchResult.data.length === 0
+      ) {
+        return {
+          exception: { message: 'No alternative found.', severity: 'fault' }
+        }
       }
 
-      const bestMatch = this._findBestMatch(searchResult.data, duration, decodedTrack, isExplicit, this.allowExplicit)
+      const bestMatch = this._findBestMatch(
+        searchResult.data,
+        duration,
+        decodedTrack,
+        isExplicit,
+        this.allowExplicit
+      )
       if (!bestMatch) {
-        return { exception: { message: 'No suitable match.', severity: 'fault' } }
+        return {
+          exception: { message: 'No suitable match.', severity: 'fault' }
+        }
       }
 
       const stream = await this.nodelink.sources.getTrackUrl(bestMatch.info)
@@ -466,53 +564,69 @@ export default class AppleMusicSource {
   }
 
   _findBestMatch(list, target, original, isExplicit, allowExplicit) {
-    const allowedDurationDiff = target * DURATION_TOLERANCE;
-    const normalizedOriginalTitle = this._normalize(original.title);
-    const normalizedOriginalAuthor = this._normalize(original.author);
+    const allowedDurationDiff = target * DURATION_TOLERANCE
+    const normalizedOriginalTitle = this._normalize(original.title)
+    const normalizedOriginalAuthor = this._normalize(original.author)
 
     const scoredCandidates = list
-      .filter(item => Math.abs(item.info.length - target) <= allowedDurationDiff)
-      .map(item => {
-        const normalizedItemTitle = this._normalize(item.info.title);
-        const normalizedItemAuthor = this._normalize(item.info.author);
-        let score = 0;
+      .filter(
+        (item) => Math.abs(item.info.length - target) <= allowedDurationDiff
+      )
+      .map((item) => {
+        const normalizedItemTitle = this._normalize(item.info.title)
+        const normalizedItemAuthor = this._normalize(item.info.author)
+        let score = 0
 
         if (!normalizedItemTitle.includes(normalizedOriginalTitle)) {
-          return { item, score: -1 };
+          return { item, score: -1 }
         }
 
-        const authorSimilarity = this._calculateSimilarity(normalizedOriginalAuthor, normalizedItemAuthor);
-        score += authorSimilarity * 100;
+        const authorSimilarity = this._calculateSimilarity(
+          normalizedOriginalAuthor,
+          normalizedItemAuthor
+        )
+        score += authorSimilarity * 100
 
-        const titleWords = new Set(normalizedItemTitle.split(' '));
-        const originalTitleWords = new Set(normalizedOriginalTitle.split(' '));
-        const extraWords = [...titleWords].filter(word => !originalTitleWords.has(word));
-        score -= extraWords.length * 5;
+        const titleWords = new Set(normalizedItemTitle.split(' '))
+        const originalTitleWords = new Set(normalizedOriginalTitle.split(' '))
+        const extraWords = [...titleWords].filter(
+          (word) => !originalTitleWords.has(word)
+        )
+        score -= extraWords.length * 5
 
         if (isExplicit && !allowExplicit) {
-          if (normalizedItemTitle.includes('clean') || normalizedItemTitle.includes('radio')) {
-            score += 200;
+          if (
+            normalizedItemTitle.includes('clean') ||
+            normalizedItemTitle.includes('radio')
+          ) {
+            score += 200
           }
         } else if (isExplicit && allowExplicit) {
-          if (normalizedItemTitle.includes('clean') || normalizedItemTitle.includes('radio')) {
-            score -= 200;
+          if (
+            normalizedItemTitle.includes('clean') ||
+            normalizedItemTitle.includes('radio')
+          ) {
+            score -= 200
           }
         }
-        
-        return { item, score };
+
+        return { item, score }
       })
-      .filter(c => c.score > 0);
+      .filter((c) => c.score > 0)
 
-    if (scoredCandidates.length === 0) return null;
+    if (scoredCandidates.length === 0) return null
 
-    scoredCandidates.sort((a, b) => b.score - a.score);
-    
-    return scoredCandidates[0].item;
+    scoredCandidates.sort((a, b) => b.score - a.score)
+
+    return scoredCandidates[0].item
   }
 
   _normalize(text) {
     if (!text) return ''
-    return text.toLowerCase().replace(/[^\w\s]/g, '').trim()
+    return text
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .trim()
   }
 
   _calculateSimilarity(string1, string2) {
@@ -533,7 +647,11 @@ export default class AppleMusicSource {
         matrix[i][j] =
           string1[j - 1] === string2[i - 1]
             ? matrix[i - 1][j - 1]
-            : Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1)
+            : Math.min(
+                matrix[i - 1][j - 1] + 1,
+                matrix[i][j - 1] + 1,
+                matrix[i - 1][j] + 1
+              )
       }
     }
 

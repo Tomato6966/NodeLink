@@ -200,10 +200,10 @@ function sendResponse(req, res, data, status, trace = false) {
 }
 
 function getGitInfo() {
-  const isBun = typeof Bun !== "undefined" && !!process.versions.bun;
+  const isBun = typeof Bun !== 'undefined' && !!process.versions.bun
   // bun is too weird
   if (isBun) {
-    logger("info", "Git", "Skipping update check (compiled build).");
+    logger('info', 'Git', 'Skipping update check (compiled build).')
     return {
       branch: 'unknown',
       commit: 'unknown',
@@ -292,7 +292,8 @@ function getStats(nodelink) {
           if (!player.connection) continue
           const sent = player.connection.statistics.packetsSent || 0
           const nulled = player.connection.statistics.packetsLost || 0
-          const expectedFrames = player.connection.statistics.packetsExpected || 0
+          const expectedFrames =
+            player.connection.statistics.packetsExpected || 0
           frameStats.sent += sent
           frameStats.nulled += nulled
           frameStats.expected += expectedFrames
@@ -1052,11 +1053,11 @@ async function loadHLSPlaylist(url, stream) {
 }
 
 async function checkForUpdates() {
-  const isBun = typeof Bun !== "undefined" && !!process.versions.bun;
+  const isBun = typeof Bun !== 'undefined' && !!process.versions.bun
   // bun is too weird
   if (isBun) {
-    logger("info", "Git", "Skipping update check (compiled build).");
-    return;
+    logger('info', 'Git', 'Skipping update check (compiled build).')
+    return
   }
 
   logger('info', 'Git', 'Checking for updates...')

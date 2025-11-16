@@ -149,8 +149,18 @@ class NodelinkServer {
     this.socket.on(
       '/v4/websocket',
       (socket, request, clientInfo, oldSessionId) => {
+        logger(
+          'debug',
+          'Resume',
+          `Processing websocket connection. oldSessionId: ${oldSessionId}`
+        )
         if (oldSessionId) {
           const session = this.sessions.get(oldSessionId)
+          logger(
+            'debug',
+            'Resume',
+            `Found session for oldSessionId ${oldSessionId}: ${!!session}`
+          )
           if (session) {
             logger(
               'info',
@@ -250,6 +260,7 @@ class NodelinkServer {
       }
 
       let sessionId = headers['session-id']
+      logger('debug', 'Resume', `Received session-id header: ${sessionId}`)
       if (sessionId && !this.sessions.has(sessionId)) {
         logger(
           'warn',
@@ -289,11 +300,23 @@ class NodelinkServer {
         )
         if (process.isBun) {
           this.socket.handleUpgrade(request, socket, head, (ws) =>
-            this.socket.emit('/v4/websocket', ws, request, clientInfo, sessionId)
+            this.socket.emit(
+              '/v4/websocket',
+              ws,
+              request,
+              clientInfo,
+              sessionId
+            )
           )
         } else {
           this.socket.handleUpgrade(request, socket, head, {}, (ws) =>
-            this.socket.emit('/v4/websocket', ws, request, clientInfo, sessionId)
+            this.socket.emit(
+              '/v4/websocket',
+              ws,
+              request,
+              clientInfo,
+              sessionId
+            )
           )
         }
       } else {
@@ -502,7 +525,7 @@ class NodelinkServer {
         try {
           try {
             handle.pause?.()
-          } catch (e) { }
+          } catch (e) {}
           this.server.emit('connection', handle)
         } catch (err) {
           logger(
@@ -512,7 +535,7 @@ class NodelinkServer {
           )
           try {
             handle.destroy?.()
-          } catch (e) { }
+          } catch (e) {}
         }
       })
     } else {

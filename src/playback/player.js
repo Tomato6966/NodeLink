@@ -457,7 +457,14 @@ export class Player {
     return true
   }
 
-  async play({ encoded, info, noReplace = false, startTime = 0, endTime = 0 }) {
+  async play({
+    encoded,
+    info,
+    userData,
+    noReplace = false,
+    startTime = 0,
+    endTime = 0
+  }) {
     this.isUpdatingTrack = true
     try {
       if (this.destroying) {
@@ -490,7 +497,7 @@ export class Player {
         this._resetTrack()
       }
 
-      this.track = { encoded, info, endTime }
+      this.track = { encoded, info, endTime, userData }
 
       const urlData = await this.nodelink.sources.getTrackUrl(info)
       this.streamInfo = { ...urlData, trackInfo: info }

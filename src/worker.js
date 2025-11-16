@@ -45,15 +45,16 @@ async function initialize() {
 initialize()
 
 process.on('uncaughtException', (err) => {
-  const isStreamAbort = err.message === 'aborted' || 
-                        err.code === 'ECONNRESET' ||
-                        err.code === 'ERR_STREAM_PREMATURE_CLOSE'
-  
+  const isStreamAbort =
+    err.message === 'aborted' ||
+    err.code === 'ECONNRESET' ||
+    err.code === 'ERR_STREAM_PREMATURE_CLOSE'
+
   if (isStreamAbort) {
     logger('debug', 'Worker', `Stream disconnected: ${err.message}`)
     return
   }
-  
+
   logger(
     'error',
     'Worker–Crash',

@@ -28,7 +28,10 @@ class BaseAudioResource {
       this.pipes[0].stopHls()
     }
 
-    if (this.pipes[0]?.responseStream && !this.pipes[0].responseStream.destroyed) {
+    if (
+      this.pipes[0]?.responseStream &&
+      !this.pipes[0].responseStream.destroyed
+    ) {
       this.pipes[0].responseStream.destroy()
     }
 

@@ -10,7 +10,8 @@ const CLEAN_PATTERNS = [
   /VEVO$/i
 ]
 
-const FEAT_PATTERN = /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
+const FEAT_PATTERN =
+  /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
 const SEPARATORS = [' - ', ' – ', ' — ']
 
 const _clean = (text, removeFeat = false) => {
@@ -26,7 +27,10 @@ const _parse = (query) => {
   for (const sep of SEPARATORS) {
     const idx = cleaned.indexOf(sep)
     if (idx > 0 && idx < cleaned.length - sep.length) {
-      return { artist: cleaned.slice(0, idx).trim(), title: cleaned.slice(idx + sep.length).trim() }
+      return {
+        artist: cleaned.slice(0, idx).trim(),
+        title: cleaned.slice(idx + sep.length).trim()
+      }
     }
   }
   return { artist: null, title: _clean(query, true) }
@@ -49,7 +53,10 @@ export default class AppleMusicLyrics {
   _parseSynced(contentArray) {
     const lines = []
     for (const e of contentArray) {
-      const txt = e.text?.map(t => t.text).join(' ').trim()
+      const txt = e.text
+        ?.map((t) => t.text)
+        .join(' ')
+        .trim()
       if (!txt) continue
       const s = e.timestamp ?? 0
       const ed = e.endtime ?? 0
@@ -69,7 +76,11 @@ export default class AppleMusicLyrics {
         lines = this._parseSynced(body.content)
       } else {
         const raw = body.plainLyrics ?? ''
-        lines = raw.split('\n').map(l => l.trim()).filter(Boolean).map(t => ({ text: t, time: 0, duration: 0 }))
+        lines = raw
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+          .map((t) => ({ text: t, time: 0, duration: 0 }))
       }
       if (!lines.length) return null
       return { synced, lines }
@@ -80,14 +91,19 @@ export default class AppleMusicLyrics {
 
   _findBestAppleMatch(results, title, authors) {
     if (!title) return results[0]
-    const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]+/gi, ' ').trim()
+    const normalize = (s) =>
+      s
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/gi, ' ')
+        .trim()
     const scoreStrings = (a, b) => {
       a = normalize(a)
       b = normalize(b)
       if (a === b) return 100
       let m = 0
       const len = Math.max(a.length, b.length)
-      for (let i = 0; i < Math.min(a.length, b.length); i++) if (a[i] === b[i]) m++
+      for (let i = 0; i < Math.min(a.length, b.length); i++)
+        if (a[i] === b[i]) m++
       return Math.round((m / len) * 100)
     }
     let best = null
@@ -95,7 +111,8 @@ export default class AppleMusicLyrics {
     for (const r of results) {
       const ts = scoreStrings(r.songName, title)
       let as = 0
-      if (authors.length) as = Math.max(...authors.map(a => scoreStrings(r.artistName, a)))
+      if (authors.length)
+        as = Math.max(...authors.map((a) => scoreStrings(r.artistName, a)))
       const final = ts * 0.7 + as * 0.3
       r.__matchScore = final
       if (final > bestScore) {
@@ -117,10 +134,17 @@ export default class AppleMusicLyrics {
 
         if (res.loadType === 'track' && res.data.info) {
           const trackInfo = res.data.info
-          title = info.title !== trackInfo.title ? trackInfo.title : _clean(info.title, true)
+          title =
+            info.title !== trackInfo.title
+              ? trackInfo.title
+              : _clean(info.title, true)
           authors = trackInfo.author ? trackInfo.author.split(', ') : []
         } else {
-          logger('warn', 'Lyrics', 'YouTube resolve returned invalid info, fallback used.')
+          logger(
+            'warn',
+            'Lyrics',
+            'YouTube resolve returned invalid info, fallback used.'
+          )
         }
       } catch (err) {
         logger('error', 'Lyrics', `YouTube resolve failed: ${err.message}`)
@@ -135,10 +159,17 @@ export default class AppleMusicLyrics {
     let results
     try {
       const url = APPLE_SEARCH_API + encodeURIComponent(query)
-      const { body: raw } = await makeRequest(url, { method: 'GET', timeout: 4000 })
+      const { body: raw } = await makeRequest(url, {
+        method: 'GET',
+        timeout: 4000
+      })
       results = JSON.parse(raw)
     } catch (e) {
-      logger('error', 'Lyrics', `AppleMusic: Apple search failed (${e.message})`)
+      logger(
+        'error',
+        'Lyrics',
+        `AppleMusic: Apple search failed (${e.message})`
+      )
       return null
     }
     if (!Array.isArray(results) || !results.length) {
@@ -186,7 +217,10 @@ export default class AppleMusicLyrics {
       }
     } catch (e) {
       logger('error', 'Lyrics', `AppleMusic error: ${e.message}`)
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 }

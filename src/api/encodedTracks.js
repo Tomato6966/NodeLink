@@ -8,10 +8,12 @@ import {
 
 const encodedTracksSchema = myzod
   .array(
-    myzod.object({
-      encoded: myzod.string(),
-      info: myzod.object({}).allowUnknownKeys()
-    }).allowUnknownKeys()
+    myzod
+      .object({
+        encoded: myzod.string(),
+        info: myzod.object({}).allowUnknownKeys()
+      })
+      .allowUnknownKeys()
   )
   .min(1)
 
@@ -19,7 +21,8 @@ function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const result = encodedTracksSchema.try(req.body)
 
   if (result instanceof myzod.ValidationError) {
-    const errorMessage = result.message || 'tracks parameter must be an array and cannot be empty.'
+    const errorMessage =
+      result.message || 'tracks parameter must be an array and cannot be empty.'
     sendErrorResponse(
       req,
       res,

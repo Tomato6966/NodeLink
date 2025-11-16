@@ -31,6 +31,11 @@ export default class SessionManager {
     return this.connections.has(sessionId)
   }
   async delete(sessionId, isSocketClosing = false) {
+    logger(
+      'debug',
+      'SessionManager',
+      `Deleting session ${sessionId}, isSocketClosing: ${isSocketClosing}`
+    )
     const connection = this.connections.get(sessionId)
     if (connection) {
       if (this.nodelink.workerManager) {

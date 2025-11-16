@@ -138,8 +138,8 @@ export default {
     },
     applemusic: {
       enabled: true,
-      mediaApiToken: "token_here", //manually | or "token_here" to get a token automatically
-      market: "US",
+      mediaApiToken: 'token_here', //manually | or "token_here" to get a token automatically
+      market: 'US',
       playlistLoadLimit: 0,
       albumLoadLimit: 0,
       playlistPageLoadConcurrency: 5,
@@ -181,7 +181,7 @@ export default {
     applemusic: {
       enabled: true,
       advanceSearch: true // Uses YTMusic to fetch the correct title and artists instead of relying on messy YouTube video titles, improving lyrics accuracy
-    },
+    }
   },
   audio: {
     encryption: 'aead_aes256_gcm_rtpsize'

@@ -7,7 +7,7 @@ export class VolumeTransformer extends Transform {
   constructor(options = {}) {
     super(options)
     this.targetVolume = options.volume ?? 1.0
-    this.currentVolume = this.targetVolume 
+    this.currentVolume = this.targetVolume
     this.startFadeVolume = this.targetVolume
     this.fadeProgress = FADE_FRAMES
 
@@ -36,14 +36,16 @@ export class VolumeTransformer extends Transform {
 
     if (this.fadeProgress < FADE_FRAMES) {
       const progress = this.fadeProgress / FADE_FRAMES
-      volumeToApply = this.startFadeVolume + (this.targetVolume - this.startFadeVolume) * progress
+      volumeToApply =
+        this.startFadeVolume +
+        (this.targetVolume - this.startFadeVolume) * progress
       this.fadeProgress++
     } else {
       volumeToApply = this.targetVolume
     }
 
     this.currentVolume = volumeToApply
-    
+
     const volumePercent = volumeToApply * 100
 
     if (Math.round(volumePercent) === 100) {

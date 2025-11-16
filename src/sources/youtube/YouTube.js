@@ -584,7 +584,7 @@ export default class YouTubeSource {
 
   async resolveHoloTrack(vanillaTrack, options = {}) {
     try {
-      const { encoded, info } = vanillaTrack
+      const { encoded, info, userData } = vanillaTrack
 
       const webClient = this.clients.Web
       if (!webClient) {
@@ -620,6 +620,10 @@ export default class YouTubeSource {
           resolveExternalLinks: options.resolveExternalLinks ?? false
         }
       )
+
+      if (holoTrack) {
+        holoTrack.userData = userData
+      }
 
       return holoTrack
     } catch (err) {
@@ -821,7 +825,8 @@ export default class YouTubeSource {
       const errorHandler = (error) => {
         cleanupListeners()
 
-        const isClientDisconnect = error.message === 'aborted' || error.code === 'ECONNRESET'
+        const isClientDisconnect =
+          error.message === 'aborted' || error.code === 'ECONNRESET'
         if (isClientDisconnect) {
           logger('debug', 'YouTube', 'Client disconnected from stream')
           if (!stream.destroyed) {
