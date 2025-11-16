@@ -133,7 +133,7 @@ export default class SpotifySource {
     const isExplicit = item.explicit || false
     let trackUri = item.external_urls?.spotify || ''
     if (trackUri) {
-      trackUri += `?explicit=${isExplicit}`
+      trackUri += (trackUri.includes('?') ? '&' : '?') + `explicit=${isExplicit}`
     }
 
     const trackInfo = {
@@ -405,7 +405,7 @@ export default class SpotifySource {
         }
       }
 
-      const bestMatch = this._findBestMatch(searchResult.data, spotifyDuration, decodedTrack)
+      const bestMatch = this._findBestMatch(searchResult.data, spotifyDuration, decodedTrack, isExplicit, this.allowExplicit)
 
       if (!bestMatch) {
         return {
@@ -425,46 +425,56 @@ export default class SpotifySource {
   }
 
   _buildSearchQuery(track, isExplicit) {
-    let query = `${track.title} ${track.author}`
-
+    let searchQuery = `${track.title} ${track.author}`
     if (isExplicit) {
-      query += this.allowExplicit ? ' explicit lyrical video' : ' non explicit lyrical video'
-      logger('info', 'Spotify', `Searching for ${this.allowExplicit ? 'explicit' : 'non explicit'} version of song "${track.title}"`)
+      searchQuery += this.allowExplicit ? ' lyrical video' : ' clean version'
     }
-
-    return query
+    return searchQuery
   }
 
-  _findBestMatch(candidates, targetDuration, originalTrack) {
-    const allowedDeviation = targetDuration * DURATION_TOLERANCE
-    let bestMatch = null
-    let minScore = Number.POSITIVE_INFINITY
+  _findBestMatch(list, target, original, isExplicit, allowExplicit) {
+    const allowedDurationDiff = target * DURATION_TOLERANCE;
+    const normalizedOriginalTitle = this._normalize(original.title);
+    const normalizedOriginalAuthor = this._normalize(original.author);
 
-    for (const candidate of candidates) {
-      const candidateDuration = candidate.info.length
-      const durationDiff = Math.abs(candidateDuration - targetDuration)
+    const scoredCandidates = list
+      .filter(item => Math.abs(item.info.length - target) <= allowedDurationDiff)
+      .map(item => {
+        const normalizedItemTitle = this._normalize(item.info.title);
+        const normalizedItemAuthor = this._normalize(item.info.author);
+        let score = 0;
 
-      if (durationDiff > allowedDeviation) continue
+        if (!normalizedItemTitle.includes(normalizedOriginalTitle)) {
+          return { item, score: -1 };
+        }
 
-      const titleSimilarity = this._calculateSimilarity(
-        this._normalize(originalTrack.title),
-        this._normalize(candidate.info.title)
-      )
+        const authorSimilarity = this._calculateSimilarity(normalizedOriginalAuthor, normalizedItemAuthor);
+        score += authorSimilarity * 100;
 
-      const authorSimilarity = this._calculateSimilarity(
-        this._normalize(originalTrack.author),
-        this._normalize(candidate.info.author)
-      )
+        const titleWords = new Set(normalizedItemTitle.split(' '));
+        const originalTitleWords = new Set(normalizedOriginalTitle.split(' '));
+        const extraWords = [...titleWords].filter(word => !originalTitleWords.has(word));
+        score -= extraWords.length * 5;
 
-      const score = durationDiff * 0.5 + (1 - titleSimilarity) * targetDuration * 0.3 + (1 - authorSimilarity) * targetDuration * 0.2
+        if (isExplicit && !allowExplicit) {
+          if (normalizedItemTitle.includes('clean') || normalizedItemTitle.includes('radio')) {
+            score += 200;
+          }
+        } else if (isExplicit && allowExplicit) {
+          if (normalizedItemTitle.includes('clean') || normalizedItemTitle.includes('radio')) {
+            score -= 200;
+          }
+        }
+        
+        return { item, score };
+      })
+      .filter(c => c.score > 0);
 
-      if (score < minScore) {
-        minScore = score
-        bestMatch = candidate
-      }
-    }
+    if (scoredCandidates.length === 0) return null;
 
-    return bestMatch
+    scoredCandidates.sort((a, b) => b.score - a.score);
+    
+    return scoredCandidates[0].item;
   }
 
   _normalize(str) {
