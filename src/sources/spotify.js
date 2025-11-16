@@ -130,19 +130,24 @@ export default class SpotifySource {
   _buildTrack(item, artworkUrl = null) {
     if (!item?.id) return null
 
+    const isExplicit = item.explicit || false
+    let trackUri = item.external_urls?.spotify || ''
+    if (trackUri) {
+      trackUri += `?explicit=${isExplicit}`
+    }
+
     const trackInfo = {
       identifier: item.id,
       isSeekable: true,
-      author: item.artists?.map(a => a.name).join(', ') || 'Unknown',
+      author: item.artists?.map((a) => a.name).join(', ') || 'Unknown',
       length: item.duration_ms,
       isStream: false,
       position: 0,
       title: item.name,
-      uri: item.external_urls?.spotify || '',
+      uri: trackUri,
       artworkUrl: artworkUrl || item.album?.images?.[0]?.url || null,
       isrc: item.external_ids?.isrc || null,
-      sourceName: 'spotify',
-      explicit: item.explicit || false
+      sourceName: 'spotify'
     }
 
     return {
@@ -374,7 +379,16 @@ export default class SpotifySource {
   }
 
   async getTrackUrl(decodedTrack) {
-    const isExplicit = decodedTrack.explicit === true
+    let isExplicit = false
+    if (decodedTrack.uri) {
+      try {
+        const url = new URL(decodedTrack.uri)
+        isExplicit = url.searchParams.get('explicit') === 'true'
+      } catch (e) {
+        // Ignore malformed URI
+      }
+    }
+
     const spotifyDuration = decodedTrack.length
 
     const query = this._buildSearchQuery(decodedTrack, isExplicit)
