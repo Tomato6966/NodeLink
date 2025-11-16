@@ -14,6 +14,7 @@ const FEAT_PATTERN = /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/g
 const SEPARATORS = [' - ', ' – ', ' — ']
 
 const _clean = (text, removeFeat = false) => {
+  if (!text) return ''
   let result = text
   for (const pattern of CLEAN_PATTERNS) result = result.replace(pattern, '')
   if (removeFeat) result = result.replace(FEAT_PATTERN, '')
@@ -31,160 +32,16 @@ const _parse = (query) => {
   return { artist: null, title: _clean(query, true) }
 }
 
-class YTMusic {
-  constructor() {
-    this.isReady = false
-    this.config = {}
-    this.baseUrl = 'https://music.youtube.com/'
-    this.defaultHeaders = {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/81.0.4044.129 Safari/537.36',
-      'Accept-Language': 'en-US,en;q=0.5'
-    }
-  }
-
-  async initialize(options = {}) {
-    try {
-      const { GL, HL } = options
-      const { body: html } = await makeRequest(this.baseUrl, { method: 'GET', headers: this.defaultHeaders, timeout: 8000 })
-      const matches = html.match(/ytcfg\.set\(.*\)/) || [];
-      const parsed = matches
-        .map(x => x.slice(10, -1))
-        .map(x => { try { return JSON.parse(x) } catch { return null } })
-        .filter(Boolean)
-      this.config = parsed.reduce((acc, v) => ({ ...acc, ...v }), {})
-      if (GL) this.config.GL = GL
-      if (HL) this.config.HL = HL
-      if (!this.config.INNERTUBE_API_KEY) {
-        logger('error', 'YTMusic', 'Initialization failed: Missing required config')
-        return
-      }
-      this.isReady = true
-      logger('info', 'YTMusic', 'Initialized successfully')
-    } catch (e) {
-      logger('error', 'YTMusic', `Initialization error: ${e.message}`)
-    }
-  }
-
-  _buildHeaders() {
-    const headers = {
-      ...this.defaultHeaders,
-      'X-Goog-Visitor-Id': this.config.VISITOR_DATA || '',
-      'X-YouTube-Client-Name': this.config.INNERTUBE_CONTEXT_CLIENT_NAME,
-      'X-YouTube-Client-Version': this.config.INNERTUBE_CLIENT_VERSION,
-      'X-YouTube-Device': this.config.DEVICE,
-      'X-YouTube-Page-CL': this.config.PAGE_CL,
-      'X-YouTube-Page-Label': this.config.PAGE_BUILD_LABEL,
-      'X-YouTube-Utc-Offset': String(-new Date().getTimezoneOffset()),
-      'X-YouTube-Time-Zone': Intl.DateTimeFormat().resolvedOptions().timeZone
-    }
-    for (const k of Object.keys(headers)) {
-      if (headers[k] === undefined || headers[k] === null || headers[k] === '') delete headers[k]
-    }
-    return headers
-  }
-
-  async _post(endpoint, body = {}, query = {}) {
-    if (!this.isReady) throw new Error('YTMusic not initialized')
-    const params = new URLSearchParams({ alt: 'json', key: this.config.INNERTUBE_API_KEY, ...query }).toString()
-    const url = `${this.baseUrl}/youtubei/${this.config.INNERTUBE_API_VERSION || 'v1'}/${endpoint}?${params}`
-    const payload = {
-      context: {
-        capabilities: {},
-        client: {
-          clientName: this.config.INNERTUBE_CLIENT_NAME || this.config.INNERTUBE_CONTEXT_CLIENT_NAME || 'WEB_REMIX',
-          clientVersion: this.config.INNERTUBE_CLIENT_VERSION || '0.0.0',
-          experimentIds: [],
-          experimentsToken: '',
-          gl: this.config.GL,
-          hl: this.config.HL,
-          locationInfo: { locationPermissionAuthorizationStatus: 'LOCATION_PERMISSION_AUTHORIZATION_STATUS_UNSUPPORTED' },
-          musicAppInfo: {
-            musicActivityMasterSwitch: 'MUSIC_ACTIVITY_MASTER_SWITCH_INDETERMINATE',
-            musicLocationMasterSwitch: 'MUSIC_LOCATION_MASTER_SWITCH_INDETERMINATE',
-            pwaInstallabilityStatus: 'PWA_INSTALLABILITY_STATUS_UNKNOWN'
-          },
-          utcOffsetMinutes: -new Date().getTimezoneOffset()
-        },
-        request: {
-          internalExperimentFlags: [
-            { key: 'force_music_enable_outertube_tastebuilder_browse', value: 'true' },
-            { key: 'force_music_enable_outertube_playlist_detail_browse', value: 'true' },
-            { key: 'force_music_enable_outertube_search_suggestions', value: 'true' }
-          ]
-        },
-        user: { enableSafetyMode: false }
-      },
-      ...body
-    }
-    const headers = this._buildHeaders()
-    const { body: res } = await makeRequest(url, { method: 'POST', headers, body: payload, timeout: 8000 })
-    return res
-  }
-
-  async getSongInfo(videoId) {
-    if (!this.isReady) {
-      logger('warn', 'YTMusic', 'getSongInfo called before initialization')
-      return { title: null, artists: [], thumbnail: null, duration: null }
-    }
-    if (!videoId || typeof videoId !== 'string') {
-      logger('warn', 'YTMusic', 'Invalid videoId provided')
-      return { title: null, artists: [], thumbnail: null, duration: null }
-    }
-    try {
-      const body = {
-        enablePersistentPlaylistPanel: true,
-        tunerSettingValue: 'AUTOMIX_SETTING_NORMAL',
-        videoId,
-        isAudioOnly: true,
-        responsiveSignals: { videoInteraction: [] },
-        queueContextParams: ''
-      }
-      const data = await this._post('next', body, { prettyPrint: 'false' })
-      return extract(data)
-    } catch (e) {
-      logger('error', 'YTMusic', `getSongInfo error: ${e.message}`)
-      return { title: null, artists: [], thumbnail: null, duration: null }
-    }
-
-    function extract(data) {
-      try {
-        const contents = data.contents.singleColumnMusicWatchNextResultsRenderer
-          .tabbedRenderer.watchNextTabbedResultsRenderer.tabs[0]
-          .tabRenderer.content.musicQueueRenderer.content.playlistPanelRenderer.contents
-        const first = contents[0].playlistPanelVideoRenderer
-        const title = first.title?.runs?.[0]?.text || null
-        const artistRuns = first.longBylineText?.runs || []
-        const artists = artistRuns
-          .filter(r =>
-            r?.navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs
-              ?.browseEndpointContextMusicConfig?.pageType === 'MUSIC_PAGE_TYPE_ARTIST'
-          )
-          .map(r => r.text)
-        const thumbs = first.thumbnail?.thumbnails || []
-        const thumbnail = thumbs.length ? thumbs[thumbs.length - 1].url : null
-        const duration = first.lengthText?.runs?.[0]?.text || null
-        return { title, artists, thumbnail, duration }
-      } catch (e) {
-        logger('error', 'YTMusic', `extractSongInfo error: ${e.message}`)
-        return { title: null, artists: [], thumbnail: null, duration: null }
-      }
-    }
-  }
-}
-
 export default class AppleMusicLyrics {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.config = nodelink.options
-    this.ytm = null
   }
 
   async setup() {
     const adv = this.config.lyrics.applemusic?.advanceSearch || false
     if (adv) {
-      this.ytm = new YTMusic()
-      await this.ytm.initialize({})
-      logger('info', 'Lyrics', 'Apple Music: Advanced search initialized')
+      logger('info', 'Lyrics', 'Apple Music: Advanced search enabled.')
     }
     return true
   }
@@ -252,22 +109,21 @@ export default class AppleMusicLyrics {
   async _searchApple(info) {
     let title = null
     let authors = []
-    if (info.sourceName === 'youtube') {
-      if (!this.ytm || !this.ytm.isReady) {
-        logger('warn', 'Lyrics', 'YTMusic not ready, skipping YTM fetch.')
-      } else {
-        try {
-          const res = await this.ytm.getSongInfo(info.identifier)
+    const adv = this.config.lyrics.applemusic?.advanceSearch || false
 
-          if (res && res.title) {
-            title = info.title !== res.title ? res.title : _clean(info.title, true)
-            authors = Array.isArray(res.artists) ? res.artists : []
-          } else {
-            logger('warn', 'Lyrics', 'YTMusic returned invalid info, fallback used.')
-          }
-        } catch (err) {
-          logger('error', 'Lyrics', `YTMusic fetch failed: ${err.message}`)
+    if (info.sourceName === 'youtube' && adv) {
+      try {
+        const res = await this.nodelink.sources.resolve(info.uri)
+
+        if (res.loadType === 'track' && res.data.info) {
+          const trackInfo = res.data.info
+          title = info.title !== trackInfo.title ? trackInfo.title : _clean(info.title, true)
+          authors = trackInfo.author ? trackInfo.author.split(', ') : []
+        } else {
+          logger('warn', 'Lyrics', 'YouTube resolve returned invalid info, fallback used.')
         }
+      } catch (err) {
+        logger('error', 'Lyrics', `YouTube resolve failed: ${err.message}`)
       }
     }
 
