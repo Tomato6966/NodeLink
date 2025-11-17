@@ -535,7 +535,7 @@ export default class AppleMusicSource {
         }
       }
 
-      const bestMatch = this._findBestMatch(
+      const bestMatch = await this._findBestMatch(
         searchResult.data,
         duration,
         decodedTrack,
@@ -558,12 +558,12 @@ export default class AppleMusicSource {
   _buildSearchQuery(track, isExplicit) {
     let searchQuery = `${track.title} ${track.author}`
     if (isExplicit) {
-      searchQuery += this.allowExplicit ? ' lyrical video' : ' clean version'
+      searchQuery += this.allowExplicit ? ' official video' : ' clean version'
     }
     return searchQuery
   }
 
-  _findBestMatch(list, target, original, isExplicit, allowExplicit) {
+  async _findBestMatch(list, target, original, isExplicit, allowExplicit) {
     const allowedDurationDiff = target * DURATION_TOLERANCE
     const normalizedOriginalTitle = this._normalize(original.title)
     const normalizedOriginalAuthor = this._normalize(original.author)
@@ -594,27 +594,33 @@ export default class AppleMusicSource {
         )
         score -= extraWords.length * 5
 
+        const isCleanOrRadio = normalizedItemTitle.includes('clean') || normalizedItemTitle.includes('radio');
+
         if (isExplicit && !allowExplicit) {
-          if (
-            normalizedItemTitle.includes('clean') ||
-            normalizedItemTitle.includes('radio')
-          ) {
-            score += 200
+          if (isCleanOrRadio) {
+            score += 500;
           }
-        } else if (isExplicit && allowExplicit) {
-          if (
-            normalizedItemTitle.includes('clean') ||
-            normalizedItemTitle.includes('radio')
-          ) {
-            score -= 200
+        } else if (!isExplicit) {
+          if (isCleanOrRadio) {
+            score -= 200;
+          }
+        } else {
+          if (isCleanOrRadio) {
+            score -= 200;
           }
         }
 
         return { item, score }
-      })
-      .filter((c) => c.score > 0)
+      }).filter((c) => c.score >= 0)
 
-    if (scoredCandidates.length === 0) return null
+    if (scoredCandidates.length === 0) {
+      const newSearch = await this.nodelink.sources.searchWithDefault(`${original.title} ${original.author} official video`);
+      if (newSearch.loadType !== 'search' || newSearch.data.length === 0) {
+        return null;
+      }
+
+      return await this._findBestMatch(newSearch.data, target, original, isExplicit, allowExplicit);
+    }
 
     scoredCandidates.sort((a, b) => b.score - a.score)
 

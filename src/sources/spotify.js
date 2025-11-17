@@ -476,7 +476,7 @@ export default class SpotifySource {
         }
       }
 
-      const bestMatch = this._findBestMatch(
+      const bestMatch = await this._findBestMatch(
         searchResult.data,
         spotifyDuration,
         decodedTrack,
@@ -509,7 +509,7 @@ export default class SpotifySource {
     return searchQuery
   }
 
-  _findBestMatch(list, target, original, isExplicit, allowExplicit) {
+  async _findBestMatch(list, target, original, isExplicit, allowExplicit) {
     const allowedDurationDiff = target * DURATION_TOLERANCE
     const normalizedOriginalTitle = this._normalize(original.title)
     const normalizedOriginalAuthor = this._normalize(original.author)
@@ -523,15 +523,40 @@ export default class SpotifySource {
         const normalizedItemAuthor = this._normalize(item.info.author)
         let score = 0
 
-        if (!normalizedItemTitle.includes(normalizedOriginalTitle)) {
-          return { item, score: -1 }
+        if (normalizedItemTitle === normalizedOriginalTitle) {
+          score += 500
+        } else if (normalizedItemTitle.includes(normalizedOriginalTitle)) {
+          score += 200
+        } else if (normalizedOriginalTitle.includes(normalizedItemTitle)) {
+          score += 100
+        } else {
+          const titleSimilarity = this._calculateSimilarity(
+            normalizedOriginalTitle,
+            normalizedItemTitle
+          )
+          if (titleSimilarity > 0.7) {
+            score += titleSimilarity * 50
+          } else {
+            return { item, score: -1 }
+          }
         }
 
-        const authorSimilarity = this._calculateSimilarity(
-          normalizedOriginalAuthor,
-          normalizedItemAuthor
-        )
-        score += authorSimilarity * 100
+        const originalArtists = normalizedOriginalAuthor.split(/,\s*|\s+&\s+/).map(a => a.trim()).filter(Boolean);
+        let authorMatchScore = 0;
+        for (const artist of originalArtists) {
+            if (normalizedItemAuthor.includes(artist)) {
+                authorMatchScore += 100;
+            }
+        }
+        if (authorMatchScore > 0) {
+            score += authorMatchScore;
+        } else {
+            const authorSimilarity = this._calculateSimilarity(
+                normalizedOriginalAuthor,
+                normalizedItemAuthor
+            );
+            score += authorSimilarity * 50;
+        }
 
         const titleWords = new Set(normalizedItemTitle.split(' '))
         const originalTitleWords = new Set(normalizedOriginalTitle.split(' '))
@@ -540,27 +565,33 @@ export default class SpotifySource {
         )
         score -= extraWords.length * 5
 
+        const isCleanOrRadio = normalizedItemTitle.includes('clean') || normalizedItemTitle.includes('radio');
+
         if (isExplicit && !allowExplicit) {
-          if (
-            normalizedItemTitle.includes('clean') ||
-            normalizedItemTitle.includes('radio')
-          ) {
-            score += 200
+          if (isCleanOrRadio) {
+            score += 500;
           }
-        } else if (isExplicit && allowExplicit) {
-          if (
-            normalizedItemTitle.includes('clean') ||
-            normalizedItemTitle.includes('radio')
-          ) {
-            score -= 200
+        } else if (!isExplicit) {
+          if (isCleanOrRadio) {
+            score -= 200;
+          }
+        } else {
+          if (isCleanOrRadio) {
+            score -= 200;
           }
         }
 
         return { item, score }
-      })
-      .filter((c) => c.score > 0)
+      }).filter((c) => c.score >= 0)
 
-    if (scoredCandidates.length === 0) return null
+    if (scoredCandidates.length === 0) {
+      const newSearch = await this.nodelink.sources.searchWithDefault(`${original.title} ${original.author} official video`);
+      if (newSearch.loadType !== 'search' || newSearch.data.length === 0) {
+        return null;
+      }
+
+      return await this._findBestMatch(newSearch.data, target, original, isExplicit, allowExplicit);
+    }
 
     scoredCandidates.sort((a, b) => b.score - a.score)
 
