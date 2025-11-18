@@ -509,7 +509,7 @@ export default class SpotifySource {
     return searchQuery
   }
 
-  async _findBestMatch(list, target, original, isExplicit, allowExplicit) {
+  async _findBestMatch(list, target, original, isExplicit, allowExplicit, retried = false) {
     const allowedDurationDiff = target * DURATION_TOLERANCE
     const normalizedOriginalTitle = this._normalize(original.title)
     const normalizedOriginalAuthor = this._normalize(original.author)
@@ -523,23 +523,17 @@ export default class SpotifySource {
         const normalizedItemAuthor = this._normalize(item.info.author)
         let score = 0
 
-        if (normalizedItemTitle === normalizedOriginalTitle) {
-          score += 500
-        } else if (normalizedItemTitle.includes(normalizedOriginalTitle)) {
-          score += 200
-        } else if (normalizedOriginalTitle.includes(normalizedItemTitle)) {
-          score += 100
-        } else {
-          const titleSimilarity = this._calculateSimilarity(
-            normalizedOriginalTitle,
-            normalizedItemTitle
-          )
-          if (titleSimilarity > 0.7) {
-            score += titleSimilarity * 50
-          } else {
-            return { item, score: -1 }
+        const originalTitleWords = new Set(normalizedOriginalTitle.split(' ').filter(w => w.length > 0));
+        const itemTitleWords = new Set(normalizedItemTitle.split(' ').filter(w => w.length > 0));
+
+        let titleScore = 0;
+        for (const word of originalTitleWords) {
+          if (itemTitleWords.has(word)) {
+            titleScore++;
           }
         }
+        score += titleScore * 100;
+
 
         const originalArtists = normalizedOriginalAuthor.split(/,\s*|\s+&\s+/).map(a => a.trim()).filter(Boolean);
         let authorMatchScore = 0;
@@ -559,9 +553,9 @@ export default class SpotifySource {
         }
 
         const titleWords = new Set(normalizedItemTitle.split(' '))
-        const originalTitleWords = new Set(normalizedOriginalTitle.split(' '))
+        const originalTitleWordsSet = new Set(normalizedOriginalTitle.split(' '))
         const extraWords = [...titleWords].filter(
-          (word) => !originalTitleWords.has(word)
+          (word) => !originalTitleWordsSet.has(word)
         )
         score -= extraWords.length * 5
 
@@ -584,13 +578,17 @@ export default class SpotifySource {
         return { item, score }
       }).filter((c) => c.score >= 0)
 
-    if (scoredCandidates.length === 0) {
+    if (scoredCandidates.length === 0 && !retried) {
       const newSearch = await this.nodelink.sources.searchWithDefault(`${original.title} ${original.author} official video`);
       if (newSearch.loadType !== 'search' || newSearch.data.length === 0) {
         return null;
       }
 
-      return await this._findBestMatch(newSearch.data, target, original, isExplicit, allowExplicit);
+      return await this._findBestMatch(newSearch.data, target, original, isExplicit, allowExplicit, true);
+    }
+
+    if (scoredCandidates.length === 0) {
+      return null;
     }
 
     scoredCandidates.sort((a, b) => b.score - a.score)
@@ -601,6 +599,8 @@ export default class SpotifySource {
   _normalize(str) {
     return str
       .toLowerCase()
+      .replace(/feat\.?/g, '')
+      .replace(/ft\.?/g, '')
       .replace(/[^\w\s]/g, '')
       .trim()
   }
