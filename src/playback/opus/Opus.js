@@ -10,17 +10,25 @@ const OPUS_CTL = {
   PLP: 4014
 }
 
-const LIBS = [
-  { name: 'toddy-mediaplex', pick: (m) => m.OpusEncoder },
-  { name: '@discordjs/opus', pick: (m) => m.OpusEncoder },
-  { name: 'opusscript', pick: (m) => m }
-]
+const RING_SIZE = 512 * 1024
+let ACTIVE_LIB = null
 
-const _loadLib = () => {
-  for (const l of LIBS) {
+const _getLib = () => {
+  if (ACTIVE_LIB) return ACTIVE_LIB
+  const libs = [
+    { name: 'toddy-mediaplex', pick: m => m.OpusEncoder },
+    { name: '@discordjs/opus', pick: m => m.OpusEncoder },
+    { name: 'opusscript', pick: m => m }
+  ]
+
+  for (const l of libs) {
     try {
       const mod = require(l.name)
-      return { name: l.name, Encoder: l.pick(mod) }
+      const Encoder = l.pick(mod)
+      if (typeof Encoder === 'function') {
+        ACTIVE_LIB = { name: l.name, Encoder }
+        return ACTIVE_LIB
+      }
     } catch (e) {
       if (e.code !== 'MODULE_NOT_FOUND') throw e
     }
@@ -28,24 +36,29 @@ const _loadLib = () => {
   throw new Error('No compatible Opus library found.')
 }
 
-const _createInstance = (rate, channels, app, cached = null) => {
-  const lib = cached ?? _loadLib()
+const _createInstance = (rate, channels, app) => {
+  const lib = _getLib()
   const { name, Encoder } = lib
 
-  const applicationType =
-    name === 'opusscript' && typeof app === 'string'
-      ? Encoder.Application[app.toUpperCase()]
-      : app
+  let type = app
+  if (name === 'opusscript' && typeof app === 'string') {
+    type = Encoder.Application[app.toUpperCase()] ?? Encoder.Application.VOIP
+  }
 
-  return { instance: new Encoder(rate, channels, applicationType), lib }
+  return { instance: new Encoder(rate, channels, type), lib }
 }
 
-const _ctl = (enc, id, val) => {
+const _applyCtl = (enc, libName, id, val) => {
   if (!enc) throw new Error('Encoder not ready.')
-  const fn = enc.applyEncoderCTL || enc.encoderCTL
-  if (typeof fn !== 'function') return;
 
-  fn.call(enc, id, val)
+  if (libName === 'toddy-mediaplex') {
+    if (id === OPUS_CTL.BITRATE) return enc.setBitrate(val)
+    if (id === OPUS_CTL.FEC) return enc.setOption('inband_fec', val)
+    if (id === OPUS_CTL.PLP) return enc.setOption('packet_loss_expectation', val)
+  }
+
+  const fn = enc.applyEncoderCTL || enc.encoderCTL
+  if (typeof fn === 'function') fn.call(enc, id, val)
 }
 
 export class Encoder extends Transform {
@@ -56,75 +69,110 @@ export class Encoder extends Transform {
     application = 'audio'
   } = {}) {
     super({ readableObjectMode: true })
-    const { instance, lib } = _createInstance(rate, channels, application)
 
+    const { instance, lib } = _createInstance(rate, channels, application)
     this.enc = instance
     this.lib = lib
-    this.frame = frameSize
-    this.ch = channels
-    this.size = frameSize * channels * 2
-    this.buf = Buffer.alloc(0)
+    this.frameBytes = frameSize * channels * 2
+    this.ring = Buffer.allocUnsafe(RING_SIZE)
+    this.swap = Buffer.allocUnsafe(this.frameBytes)
+    this.writePos = 0
+    this.readPos = 0
   }
 
   _transform(chunk, _, cb) {
-    try {
-      this.buf = Buffer.concat([this.buf, chunk])
+    if (!chunk || !chunk.length) return cb()
 
-      while (this.buf.length >= this.size) {
-        const pcm = this.buf.subarray(0, this.size)
-        this.buf = this.buf.subarray(this.size)
+    let wp = this.writePos
+    let rp = this.readPos
+    const total = chunk.length
+    let remaining = total
 
-        const data = this.enc.encode(pcm, this.frame)
-        this.push(data)
-      }
-      cb()
-    } catch (e) {
-      cb(new Error(`Encode failed: ${e.message}`))
+    while (remaining > 0) {
+      const space = RING_SIZE - wp
+      const canWrite = remaining < space ? remaining : space
+      chunk.copy(this.ring, wp, total - remaining, total - remaining + canWrite)
+      remaining -= canWrite
+      wp += canWrite
+      if (wp === RING_SIZE) wp = 0
     }
+
+    while (true) {
+      const available = wp >= rp ? wp - rp : RING_SIZE - rp + wp
+      if (available < this.frameBytes) break
+
+      let frame
+      const end = rp + this.frameBytes
+
+      if (end <= RING_SIZE) {
+        frame = this.ring.subarray(rp, end)
+      } else {
+        const first = RING_SIZE - rp
+        this.ring.copy(this.swap, 0, rp, RING_SIZE)
+        this.ring.copy(this.swap, first, 0, this.frameBytes - first)
+        frame = this.swap
+      }
+
+      try {
+        this.push(this.enc.encode(frame))
+      } catch (e) {
+        this.writePos = wp
+        this.readPos = rp
+        return cb(new Error(`Encode failed: ${e.message}`))
+      }
+
+      rp += this.frameBytes
+      if (rp >= RING_SIZE) rp -= RING_SIZE
+    }
+
+    this.writePos = wp
+    this.readPos = rp
+    cb()
+  }
+
+  _flush(cb) {
+    this.writePos = 0
+    this.readPos = 0
+    cb()
   }
 
   _destroy(err, cb) {
-    if (this.lib.name === 'opusscript' && this.enc?.delete) this.enc.delete()
+    if (this.lib.name === 'opusscript' && this.enc && this.enc.delete) {
+      this.enc.delete()
+    }
     this.enc = null
+    this.ring = null
+    this.swap = null
     cb(err)
   }
 
   setBitrate(v) {
-    _ctl(
-      this.enc,
-      OPUS_CTL.BITRATE,
-      Math.min(128000, Math.max(16000, v))
-    )
+    const val = v < 500 ? 500 : (v > 512000 ? 512000 : v)
+    _applyCtl(this.enc, this.lib.name, OPUS_CTL.BITRATE, val)
   }
 
-  setFEC(v) {
-    _ctl(this.enc, OPUS_CTL.FEC, v ? 1 : 0)
+  setFEC(enabled = true) {
+    _applyCtl(this.enc, this.lib.name, OPUS_CTL.FEC, enabled ? 1 : 0)
   }
 
-  setPLP(v) {
-    _ctl(
-      this.enc,
-      OPUS_CTL.PLP,
-      Math.min(100, Math.max(0, v * 100))
-    )
+  setPLP(percent) {
+    const p = percent <= 1 ? percent * 100 : percent
+    const val = p < 0 ? 0 : (p > 100 ? 100 : Math.round(p))
+    _applyCtl(this.enc, this.lib.name, OPUS_CTL.PLP, val)
   }
 }
 
 export class Decoder extends Transform {
-  constructor({ rate = 48000, channels = 2, frameSize = 960 } = {}) {
-    super({ readableObjectMode: false })
+  constructor({ rate = 48000, channels = 2 } = {}) {
+    super({ readableObjectMode: true })
     const { instance, lib } = _createInstance(rate, channels, 'voip')
-
     this.dec = instance
     this.lib = lib
-    this.frame = frameSize
   }
 
   _transform(chunk, _, cb) {
     try {
-      const f = this.lib.name === 'opusscript' ? null : this.frame
-      const pcm = this.dec.decode(chunk, f)
-      this.push(pcm)
+      this.push(this.dec.decode(chunk))
       cb()
     } catch (e) {
       cb(new Error(`Decode failed: ${e.message}`))
@@ -132,7 +180,9 @@ export class Decoder extends Transform {
   }
 
   _destroy(err, cb) {
-    if (this.lib.name === 'opusscript' && this.dec?.delete) this.dec.delete()
+    if (this.lib.name === 'opusscript' && this.dec && this.dec.delete) {
+      this.dec.delete()
+    }
     this.dec = null
     cb(err)
   }
