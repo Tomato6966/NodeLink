@@ -1,5 +1,6 @@
 import { Transform } from 'node:stream'
 import { createRequire } from 'node:module'
+import { Buffer } from 'node:buffer'
 
 const require = createRequire(import.meta.url)
 
@@ -10,12 +11,12 @@ const OPUS_CTL = {
 }
 
 const LIBS = [
+  { name: 'toddy-mediaplex', pick: (m) => m.OpusEncoder },
   { name: '@discordjs/opus', pick: (m) => m.OpusEncoder },
-  { name: 'node-opus', pick: (m) => m.OpusEncoder },
   { name: 'opusscript', pick: (m) => m }
 ]
 
-const loadLib = () => {
+const _loadLib = () => {
   for (const l of LIBS) {
     try {
       const mod = require(l.name)
@@ -27,20 +28,23 @@ const loadLib = () => {
   throw new Error('No compatible Opus library found.')
 }
 
-const createInstance = (rate, channels, app, cached = null) => {
-  const lib = cached ?? loadLib()
+const _createInstance = (rate, channels, app, cached = null) => {
+  const lib = cached ?? _loadLib()
   const { name, Encoder } = lib
-  const a =
+
+  const applicationType =
     name === 'opusscript' && typeof app === 'string'
-      ? Encoder.Application[app]
+      ? Encoder.Application[app.toUpperCase()]
       : app
-  return { instance: new Encoder(rate, channels, a), lib }
+
+  return { instance: new Encoder(rate, channels, applicationType), lib }
 }
 
-const ctl = (enc, id, val, lib) => {
+const _ctl = (enc, id, val) => {
   if (!enc) throw new Error('Encoder not ready.')
   const fn = enc.applyEncoderCTL || enc.encoderCTL
-  if (typeof fn !== 'function') return
+  if (typeof fn !== 'function') return;
+
   fn.call(enc, id, val)
 }
 
@@ -52,7 +56,8 @@ export class Encoder extends Transform {
     application = 'audio'
   } = {}) {
     super({ readableObjectMode: true })
-    const { instance, lib } = createInstance(rate, channels, application)
+    const { instance, lib } = _createInstance(rate, channels, application)
+
     this.enc = instance
     this.lib = lib
     this.frame = frameSize
@@ -64,9 +69,11 @@ export class Encoder extends Transform {
   _transform(chunk, _, cb) {
     try {
       this.buf = Buffer.concat([this.buf, chunk])
+
       while (this.buf.length >= this.size) {
         const pcm = this.buf.subarray(0, this.size)
         this.buf = this.buf.subarray(this.size)
+
         const data = this.enc.encode(pcm, this.frame)
         this.push(data)
       }
@@ -83,32 +90,31 @@ export class Encoder extends Transform {
   }
 
   setBitrate(v) {
-    ctl(
+    _ctl(
       this.enc,
       OPUS_CTL.BITRATE,
-      Math.min(128000, Math.max(16000, v)),
-      this.lib.name
+      Math.min(128000, Math.max(16000, v))
     )
   }
 
   setFEC(v) {
-    ctl(this.enc, OPUS_CTL.FEC, v ? 1 : 0, this.lib.name)
+    _ctl(this.enc, OPUS_CTL.FEC, v ? 1 : 0)
   }
 
   setPLP(v) {
-    ctl(
+    _ctl(
       this.enc,
       OPUS_CTL.PLP,
-      Math.min(100, Math.max(0, v * 100)),
-      this.lib.name
+      Math.min(100, Math.max(0, v * 100))
     )
   }
 }
 
 export class Decoder extends Transform {
   constructor({ rate = 48000, channels = 2, frameSize = 960 } = {}) {
-    super({ readableObjectMode: true })
-    const { instance, lib } = createInstance(rate, channels, 'voip')
+    super({ readableObjectMode: false })
+    const { instance, lib } = _createInstance(rate, channels, 'voip')
+
     this.dec = instance
     this.lib = lib
     this.frame = frameSize
