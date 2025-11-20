@@ -164,7 +164,7 @@ export class Encoder extends Transform {
 
 export class Decoder extends Transform {
   constructor({ rate = 48000, channels = 2 } = {}) {
-    super({ readableObjectMode: true })
+    super({ readableObjectMode: false, writableObjectMode: true })
     const { instance, lib } = _createInstance(rate, channels, 'voip')
     this.dec = instance
     this.lib = lib
