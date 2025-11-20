@@ -73,6 +73,7 @@ export class Encoder extends Transform {
     const { instance, lib } = _createInstance(rate, channels, application)
     this.enc = instance
     this.lib = lib
+    this.frameSize = frameSize
     this.frameBytes = frameSize * channels * 2
     this.ring = Buffer.allocUnsafe(RING_SIZE)
     this.swap = Buffer.allocUnsafe(this.frameBytes)
@@ -114,7 +115,11 @@ export class Encoder extends Transform {
       }
 
       try {
-        this.push(this.enc.encode(frame))
+        if (this.lib.name === 'opusscript') {
+          this.push(this.enc.encode(frame, this.frameSize))
+        } else {
+          this.push(this.enc.encode(frame))
+        }
       } catch (e) {
         this.writePos = wp
         this.readPos = rp
@@ -164,7 +169,7 @@ export class Encoder extends Transform {
 
 export class Decoder extends Transform {
   constructor({ rate = 48000, channels = 2 } = {}) {
-    super({ readableObjectMode: false, writableObjectMode: true })
+    super({ readableObjectMode: false })
     const { instance, lib } = _createInstance(rate, channels, 'voip')
     this.dec = instance
     this.lib = lib
