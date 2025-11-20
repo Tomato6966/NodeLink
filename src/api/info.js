@@ -19,6 +19,7 @@ async function handler(nodelink, req, res, sendResponse) {
       name: '@performanc/voice',
       version: 'github:PerformanC/voice'
     },
+    isNodelink: true,
     sourceManagers: nodelink.workerManager
       ? nodelink.supportedSourcesCache ||
         (nodelink.supportedSourcesCache = await nodelink.getSourcesFromWorker())
