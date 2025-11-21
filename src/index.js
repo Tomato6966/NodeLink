@@ -149,7 +149,6 @@ class NodelinkServer {
     this.socket.on(
       '/v4/websocket',
       (socket, request, clientInfo, oldSessionId) => {
-        console.log(socket, request, clientInfo, oldSessionId);
         logger(
           'debug',
           'Resume',
