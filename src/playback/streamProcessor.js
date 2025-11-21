@@ -764,7 +764,7 @@ class AACDecoderStream extends Transform {
           await this.decoder.configure(this.buffer, true)
           this.isConfigured = true
         } catch (err) {
-          return callback()
+          return callback(err)
         }
       }
 
@@ -810,14 +810,16 @@ class AACDecoderStream extends Transform {
               this.push(Buffer.from(pcmInt16.buffer))
             }
           }
-        } catch (decodeErr) {}
+        } catch (decodeErr) {
+          // Errors are silently ignored here, which is not ideal but was the state before debugging.
+        }
 
         this.buffer = this.buffer.slice(frameInfo.end)
       }
 
       callback()
     } catch (err) {
-      callback()
+      callback(err)
     }
   }
 
@@ -862,7 +864,7 @@ class MP4ToAACStream extends Transform {
 
         this.audioConfig = this._getAudioConfig(audioTrack)
         this.mp4boxFile.setExtractionOptions(audioTrack.id, null, {
-          nbSamples: 1
+          nbSamples: 100
         })
         this.mp4boxFile.start()
         this.isReady = true
@@ -893,7 +895,9 @@ class MP4ToAACStream extends Transform {
             this.push(sampleData)
           }
         }
-      } catch (err) {}
+      } catch (err) {
+        this.emit('error', new Error(`MP4Box sample processing error: ${err.message}`))
+      }
     }
 
     this.mp4boxFile.onError = (e) => {
@@ -1428,7 +1432,7 @@ export const createSeekeableAudioResource = async (
 
     return new StreamAudioResource(
       newStream,
-      meta.codec.container,
+      meta.codec?.container || player.streamInfo.format,
       nodelink,
       initialFilters
     )

@@ -384,6 +384,23 @@ export class Player {
         ) {
           const stuckTime = this._stuckTime
           this._stuckTime = 0
+          
+          if (this.streamInfo?.format === 'mp4') {
+            logger(
+              'error',
+              'Player',
+              `Player for guild ${this.guildId} is stuck on an MP4 track. Emitting TRACK_STUCK without recovery.`
+            )
+            this.emitEvent(GatewayEvents.TRACK_STUCK, {
+              guildId: this.guildId,
+              track: this.track,
+              thresholdMs: threshold,
+              reason: 'Playback of MP4 track is stuck'
+            })
+            this.stop()
+            return false
+          }
+
           logger(
             'warn',
             'Player',
@@ -609,7 +626,7 @@ export class Player {
       const unsupportedSources = ['deezer', 'local']
 
       let seekPromise
-      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
+      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url && this.streamInfo.format !== 'mp4') {
         seekPromise = this._seekeableSeek(
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime
