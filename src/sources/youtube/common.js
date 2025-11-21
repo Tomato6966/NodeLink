@@ -1355,21 +1355,50 @@ export class BaseClient {
       }
     }
 
-    const qualityPriority = this._getQualityPriority()
-    const targetItags = qualityPriority[this.config.audio.quality || 'high']
+    const { targetItag, allowItag = [] } = this.config.sources.youtube || {}
+    let targetItags = []
+
+    if (targetItag) {
+      logger('debug', `youtube-${this.name}`, `Using target itag: ${targetItag}`)
+      targetItags = [Number(targetItag)]
+    } else {
+      const qualityPriority = this._getQualityPriority()
+      targetItags = qualityPriority[this.config.audio.quality || 'high'] || []
+      if (allowItag.length > 0) {
+        targetItags = [...new Set([...targetItags, ...allowItag])]
+      }
+    }
 
     const allFormats = [
       ...(streamingData.adaptiveFormats || []),
       ...(streamingData.formats || [])
     ]
 
-    const filteredFormats = allFormats.filter((format) =>
-      targetItags.includes(format.itag)
-    )
+    const filteredFormats = allFormats
+      .filter((format) => targetItags.includes(format.itag))
+      .sort(
+        (a, b) => targetItags.indexOf(a.itag) - targetItags.indexOf(b.itag)
+      )
+
+    if (filteredFormats.length === 0) {
+      logger(
+        'debug',
+        `youtube-${this.name}`,
+        `No suitable audio stream found for the configured quality. Available itags: ${allFormats.map((f) => f.itag).join(', ')}`
+      )
+      return {
+        exception: {
+          message: 'No suitable audio stream found for the configured quality.',
+          severity: 'common',
+          cause: 'Upstream'
+        }
+      }
+    }
+
+    let resolvedFormat = null
 
     if (this.requirePlayerScript()) {
       const playerScript = await cipherManager.getCachedPlayerScript()
-
       for (const format of filteredFormats) {
         let currentStreamUrl = format.url
         let currentEncryptedSignature = undefined
@@ -1395,6 +1424,13 @@ export class BaseClient {
               context
             )
             format.url = decipheredUrl
+            resolvedFormat = format
+            logger(
+              'debug',
+              `youtube-${this.name}`,
+              `Successfully resolved URL for itag ${format.itag}.`
+            )
+            break
           } catch (e) {
             logger(
               'warn',
@@ -1404,15 +1440,29 @@ export class BaseClient {
           }
         }
       }
+    } else {
+      resolvedFormat = filteredFormats[0]
     }
 
-    let audioFormat = null
-    if (filteredFormats.length > 0) {
-      audioFormat = filteredFormats[0] // Pick the first one after filtering
+    if (!resolvedFormat) {
+      logger(
+        'debug',
+        `youtube-${this.name}`,
+        'Could not resolve a working URL from the filtered formats.'
+      )
+      return {
+        exception: {
+          message: 'Could not resolve a working URL.',
+          severity: 'fault',
+          cause: 'Cipher'
+        }
+      }
     }
 
     const directUrl =
-      audioFormat?.url && !decodedTrack.isStream ? audioFormat.url : undefined
+      resolvedFormat?.url && !decodedTrack.isStream
+        ? resolvedFormat.url
+        : undefined
 
     if (!directUrl && !streamingData.hlsManifestUrl) {
       logger(
@@ -1428,21 +1478,55 @@ export class BaseClient {
         }
       }
     }
-
+    
+    const resolveFormat = (mimeType) => {
+      if (!mimeType) return null
+      
+      const lowerMime = mimeType.toLowerCase()
+      
+      if (lowerMime.includes('opus')) {
+        return 'webm/opus'
+      }
+      if (lowerMime.includes('mp4')) {
+        return 'mp4'
+      }
+      if (lowerMime.includes('mp3')) {
+        return 'mp3'
+      }
+      if (lowerMime.includes('aac')) {
+        return 'aac'
+      }
+      
+      if (decodedTrack.isStream) {
+        return 'mpegts'
+      }
+      
+      return null
+    }
+    
     return {
       url: directUrl,
       protocol: directUrl ? 'http' : null,
       format: directUrl
-        ? audioFormat.mimeType.includes('opus')
-          ? 'webm/opus'
-          : 'mpegts'
+        ? decodedTrack.isStream
+          ? 'mpegts'
+          : resolvedFormat.mimeType.includes('opus')
+            ? 'webm/opus'
+            : resolvedFormat.mimeType.includes('mp4')
+              ? 'mp4'
+              : null
         : null,
       hlsUrl: streamingData.hlsManifestUrl || null
     }
   }
 
   _getQualityPriority() {
-    return { high: [251], medium: [250], low: [249], lowest: [249] }
+    return {
+      high: [251, 141],
+      medium: [250, 140],
+      low: [249],
+      lowest: [249]
+    }
   }
 
   async resolve(url, type, context, cipherManager) {
