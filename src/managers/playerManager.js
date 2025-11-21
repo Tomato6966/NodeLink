@@ -69,12 +69,11 @@ export default class PlayerManager {
   }
 
   async destroy(guildId) {
-    const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.isCluster) {
       if (!this.nodelink.workerManager.isGuildAssigned(playerKey)) {
-        throw new Error('Player not found.')
+        return
       }
 
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
@@ -82,7 +81,7 @@ export default class PlayerManager {
         const destroyResult = await this.nodelink.workerManager.execute(
           worker,
           'destroyPlayer',
-          { sessionId: this.sessionId, guildId, userId: session.userId }
+          { sessionId: this.sessionId, guildId }
         )
         if (destroyResult.destroyed) {
           this.nodelink.workerManager.unassignGuild(playerKey)
@@ -90,10 +89,10 @@ export default class PlayerManager {
         } else {
           this.nodelink.workerManager.unassignGuild(playerKey)
           this.players.delete(playerKey)
-          throw new Error('Player not found in worker, but was assigned.')
         }
       } else {
-        throw new Error('Assigned worker not found for player.')
+        this.nodelink.workerManager.unassignGuild(playerKey)
+        this.players.delete(playerKey)
       }
     } else {
       const player = this.players.get(playerKey)
