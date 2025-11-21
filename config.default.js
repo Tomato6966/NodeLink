@@ -98,6 +98,8 @@ export default {
     },
     youtube: {
       enabled: true,
+      allowItag: [], // additional itags for audio streams, e.g., [140, 141]
+      targetItag: null, // force a specific itag for audio streams, overriding the quality option
       getOAuthToken: false,
       hl: 'en',
       gl: 'US',
@@ -184,7 +186,9 @@ export default {
     }
   },
   audio: {
-    encryption: 'aead_aes256_gcm_rtpsize'
+    quality: 'high', // high, medium, low, lowest
+    encryption: 'aead_aes256_gcm_rtpsize',
+    resamplingQuality: 'best' // best, medium, fastest, zero order holder, linear
   },
   routePlanner: {
     strategy: 'RotateOnBan', // RotateOnBan, RoundRobin, LoadBalance

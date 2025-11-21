@@ -15,6 +15,23 @@ const require = createRequire(import.meta.url)
 const { MPEGDecoder } = require('mpg123-decoder')
 const LibSampleRate = require('@alexanderolsen/libsamplerate-js')
 
+function getResamplerConverterType(quality, LibSampleRate) {
+  switch (quality) {
+    case 'best':
+      return LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY
+    case 'medium':
+      return LibSampleRate.ConverterType.SRC_SINC_MEDIUM_QUALITY
+    case 'fastest':
+      return LibSampleRate.ConverterType.SRC_SINC_FASTEST_QUALITY
+    case 'zero order holder':
+      return LibSampleRate.ConverterType.SRC_ZERO_ORDER_HOLDER
+    case 'linear':
+      return LibSampleRate.ConverterType.SRC_LINEAR
+    default:
+      return LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY
+  }
+}
+
 class BaseAudioResource {
   constructor() {
     this.pipes = []
@@ -114,6 +131,7 @@ class MpegDecoderStream extends Transform {
     this.decoder = new MPEGDecoder()
     this.resampler = null
     this.isDecoderReady = false
+    this.resamplingQuality = options?.resamplingQuality || 'best'
 
     this.decoder.ready
       .then(() => {
@@ -142,7 +160,7 @@ class MpegDecoderStream extends Transform {
           this._resample(channelData, channels, callback)
         } else {
           LibSampleRate.create(2, sampleRate, 48000, {
-            converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY
+            converterType: getResamplerConverterType(this.resamplingQuality, LibSampleRate)
           })
             .then((src) => {
               this.resampler = src
@@ -213,6 +231,7 @@ class FLACDecoderStream extends Transform {
     this.decoder = new FLACDecoder()
     this.resampler = null
     this.isDecoderReady = false
+    this.resamplingQuality = options?.resamplingQuality || 'best'
 
     this.decoder.ready
       .then(() => {
@@ -250,7 +269,7 @@ class FLACDecoderStream extends Transform {
         } else {
           try {
             this.resampler = await LibSampleRate.create(2, sampleRate, 48000, {
-              converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY
+              converterType: getResamplerConverterType(this.resamplingQuality, LibSampleRate)
             })
             this._resample(
               channelData,
@@ -339,6 +358,7 @@ class OggVorbisDecoderStream extends Transform {
     this.decoder = new OggVorbisDecoder()
     this.resampler = null
     this.isDecoderReady = false
+    this.resamplingQuality = options?.resamplingQuality || 'best'
 
     this.decoder.ready
       .then(() => {
@@ -376,7 +396,7 @@ class OggVorbisDecoderStream extends Transform {
         } else {
           try {
             this.resampler = await LibSampleRate.create(2, sampleRate, 48000, {
-              converterType: LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY
+              converterType: getResamplerConverterType(this.resamplingQuality, LibSampleRate)
             })
             this._resample(
               channelData,
@@ -582,6 +602,7 @@ class AACDecoderStream extends Transform {
     this.isConfigured = false
     this.pendingChunks = []
     this.buffer = Buffer.alloc(0)
+    this.resamplingQuality = options?.resamplingQuality || 'best'
 
     this.decoder.ready
       .then(() => {
@@ -770,8 +791,7 @@ class AACDecoderStream extends Transform {
                   sampleRate,
                   48000,
                   {
-                    converterType:
-                      LibSampleRate.ConverterType.SRC_SINC_BEST_QUALITY
+                    converterType: getResamplerConverterType(this.resamplingQuality, LibSampleRate)
                   }
                 )
               }
@@ -1240,6 +1260,7 @@ class StreamAudioResource extends BaseAudioResource {
         throw new Error('Invalid stream provided')
       }
 
+      const resamplingQuality = nodelink.options.audio.resamplingQuality
       const normalizedType = normalizeFormat(type)
       let pcmStream
 
@@ -1276,25 +1297,25 @@ class StreamAudioResource extends BaseAudioResource {
             this.pipes.push(mp4ToAAC)
           }
 
-          const aacDecoder = new AACDecoderStream()
+          const aacDecoder = new AACDecoderStream({ resamplingQuality })
           pcmStream = aacStream.pipe(aacDecoder)
           this.pipes.push(aacDecoder)
           break
         }
         case SupportedFormats.MPEG: {
-          const mpegDecoder = new MpegDecoderStream()
+          const mpegDecoder = new MpegDecoderStream({ resamplingQuality })
           pcmStream = stream.pipe(mpegDecoder)
           this.pipes.push(mpegDecoder)
           break
         }
         case SupportedFormats.FLAC: {
-          const flacDecoder = new FLACDecoderStream()
+          const flacDecoder = new FLACDecoderStream({ resamplingQuality })
           pcmStream = stream.pipe(flacDecoder)
           this.pipes.push(flacDecoder)
           break
         }
         case SupportedFormats.OGG_VORBIS: {
-          const vorbisDecoder = new OggVorbisDecoderStream()
+          const vorbisDecoder = new OggVorbisDecoderStream({ resamplingQuality })
           pcmStream = stream.pipe(vorbisDecoder)
           this.pipes.push(vorbisDecoder)
           break
