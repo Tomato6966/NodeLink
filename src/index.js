@@ -176,7 +176,10 @@ class NodelinkServer {
               socket.send(event)
             }
 
-            for (const [playerKey, playerInfo] of session.players.players.entries()) {
+            for (const [
+              playerKey,
+              playerInfo
+            ] of session.players.players.entries()) {
               if (this.workerManager) {
                 const worker = this.workerManager.getWorkerForGuild(playerKey)
                 if (worker) {
@@ -342,13 +345,21 @@ class NodelinkServer {
     const port = this.options.server.port
     const host = this.options.server.host || '0.0.0.0'
 
-    logger('info', 'Server', `Attempting to listen on host: ${host}, port: ${port}`)
+    logger(
+      'info',
+      'Server',
+      `Attempting to listen on host: ${host}, port: ${port}`
+    )
 
     this.server.on('error', (err) => {
       if (err.code === 'EADDRINUSE') {
         logger('error', 'Server', `Port ${port} is already in use.`)
       } else if (err.code === 'EADDRNOTAVAIL') {
-        logger('error', 'Server', `The address ${host} is not available on this machine.`)
+        logger(
+          'error',
+          'Server',
+          `The address ${host} is not available on this machine.`
+        )
         logger(
           'error',
           'Server',
@@ -361,7 +372,11 @@ class NodelinkServer {
     })
 
     this.server.listen(port, host, () => {
-      logger('started', 'Server', `Successfully listening on host ${host}, port ${port}`)
+      logger(
+        'started',
+        'Server',
+        `Successfully listening on host ${host}, port ${port}`
+      )
     })
   }
   _startGlobalUpdater() {

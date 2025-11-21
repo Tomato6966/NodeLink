@@ -564,7 +564,14 @@ export default class AppleMusicSource {
     return searchQuery
   }
 
-  async _findBestMatch(list, target, original, isExplicit, allowExplicit, retried = false) {
+  async _findBestMatch(
+    list,
+    target,
+    original,
+    isExplicit,
+    allowExplicit,
+    retried = false
+  ) {
     const allowedDurationDiff = target * DURATION_TOLERANCE
     const normalizedOriginalTitle = this._normalize(original.title)
     const normalizedOriginalAuthor = this._normalize(original.author)
@@ -578,16 +585,20 @@ export default class AppleMusicSource {
         const normalizedItemAuthor = this._normalize(item.info.author)
         let score = 0
 
-        const originalTitleWords = new Set(normalizedOriginalTitle.split(' ').filter(w => w.length > 0));
-        const itemTitleWords = new Set(normalizedItemTitle.split(' ').filter(w => w.length > 0));
+        const originalTitleWords = new Set(
+          normalizedOriginalTitle.split(' ').filter((w) => w.length > 0)
+        )
+        const itemTitleWords = new Set(
+          normalizedItemTitle.split(' ').filter((w) => w.length > 0)
+        )
 
-        let titleScore = 0;
+        let titleScore = 0
         for (const word of originalTitleWords) {
           if (itemTitleWords.has(word)) {
-            titleScore++;
+            titleScore++
           }
         }
-        score += titleScore * 100;
+        score += titleScore * 100
 
         const authorSimilarity = this._calculateSimilarity(
           normalizedOriginalAuthor,
@@ -596,42 +607,56 @@ export default class AppleMusicSource {
         score += authorSimilarity * 100
 
         const titleWords = new Set(normalizedItemTitle.split(' '))
-        const originalTitleWordsSet = new Set(normalizedOriginalTitle.split(' '))
+        const originalTitleWordsSet = new Set(
+          normalizedOriginalTitle.split(' ')
+        )
         const extraWords = [...titleWords].filter(
           (word) => !originalTitleWordsSet.has(word)
         )
         score -= extraWords.length * 5
 
-        const isCleanOrRadio = normalizedItemTitle.includes('clean') || normalizedItemTitle.includes('radio');
+        const isCleanOrRadio =
+          normalizedItemTitle.includes('clean') ||
+          normalizedItemTitle.includes('radio')
 
         if (isExplicit && !allowExplicit) {
           if (isCleanOrRadio) {
-            score += 500;
+            score += 500
           }
         } else if (!isExplicit) {
           if (isCleanOrRadio) {
-            score -= 200;
+            score -= 200
           }
         } else {
           if (isCleanOrRadio) {
-            score -= 200;
+            score -= 200
           }
         }
 
         return { item, score }
-      }).filter((c) => c.score >= 0)
+      })
+      .filter((c) => c.score >= 0)
 
     if (scoredCandidates.length === 0 && !retried) {
-      const newSearch = await this.nodelink.sources.searchWithDefault(`${original.title} ${original.author} official video`);
+      const newSearch = await this.nodelink.sources.searchWithDefault(
+        `${original.title} ${original.author} official video`
+      )
       if (newSearch.loadType !== 'search' || newSearch.data.length === 0) {
-        return null;
+        return null
       }
 
-      return await this._findBestMatch(newSearch.data, target, original, isExplicit, allowExplicit, true);
+      return await this._findBestMatch(
+        newSearch.data,
+        target,
+        original,
+        isExplicit,
+        allowExplicit,
+        true
+      )
     }
 
     if (scoredCandidates.length === 0) {
-      return null;
+      return null
     }
 
     scoredCandidates.sort((a, b) => b.score - a.score)

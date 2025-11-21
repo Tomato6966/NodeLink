@@ -16,9 +16,9 @@ let ACTIVE_LIB = null
 const _getLib = () => {
   if (ACTIVE_LIB) return ACTIVE_LIB
   const libs = [
-    { name: 'toddy-mediaplex', pick: m => m.OpusEncoder },
-    { name: '@discordjs/opus', pick: m => m.OpusEncoder },
-    { name: 'opusscript', pick: m => m }
+    { name: 'toddy-mediaplex', pick: (m) => m.OpusEncoder },
+    { name: '@discordjs/opus', pick: (m) => m.OpusEncoder },
+    { name: 'opusscript', pick: (m) => m }
   ]
 
   for (const l of libs) {
@@ -54,7 +54,8 @@ const _applyCtl = (enc, libName, id, val) => {
   if (libName === 'toddy-mediaplex') {
     if (id === OPUS_CTL.BITRATE) return enc.setBitrate(val)
     if (id === OPUS_CTL.FEC) return enc.setOption('inband_fec', val)
-    if (id === OPUS_CTL.PLP) return enc.setOption('packet_loss_expectation', val)
+    if (id === OPUS_CTL.PLP)
+      return enc.setOption('packet_loss_expectation', val)
   }
 
   const fn = enc.applyEncoderCTL || enc.encoderCTL
@@ -152,7 +153,7 @@ export class Encoder extends Transform {
   }
 
   setBitrate(v) {
-    const val = v < 500 ? 500 : (v > 512000 ? 512000 : v)
+    const val = v < 500 ? 500 : v > 512000 ? 512000 : v
     _applyCtl(this.enc, this.lib.name, OPUS_CTL.BITRATE, val)
   }
 
@@ -162,7 +163,7 @@ export class Encoder extends Transform {
 
   setPLP(percent) {
     const p = percent <= 1 ? percent * 100 : percent
-    const val = p < 0 ? 0 : (p > 100 ? 100 : Math.round(p))
+    const val = p < 0 ? 0 : p > 100 ? 100 : Math.round(p)
     _applyCtl(this.enc, this.lib.name, OPUS_CTL.PLP, val)
   }
 }

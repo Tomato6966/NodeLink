@@ -11,7 +11,11 @@ export default class SessionManager {
 
   create(request, socket, clientInfo) {
     const sessionId = generateRandomLetters(16)
-    logger('debug', 'SessionManager', `New session created with ID ${sessionId}`)
+    logger(
+      'debug',
+      'SessionManager',
+      `New session created with ID ${sessionId}`
+    )
     const session = {
       id: sessionId,
       clientInfo,
@@ -30,7 +34,8 @@ export default class SessionManager {
 
   get(sessionId) {
     return (
-      this.activeSessions.get(sessionId) || this.resumableSessions.get(sessionId)
+      this.activeSessions.get(sessionId) ||
+      this.resumableSessions.get(sessionId)
     )
   }
 

@@ -499,7 +499,7 @@ const httpAgent = new http.Agent({ keepAlive: true })
 const httpsAgent = new https.Agent({ keepAlive: true })
 const http2FailedHosts = new Set()
 
-async function http1makeRequest(urlString, options = {}) {
+async function _internalHttp1Request(urlString, options = {}) {
   const {
     method = 'GET',
     headers: customHeaders = {},
@@ -509,6 +509,7 @@ async function http1makeRequest(urlString, options = {}) {
     disableBodyCompression = false,
     maxRedirects = DEFAULT_MAX_REDIRECTS,
     localAddress,
+    agent: customAgent,
     _redirectsFollowed = 0
   } = options
 
@@ -519,7 +520,7 @@ async function http1makeRequest(urlString, options = {}) {
   const currentUrl = new URL(urlString)
   const isHttps = currentUrl.protocol === 'https:'
   const lib = isHttps ? https : http
-  const agent = isHttps ? httpsAgent : httpAgent
+  const agent = customAgent || (isHttps ? httpsAgent : httpAgent)
 
   const reqHeaders = {
     'Accept-Encoding': 'br, gzip, deflate',
@@ -632,9 +633,7 @@ async function http1makeRequest(urlString, options = {}) {
       })
     })
 
-    req.on('error', (err) =>
-      reject(new Error(`Request error for ${urlString}: ${err.message}`))
-    )
+    req.on('error', (err) => reject(err))
     req.on('timeout', () =>
       req.destroy(
         new Error(`Request timed out after ${timeout}ms for ${urlString}`)
@@ -648,6 +647,49 @@ async function http1makeRequest(urlString, options = {}) {
     }
   })
 }
+
+async function http1makeRequest(urlString, options = {}) {
+  const { maxRetries = 3 } = options
+  let attempt = 0
+
+  while (true) {
+    try {
+      const isHttps = new URL(urlString).protocol === 'https:'
+      const useKeepAlive = !options.streamOnly
+      const agent = useKeepAlive
+        ? isHttps
+          ? httpsAgent
+          : httpAgent
+        : new (isHttps ? https : http).Agent({ keepAlive: false })
+
+      const newOptions = { ...options, agent }
+
+      return await _internalHttp1Request(urlString, newOptions)
+    } catch (err) {
+      const isRetryable = [
+        'ECONNRESET',
+        'ETIMEDOUT',
+        'EPIPE',
+        'ENETUNREACH',
+        'EHOSTUNREACH'
+      ].includes(err.code)
+
+      if (isRetryable && attempt < maxRetries) {
+        attempt++
+        const delay = 100 * Math.pow(2, attempt)
+        logger(
+          'warn',
+          'Network',
+          `Request for ${urlString} failed with ${err.code}. Retrying in ${delay}ms... (Attempt ${attempt}/${maxRetries})`
+        )
+        await new Promise((resolve) => setTimeout(resolve, delay))
+      } else {
+        throw err
+      }
+    }
+  }
+}
+
 async function makeRequest(urlString, options, nodelink) {
   const {
     method = 'GET',
@@ -691,10 +733,10 @@ async function makeRequest(urlString, options, nodelink) {
   try {
     const url = new URL(urlString)
     if (http2FailedHosts.has(url.host)) {
-      return http1makeRequest(urlString, { ...options, localAddress })
+      return http1makeRequest(urlString, { ...options, localAddress }, nodelink)
     }
   } catch (e) {
-    return http1makeRequest(urlString, { ...options, localAddress })
+    return http1makeRequest(urlString, { ...options, localAddress }, nodelink)
   }
 
   return new Promise((resolve, reject) => {
@@ -711,7 +753,9 @@ async function makeRequest(urlString, options, nodelink) {
         const url = new URL(urlString)
         http2FailedHosts.add(url.host)
       } catch (e) {}
-      resolve(http1makeRequest(urlString, { ...options, localAddress }))
+      resolve(
+        http1makeRequest(urlString, { ...options, localAddress }, nodelink)
+      )
     }
 
     try {
@@ -745,10 +789,10 @@ async function makeRequest(urlString, options, nodelink) {
       }
 
       if (body && !['GET', 'HEAD'].includes(method)) {
-        headers['Content-Type'] =
+        h2Headers['Content-Type'] =
           typeof body === 'object'
             ? 'application/json'
-            : headers['Content-Type']
+            : h2Headers['Content-Type']
         if (!disableBodyCompression) h2Headers['content-encoding'] = 'gzip'
       }
 
@@ -804,15 +848,19 @@ async function makeRequest(urlString, options, nodelink) {
           }
           closeSessionGracefully()
           return resolve(
-            makeRequest(newLocation, {
-              ...options,
-              method: nextMethod,
-              body: nextBody,
-              _redirectsFollowed: _redirectsFollowed + 1,
-              disableBodyCompression: nextBody
-                ? disableBodyCompression
-                : undefined
-            })
+            makeRequest(
+              newLocation,
+              {
+                ...options,
+                method: nextMethod,
+                body: nextBody,
+                _redirectsFollowed: _redirectsFollowed + 1,
+                disableBodyCompression: nextBody
+                  ? disableBodyCompression
+                  : undefined
+              },
+              nodelink
+            )
           )
         }
 
