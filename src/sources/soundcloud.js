@@ -1,4 +1,5 @@
 import { PassThrough } from 'node:stream'
+
 import {
   encodeTrack,
   http1makeRequest,
@@ -11,9 +12,7 @@ const BASE_URL = 'https://api-v2.soundcloud.com'
 const SOUNDCLOUD_URL = 'https://soundcloud.com'
 const ASSET_PATTERN = /https:\/\/a-v2\.sndcdn\.com\/assets\/[a-zA-Z0-9-]+\.js/g
 const CLIENT_ID_PATTERN = /client_id=([a-zA-Z0-9]{32})/
-const TRACK_PATTERN =
-  /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:sets\/)?[^/\s]+$/
-const ASSET_INDEX = 5
+const TRACK_PATTERN = /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:sets\/)?[^/\s]+$/
 const BATCH_SIZE = 50
 const DEFAULT_PRIORITY = 85
 
@@ -28,47 +27,58 @@ export default class SoundCloudSource {
   }
 
   async setup() {
-    if (this.clientId) return true
-
     try {
       const mainPage = await makeRequest(SOUNDCLOUD_URL, { method: 'GET' })
+
       if (!mainPage || mainPage.error) {
         this._logError('Failed to load SoundCloud main page', mainPage?.error)
+
         return false
       }
 
       const assetMatches = [...mainPage.body.matchAll(ASSET_PATTERN)]
-      if (!assetMatches[ASSET_INDEX]) {
+
+      if (assetMatches.length === 0) {
         logger('warn', 'Sources', 'SoundCloud asset URL not found')
+
         return false
       }
 
-      const asset = await http1makeRequest(assetMatches[ASSET_INDEX][0])
-      if (!asset || asset.error) {
-        this._logError('Failed to load asset', asset?.error)
+      try {
+        const clientId = await Promise.any(
+          assetMatches.map(async (match) => {
+            const assetUrl = match[0]
+            const asset = await http1makeRequest(assetUrl)
+
+            if (asset && !asset.error) {
+              const idMatch = asset.body.match(CLIENT_ID_PATTERN)
+              if (idMatch?.[1]) {
+                return idMatch[1]
+              }
+            }
+            throw new Error('No client_id found in asset')
+          })
+        )
+
+        this.clientId = clientId
+        logger('info', 'Sources', `Loaded SoundCloud (clientId: ${this.clientId})`)
+
+        return true
+      } catch {
+        logger('warn', 'Sources', 'client_id not found in any assets')
+
         return false
       }
-
-      const match = asset.body.match(CLIENT_ID_PATTERN)
-      if (!match?.[1]) {
-        logger('warn', 'Sources', 'client_id not found')
-        return false
-      }
-
-      this.clientId = match[1]
-      logger(
-        'info',
-        'Sources',
-        `Loaded SoundCloud (clientId: ${this.clientId})`
-      )
-      return true
     } catch (err) {
       this._logError('Setup failed', err)
+
       return false
     }
   }
 
-  match() {}
+  match(url) {
+    return this.patterns.some((p) => p.test(url))
+  }
 
   async search(query) {
     if (!this._isValidString(query)) {
@@ -86,23 +96,24 @@ export default class SoundCloudSource {
       })
 
       const req = await http1makeRequest(`${BASE_URL}/search?${params}`)
+
       if (req.error || req.statusCode !== 200) {
-        return this._buildError(
-          req.error?.message ?? `Status: ${req.statusCode}`
-        )
+        return this._buildError(req.error?.message ?? `Status: ${req.statusCode}`)
       }
 
-      if (!req.body?.total_results) {
-        logger('debug', 'Sources', `No results for "${query}"`)
+      if (!req.body?.total_results && !req.body?.collection?.length) {
+        logger('debug', 'Sources', `No results for '${query}'`)
+
         return { loadType: 'empty', data: {} }
       }
 
       const tracks = this._processTracks(req.body.collection)
-      logger('debug', 'Sources', `Found ${tracks.length} tracks for "${query}"`)
+      logger('debug', 'Sources', `Found ${tracks.length} tracks for '${query}'`)
 
       return { loadType: 'search', data: tracks }
     } catch (err) {
       this._logError('Search failed', err)
+
       return this._buildError(err.message)
     }
   }
@@ -117,13 +128,13 @@ export default class SoundCloudSource {
       const req = await http1makeRequest(reqUrl)
 
       if (req.statusCode === 404) return { loadType: 'empty', data: {} }
+
       if (req.error || req.statusCode !== 200) {
-        return this._buildError(
-          req.error?.message ?? `Status: ${req.statusCode}`
-        )
+        return this._buildError(req.error?.message ?? `Status: ${req.statusCode}`)
       }
 
       const { body } = req
+
       if (!body?.kind) return this._buildError('Invalid response')
 
       if (body.kind === 'track') {
@@ -137,6 +148,7 @@ export default class SoundCloudSource {
       return { loadType: 'empty', data: {} }
     } catch (err) {
       this._logError('Resolve failed', err)
+
       return this._buildError(err.message)
     }
   }
@@ -153,28 +165,39 @@ export default class SoundCloudSource {
       }
     }
 
-    while (ids.length > 0) {
-      const batch = ids.splice(0, BATCH_SIZE)
-      const batchUrl = `${BASE_URL}/tracks?${new URLSearchParams({
-        ids: batch.join(','),
-        client_id: this.clientId
-      })}`
+    const limit = this.nodelink.options.maxAlbumPlaylistLength
+    const neededIds = ids.slice(0, Math.max(0, limit - complete.length))
 
-      try {
-        const res = await http1makeRequest(batchUrl, { method: 'GET' })
-        if (Array.isArray(res.body)) {
-          complete.push(...res.body)
-        } else {
-          break
-        }
-      } catch (err) {
-        this._logError('Batch fetch failed', err)
-        break
+    if (neededIds.length > 0) {
+      const chunks = []
+
+      for (let i = 0; i < neededIds.length; i += BATCH_SIZE) {
+        chunks.push(neededIds.slice(i, i + BATCH_SIZE))
       }
+
+      const promises = chunks.map((chunk) => {
+        const batchUrl = `${BASE_URL}/tracks?${new URLSearchParams({
+          ids: chunk.join(','),
+          client_id: this.clientId
+        })}`
+
+        return http1makeRequest(batchUrl, { method: 'GET' })
+          .then((res) => (Array.isArray(res.body) ? res.body : []))
+          .catch((err) => {
+            this._logError('Batch fetch failed', err)
+
+            return []
+          })
+      })
+
+      const results = await Promise.all(promises)
+      results.forEach((batch) => complete.push(...batch))
     }
 
-    const limit = this.nodelink.options.maxAlbumPlaylistLength
-    const tracks = complete.slice(0, limit).map((t) => this._buildTrack(t))
+    const tracks = complete
+      .slice(0, limit)
+      .filter((t) => t.title)
+      .map((t) => this._buildTrack(t))
 
     return {
       loadType: 'playlist',
@@ -192,6 +215,8 @@ export default class SoundCloudSource {
   _processTracks(collection) {
     const max = this.nodelink.options.maxSearchResults
     const tracks = []
+
+    if (!Array.isArray(collection)) return []
 
     for (let i = 0; i < collection.length && tracks.length < max; i++) {
       if (collection[i]?.kind === 'track') {
@@ -236,35 +261,61 @@ export default class SoundCloudSource {
 
       if (req.error || req.statusCode !== 200) {
         this._logError('getTrackUrl failed', req.error)
-        return this._buildException(
-          req.error?.message ?? `Status: ${req.statusCode}`
-        )
+
+        return this._buildException(req.error?.message ?? `Status: ${req.statusCode}`)
       }
 
       if (req.body?.errors?.[0]) {
         const msg = req.body.errors[0].error_message
         this._logError('API error', new Error(msg))
+
         return this._buildException(msg)
       }
 
       return await this._selectTranscoding(req.body)
     } catch (err) {
       this._logError('getTrackUrl exception', err)
+
       return this._buildException(err.message)
     }
   }
 
   async _selectTranscoding(body) {
     const transcodings = body.media?.transcodings ?? []
+
+    if (!transcodings.length && (body.hls_aac_160_url || body.hls_aac_96_url)) {
+      if (body.hls_aac_160_url) {
+        transcodings.push({
+          format: { protocol: 'hls', mime_type: 'audio/aac' },
+          url: body.hls_aac_160_url,
+          quality: 'high'
+        })
+      }
+
+      if (body.hls_aac_96_url) {
+        transcodings.push({
+          format: { protocol: 'hls', mime_type: 'audio/aac' },
+          url: body.hls_aac_96_url,
+          quality: 'low'
+        })
+      }
+    }
+
     if (transcodings.length === 0) {
       return this._buildException('No transcodings available')
     }
 
-    // Priority order: Progressive MP3 > Progressive AAC > HLS MP3 > HLS AAC > Any HLS
-    const progressiveMp3 = transcodings.find(
+    const hlsAacHigh = transcodings.find(
       (t) =>
-        t.format?.protocol === 'progressive' &&
-        t.format?.mime_type === 'audio/mpeg'
+        t.format?.protocol === 'hls' &&
+        (t.format?.mime_type?.includes('aac') || t.format?.mime_type?.includes('mp4')) &&
+        (t.quality === 'hq' || t.preset?.includes('160') || t.url.includes('160'))
+    )
+
+    const hlsAacStandard = transcodings.find(
+      (t) =>
+        t.format?.protocol === 'hls' &&
+        (t.format?.mime_type?.includes('aac') || t.format?.mime_type?.includes('mp4'))
     )
 
     const progressiveAac = transcodings.find(
@@ -273,29 +324,17 @@ export default class SoundCloudSource {
         t.format?.mime_type?.includes('aac')
     )
 
-    const hlsMp3 = transcodings.find(
-      (t) =>
-        t.format?.protocol === 'hls' && t.format?.mime_type === 'audio/mpeg'
-    )
-
-    const hlsAac = transcodings.find(
-      (t) =>
-        t.format?.protocol === 'hls' &&
-        (t.format?.mime_type?.includes('aac') ||
-          t.format?.mime_type?.includes('mp4'))
-    )
-
-    const anyHls = transcodings.find(
-      (t) =>
-        t.format?.protocol === 'hls' && !t.format?.mime_type?.includes('opus')
+    const anyHls = transcodings.find((t) => t.format?.protocol === 'hls')
+    const anyProgressive = transcodings.find(
+      (t) => t.format?.protocol === 'progressive'
     )
 
     const selected =
-      progressiveMp3 ||
+      hlsAacHigh ||
+      hlsAacStandard ||
       progressiveAac ||
-      hlsMp3 ||
-      hlsAac ||
       anyHls ||
+      anyProgressive ||
       transcodings[0]
 
     if (selected.format?.mime_type?.includes('opus')) {
@@ -306,25 +345,43 @@ export default class SoundCloudSource {
       )
     }
 
-    const streamUrl = `${selected.url}?client_id=${this.clientId}`
-    const urlReq = await http1makeRequest(streamUrl)
+    const streamAuthUrl = `${selected.url}?client_id=${this.clientId}`
+    const urlReq = await http1makeRequest(streamAuthUrl, { method: 'GET' })
+    let finalUrl = null
 
-    if (!urlReq.body?.url) {
+    if (urlReq.url && urlReq.url !== streamAuthUrl) {
+      finalUrl = urlReq.url
+    } else if (urlReq.statusCode === 302 || urlReq.statusCode === 301) {
+      finalUrl = urlReq.headers?.location
+    } else if (urlReq.body && typeof urlReq.body === 'object' && urlReq.body.url) {
+      finalUrl = urlReq.body.url
+    } else if (urlReq.statusCode === 200) {
+      finalUrl = streamAuthUrl
+    }
+
+    if (!finalUrl) {
       return this._buildException('Failed to resolve stream URL')
     }
 
     const mimeType = selected.format?.mime_type?.toLowerCase() ?? ''
-    const format = mimeType.includes('mpeg')
-      ? 'mp3'
-      : mimeType.includes('aac') || mimeType.includes('mp4')
-        ? 'aac'
-        : mimeType.includes('opus')
-          ? 'opus'
-          : 'arbitrary'
+    const protocol = selected.format?.protocol ?? 'progressive'
+    let format = 'arbitrary'
+
+    if (mimeType.includes('mpeg')) {
+      format = 'mp3'
+    } else if (mimeType.includes('aac') || mimeType.includes('mp4')) {
+      if (protocol === 'hls') {
+        format = 'aac_hls'
+      } else {
+        format = 'm4a'
+      }
+    } else if (mimeType.includes('opus')) {
+      format = 'opus'
+    }
 
     return {
-      url: urlReq.body.url,
-      protocol: selected.format?.protocol ?? 'progressive',
+      url: finalUrl,
+      protocol,
       format
     }
   }
@@ -352,6 +409,7 @@ export default class SoundCloudSource {
 
       if (res.error) {
         stream.destroy(new Error(`Stream load failed: ${res.error.message}`))
+
         return
       }
 
