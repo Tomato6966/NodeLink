@@ -135,12 +135,13 @@ Internally, NodeLink combines native and WebAssembly modules for precise audio p
 - [`@ecliptia/seekeable-node`](https://www.npmjs.com/package/@ecliptia/seekeable-node)
 - [`@wasm-audio-decoders/flac`](https://www.npmjs.com/package/@wasm-audio-decoders/flac)
 - [`@wasm-audio-decoders/ogg-vorbis`](https://www.npmjs.com/package/@wasm-audio-decoders/ogg-vorbis)
+- [`myzod`](https://www.npmjs.com/package/myzod)
+- [`mp4box`](https://www.npmjs.com/package/mp4box)
 - [`mpg123-decoder`](https://www.npmjs.com/package/mpg123-decoder)
-- [`opusscript`](https://www.npmjs.com/package/opusscript)
-- [`prism-media`](https://www.npmjs.com/package/prism-media)
+- [`toddy-mediaplex`](https://www.npmjs.com/package/toddy-mediaplex)
 - [`sodium-native`](https://www.npmjs.com/package/sodium-native)
 
-> [!NOTE]  
+> [!NOTE]
 > Dependencies marked with an asterisk (*) are maintained by the PerformanC team.
 
 These modules form the essential foundation that keeps NodeLink’s playback stable and reliable.
