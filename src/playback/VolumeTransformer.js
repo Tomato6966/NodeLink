@@ -5,7 +5,7 @@ const FADE_FRAMES = 50 // 50 frames * 20ms/frame = 1 second fade
 
 export class VolumeTransformer extends Transform {
   constructor(options = {}) {
-    super(options)
+    super({ highWaterMark: 3840, ...options })
     this.targetVolume = options.volume ?? 1.0
     this.currentVolume = this.targetVolume
     this.startFadeVolume = this.targetVolume
@@ -55,14 +55,13 @@ export class VolumeTransformer extends Transform {
 
     this._setupMultipliers(volumePercent)
 
-    const newBuffer = Buffer.alloc(chunk.length)
     for (let i = 0; i < chunk.length; i += 2) {
       const sample = chunk.readInt16LE(i)
       const value = (sample * this.integerMultiplier) / 10000
-      newBuffer.writeInt16LE(clamp16Bit(value), i)
+      chunk.writeInt16LE(clamp16Bit(value), i)
     }
 
-    this.push(newBuffer)
+    this.push(chunk)
     callback()
   }
 }
