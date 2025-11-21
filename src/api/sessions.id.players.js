@@ -94,9 +94,9 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           nodelink.workerManager.guildToWorker.keys()
         )
         const sessionPlayerKeys = playerKeys.filter((key) =>
-          key.endsWith(`:${session.userId}`)
+          key.startsWith(`${session.id}:`)
         )
-        const guildIds = sessionPlayerKeys.map((key) => key.split(':')[0])
+        const guildIds = sessionPlayerKeys.map((key) => key.split(':')[1])
 
         const players = await Promise.all(
           guildIds.map((gid) =>

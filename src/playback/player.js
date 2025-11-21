@@ -47,16 +47,25 @@ export class Player {
 
     this.emitEvent = (type, payload = {}) => {
       this.nodelink.statsManager.incrementPlaybackEvent(type)
+      const eventData = JSON.stringify({
+        op: 'event',
+        type,
+        guildId: this.guildId,
+        ...payload
+      })
+
+      if (this.session.isPaused) {
+        this.session.eventQueue.push(eventData)
+        logger(
+          'debug',
+          'Player',
+          `Queued event ${type} for paused session ${this.session.id}`
+        )
+        return
+      }
 
       try {
-        this.session.socket.send(
-          JSON.stringify({
-            op: 'event',
-            type,
-            guildId: this.guildId,
-            ...payload
-          })
-        )
+        this.session.socket.send(eventData)
       } catch {}
     }
 
@@ -457,6 +466,67 @@ export class Player {
     return true
   }
 
+  async _startPlayback(startTime = 0) {
+    if (!this.track) return false
+
+    const urlData = await this.nodelink.sources.getTrackUrl(this.track.info)
+    this.streamInfo = { ...urlData, trackInfo: this.track.info }
+    logger('debug', 'Player', `Got track URL for guild ${this.guildId}`, {
+      urlData
+    })
+
+    if (urlData.exception) {
+      const err = new Error(urlData.exception.message)
+      this._onError(err)
+      return false
+    }
+
+    if (!this.connection) {
+      this._initConnection()
+    }
+
+    if (
+      !this.connection ||
+      !this.connection.udpInfo ||
+      !this.connection.udpInfo.secretKey
+    ) {
+      logger(
+        'error',
+        'Player',
+        `Voice connection for guild ${this.guildId} is not ready, cannot start playback.`
+      )
+      this._onError(new Error('Voice connection is not ready.'))
+      return false
+    }
+
+    const fetched = await this._fetchResource(
+      this.track.info,
+      urlData,
+      startTime
+    )
+    if (fetched.exception) {
+      const err = new Error(fetched.exception.message)
+      this._onError(err)
+      return false
+    }
+
+    if (this.connection.audioStream) {
+      this.connection.audioStream?.destroy()
+    }
+
+    const resource = fetched.stream
+    if (this.volumePercent !== 100) {
+      resource.setVolume(this.volumePercent / 100)
+    }
+
+    this.setFilters(this.filters)
+
+    logger('debug', 'Player', `Playing resource for guild ${this.guildId}`)
+    this.connection.play(resource)
+    await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
+    return true
+  }
+
   async play({
     encoded,
     info,
@@ -483,87 +553,31 @@ export class Player {
         track: info
       })
 
-      if (noReplace && this.track) {
+      if (noReplace && this.track && this.connection?.audioStream) {
         logger(
           'debug',
           'Player',
-          `play() aborted for guild ${this.guildId} due to noReplace=true`
+          `play() aborted for guild ${this.guildId} due to noReplace=true and player is active`
         )
         return false
       }
 
       if (this.track) {
         this._emitTrackEnd(EndReasons.REPLACED)
-        this._resetTrack()
       }
 
       this.track = { encoded, info, endTime, userData }
 
-      const urlData = await this.nodelink.sources.getTrackUrl(info)
-      this.streamInfo = { ...urlData, trackInfo: info }
-      logger('debug', 'Player', `Got track URL for guild ${this.guildId}`, {
-        urlData
-      })
-
-      if (urlData.exception) {
-        const err = new Error(urlData.exception.message)
-        this._onError(err)
-        return false
-      }
-
-      if (!this.connection) {
-        this._initConnection()
-      }
-
-      if (
-        !this.connection ||
-        !this.connection.udpInfo ||
-        !this.connection.udpInfo.secretKey
-      ) {
+      if (!this.voice.endpoint || !this.voice.token) {
         logger(
           'debug',
           'Player',
-          `Waiting for voice connection to be ready for guild ${this.guildId}`
+          `No voice state for guild ${this.guildId}, track is enqueued and will play when voice state is provided.`
         )
-        await this.waitEvent(
-          'stateChange',
-          (s) => s.status === 'connected' && this.connection?.udpInfo?.secretKey
-        )
+        return true
       }
 
-      if (
-        !this.connection ||
-        !this.connection.udpInfo ||
-        !this.connection.udpInfo.secretKey
-      ) {
-        const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`
-        logger('error', 'Player', errorMessage)
-        this._onError(new Error(errorMessage))
-        return false
-      }
-
-      const fetched = await this._fetchResource(info, urlData, startTime)
-      if (fetched.exception) {
-        const err = new Error(fetched.exception.message)
-        this._onError(err)
-        return false
-      }
-
-      if (this.connection.audioStream) {
-        this.connection.audioStream?.destroy()
-      }
-
-      const resource = fetched.stream
-      if (this.volumePercent !== 100) {
-        resource.setVolume(this.volumePercent / 100)
-      }
-
-      this.setFilters(this.filters)
-
-      logger('debug', 'Player', `Playing resource for guild ${this.guildId}`)
-      this.connection.play(resource)
-      await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
-      return true
+      return await this._startPlayback(startTime)
     } finally {
       this.isUpdatingTrack = false
     }
@@ -918,10 +932,19 @@ export class Player {
         token: this.voice.token,
         endpoint: this.voice.endpoint
       })
-      this.connection.connect(() => {
+      this.connection.connect(async () => {
         if (this.destroying) return
         if (this.connection.audioStream && !this.isPaused) {
           this.connection.unpause('reconnected')
+        }
+
+        if (this.track && !this.connection.audioStream) {
+          logger(
+            'debug',
+            'Player',
+            `Voice state updated for guild ${this.guildId}, starting pending track.`
+          )
+          await this._startPlayback()
         }
       })
     } else {

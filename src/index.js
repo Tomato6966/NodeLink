@@ -149,25 +149,21 @@ class NodelinkServer {
     this.socket.on(
       '/v4/websocket',
       (socket, request, clientInfo, oldSessionId) => {
+        console.log(socket, request, clientInfo, oldSessionId);
         logger(
           'debug',
           'Resume',
           `Processing websocket connection. oldSessionId: ${oldSessionId}`
         )
         if (oldSessionId) {
-          const session = this.sessions.get(oldSessionId)
-          logger(
-            'debug',
-            'Resume',
-            `Found session for oldSessionId ${oldSessionId}: ${!!session}`
-          )
+          const session = this.sessions.resume(oldSessionId, socket)
+
           if (session) {
             logger(
               'info',
               'Server',
               `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m resumed session with ID: ${oldSessionId}`
             )
-            session.socket = socket
             socket.send(
               JSON.stringify({
                 op: 'ready',
@@ -175,49 +171,48 @@ class NodelinkServer {
                 sessionId: oldSessionId
               })
             )
-            session.resumed = true
 
-            if (session.interval) {
-              clearTimeout(session.interval)
-              session.interval = null
+            while (session.eventQueue.length > 0) {
+              const event = session.eventQueue.shift()
+              socket.send(event)
+            }
+
+            for (const [playerKey, playerInfo] of session.players.players.entries()) {
+              if (this.workerManager) {
+                const worker = this.workerManager.getWorkerForGuild(playerKey)
+                if (worker) {
+                  this.workerManager.execute(worker, 'playerCommand', {
+                    sessionId: session.id,
+                    guildId: playerInfo.guildId,
+                    command: 'forceUpdate',
+                    args: []
+                  })
+                }
+              } else {
+                playerInfo._sendUpdate()
+              }
             }
           }
         } else {
           const sessionId = this.sessions.create(request, socket, clientInfo)
           socket.on('close', (code, reason) => {
             if (!this.sessions.has(sessionId)) return
+
             const session = this.sessions.get(sessionId)
+            if (!session) return
+
             logger(
               'info',
               'Server',
-              `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m disconnected with code ${code} and reason: ${reason || 'without reason'}`
+              `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m disconnected with code ${code} and reason: ${
+                reason || 'without reason'
+              }`
             )
-            if (!session.resuming) this.sessions.delete(sessionId, true)
-            else {
-              logger(
-                'info',
-                'Server',
-                `Session with ID: ${sessionId} is resuming, waiting for reconnection in ${session.timeout || 60} seconds`
-              )
 
-              session.interval = setTimeout(
-                () => {
-                  if (this.sessions.get(sessionId)?.resumed !== true) {
-                    logger(
-                      'info',
-                      'Server',
-                      `Session with ID: ${sessionId} has not been resumed, deleting session due to timeout`
-                    )
-                    this.sessions.delete(sessionId, true)
-                  } else
-                    logger(
-                      'info',
-                      'Server',
-                      `Session with ID: ${sessionId} has been resumed, keeping session alive`
-                    )
-                },
-                (session.timeout || 60) * 1000
-              )
+            if (session.resuming) {
+              this.sessions.pause(sessionId)
+            } else {
+              this.sessions.shutdown(sessionId)
             }
           })
 
@@ -237,7 +232,18 @@ class NodelinkServer {
         /^(::1|localhost|127\.0\.0\.1)/.test(remoteAddress) ||
         /^::ffff:127\.0\.0\.1/.test(remoteAddress)
       const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort})`
-      const { headers } = request
+
+      const originalHeaders = request.headers
+      const headers = {}
+      for (const key in originalHeaders) {
+        headers[key.toLowerCase()] = originalHeaders[key]
+      }
+
+      logger(
+        'debug',
+        'Resume',
+        `Received headers (lowercased): ${JSON.stringify(headers)}`
+      )
 
       if (headers.authorization !== this.options.server.password) {
         logger(
@@ -261,11 +267,11 @@ class NodelinkServer {
 
       let sessionId = headers['session-id']
       logger('debug', 'Resume', `Received session-id header: ${sessionId}`)
-      if (sessionId && !this.sessions.has(sessionId)) {
+      if (sessionId && !this.sessions.resumableSessions.has(sessionId)) {
         logger(
           'warn',
           'Server',
-          `Session-ID provided by ${clientAddress} does not exist: ${sessionId}, creating a new session`
+          `Session-ID provided by ${clientAddress} does not exist or is not resumable: ${sessionId}, creating a new session`
         )
         sessionId = undefined
       }
@@ -275,7 +281,7 @@ class NodelinkServer {
         `http://${request.headers.host}`
       )
       if (pathname === '/v4/websocket') {
-        if (!request.headers['user-id']) {
+        if (!headers['user-id']) {
           logger(
             'warn',
             'Server',
@@ -284,7 +290,7 @@ class NodelinkServer {
           socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
           return socket.destroy()
         }
-        if (!verifyDiscordID(request.headers['user-id'])) {
+        if (!verifyDiscordID(headers['user-id'])) {
           logger(
             'warn',
             'Server',
@@ -293,6 +299,9 @@ class NodelinkServer {
           socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
           return socket.destroy()
         }
+        // Hack to pass the lower-cased headers to the 'connection' event
+        request.headers = headers
+
         logger(
           'info',
           'Server',
@@ -331,16 +340,30 @@ class NodelinkServer {
     })
   }
   _listen() {
-    try {
-      const port = this.options.server.port
-      const host = this.options.server.host
-      this.server.listen(port, host, () => {
-        logger('started', 'Server', `running at host ${host} on port ${port}`)
-      })
-    } catch (error) {
-      logger('error', 'Server', `Failed to start server: ${error.message}`)
+    const port = this.options.server.port
+    const host = this.options.server.host || '0.0.0.0'
+
+    logger('info', 'Server', `Attempting to listen on host: ${host}, port: ${port}`)
+
+    this.server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        logger('error', 'Server', `Port ${port} is already in use.`)
+      } else if (err.code === 'EADDRNOTAVAIL') {
+        logger('error', 'Server', `The address ${host} is not available on this machine.`)
+        logger(
+          'error',
+          'Server',
+          'Please check your `host` configuration. Use "0.0.0.0" to listen on all available interfaces.'
+        )
+      } else {
+        logger('error', 'Server', `Failed to start server: ${err.message}`)
+      }
       process.exit(1)
-    }
+    })
+
+    this.server.listen(port, host, () => {
+      logger('started', 'Server', `Successfully listening on host ${host}, port ${port}`)
+    })
   }
   _startGlobalUpdater() {
     if (this._globalUpdater) return
@@ -452,15 +475,11 @@ class NodelinkServer {
       const sessionsToNotify = new Map()
 
       for (const playerKey of affectedGuilds) {
-        const [guildId, userId] = playerKey.split(':')
-        for (const session of this.sessions.values()) {
-          if (session.userId === userId) {
-            if (!sessionsToNotify.has(session.id)) {
-              sessionsToNotify.set(session.id, new Set())
-            }
-            sessionsToNotify.get(session.id).add(guildId)
-          }
+        const [sessionId, guildId] = playerKey.split(':')
+        if (!sessionsToNotify.has(sessionId)) {
+          sessionsToNotify.set(sessionId, new Set())
         }
+        sessionsToNotify.get(sessionId).add(guildId)
       }
 
       for (const [sessionId, guildsInSession] of sessionsToNotify.entries()) {

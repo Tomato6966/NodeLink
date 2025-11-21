@@ -81,7 +81,7 @@ async function processQueue() {
     switch (type) {
       case 'createPlayer': {
         const { sessionId, guildId, userId, voice } = payload
-        const playerKey = `${guildId}:${userId}`
+        const playerKey = `${sessionId}:${guildId}`
 
         if (players.has(playerKey)) {
           result = { created: false, reason: 'Player already exists' }
@@ -120,8 +120,8 @@ async function processQueue() {
       }
 
       case 'destroyPlayer': {
-        const { guildId, userId } = payload
-        const playerKey = `${guildId}:${userId}`
+        const { sessionId, guildId } = payload
+        const playerKey = `${sessionId}:${guildId}`
         const player = players.get(playerKey)
 
         if (player) {
@@ -132,7 +132,11 @@ async function processQueue() {
             try {
               process.send({
                 type: 'playerDestroyed',
-                payload: { guildId, userId }
+                payload: {
+                  guildId,
+                  userId: player.session.userId,
+                  sessionId
+                }
               })
             } catch (e) {
               logger(
@@ -163,12 +167,12 @@ async function processQueue() {
           filters,
           voice
         } = snapshot
-        const playerKey = `${guildId}:${userId}`
+        const playerKey = `${sessionId}:${guildId}`
 
         logger(
           'info',
           'Worker',
-          `Restoring player for guild ${guildId} (bot: ${userId}) (position: ${position}ms, paused: ${isPaused})`
+          `Restoring player for guild ${guildId} (session: ${sessionId}) (position: ${position}ms, paused: ${isPaused})`
         )
 
         const mockSession = {
@@ -216,15 +220,18 @@ async function processQueue() {
       }
 
       case 'playerCommand': {
-        const { guildId, userId, command, args } = payload
-        const playerKey = `${guildId}:${userId}`
+        const { sessionId, guildId, command, args } = payload
+        const playerKey = `${sessionId}:${guildId}`
         const player = players.get(playerKey)
 
         if (player && typeof player[command] === 'function') {
           result = await player[command](...args)
+        } else if (command === 'forceUpdate') {
+          player?._sendUpdate()
+          result = { updated: true }
         } else {
           result = {
-            error: `Player or command '${command}' not found for guild ${guildId} (bot: ${userId})`,
+            error: `Player or command '${command}' not found for guild ${guildId} (session: ${sessionId})`,
             playerNotFound: true
           }
         }
@@ -365,7 +372,7 @@ setInterval(() => {
 
     if (player.track && !player._isRestoring) {
       try {
-        const playerKey = `${player.guildId}:${player.session.userId}`
+        const playerKey = `${player.session.id}:${player.guildId}`
         process.send({
           type: 'playerSnapshot',
           payload: {

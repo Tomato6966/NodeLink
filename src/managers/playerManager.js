@@ -10,13 +10,13 @@ export default class PlayerManager {
 
   async create(guildId, voice) {
     const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.players.has(playerKey)) {
       logger(
         'debug',
         'PlayerManager',
-        `Returning existing player for guild ${guildId} (bot: ${session.userId})`
+        `Returning existing player for guild ${guildId} (session: ${this.sessionId})`
       )
       return this.players.get(playerKey)
     }
@@ -31,7 +31,7 @@ export default class PlayerManager {
       logger(
         'debug',
         'PlayerManager',
-        `Creating player for guild ${guildId} (bot: ${session.userId}) on worker ${worker.id}`
+        `Creating player for guild ${guildId} (session: ${this.sessionId}) on worker ${worker.id}`
       )
       await this.nodelink.workerManager.execute(worker, 'createPlayer', {
         sessionId: this.sessionId,
@@ -40,14 +40,18 @@ export default class PlayerManager {
         voice
       })
 
-      this.players.set(playerKey, { guildId, userId: session.userId })
+      this.players.set(playerKey, {
+        guildId,
+        userId: session.userId,
+        sessionId: this.sessionId
+      })
       return this.players.get(playerKey)
     }
     const { Player } = await import('../playback/player.js')
     logger(
       'debug',
       'PlayerManager',
-      `Creating new player for guild ${guildId} (bot: ${session.userId})`
+      `Creating new player for guild ${guildId} (session: ${this.sessionId})`
     )
     const player = new Player({
       nodelink: this.nodelink,
@@ -60,14 +64,13 @@ export default class PlayerManager {
   }
 
   get(guildId) {
-    const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
     return this.players.get(playerKey)
   }
 
   async destroy(guildId) {
     const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.isCluster) {
       if (!this.nodelink.workerManager.isGuildAssigned(playerKey)) {
@@ -79,7 +82,7 @@ export default class PlayerManager {
         const destroyResult = await this.nodelink.workerManager.execute(
           worker,
           'destroyPlayer',
-          { guildId, userId: session.userId }
+          { sessionId: this.sessionId, guildId, userId: session.userId }
         )
         if (destroyResult.destroyed) {
           this.nodelink.workerManager.unassignGuild(playerKey)
@@ -106,7 +109,7 @@ export default class PlayerManager {
 
   async play(guildId, trackPayload) {
     const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
@@ -115,6 +118,7 @@ export default class PlayerManager {
         worker,
         'playerCommand',
         {
+          sessionId: this.sessionId,
           guildId,
           userId: session.userId,
           command: 'play',
@@ -133,7 +137,7 @@ export default class PlayerManager {
 
   async stop(guildId) {
     const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
@@ -142,6 +146,7 @@ export default class PlayerManager {
         worker,
         'playerCommand',
         {
+          sessionId: this.sessionId,
           guildId,
           userId: session.userId,
           command: 'stop',
@@ -160,7 +165,7 @@ export default class PlayerManager {
 
   async pause(guildId, shouldPause) {
     const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
@@ -169,6 +174,7 @@ export default class PlayerManager {
         worker,
         'playerCommand',
         {
+          sessionId: this.sessionId,
           guildId,
           userId: session.userId,
           command: 'pause',
@@ -187,7 +193,7 @@ export default class PlayerManager {
 
   async seek(guildId, position, endTime) {
     const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
@@ -196,6 +202,7 @@ export default class PlayerManager {
         worker,
         'playerCommand',
         {
+          sessionId: this.sessionId,
           guildId,
           userId: session.userId,
           command: 'seek',
@@ -214,7 +221,7 @@ export default class PlayerManager {
 
   async volume(guildId, level) {
     const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
@@ -223,6 +230,7 @@ export default class PlayerManager {
         worker,
         'playerCommand',
         {
+          sessionId: this.sessionId,
           guildId,
           userId: session.userId,
           command: 'volume',
@@ -241,7 +249,7 @@ export default class PlayerManager {
 
   async setFilters(guildId, filtersPayload) {
     const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
@@ -250,6 +258,7 @@ export default class PlayerManager {
         worker,
         'playerCommand',
         {
+          sessionId: this.sessionId,
           guildId,
           userId: session.userId,
           command: 'setFilters',
@@ -268,7 +277,7 @@ export default class PlayerManager {
 
   async updateVoice(guildId, voicePayload) {
     const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
@@ -277,6 +286,7 @@ export default class PlayerManager {
         worker,
         'playerCommand',
         {
+          sessionId: this.sessionId,
           guildId,
           userId: session.userId,
           command: 'updateVoice',
@@ -295,7 +305,7 @@ export default class PlayerManager {
 
   async toJSON(guildId) {
     const session = this.nodelink.sessions.get(this.sessionId)
-    const playerKey = `${guildId}:${session.userId}`
+    const playerKey = `${this.sessionId}:${guildId}`
 
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
@@ -304,6 +314,7 @@ export default class PlayerManager {
         worker,
         'playerCommand',
         {
+          sessionId: this.sessionId,
           guildId,
           userId: session.userId,
           command: 'toJSON',
