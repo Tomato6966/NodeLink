@@ -552,52 +552,54 @@ export class Player {
     startTime = 0,
     endTime = 0
   }) {
-    this.isUpdatingTrack = true
-    try {
-      if (this.destroying) {
-        logger(
-          'debug',
-          'Player',
-          `play() aborted for guild ${this.guildId} because player is destroying`
-        )
-        return false
+    return new Promise((resolve) => {
+      this.isUpdatingTrack = true
+
+      try {
+        if (this.destroying) {
+          logger('debug', 'Player', `play() aborted for guild ${this.guildId} because player is destroying`)
+          this.isUpdatingTrack = false
+          return resolve(false)
+        }
+        logger('debug', 'Player', `play() called for guild ${this.guildId}`, {
+          encoded,
+          noReplace,
+          startTime,
+          endTime,
+          track: info
+        })
+
+        if (noReplace && this.track && this.connection?.audioStream) {
+          logger('debug', 'Player', `play() aborted for guild ${this.guildId} due to noReplace=true and player is active`)
+          this.isUpdatingTrack = false
+          return resolve(false)
+        }
+
+        if (this.track) {
+          this._emitTrackEnd(EndReasons.REPLACED)
+        }
+
+        this.track = { encoded, info, endTime, userData }
+
+        if (!this.voice.endpoint || !this.voice.token) {
+          logger('debug', 'Player', `No voice state for guild ${this.guildId}, track is enqueued and will play when voice state is provided.`)
+          this.isUpdatingTrack = false
+          return resolve(true)
+        }
+
+        this._startPlayback(startTime)
+          .catch((err) => this._onError(err))
+          .finally(() => {
+            this.isUpdatingTrack = false
+          })
+        
+        return resolve(true)
+      } catch (e) {
+        this.isUpdatingTrack = false
+        this._onError(e)
+        return resolve(false)
       }
-      logger('debug', 'Player', `play() called for guild ${this.guildId}`, {
-        encoded,
-        noReplace,
-        startTime,
-        endTime,
-        track: info
-      })
-
-      if (noReplace && this.track && this.connection?.audioStream) {
-        logger(
-          'debug',
-          'Player',
-          `play() aborted for guild ${this.guildId} due to noReplace=true and player is active`
-        )
-        return false
-      }
-
-      if (this.track) {
-        this._emitTrackEnd(EndReasons.REPLACED)
-      }
-
-      this.track = { encoded, info, endTime, userData }
-
-      if (!this.voice.endpoint || !this.voice.token) {
-        logger(
-          'debug',
-          'Player',
-          `No voice state for guild ${this.guildId}, track is enqueued and will play when voice state is provided.`
-        )
-        return true
-      }
-
-      return await this._startPlayback(startTime)
-    } finally {
-      this.isUpdatingTrack = false
-    }
+    })
   }
 
   async seek(position, endTime) {
