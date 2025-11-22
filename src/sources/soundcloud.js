@@ -305,6 +305,18 @@ export default class SoundCloudSource {
       return this._buildException('No transcodings available')
     }
 
+    const progressiveMp3 = transcodings.find(
+      (t) =>
+        t.format?.protocol === 'progressive' &&
+        t.format?.mime_type?.includes('mpeg')
+    )
+
+    const progressiveAac = transcodings.find(
+      (t) =>
+        t.format?.protocol === 'progressive' &&
+        t.format?.mime_type?.includes('aac')
+    )
+
     const hlsAacHigh = transcodings.find(
       (t) =>
         t.format?.protocol === 'hls' &&
@@ -318,23 +330,18 @@ export default class SoundCloudSource {
         (t.format?.mime_type?.includes('aac') || t.format?.mime_type?.includes('mp4'))
     )
 
-    const progressiveAac = transcodings.find(
-      (t) =>
-        t.format?.protocol === 'progressive' &&
-        t.format?.mime_type?.includes('aac')
-    )
-
     const anyHls = transcodings.find((t) => t.format?.protocol === 'hls')
     const anyProgressive = transcodings.find(
       (t) => t.format?.protocol === 'progressive'
     )
 
     const selected =
+      progressiveMp3 ||
+      progressiveAac ||
       hlsAacHigh ||
       hlsAacStandard ||
-      progressiveAac ||
-      anyHls ||
       anyProgressive ||
+      anyHls ||
       transcodings[0]
 
     if (selected.format?.mime_type?.includes('opus')) {
