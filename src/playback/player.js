@@ -187,6 +187,11 @@ export class Player {
         EndReasons.LOAD_FAILED
       ].includes(state.reason)
     ) {
+      if (this.isUpdatingTrack && state.reason === 'finished') {
+        logger('debug', 'Player', `Ignoring spurious idle/finished event during track replacement for guild ${this.guildId}.`);
+        return;
+      }
+
       logger(
         'debug',
         'Player',
@@ -401,6 +406,18 @@ export class Player {
             return false
           }
 
+          if (!this.track.info.isSeekable) {
+            logger('warn', 'Player', `Player for guild ${this.guildId} is stuck on a non-seekable track. Stopping track.`)
+            this.emitEvent(GatewayEvents.TRACK_STUCK, {
+              guildId: this.guildId,
+              track: this.track,
+              thresholdMs: threshold,
+              reason: 'Track is not seekable'
+            })
+            this.stop()
+            return false
+          }
+
           logger(
             'warn',
             'Player',
@@ -492,6 +509,10 @@ export class Player {
       urlData
     })
 
+    if (['mp4', 'm4a', 'mov'].includes(this.streamInfo.format)) {
+      this.track.info.isSeekable = false
+    }
+
     if (urlData.exception) {
       const err = new Error(urlData.exception.message)
       this._onError(err)
@@ -549,7 +570,7 @@ export class Player {
     info,
     userData,
     noReplace = false,
-    startTime = 0,
+    startTime,
     endTime = 0
   }) {
     return new Promise((resolve) => {
@@ -587,7 +608,16 @@ export class Player {
           return resolve(true)
         }
 
-        this._startPlayback(startTime)
+        let effectiveStartTime = 0
+        if (startTime !== undefined) {
+          effectiveStartTime = startTime
+        } else if (info.position > 0) {
+          if (info.isSeekable) {
+            effectiveStartTime = info.position
+          }
+        }
+
+        this._startPlayback(effectiveStartTime)
           .catch((err) => this._onError(err))
           .finally(() => {
             this.isUpdatingTrack = false
@@ -605,6 +635,13 @@ export class Player {
   async seek(position, endTime) {
     if (this.destroying || !this.track) return false
     if (!this.track.info.isSeekable && !this.track.info.isStream) return false
+
+    if (this.isUpdatingTrack && position === 0) {
+      if (this.track.info.position === 0) {
+        logger('debug', 'Player', 'Ignoring redundant seek to 0 on new track.')
+        return false
+      }
+    }
 
     const seekPosition =
       position === null || position === undefined

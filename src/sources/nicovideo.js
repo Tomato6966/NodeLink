@@ -201,7 +201,7 @@ export default class NicoVideoSource {
     const tracks = body.data.map((item) => {
       const trackInfo = {
         identifier: item.contentId,
-        isSeekable: true,
+        isSeekable: false,
         author: item.owner?.name || 'Unknown Artist',
         length: item.duration * 1000,
         isStream: false,
@@ -254,7 +254,7 @@ export default class NicoVideoSource {
       : 0
     const track = {
       identifier: videoIdFromApi,
-      isSeekable: true,
+      isSeekable: false,
       author: jsonLd.author?.name || 'Unknown Artist',
       length: durationMs,
       isStream: false,

@@ -1381,14 +1381,14 @@ class StreamAudioResource extends BaseAudioResource {
 
       stream.on('error', (err) => {
         console.error('Error in input stream:', err)
-        this.stream.emit('error', err)
+        this.stream?.emit('error', err)
       })
 
       for (const pipe of this.pipes) {
         if (pipe === this.stream) continue
         pipe.on?.('error', (err) => {
           console.error(`Error in stream pipe ${pipe.constructor.name}:`, err)
-          this.stream.emit('error', err)
+          this.stream?.emit('error', err)
         })
       }
 

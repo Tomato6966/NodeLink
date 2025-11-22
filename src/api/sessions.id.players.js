@@ -360,6 +360,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             ...trackToPlay,
             userData,
             noReplace,
+            startTime: payload.position,
             endTime: payload.endTime || undefined
           })
         }
@@ -382,7 +383,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           await session.players.pause(guildId, payload.paused)
         }
 
-        if (payload.position !== undefined) {
+        if (payload.position !== undefined && !trackToPlay) {
           logger(
             'debug',
             'PlayerUpdate',
