@@ -1023,26 +1023,19 @@ class FMP4ToAACStream extends Transform {
     super(options)
     this.audioConfig = null
     this.initSegmentProcessed = false
-    this.buffer = Buffer.alloc(0)
-    this.fallbackAudioConfig = {
-      profile: 2,
-      samplingIndex: 4,
-      channelCount: 2,
-      sampleRate: 44100
-    }
   }
 
   _parseBoxes(buffer, offset = 0) {
     const boxes = []
     while (offset < buffer.length) {
       if (offset + 8 > buffer.length) break
-
+      
       const size = buffer.readUInt32BE(offset)
       const type = buffer.toString('ascii', offset + 4, offset + 8)
-
+      
       if (size === 0 || size > buffer.length - offset) break
       if (type === '\0\0\0\0') break
-
+      
       const boxData = buffer.subarray(offset + 8, offset + size)
       boxes.push({ type, size, data: boxData, offset })
       offset += size
@@ -1052,48 +1045,45 @@ class FMP4ToAACStream extends Transform {
 
   _extractAudioConfigFromInit(initSegment) {
     const boxes = this._parseBoxes(initSegment)
-    const moovBox = boxes.find((b) => b.type === 'moov')
+    const moovBox = boxes.find(b => b.type === 'moov')
     if (!moovBox) return null
-
+    
     const moovBoxes = this._parseBoxes(moovBox.data)
-    const trakBox = moovBoxes.find((b) => b.type === 'trak')
+    const trakBox = moovBoxes.find(b => b.type === 'trak')
     if (!trakBox) return null
-
+    
     const trakBoxes = this._parseBoxes(trakBox.data)
-    const mdiaBox = trakBoxes.find((b) => b.type === 'mdia')
+    const mdiaBox = trakBoxes.find(b => b.type === 'mdia')
     if (!mdiaBox) return null
-
+    
     const mdiaBoxes = this._parseBoxes(mdiaBox.data)
-    const minfBox = mdiaBoxes.find((b) => b.type === 'minf')
+    const minfBox = mdiaBoxes.find(b => b.type === 'minf')
     if (!minfBox) return null
-
+    
     const minfBoxes = this._parseBoxes(minfBox.data)
-    const stblBox = minfBoxes.find((b) => b.type === 'stbl')
+    const stblBox = minfBoxes.find(b => b.type === 'stbl')
     if (!stblBox) return null
-
+    
     const stblBoxes = this._parseBoxes(stblBox.data)
-    const stsdBox = stblBoxes.find((b) => b.type === 'stsd')
+    const stsdBox = stblBoxes.find(b => b.type === 'stsd')
     if (!stsdBox) return null
-
+    
     const stsd = stsdBox.data
     if (stsd.length < 16) return null
-
+    
     const stsdBoxes = this._parseBoxes(stsd, 8)
-    const mp4aBox = stsdBoxes.find((b) => b.type === 'mp4a')
+    const mp4aBox = stsdBoxes.find(b => b.type === 'mp4a')
     if (!mp4aBox) return null
-
+    
     const mp4a = mp4aBox.data
     if (mp4a.length < 28) return null
-
+    
     const channelCount = mp4a.readUInt16BE(16)
     const sampleRate = mp4a.readUInt32BE(24) >> 16
-
-    const sampleRates = [
-      96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000,
-      11025, 8000, 7350
-    ]
+    
+    const sampleRates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350]
     const samplingIndex = sampleRates.indexOf(sampleRate)
-
+    
     return {
       profile: 2,
       samplingIndex: samplingIndex !== -1 ? samplingIndex : 4,
@@ -1105,147 +1095,100 @@ class FMP4ToAACStream extends Transform {
   _createAdtsHeader(sampleLength, audioConfig) {
     const adts = Buffer.alloc(7)
     const frameLength = sampleLength + 7
-
+    
     const profile = (audioConfig.profile || 2) - 1
-    const samplingIndex =
-      audioConfig.samplingIndex !== undefined ? audioConfig.samplingIndex : 4
+    const samplingIndex = audioConfig.samplingIndex || 4
     const channelCount = audioConfig.channelCount || 2
-
+    
     adts[0] = 0xff
     adts[1] = 0xf1
-    adts[2] =
-      ((profile & 0x03) << 6) |
-      ((samplingIndex & 0x0f) << 2) |
-      ((channelCount & 0x04) >> 2)
+    adts[2] = ((profile & 0x03) << 6) | ((samplingIndex & 0x0f) << 2) | ((channelCount & 0x04) >> 2)
     adts[3] = ((channelCount & 0x03) << 6) | ((frameLength & 0x1800) >> 11)
     adts[4] = (frameLength & 0x7f8) >> 3
     adts[5] = ((frameLength & 0x7) << 5) | 0x1f
     adts[6] = 0xfc
-
+    
     return adts
   }
 
   _extractAACFromSegment(buffer) {
+    if (!this.audioConfig) return null
+    
     const boxes = this._parseBoxes(buffer)
-    const mdatBox = boxes.find((b) => b.type === 'mdat')
+    const mdatBox = boxes.find(b => b.type === 'mdat')
     if (!mdatBox) return null
-
+    
     const aacData = mdatBox.data
-    const moofBox = boxes.find((b) => b.type === 'moof')
+    const moofBox = boxes.find(b => b.type === 'moof')
     if (!moofBox) return aacData
-
+    
     const moofBoxes = this._parseBoxes(moofBox.data)
-    const trafBox = moofBoxes.find((b) => b.type === 'traf')
+    const trafBox = moofBoxes.find(b => b.type === 'traf')
     if (!trafBox) return aacData
-
+    
     const trafBoxes = this._parseBoxes(trafBox.data)
-    const trunBox = trafBoxes.find((b) => b.type === 'trun')
+    const trunBox = trafBoxes.find(b => b.type === 'trun')
     if (!trunBox) return aacData
-
+    
     const trun = trunBox.data
     if (trun.length < 8) return aacData
-
+    
     const flags = (trun[1] << 16) | (trun[2] << 8) | trun[3]
     const sampleCount = trun.readUInt32BE(4)
-
+    
     let offset = 8
     if (flags & 0x1) offset += 4
     if (flags & 0x4) offset += 4
-
+    
     const sampleSizes = []
     const hasSampleSize = flags & 0x200
-    const hasSampleDuration = flags & 0x100
-    const hasSampleFlags = flags & 0x400
-    const hasSampleCompositionTimeOffset = flags & 0x800
-
+    
     for (let i = 0; i < sampleCount && offset < trun.length; i++) {
-      if (hasSampleDuration) offset += 4
+      if (flags & 0x100) offset += 4
       if (hasSampleSize && offset + 4 <= trun.length) {
         sampleSizes.push(trun.readUInt32BE(offset))
         offset += 4
       }
-      if (hasSampleFlags) offset += 4
-      if (hasSampleCompositionTimeOffset) offset += 4
+      if (flags & 0x400) offset += 4
+      if (flags & 0x800) offset += 4
     }
-
+    
     if (sampleSizes.length > 0) {
       const frames = []
       let dataOffset = 0
-
-      const configToUse = this.audioConfig || this.fallbackAudioConfig
-
       for (const sampleSize of sampleSizes) {
         if (dataOffset + sampleSize <= aacData.length) {
-          const adtsHeader = this._createAdtsHeader(sampleSize, configToUse)
-          const aacSample = aacData.subarray(
-            dataOffset,
-            dataOffset + sampleSize
-          )
+          const adtsHeader = this._createAdtsHeader(sampleSize, this.audioConfig)
+          const aacSample = aacData.subarray(dataOffset, dataOffset + sampleSize)
           frames.push(Buffer.concat([adtsHeader, aacSample]))
           dataOffset += sampleSize
         }
       }
       return frames.length > 0 ? Buffer.concat(frames) : null
     }
-
+    
     return null
   }
 
   _transform(chunk, encoding, callback) {
     try {
-      this.buffer = Buffer.concat([this.buffer, chunk])
-
-      if (!this.initSegmentProcessed) {
-        if (this.buffer.length >= 8) {
-          const boxes = this._parseBoxes(this.buffer)
-          const ftyp = boxes.find((b) => b.type === 'ftyp')
-          const moov = boxes.find((b) => b.type === 'moov')
-
-          if (ftyp || moov) {
-            if (moov) {
-              this.audioConfig = this._extractAudioConfigFromInit(this.buffer)
-              if (this.audioConfig) {
-                this.initSegmentProcessed = true
-              }
-            }
-          }
+      if (!this.initSegmentProcessed && chunk.length > 8) {
+        const boxType = chunk.toString('ascii', 4, 8)
+        if (boxType === 'ftyp') {
+          this.audioConfig = this._extractAudioConfigFromInit(chunk)
+          this.initSegmentProcessed = true
+          callback()
+          return
         }
       }
-
-      const boxes = this._parseBoxes(this.buffer)
-      let bytesConsumed = 0
-
-      for (let i = 0; i < boxes.length; i++) {
-        const box = boxes[i]
-
-        if (box.type === 'ftyp' || box.type === 'moov') {
-          bytesConsumed = box.offset + box.size
-          continue
-        }
-
-        if (box.type === 'moof') {
-          const nextBox = boxes[i + 1]
-          if (nextBox && nextBox.type === 'mdat') {
-            const segment = Buffer.concat([
-              this.buffer.subarray(box.offset, box.offset + box.size),
-              this.buffer.subarray(nextBox.offset, nextBox.offset + nextBox.size)
-            ])
-
-            const aacData = this._extractAACFromSegment(segment)
-            if (aacData) {
-              this.push(aacData)
-            }
-
-            bytesConsumed = nextBox.offset + nextBox.size
-            i++
-          }
+      
+      if (this.audioConfig) {
+        const aacData = this._extractAACFromSegment(chunk)
+        if (aacData) {
+          this.push(aacData)
         }
       }
-
-      if (bytesConsumed > 0) {
-        this.buffer = this.buffer.subarray(bytesConsumed)
-      }
-
+      
       callback()
     } catch (err) {
       callback()
