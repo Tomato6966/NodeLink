@@ -1,11 +1,13 @@
-import { URLSearchParams } from 'node:url'
-import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
 import { PassThrough } from 'node:stream'
+import { URLSearchParams } from 'node:url'
+
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
 
 export default class InstagramSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.patterns = [
+      /^https?:\/\/(?:www\.)?instagram\.com\/reels\/audio\/(\d+)/,
       /^https?:\/\/(?:www\.)?instagram\.com\/p\/([\w-]+)/,
       /^https?:\/\/(?:www\.)?instagram\.com\/(?:reels?|reel)\/([\w-]+)/
     ]
@@ -13,6 +15,7 @@ export default class InstagramSource {
 
     this.apiConfig = {
       apiUrl: 'https://www.instagram.com/api/graphql',
+      audioApiUrl: 'https://www.instagram.com/api/v1/clips/music/',
       csrfToken: null,
       igAppId: null,
       fbLsd: null,
@@ -77,29 +80,37 @@ export default class InstagramSource {
     return this.patterns.some((pattern) => pattern.test(link))
   }
 
-  _getPostId(url) {
+  _extractInfo(url) {
     if (!url) {
       return {
         id: null,
         error: 'Instagram URL not provided',
-        pathSegment: null
+        type: null
       }
     }
-    for (const pattern of this.patterns) {
+    for (const [index, pattern] of this.patterns.entries()) {
       const match = url.match(pattern)
-      //biome-ignore lint: change-to-an-optinal-chain
       if (match && match[1]) {
+        if (index === 0) {
+          return { id: match[1], error: null, type: 'audio' }
+        }
+
         let pathSegment = 'p'
         if (url.includes('/reel/') || url.includes('/reels/')) {
           pathSegment = 'reel'
         }
-        return { id: match[1], error: null, pathSegment: pathSegment }
+        return {
+          id: match[1],
+          error: null,
+          type: 'post',
+          pathSegment: pathSegment
+        }
       }
     }
     return {
       id: null,
-      error: 'Instagram post/reel ID not found in URL',
-      pathSegment: null
+      error: 'Instagram post/reel/audio ID not found in URL',
+      type: null
     }
   }
 
@@ -108,7 +119,6 @@ export default class InstagramSource {
       'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
     let shortcode = ''
     if (String(mediaId).includes('_')) {
-      //biome-ignore lint: reassign
       mediaId = String(mediaId).substring(0, String(mediaId).indexOf('_'))
     }
     try {
@@ -167,6 +177,195 @@ export default class InstagramSource {
     return params.toString()
   }
 
+  async _fetchFromAudioAPI(audioId) {
+    if (!audioId) {
+      return {
+        data: null,
+        exception: { message: 'Audio ID not provided', severity: 'common' }
+      }
+    }
+
+    const headers = {
+      Accept: '*/*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-FB-Friendly-Name': 'PolarisClipsAudioRoute',
+      'X-CSRFToken': this.apiConfig.csrfToken,
+      'X-IG-App-ID': this.apiConfig.igAppId,
+      'X-FB-LSD': this.apiConfig.fbLsd,
+      'X-ASBD-ID': '129477',
+      'Sec-Fetch-Site': 'same-origin',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
+      Origin: 'https://www.instagram.com',
+      Referer: `https://www.instagram.com/reels/audio/${audioId}/`
+    }
+
+    const body = new URLSearchParams({
+      audio_cluster_id: audioId,
+      lsd: this.apiConfig.fbLsd,
+      jazoest: this.apiConfig.jazoest,
+      __user: '0',
+      __a: '1'
+    }).toString()
+
+    let response = null
+    try {
+      response = await http1makeRequest(this.apiConfig.audioApiUrl, {
+        method: 'POST',
+        headers: headers,
+        body: body,
+        disableBodyCompression: true
+      })
+    } catch (e) {
+      logger(
+        'error',
+        'Sources',
+        `Internal error during Instagram Audio API request for audioId ${audioId}: ${e.message}`
+      )
+      return {
+        data: null,
+        exception: {
+          message: `Internal error during Audio API request: ${e.message}`,
+          severity: 'fault'
+        }
+      }
+    }
+
+    if (response.error || response.statusCode !== 200) {
+      const errorMsg =
+        response.error?.message ||
+        `Audio API request failed with code ${response.statusCode}`
+      return {
+        data: null,
+        exception: {
+          message: errorMsg,
+          severity: 'fault',
+          cause: `Status: ${response.statusCode}`
+        }
+      }
+    }
+
+    let responseData = response.body
+    if (typeof responseData === 'string') {
+      if (responseData.startsWith('for (;;);')) {
+        responseData = responseData.substring('for (;;);'.length)
+      }
+      try {
+        responseData = JSON.parse(responseData)
+      } catch (e) {
+        return {
+          data: null,
+          exception: {
+            message: 'Invalid JSON response from Audio API',
+            severity: 'fault'
+          }
+        }
+      }
+    }
+
+    if (!responseData) {
+      return {
+        data: null,
+        exception: {
+          message: 'Invalid data structure in Audio API JSON response',
+          severity: 'fault'
+        }
+      }
+    }
+
+    let payload = null
+    if (responseData.payload) {
+      payload = responseData.payload
+    } else if (responseData.metadata) {
+      payload = responseData
+    } else {
+      return {
+        data: null,
+        exception: {
+          message: 'Invalid data structure in Audio API JSON response (no payload or metadata)',
+          severity: 'fault'
+        }
+      }
+    }
+
+    let audioInfo = payload.metadata?.original_sound_info
+    let infoSource = 'original_sound_info'
+
+    if (!audioInfo) {
+      audioInfo = payload.metadata?.music_info
+      infoSource = 'music_info'
+    }
+
+    if (!audioInfo) {
+      return {
+        data: null,
+        exception: {
+          message: 'Audio information not found in API response.',
+          severity: 'common'
+        }
+      }
+    }
+
+    let audioUrl = null
+    let artist = null
+    let title = null
+    let duration = null
+    let thumbnail = null
+
+    if (infoSource === 'original_sound_info') {
+      audioUrl = audioInfo.progressive_download_url
+      artist = audioInfo.ig_artist?.username || 'User Unknown'
+      title = audioInfo.original_audio_title || 'Instagram Audio'
+      duration = audioInfo.duration_in_ms || 0
+      thumbnail = audioInfo.ig_artist?.profile_pic_url || ''
+    } else {
+      const musicAsset = audioInfo.music_asset_info
+      const musicConsumption = audioInfo.music_consumption_info
+
+      audioUrl = musicAsset?.progressive_download_url
+
+      if (!audioUrl && musicConsumption?.dash_manifest) {
+        const urlMatch = musicConsumption.dash_manifest.match(/<BaseURL>(.*?)<\/BaseURL>/)
+        if (urlMatch && urlMatch[1]) {
+          audioUrl = urlMatch[1].replace(/&amp;/g, '&')
+        }
+      }
+
+      if (!audioUrl) {
+         audioUrl = audioInfo.progressive_download_url
+      }
+
+      artist = musicAsset?.artist_name || 'User Unknown'
+      title = musicAsset?.title || 'Instagram Audio'
+      duration = musicAsset?.duration_in_ms || 0
+      thumbnail = musicAsset?.cover_artwork_thumbnail_uri || ''
+    }
+
+    if (!audioUrl) {
+      return {
+        data: null,
+        exception: {
+          message: 'Audio download URL not found in API response.',
+          severity: 'common'
+        }
+      }
+    }
+
+    return {
+      data: {
+        videoUrl: audioUrl,
+        author: artist,
+        length: duration,
+        thumbnail: thumbnail,
+        title: title,
+        isStream: false,
+        isSeekable: false
+      },
+      exception: null
+    }
+  }
+
   async _fetchFromGraphQL(postId, pathSegment) {
     if (!postId) {
       return {
@@ -193,7 +392,7 @@ export default class InstagramSource {
 
     const encodedData = this._encodePostRequestData(postId)
 
-    let response
+    let response = null
     try {
       response = await http1makeRequest(this.apiConfig.apiUrl, {
         method: 'POST',
@@ -322,18 +521,35 @@ export default class InstagramSource {
 
   async resolve(queryUrl) {
     const {
-      id: postId,
+      id: contentId,
       error: idError,
+      type,
       pathSegment
-    } = this._getPostId(queryUrl)
+    } = this._extractInfo(queryUrl)
     if (idError) {
       return {
         exception: { message: idError, severity: 'common', cause: 'URLParsing' }
       }
     }
 
-    const { data: videoData, exception: fetchError } =
-      await this._fetchFromGraphQL(postId, pathSegment)
+    let trackData = null
+    let fetchError = null
+
+    if (type === 'post') {
+      ;({ data: trackData, exception: fetchError } =
+        await this._fetchFromGraphQL(contentId, pathSegment))
+    } else if (type === 'audio') {
+      ;({ data: trackData, exception: fetchError } =
+        await this._fetchFromAudioAPI(contentId))
+    } else {
+      return {
+        exception: {
+          message: 'Unknown URL type',
+          severity: 'fault',
+          cause: 'URLParsing'
+        }
+      }
+    }
 
     if (fetchError) {
       if (fetchError.message?.includes('Media not found')) {
@@ -342,24 +558,25 @@ export default class InstagramSource {
       return { exception: { ...fetchError, cause: 'APIRequest' } }
     }
 
-    const track = this.buildTrack(videoData, queryUrl, postId)
+    const track = this.buildTrack(trackData, queryUrl, contentId)
     return { loadType: 'track', data: track }
   }
 
-  buildTrack(videoData, queryUrl, postId) {
+  buildTrack(trackData, queryUrl, contentId) {
     const trackInfo = {
-      identifier: postId,
-      title: videoData.title || 'Instagram Video',
-      author: videoData.author,
-      length: videoData.length || -1,
+      identifier: contentId,
+      title: trackData.title || 'Instagram Content',
+      author: trackData.author,
+      length: trackData.length || -1,
       sourceName: 'instagram',
-      artworkUrl: videoData.thumbnail || videoData.artworkUrl,
+      artworkUrl: trackData.thumbnail || trackData.artworkUrl,
       uri: queryUrl,
-      isStream: videoData.isStream,
-      isSeekable: videoData.isSeekable,
+      isStream: trackData.isStream,
+      isSeekable: trackData.isSeekable,
       position: 0,
       isrc: null
     }
+
     return {
       encoded: encodeTrack(trackInfo),
       info: trackInfo,
@@ -369,22 +586,39 @@ export default class InstagramSource {
 
   async getTrackUrl(track) {
     const {
-      id: postId,
+      id: contentId,
       error: idError,
+      type,
       pathSegment
-    } = this._getPostId(track.uri)
+    } = this._extractInfo(track.uri)
     if (idError) {
       return {
         exception: { message: idError, severity: 'common', cause: 'URLParsing' }
       }
     }
 
-    const { data: videoData, error: fetchError_graphql } =
-      await this._fetchFromGraphQL(postId, pathSegment)
+    let trackData = null
+    let fetchError = null
 
-    if (fetchError_graphql || !videoData?.videoUrl) {
+    if (type === 'post') {
+      ;({ data: trackData, exception: fetchError } =
+        await this._fetchFromGraphQL(contentId, pathSegment))
+    } else if (type === 'audio') {
+      ;({ data: trackData, exception: fetchError } =
+        await this._fetchFromAudioAPI(contentId))
+    } else {
+      return {
+        exception: {
+          message: 'Unknown URL type',
+          severity: 'fault',
+          cause: 'URLParsing'
+        }
+      }
+    }
+
+    if (fetchError || !trackData?.videoUrl) {
       const errorMessage =
-        fetchError_graphql?.message || 'Could not retrieve video stream URL.'
+        fetchError?.message || 'Could not retrieve video/audio stream URL.'
       return {
         exception: {
           message: errorMessage,
@@ -395,8 +629,8 @@ export default class InstagramSource {
     }
 
     return {
-      url: videoData.videoUrl,
-      protocol: videoData.videoUrl.startsWith('https:') ? 'https' : 'http',
+      url: trackData.videoUrl,
+      protocol: trackData.videoUrl.startsWith('https:') ? 'https' : 'http',
       format: 'mp4'
     }
   }
