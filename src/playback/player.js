@@ -2,6 +2,7 @@ import { SeekError } from '@ecliptia/seekable-stream'
 import discordVoice from '@performanc/voice'
 import { EndReasons, GatewayEvents } from '../constants.js'
 import { logger } from '../utils.js'
+
 let createAudioResource
 let createSeekeableAudioResource
 
@@ -188,8 +189,12 @@ export class Player {
       ].includes(state.reason)
     ) {
       if (this.isUpdatingTrack && state.reason === 'finished') {
-        logger('debug', 'Player', `Ignoring spurious idle/finished event during track replacement for guild ${this.guildId}.`);
-        return;
+        logger(
+          'debug',
+          'Player',
+          `Ignoring spurious idle/finished event during track replacement for guild ${this.guildId}.`
+        )
+        return
       }
 
       logger(
@@ -389,7 +394,7 @@ export class Player {
         ) {
           const stuckTime = this._stuckTime
           this._stuckTime = 0
-          
+
           if (this.streamInfo?.format === 'mp4') {
             logger(
               'error',
@@ -407,7 +412,11 @@ export class Player {
           }
 
           if (!this.track.info.isSeekable) {
-            logger('warn', 'Player', `Player for guild ${this.guildId} is stuck on a non-seekable track. Stopping track.`)
+            logger(
+              'warn',
+              'Player',
+              `Player for guild ${this.guildId} is stuck on a non-seekable track. Stopping track.`
+            )
             this.emitEvent(GatewayEvents.TRACK_STUCK, {
               guildId: this.guildId,
               track: this.track,
@@ -529,6 +538,23 @@ export class Player {
       !this.connection.udpInfo.secretKey
     ) {
       logger(
+        'debug',
+        'Player',
+        `Waiting for voice connection to be ready for guild ${this.guildId}`
+      )
+
+      await this.waitEvent(
+        'stateChange',
+        (s) => s.status === 'connected' && this.connection?.udpInfo?.secretKey
+      )
+    }
+
+    if (
+      !this.connection ||
+      !this.connection.udpInfo ||
+      !this.connection.udpInfo.secretKey
+    ) {
+      logger(
         'error',
         'Player',
         `Voice connection for guild ${this.guildId} is not ready, cannot start playback.`
@@ -578,7 +604,11 @@ export class Player {
 
       try {
         if (this.destroying) {
-          logger('debug', 'Player', `play() aborted for guild ${this.guildId} because player is destroying`)
+          logger(
+            'debug',
+            'Player',
+            `play() aborted for guild ${this.guildId} because player is destroying`
+          )
           this.isUpdatingTrack = false
           return resolve(false)
         }
@@ -591,7 +621,11 @@ export class Player {
         })
 
         if (noReplace && this.track && this.connection?.audioStream) {
-          logger('debug', 'Player', `play() aborted for guild ${this.guildId} due to noReplace=true and player is active`)
+          logger(
+            'debug',
+            'Player',
+            `play() aborted for guild ${this.guildId} due to noReplace=true and player is active`
+          )
           this.isUpdatingTrack = false
           return resolve(false)
         }
@@ -603,7 +637,11 @@ export class Player {
         this.track = { encoded, info, endTime, userData }
 
         if (!this.voice.endpoint || !this.voice.token) {
-          logger('debug', 'Player', `No voice state for guild ${this.guildId}, track is enqueued and will play when voice state is provided.`)
+          logger(
+            'debug',
+            'Player',
+            `No voice state for guild ${this.guildId}, track is enqueued and will play when voice state is provided.`
+          )
           this.isUpdatingTrack = false
           return resolve(true)
         }
@@ -622,7 +660,7 @@ export class Player {
           .finally(() => {
             this.isUpdatingTrack = false
           })
-        
+
         return resolve(true)
       } catch (e) {
         this.isUpdatingTrack = false
@@ -665,7 +703,11 @@ export class Player {
       const unsupportedSources = ['deezer', 'local']
 
       let seekPromise
-      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url && this.streamInfo.format !== 'mp4') {
+      if (
+        !unsupportedSources.includes(sourceName) &&
+        this.streamInfo?.url &&
+        this.streamInfo.format !== 'mp4'
+      ) {
         seekPromise = this._seekeableSeek(
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime
@@ -994,7 +1036,11 @@ export class Player {
           this.connection.unpause('reconnected')
         }
 
-        if (this.track && !this.connection.audioStream) {
+        if (
+          this.track &&
+          !this.connection.audioStream &&
+          !this.isUpdatingTrack
+        ) {
           logger(
             'debug',
             'Player',
