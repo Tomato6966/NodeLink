@@ -906,6 +906,10 @@ export function checkURLType(url, type) {
 }
 
 function parseLengthAndStream(lengthText, lengthSeconds, isLive) {
+  if (isLive) {
+    return { lengthMs: -1, isStream: true }
+  }
+
   let lengthMs = 0
   let isStream = true
 
@@ -1381,16 +1385,25 @@ export class BaseClient {
       )
 
     if (filteredFormats.length === 0) {
-      logger(
-        'debug',
-        `youtube-${this.name}`,
-        `No suitable audio stream found for the configured quality. Available itags: ${allFormats.map((f) => f.itag).join(', ')}`
-      )
-      return {
-        exception: {
-          message: 'No suitable audio stream found for the configured quality.',
-          severity: 'common',
-          cause: 'Upstream'
+      if (streamingData.hlsManifestUrl) {
+        logger(
+          'debug',
+          `youtube-${this.name}`,
+          `No suitable audio stream found for the configured quality. Falling back to HLS.`
+        )
+      } else {
+        logger(
+          'debug',
+          `youtube-${this.name}`,
+          `No suitable audio stream found for the configured quality. Available itags: ${allFormats.map((f) => f.itag).join(', ')}`
+        )
+        return {
+          exception: {
+            message:
+              'No suitable audio stream found for the configured quality.',
+            severity: 'common',
+            cause: 'Upstream'
+          }
         }
       }
     }
@@ -1445,16 +1458,24 @@ export class BaseClient {
     }
 
     if (!resolvedFormat) {
-      logger(
-        'debug',
-        `youtube-${this.name}`,
-        'Could not resolve a working URL from the filtered formats.'
-      )
-      return {
-        exception: {
-          message: 'Could not resolve a working URL.',
-          severity: 'fault',
-          cause: 'Cipher'
+      if (streamingData.hlsManifestUrl) {
+        logger(
+          'debug',
+          `youtube-${this.name}`,
+          'Could not resolve a working URL from the filtered formats. Falling back to HLS.'
+        )
+      } else {
+        logger(
+          'debug',
+          `youtube-${this.name}`,
+          'Could not resolve a working URL from the filtered formats.'
+        )
+        return {
+          exception: {
+            message: 'Could not resolve a working URL.',
+            severity: 'fault',
+            cause: 'Cipher'
+          }
         }
       }
     }

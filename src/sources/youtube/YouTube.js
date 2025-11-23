@@ -39,6 +39,8 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
     })
   }
 
+  let isFirstFetch = true
+
   const playlistFetcher = async (playlistUrl) => {
     while (!stopRef.stop) {
       try {
@@ -65,15 +67,32 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
           targetDuration = Number.parseInt(targetDurationLine.split(':')[1], 10)
         }
 
+        const currentSegments = []
         for (let i = 0; i < lines.length; i++) {
           if (lines[i].startsWith('#EXTINF:')) {
             const segmentUrl = lines[i + 1]
             if (segmentUrl && !segmentUrl.startsWith('#')) {
               const absoluteUrl = new URL(segmentUrl, playlistUrl).toString()
-              if (!processedSegments.has(absoluteUrl)) {
-                processedSegments.add(absoluteUrl)
-                segmentQueue.push(absoluteUrl)
-              }
+              currentSegments.push(absoluteUrl)
+            }
+          }
+        }
+
+        if (isFirstFetch) {
+          const startIdx = Math.max(0, currentSegments.length - 3)
+          for (let i = 0; i < currentSegments.length; i++) {
+            const url = currentSegments[i]
+            processedSegments.add(url)
+            if (i >= startIdx) {
+              segmentQueue.push(url)
+            }
+          }
+          isFirstFetch = false
+        } else {
+          for (const url of currentSegments) {
+            if (!processedSegments.has(url)) {
+              processedSegments.add(url)
+              segmentQueue.push(url)
             }
           }
         }
