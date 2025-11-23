@@ -873,7 +873,7 @@ class MP4ToAACStream extends Transform {
 
         this.audioConfig = this._getAudioConfig(audioTrack)
         this.mp4boxFile.setExtractionOptions(audioTrack.id, null, {
-          nbSamples: 100
+          nbSamples: 1
         })
         this.mp4boxFile.start()
         this.isReady = true
