@@ -96,6 +96,12 @@ export default {
     http: {
       enabled: true
     },
+    jiosaavn: {
+      enabled: true,
+      playlistLoadLimit: 50,
+      artistLoadLimit: 20
+      // "secretKey": "38346591" // Optional, defaults to standard key
+    },
     youtube: {
       enabled: true,
       allowItag: [], // additional itags for audio streams, e.g., [140, 141]
