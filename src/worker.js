@@ -262,6 +262,11 @@ async function processQueue() {
         result = nodelink.sources.getEnabledSourceNames()
         break
       }
+      case 'getTrackUrl': {
+        const { decodedTrackInfo } = payload
+        result = await nodelink.sources.getTrackUrl(decodedTrackInfo)
+        break
+      }
       default:
         throw new Error(`Unknown command type: ${type}`)
     }

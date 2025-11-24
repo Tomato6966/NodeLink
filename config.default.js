@@ -55,6 +55,7 @@ export default {
   trackStuckThresholdMs: 10000,
   zombieThresholdMs: 60000,
   enableHoloTracks: false,
+  enableTrackStreamEndpoint: false,
   resolveExternalLinks: false,
   fetchChannelInfo: false,
   filters: {
