@@ -161,6 +161,9 @@ export default {
       playlistLoadLimit: 2, // 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
       playlistPageLoadConcurrency: 5 // How many pages to load simultaneously
     },
+    pandora: {
+      enabled: true
+    },
     nicovideo: {
       enabled: true
     },

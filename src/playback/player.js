@@ -384,7 +384,7 @@ export class Player {
     const position = this._realPosition()
 
     const threshold = this.nodelink.options.trackStuckThresholdMs
-    if (threshold > 0) {
+    if (threshold > 0 && !this.isUpdatingTrack) {
       if (this._lastPosition === position) {
         this._stuckTime += this.nodelink.options.playerUpdateInterval
         if (
@@ -586,6 +586,7 @@ export class Player {
     this.setFilters(this.filters)
 
     logger('debug', 'Player', `Playing resource for guild ${this.guildId}`)
+    this._stuckTime = 0
     this.connection.play(resource)
     await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
     return true
@@ -667,7 +668,7 @@ export class Player {
     if (this.destroying || !this.track) return false
     if (!this.track.info.isSeekable && this.track.info.isStream) return false
 
-    if (position === 0) {
+    if (position === 0 && !this._isRecovering) {
       if (this.track.info.position === 0) {
         logger('debug', 'Player', 'Ignoring redundant seek to 0 on new track.')
         return false
