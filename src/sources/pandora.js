@@ -9,7 +9,7 @@ export default class PandoraSource {
       /^https?:\/\/(?:www\.)?pandora\.com\/(?:playlist|station|podcast|artist)\/.+/
     ]
     this.priority = 80
-
+    this.csrfTokenConfig = this.config.sources?.pandora?.csrfToken || null
     this.csrfToken = null
     this.authToken = null
     this.setupPromise = null
@@ -33,22 +33,35 @@ export default class PandoraSource {
         }
 
         const cookies = pandoraRequest.headers['set-cookie']
-        const csrfCookie = cookies ? cookies.find(c => c.includes('csrftoken')) : null
+        const csrfCookie = cookies
+          ? this.csrfTokenConfig || cookies.find(cookie => cookie.startsWith('csrftoken='))
+          : null
 
         if (!csrfCookie) {
           logger('error', 'Pandora', 'Failed to find CSRF token cookie.')
           return false
         }
 
-        const csrfMatch = /csrftoken=([a-f0-9]{16})/.exec(csrfCookie)
-        if (!csrfMatch) {
-          logger('error', 'Pandora', 'Failed to parse CSRF token.')
-          return false
-        }
-
-        this.csrfToken = {
-          raw: csrfCookie.split(';')[0],
-          parsed: csrfMatch[1]
+        if (this.csrfTokenConfig) {
+          const csrfMatch = `csrftoken=${this.csrfTokenConfig};Path=/;Domain=.pandora.com;Secure`
+          if (!csrfMatch) {
+            logger('error', 'Pandora', 'Failed to parse provided CSRF token.')
+            return false
+          }
+          this.csrfToken = {
+            raw: csrfMatch,
+            parsed: this.csrfTokenConfig
+          }
+        } else {
+          const csrfMatch = /csrftoken=([a-f0-9]{16})/.exec(csrfCookie)
+          if (!csrfMatch) {
+            logger('error', 'Pandora', 'Failed to parse CSRF token.')
+            return false
+          }
+          this.csrfToken = {
+            raw: csrfCookie.split(';')[0],
+            parsed: csrfMatch[1]
+          }
         }
 
         const tokenRequest = await makeRequest(
@@ -85,19 +98,8 @@ export default class PandoraSource {
   }
 
   async search(query) {
-    if (!this.authToken) {
-      await this.setup()
-    }
-
-    if (!this.authToken) {
-      return {
-        exception: {
-          message: 'Pandora source is not available.',
-          severity: 'common',
-          cause: 'Auth Failed'
-        }
-      }
-    }
+    const authError = await this._ensureAuth()
+    if (authError) return authError
 
     logger('debug', 'Pandora', `Searching for: ${query}`)
 
@@ -126,9 +128,7 @@ export default class PandoraSource {
     )
 
     if (error) {
-      return {
-        exception: { message: error.message, severity: 'common' }
-      }
+      return this._buildException(error)
     }
 
     if (!data.results || data.results.length === 0) {
@@ -149,23 +149,10 @@ export default class PandoraSource {
   }
 
   async resolve(url) {
-    if (!this.authToken) {
-      await this.setup()
-    }
+    const authError = await this._ensureAuth()
+    if (authError) return authError
 
-    if (!this.authToken) {
-      return {
-        exception: {
-          message: 'Pandora source is not available.',
-          severity: 'common',
-          cause: 'Auth Failed'
-        }
-      }
-    }
-
-    const typeMatch = /^(https:\/\/www\.pandora\.com\/)((playlist)|(station)|(podcast)|(artist))\/.+/.exec(
-      url
-    )
+    const typeMatch = /^(https:\/\/www\.pandora\.com\/)((playlist)|(station)|(podcast)|(artist))\/.+/.exec(url)
 
     if (!typeMatch) {
       return { loadType: 'empty', data: {} }
@@ -190,6 +177,60 @@ export default class PandoraSource {
     }
   }
 
+  async _ensureAuth() {
+    if (!this.authToken) {
+      await this.setup()
+    }
+
+    if (!this.authToken) {
+      return {
+        exception: {
+          message: 'Pandora source is not available.',
+          severity: 'common',
+          cause: 'Auth Failed'
+        }
+      }
+    }
+
+    return null
+  }
+
+  _buildException(error, data) {
+    return {
+      exception: {
+        message: error?.message || data?.message || 'Unknown error',
+        severity: 'common'
+      }
+    }
+  }
+
+  _getHeaders() {
+    return {
+      Cookie: this.csrfToken.raw,
+      'X-CsrfToken': this.csrfToken.parsed,
+      'X-AuthToken': this.authToken,
+      'Content-Type': 'application/json'
+    }
+  }
+
+  _buildArtworkUrl(artwork) {
+    if (!artwork) return null
+    return artwork.startsWith('http')
+      ? artwork
+      : `https://content-images.p-cdn.com/${artwork}`
+  }
+
+  _buildUri(shareableUrlPath) {
+    if (!shareableUrlPath) return ''
+    return shareableUrlPath.startsWith('http')
+      ? shareableUrlPath
+      : `https://www.pandora.com${shareableUrlPath}`
+  }
+
+  _limitArray(arr, limit) {
+    return arr.length > limit ? arr.slice(0, limit) : arr
+  }
+
   async _resolveArtist(id) {
     const { body: trackData, error } = await http1makeRequest(
       'https://www.pandora.com/api/v4/catalog/annotateObjectsSimple',
@@ -202,12 +243,7 @@ export default class PandoraSource {
     )
 
     if (error || trackData.message) {
-      return {
-        exception: {
-          message: error?.message || trackData.message,
-          severity: 'common'
-        }
-      }
+      return this._buildException(error, trackData)
     }
 
     const keys = Object.keys(trackData)
@@ -239,29 +275,19 @@ export default class PandoraSource {
     )
 
     if (error || data.errors) {
-      return {
-        exception: {
-          message: error?.message || 'Unknown album error',
-          severity: 'common'
-        }
-      }
+      return this._buildException(error, { message: 'Unknown album error' })
     }
 
-    const tracks = []
-    let trackKeys = Object.keys(data.annotations)
-
-    if (trackKeys.length > this.config.maxAlbumPlaylistLength) {
-      trackKeys = trackKeys.slice(0, this.config.maxAlbumPlaylistLength)
-    }
-
-    for (const key of trackKeys) {
-      tracks.push(this.buildTrack(data.annotations[key]))
-    }
+    const trackKeys = this._limitArray(
+      Object.keys(data.annotations),
+      this.config.maxAlbumPlaylistLength
+    )
+    const tracks = trackKeys.map(key => this.buildTrack(data.annotations[key]))
 
     return {
       loadType: 'playlist',
       data: {
-        info: { name: name, selectedTrack: 0 },
+        info: { name, selectedTrack: 0 },
         tracks
       }
     }
@@ -315,32 +341,20 @@ export default class PandoraSource {
     )
 
     if (error || data.errors) {
-      return {
-        exception: {
-          message: error?.message || 'Unknown artist error',
-          severity: 'common'
-        }
-      }
+      return this._buildException(error, { message: 'Unknown artist error' })
     }
 
     const topTracks = data.data?.entity?.topTracksWithCollaborations || []
-    const tracks = []
+    const items = this._limitArray(topTracks, this.config.maxAlbumPlaylistLength)
 
-    const limit = this.config.maxAlbumPlaylistLength
-    const items =
-      topTracks.length > limit ? topTracks.slice(0, limit) : topTracks
-
-    for (const item of items) {
-      const trackItem = {
-        name: item.name,
-        artistName: item.artistName?.name,
-        shareableUrlPath: item.shareableUrlPath,
-        icon: item.icon,
-        pandoraId: item.pandoraId,
-        duration: item.duration
-      }
-      tracks.push(this.buildTrack(trackItem))
-    }
+    const tracks = items.map(item => this.buildTrack({
+      name: item.name,
+      artistName: item.artistName?.name,
+      shareableUrlPath: item.shareableUrlPath,
+      icon: item.icon,
+      pandoraId: item.pandoraId,
+      duration: item.duration
+    }))
 
     return {
       loadType: 'playlist',
@@ -378,19 +392,11 @@ export default class PandoraSource {
     )
 
     if (error) {
-      return {
-        exception: { message: error.message, severity: 'common' }
-      }
+      return this._buildException(error)
     }
 
-    const tracks = []
-    const keys = Object.keys(data.annotations).filter(
-      key => key.indexOf('TR:') !== -1
-    )
-
-    for (const key of keys) {
-      tracks.push(this.buildTrack(data.annotations[key]))
-    }
+    const keys = Object.keys(data.annotations).filter(key => key.includes('TR:'))
+    const tracks = keys.map(key => this.buildTrack(data.annotations[key]))
 
     return {
       loadType: 'playlist',
@@ -413,14 +419,21 @@ export default class PandoraSource {
     )
 
     if (error || stationData.message) {
-      return {
-        exception: {
-          message: error?.message || stationData.message,
-          severity: 'common'
-        }
-      }
+      return this._buildException(error, stationData)
     }
 
+    const tracks = await this._fetchStationTracks(id, stationData)
+
+    return {
+      loadType: 'playlist',
+      data: {
+        info: { name: stationData.name, selectedTrack: 0 },
+        tracks
+      }
+    }
+  }
+
+  async _fetchStationTracks(id, stationData) {
     const tracks = []
 
     try {
@@ -438,15 +451,14 @@ export default class PandoraSource {
         for (const item of playlistData.items) {
           if (!item.songName) continue
 
-          const trackItem = {
+          tracks.push(this.buildTrack({
             name: item.songName,
             artistName: item.artistName,
             shareableUrlPath: item.songDetailUrl,
             icon: { artUrl: item.albumArtUrl },
             pandoraId: item.songId,
             duration: item.trackLength
-          }
-          tracks.push(this.buildTrack(trackItem))
+          }))
         }
       }
     } catch (e) {
@@ -454,14 +466,14 @@ export default class PandoraSource {
     }
 
     if (tracks.length === 0) {
-      let seeds = stationData.seeds || []
-      if (seeds.length > this.config.maxAlbumPlaylistLength) {
-        seeds = seeds.slice(0, this.config.maxAlbumPlaylistLength)
-      }
+      const seeds = this._limitArray(
+        stationData.seeds || [],
+        this.config.maxAlbumPlaylistLength
+      )
 
       for (const seed of seeds) {
         if (!seed.song) continue
-        const item = {
+        tracks.push(this.buildTrack({
           name: seed.song.songTitle,
           artistName: seed.song.artistSummary,
           shareableUrlPath: seed.song.songDetailUrl,
@@ -469,18 +481,11 @@ export default class PandoraSource {
             artUrl: seed.art?.[seed.art.length - 1]?.url
           },
           pandoraId: seed.song.songId
-        }
-        tracks.push(this.buildTrack(item))
+        }))
       }
     }
 
-    return {
-      loadType: 'playlist',
-      data: {
-        info: { name: stationData.name, selectedTrack: 0 },
-        tracks
-      }
-    }
+    return tracks
   }
 
   async _resolvePodcast(id) {
@@ -495,12 +500,7 @@ export default class PandoraSource {
     )
 
     if (error || podcastData.message) {
-      return {
-        exception: {
-          message: error?.message || podcastData.message,
-          severity: 'common'
-        }
-      }
+      return this._buildException(error, podcastData)
     }
 
     const details = podcastData.details
@@ -532,25 +532,13 @@ export default class PandoraSource {
     )
 
     if (error || allEpisodesIdsData.message) {
-      return {
-        exception: {
-          message: error?.message || allEpisodesIdsData.message,
-          severity: 'common'
-        }
-      }
+      return this._buildException(error, allEpisodesIdsData)
     }
 
-    let allEpisodesIds = []
-    allEpisodesIdsData.episodes.episodesWithLabel.forEach(yearInfo => {
-      allEpisodesIds.push(...yearInfo.episodes)
-    })
-
-    if (allEpisodesIds.length > this.config.maxAlbumPlaylistLength) {
-      allEpisodesIds = allEpisodesIds.slice(
-        0,
-        this.config.maxAlbumPlaylistLength
-      )
-    }
+    const allEpisodesIds = this._limitArray(
+      allEpisodesIdsData.episodes.episodesWithLabel.flatMap(yearInfo => yearInfo.episodes),
+      this.config.maxAlbumPlaylistLength
+    )
 
     const { body: allEpisodesData, error: epError } = await http1makeRequest(
       'https://www.pandora.com/api/v1/aesop/annotateObjects',
@@ -563,21 +551,11 @@ export default class PandoraSource {
     )
 
     if (epError || allEpisodesData.message) {
-      return {
-        exception: {
-          message: epError?.message || allEpisodesData.message,
-          severity: 'common'
-        }
-      }
+      return this._buildException(epError, allEpisodesData)
     }
 
-    const tracks = []
     const episodes = Object.keys(allEpisodesData.annotations)
-
-    for (const epKey of episodes) {
-      let episode = allEpisodesData.annotations[epKey]
-      tracks.push(this.buildTrack(episode))
-    }
+    const tracks = episodes.map(epKey => this.buildTrack(allEpisodesData.annotations[epKey]))
 
     const programId = Object.keys(allEpisodesData.annotations).find(
       key => allEpisodesData.annotations[key].type === 'PC'
@@ -595,41 +573,20 @@ export default class PandoraSource {
     }
   }
 
-  _getHeaders() {
-    return {
-      Cookie: this.csrfToken.raw,
-      'X-CsrfToken': this.csrfToken.parsed,
-      'X-AuthToken': this.authToken,
-      'Content-Type': 'application/json'
-    }
-  }
-
   buildTrack(item) {
-    let artwork = item.icon?.artUrl || null
-    if (artwork && !artwork.startsWith('http')) {
-      artwork = `https://content-images.p-cdn.com/${artwork}`
-    }
-
-    let uri = ''
-    if (item.shareableUrlPath) {
-      if (item.shareableUrlPath.startsWith('http')) {
-        uri = item.shareableUrlPath
-      } else {
-        uri = `https://www.pandora.com${item.shareableUrlPath}`
-      }
-    }
-
+    const artwork = this._buildArtworkUrl(item.icon?.artUrl)
+    const uri = this._buildUri(item.shareableUrlPath)
     const duration = item.duration || item.trackLength || item.length || 0
 
     const trackInfo = {
       identifier: item.pandoraId || item.id || 'unknown',
       isSeekable: true,
       author: item.artistName || item.programName || 'Unknown Artist',
-      length: duration * 1000, 
+      length: duration * 1000,
       isStream: false,
       position: 0,
       title: item.name || 'Unknown Title',
-      uri: uri,
+      uri,
       artworkUrl: artwork,
       isrc: item.isrc || null,
       sourceName: 'pandora'
@@ -644,6 +601,7 @@ export default class PandoraSource {
 
   async getTrackUrl(track) {
     const query = `${track.title} ${track.author}`
+
     try {
       const searchResult = await this.nodelink.sources.searchWithDefault(query)
 
@@ -657,8 +615,8 @@ export default class PandoraSource {
       }
 
       const bestMatch = searchResult.data[0]
-
       const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+
       return { newTrack: bestMatch, ...streamInfo }
     } catch (e) {
       logger('error', 'Pandora', `Failed to mirror track: ${e.message}`)
