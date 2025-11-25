@@ -16,14 +16,14 @@
     "@performanc/voice": "github:PerformanC/voice",
     "@wasm-audio-decoders/flac": "^0.2.10",
     "@wasm-audio-decoders/ogg-vorbis": "^0.1.20",
-    "mp4box": "^2.2.0",
+    "mp4box": "^2.3.0",
     "mpg123-decoder": "^1.0.3",
     "myzod": "^1.12.1",
     "sodium-native": "^5.0.10",
     "toddy-mediaplex": "^2.0.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.3.6",
+    "@biomejs/biome": "^2.3.7",
     "dotenv": "^17.2.3"
   }
 }
