@@ -39,6 +39,7 @@ export class Player {
     this.connection = null
     this.voice = { sessionId: null, token: null, endpoint: null }
     this.streamInfo = null
+    this.lastManualReconnect = 0
 
     logger(
       'debug',
@@ -230,13 +231,32 @@ export class Player {
       let severity = 'fault'
       let cause = 'UNKNOWN_ERROR'
       let shouldStop = true
-
+      logger(
+        'debug',
+        'Player',
+        `Handling player error for guild ${this.guildId}: ${error.message}`
+      )
+      
       if (error.message.includes('ECONNRESET')) {
-        logger(
-          'warn',
-          'Player',
-          `Voice connection reset for guild ${this.guildId}. The library will attempt to reconnect.`
-        )
+        const now = Date.now()
+        const reconnectCooldown = 5000
+
+        if (now - (this.lastManualReconnect || 0) < reconnectCooldown) {
+          logger(
+            'warn',
+            'Player',
+            `Voice connection reset for guild ${this.guildId}. Manual reconnect on cooldown. Relying on library.`
+          )
+        } else {
+          this.lastManualReconnect = now
+          logger(
+            'warn',
+            'Player',
+            `Voice connection reset for guild ${this.guildId}. Attempting to manually reconnect.`
+          )
+          this.updateVoice(this.voice)
+        }
+
         severity = 'suspicious'
         cause = 'VOICE_CONNECTION_RESET'
         shouldStop = false
