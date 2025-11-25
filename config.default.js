@@ -163,7 +163,10 @@ export default {
       playlistPageLoadConcurrency: 5 // How many pages to load simultaneously
     },
     pandora: {
-      enabled: true
+      enabled: true,
+      // Optional, setting this manually can help unblocking countries (since pandora is US only.). May need to be updated periodically.
+      // fetching manually: use a vpn connected to US, go on pandora.com, open devtools, Network tab, first request to appear and copy the 2nd csrfToken= value.
+      // csrfToken: ''
     },
     nicovideo: {
       enabled: true
