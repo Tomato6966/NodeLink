@@ -2,7 +2,8 @@ export default {
   server: {
     host: '0.0.0.0',
     port: 3000,
-    password: 'youshallnotpass'
+    password: 'youshallnotpass',
+    useBunServer: false // set to true to use Bun.serve websocket (experimental)
   },
   cluster: {
     enabled: true, // active cluster (or use env CLUSTER_ENABLED)
