@@ -276,7 +276,7 @@ class NodelinkServer {
     const port = this.options.server.port
     const host = this.options.server.host || '0.0.0.0'
     const password = this.options.server.password
-    const useBun = this.options.server.useBun || false
+    const useBun = this.options.server.useBunServer || false
 
     if (!useBun) {
       logger('warn', 'Server', 'Bun.serve usage is disabled in config, using standard Node.js HTTP server instead.')
