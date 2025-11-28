@@ -23,13 +23,13 @@ const _getResamplerConverterType = (quality) => {
     case 'medium':
       return LibSampleRate.ConverterType.SRC_SINC_MEDIUM_QUALITY
     case 'fastest':
-      return LibSampleRate.ConverterType.SRC_SINC_FASTEST_QUALITY
+      return LibSampleRate.ConverterType.SRC_SINC_FASTEST
     case 'zero order holder':
-      return LibSampleRate.ConverterType.SRC_ZERO_ORDER_HOLDER
+      return LibSampleRate.ConverterType.SRC_ZERO_ORDER_HOLD
     case 'linear':
       return LibSampleRate.ConverterType.SRC_LINEAR
     default:
-      return LibSampleRate.ConverterType.SRC_SINC_FASTEST_QUALITY
+      return LibSampleRate.ConverterType.SRC_SINC_FASTEST
   }
 }
 
