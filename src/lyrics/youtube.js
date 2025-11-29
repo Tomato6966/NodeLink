@@ -54,6 +54,7 @@ export default class YouTubeLyrics {
         if (defaultTrack && defaultTrack.isTranslatable) {
           trackLang = {
             ...defaultTrack,
+            languageCode: language,
             baseUrl: `${defaultTrack.baseUrl}&tlang=${language}`,
             name: {
               simpleText: `${defaultTrack.name.simpleText} (Translated to ${language})`
@@ -107,6 +108,7 @@ export default class YouTubeLyrics {
       data: {
         name: trackLang.name.simpleText,
         synced: true,
+        lang: trackLang.languageCode,
         lines,
         langs
       }
