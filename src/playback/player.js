@@ -404,7 +404,7 @@ export class Player {
     const position = this._realPosition()
 
     const threshold = this.nodelink.options.trackStuckThresholdMs
-    if (threshold > 0 && !this.isUpdatingTrack) {
+    if (threshold > 0 && !this.isUpdatingTrack && this.track) {
       if (this._lastPosition === position) {
         this._stuckTime += this.nodelink.options.playerUpdateInterval
         if (
