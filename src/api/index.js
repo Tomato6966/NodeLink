@@ -109,13 +109,15 @@ async function requestHandler(nodelink, req, res) {
 
   if (
     !req.headers ||
-    req.headers.authorization !== nodelink.options.server.password
+    req.headers.authorization !== nodelink.options.server.password &&
+    req.headers.authorization !== `Bearer ${nodelink.options.server.password}`
   ) {
     logger(
       'warn',
       'Server',
       `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
     )
+
     res.writeHead(401, { 'Content-Type': 'text/plain' })
     res.end('Unauthorized')
     return
