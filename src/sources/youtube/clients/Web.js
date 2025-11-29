@@ -275,4 +275,107 @@ export default class Web extends BaseClient {
       cipherManager
     )
   }
+
+  async getChapters(trackInfo, context) {
+    const requestBody = {
+      context: this.getClient(context),
+      query: trackInfo.identifier
+    }
+
+    const { body: searchResult, error, statusCode } = await makeRequest(
+      'https://www.youtube.com/youtubei/v1/search',
+      {
+        method: 'POST',
+        headers: {
+          'User-Agent': this.getClient(context).client.userAgent
+        },
+        body: requestBody,
+        disableBodyCompression: true
+      }
+    )
+
+    if (error || statusCode !== 200) {
+      throw new Error(
+        `Search failed for chapters: ${error?.message || statusCode}`
+      )
+    }
+
+    const contents = searchResult.contents?.twoColumnSearchResultsRenderer
+      ?.primaryContents?.sectionListRenderer?.contents
+
+    if (!contents) return []
+
+    let videoRenderer = null
+
+    for (const section of contents) {
+      if (section.itemSectionRenderer) {
+        for (const item of section.itemSectionRenderer.contents) {
+          if (item.videoRenderer && item.videoRenderer.videoId === trackInfo.identifier) {
+            videoRenderer = item.videoRenderer
+            break
+          }
+        }
+      }
+      if (videoRenderer) break
+    }
+
+    if (!videoRenderer) return []
+
+    const macroMarkersCards = videoRenderer.expandableMetadata
+      ?.expandableMetadataRenderer?.expandedContent
+      ?.horizontalCardListRenderer?.cards
+
+    if (!macroMarkersCards) return []
+
+    const chapters = []
+
+    for (const card of macroMarkersCards) {
+      const renderer = card.macroMarkersListItemRenderer
+      if (renderer) {
+        const title = renderer.title?.simpleText || renderer.title?.runs?.[0]?.text
+        const timeStr = renderer.timeDescription?.simpleText || renderer.timeDescription?.runs?.[0]?.text
+        
+        let thumbnails = []
+        if (renderer.thumbnail && renderer.thumbnail.thumbnails) {
+            thumbnails = renderer.thumbnail.thumbnails
+        }
+
+        if (title && timeStr) {
+          chapters.push({
+            title,
+            startTime: this._parseTime(timeStr),
+            thumbnails
+          })
+        }
+      }
+    }
+
+    for (let i = 0; i < chapters.length; i++) {
+      const current = chapters[i]
+      const next = chapters[i + 1]
+
+      if (next) {
+        current.duration = next.startTime - current.startTime
+        current.endTime = next.startTime
+      } else {
+        current.duration = trackInfo.length - current.startTime
+        current.endTime = trackInfo.length
+      }
+    }
+
+    return chapters
+  }
+
+  _parseTime(timeStr) {
+    const parts = timeStr.split(':').map(Number)
+    let ms = 0
+    if (parts.length === 3) {
+      ms = (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+    } else if (parts.length === 2) {
+      ms = (parts[0] * 60 + parts[1]) * 1000
+    } else {
+      ms = parts[0] * 1000
+    }
+    return ms
+  }
 }
