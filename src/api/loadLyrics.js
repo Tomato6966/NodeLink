@@ -7,12 +7,14 @@ import {
 } from '../utils.js'
 
 const loadLyricsSchema = myzod.object({
-  encodedTrack: myzod.string()
+  encodedTrack: myzod.string(),
+  lang: myzod.string().optional()
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const result = loadLyricsSchema.try({
-    encodedTrack: parsedUrl.searchParams.get('encodedTrack')
+    encodedTrack: parsedUrl.searchParams.get('encodedTrack'),
+    lang: parsedUrl.searchParams.get('lang') || undefined
   })
 
   if (result instanceof myzod.ValidationError) {
@@ -29,6 +31,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   }
 
   const encodedTrack = result.encodedTrack.replace(/ /g, '+')
+  const language = result.lang
 
   try {
     const decodedTrack = decodeTrack(encodedTrack)
@@ -51,17 +54,18 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     logger(
       'debug',
       'Lyrics',
-      `Request to load lyrics for: ${decodedTrack.info.title}`
+      `Request to load lyrics for: ${decodedTrack.info.title}${language ? ` (Lang: ${language})` : ''}`
     )
 
     let lyricsData
     if (nodelink.workerManager) {
       const worker = nodelink.workerManager.getBestWorker()
       lyricsData = await nodelink.workerManager.execute(worker, 'loadLyrics', {
-        decodedTrack
+        decodedTrack,
+        language
       })
     } else {
-      lyricsData = await nodelink.lyrics.loadLyrics(decodedTrack)
+      lyricsData = await nodelink.lyrics.loadLyrics(decodedTrack, language)
     }
 
     sendResponse(req, res, lyricsData, 200)

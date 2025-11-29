@@ -254,8 +254,8 @@ async function processQueue() {
       }
 
       case 'loadLyrics': {
-        const { decodedTrack } = payload
-        result = await nodelink.lyrics.loadLyrics(decodedTrack)
+        const { decodedTrack, language } = payload
+        result = await nodelink.lyrics.loadLyrics(decodedTrack, language)
         break
       }
       case 'getSources': {
