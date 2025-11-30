@@ -285,7 +285,16 @@ function getStats(nodelink) {
   let frameStats = null
   if (players > 0) {
     frameStats = { sent: 0, nulled: 0, deficit: 0, expected: 0 }
-    if (!nodelink.workerManager) {
+    if (nodelink.workerManager) { 
+      for (const workerStats of nodelink.workerManager.workerStats.values()) {
+        if (workerStats.frameStats) {
+          frameStats.sent += workerStats.frameStats.sent || 0
+          frameStats.nulled += workerStats.frameStats.nulled || 0
+          frameStats.expected += workerStats.frameStats.expected || 0
+        }
+      }
+      frameStats.deficit = Math.max(0, frameStats.expected - frameStats.sent)
+    } else { 
       for (const session of nodelink.sessions.values()) {
         if (!session.players) continue
         for (const player of session.players.players.values()) {
@@ -299,7 +308,7 @@ function getStats(nodelink) {
           frameStats.expected += expectedFrames
         }
       }
-      frameStats.deficit += Math.max(0, frameStats.expected - frameStats.sent)
+      frameStats.deficit = Math.max(0, frameStats.expected - frameStats.sent)
     }
   }
 
