@@ -614,6 +614,7 @@ class NodelinkServer {
       }
 
       const stats = getStats(this)
+      this.statsManager.updateStatsMetrics(stats);
       const statsPayload = JSON.stringify({ op: 'stats', ...stats })
 
       for (const session of this.sessions.values()) {
