@@ -1,12 +1,12 @@
 import { collectDefaultMetrics, Registry, Counter, Gauge } from 'prom-client'
 import { getStats, logger } from '../utils.js'
-import { NodelinkServer } from '../index.js'
 
 export default class StatsManager {
+  
   /**
    * 
-   * @param {NodelinkServer} nodelink 
-   */
+   * @param {import('../index').NodelinkServer} nodelink 
+   */ 
   constructor(nodelink) {
     this.nodelink = nodelink
     this.stats = {
@@ -207,7 +207,6 @@ export default class StatsManager {
     
     try {
       const stats = statsData;
-      console.log(stats)
       // Update player metrics
       this.promPlayers.set(stats.players || 0)
       this.promPlayingPlayers.set(stats.playingPlayers || 0)
@@ -244,7 +243,6 @@ export default class StatsManager {
         this.promFramesExpected.set(0)
       }
     } catch (error) {
-      console.log(error, error.stack)
       logger('error', 'StatsManager', `Failed to update stats metrics: ${error.message}`)
     }
   }

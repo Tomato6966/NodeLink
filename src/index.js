@@ -844,5 +844,3 @@ if (clusterEnabled && cluster.isPrimary) {
 
   await serverInstancePromise
 }
-
-export { NodelinkServer }

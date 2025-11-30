@@ -439,7 +439,15 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         `Unhandled error: ${error.message}`,
         error
       )
-      throw error
+      return sendErrorResponse(
+        req,
+        res,
+        500,
+        'Internal Server Error',
+        error.message,
+        parsedUrl.pathname,
+        true
+      )
     }
   }
 }
