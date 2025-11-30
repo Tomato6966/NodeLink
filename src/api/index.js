@@ -211,11 +211,13 @@ async function requestHandler(nodelink, req, res) {
 
   req.headers.authorization = '[REDACTED]'
   req.headers.host = '[REDACTED]'
-  logger(
-    'info',
-    'Request',
-    `${req.method} | ${clientAddress} [${req.headers['user-agent']}] - ${parsedUrl.pathname} ${JSON.stringify(req.headers)}${req.body ? `\nBody: ${JSON.stringify(req.body)}` : ''}`
-  )
+  if (!isMetricsEndpoint) {
+    logger(
+      'info',
+      'Request',
+      `${req.method} | ${clientAddress} [${req.headers['user-agent']}] - ${parsedUrl.pathname} ${JSON.stringify(req.headers)}${req.body ? `\nBody: ${JSON.stringify(req.body)}` : ''}`
+    )
+  }
 
   const { staticRoutes, dynamicRoutes } = await routesPromise
 
