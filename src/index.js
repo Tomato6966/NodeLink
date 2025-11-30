@@ -611,6 +611,10 @@ class NodelinkServer {
             playingPlayers: localPlayingPlayers
           }
         })
+      } else if (!clusterEnabled) {
+        // In single-process mode, update the server's own statistics
+        this.statistics.players = localPlayers
+        this.statistics.playingPlayers = localPlayingPlayers
       }
 
       const stats = getStats(this)
