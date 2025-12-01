@@ -157,7 +157,7 @@ export default class IOS extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager) {
+  async getTrackUrl(decodedTrack, context, cipherManager, itag) {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',
@@ -182,7 +182,8 @@ export default class IOS extends BaseClient {
       playerResponse,
       decodedTrack,
       context,
-      cipherManager
+      cipherManager,
+      itag
     )
   }
 }

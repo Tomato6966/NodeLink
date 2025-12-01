@@ -2,8 +2,8 @@ import myzod from 'myzod'
 import {
   decodeTrack,
   logger,
-  sendResponse,
-  sendErrorResponse
+  sendErrorResponse,
+  sendResponse
 } from '../utils.js'
 
 const trackStreamSchema = myzod.object({
@@ -25,6 +25,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const result = trackStreamSchema.try({
     encodedTrack: parsedUrl.searchParams.get('encodedTrack')
   })
+
+  const itag = parsedUrl.searchParams.get('itag')
+    ? Number(parsedUrl.searchParams.get('itag'))
+    : null
 
   if (result instanceof myzod.ValidationError) {
     const errorMessage = result.message || 'Missing encodedTrack parameter.'
@@ -58,10 +62,11 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     if (nodelink.workerManager) {
       const worker = nodelink.workerManager.getBestWorker()
       urlResult = await nodelink.workerManager.execute(worker, 'getTrackUrl', {
-        decodedTrackInfo: decodedTrack.info
+        decodedTrackInfo: decodedTrack.info,
+        itag
       })
     } else {
-      urlResult = await nodelink.sources.getTrackUrl(decodedTrack.info)
+      urlResult = await nodelink.sources.getTrackUrl(decodedTrack.info, itag)
     }
 
     if (urlResult.exception) {

@@ -271,8 +271,8 @@ async function processQueue() {
         break
       }
       case 'getTrackUrl': {
-        const { decodedTrackInfo } = payload
-        result = await nodelink.sources.getTrackUrl(decodedTrackInfo)
+        const { decodedTrackInfo, itag } = payload
+        result = await nodelink.sources.getTrackUrl(decodedTrackInfo, itag)
         break
       }
       default:

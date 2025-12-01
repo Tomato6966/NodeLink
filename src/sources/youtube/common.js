@@ -1341,7 +1341,8 @@ export class BaseClient {
     playerResponse,
     decodedTrack,
     context,
-    cipherManager
+    cipherManager,
+    itag
   ) {
     const streamingData = playerResponse.streamingData
 
@@ -1363,16 +1364,23 @@ export class BaseClient {
     const { targetItag, allowItag = [] } = this.config.sources.youtube || {}
     let targetItags = []
 
-    if (targetItag) {
+    if (itag) {
+      logger('debug', `youtube-${this.name}`, `Using requested itag: ${itag}`)
+
+      targetItags = [Number(itag)]
+    } else if (targetItag) {
       logger(
         'debug',
         `youtube-${this.name}`,
         `Using target itag: ${targetItag}`
       )
+
       targetItags = [Number(targetItag)]
     } else {
       const qualityPriority = this._getQualityPriority()
+
       targetItags = qualityPriority[this.config.audio.quality || 'high'] || []
+
       if (allowItag.length > 0) {
         targetItags = [...new Set([...targetItags, ...allowItag])]
       }
@@ -1382,6 +1390,14 @@ export class BaseClient {
       ...(streamingData.adaptiveFormats || []),
       ...(streamingData.formats || [])
     ]
+
+    const formats = allFormats.map((f) => ({
+      itag: f.itag,
+      mimeType: f.mimeType,
+      qualityLabel: f.qualityLabel,
+      bitrate: f.bitrate,
+      audioQuality: f.audioQuality
+    }))
 
     const filteredFormats = allFormats
       .filter((format) => targetItags.includes(format.itag))
@@ -1491,15 +1507,22 @@ export class BaseClient {
     if (!directUrl && !streamingData.hlsManifestUrl) {
       logger(
         'debug',
+
         `youtube-${this.name}`,
+
         `No suitable audio stream found. Available streamingData: ${JSON.stringify(streamingData)}`
       )
+
       return {
         exception: {
           message: 'No suitable audio stream found.',
+
           severity: 'common',
+
           cause: 'Upstream'
-        }
+        },
+
+        formats
       }
     }
 
@@ -1511,12 +1534,15 @@ export class BaseClient {
       if (lowerMime.includes('opus')) {
         return 'webm/opus'
       }
+
       if (lowerMime.includes('mp4')) {
         return 'mp4'
       }
+
       if (lowerMime.includes('mp3')) {
         return 'mp3'
       }
+
       if (lowerMime.includes('aac')) {
         return 'aac'
       }
@@ -1530,17 +1556,14 @@ export class BaseClient {
 
     return {
       url: directUrl,
+
       protocol: directUrl ? 'http' : null,
-      format: directUrl
-        ? decodedTrack.isStream
-          ? 'mpegts'
-          : resolvedFormat.mimeType.includes('opus')
-            ? 'webm/opus'
-            : resolvedFormat.mimeType.includes('mp4')
-              ? 'mp4'
-              : null
-        : null,
-      hlsUrl: streamingData.hlsManifestUrl || null
+
+      format: resolveFormat(resolvedFormat?.mimeType),
+
+      hlsUrl: streamingData.hlsManifestUrl || null,
+
+      formats
     }
   }
 

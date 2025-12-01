@@ -5,10 +5,7 @@ import {
   logger,
   makeRequest
 } from '../../utils.js'
-import { YOUTUBE_CONSTANTS, checkURLType } from './common.js'
-
 import CipherManager from './CipherManager.js'
-import OAuth from './OAuth.js'
 import Android from './clients/Android.js'
 import AndroidVR from './clients/AndroidVR.js'
 import IOS from './clients/IOS.js'
@@ -16,6 +13,8 @@ import Music from './clients/Music.js'
 import TV from './clients/TV.js'
 import TVEmbedded from './clients/TVEmbedded.js'
 import Web from './clients/Web.js'
+import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
+import OAuth from './OAuth.js'
 
 async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
   const segmentQueue = []
@@ -651,7 +650,7 @@ export default class YouTubeSource {
     }
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack, itag) {
     const clientList = this.config.clients.playback
     const clientErrors = []
 
@@ -668,7 +667,8 @@ export default class YouTubeSource {
         const urlData = await client.getTrackUrl(
           decodedTrack,
           this.ytContext,
-          this.cipherManager
+          this.cipherManager,
+          itag
         )
 
         if (urlData.exception) {
@@ -885,7 +885,11 @@ export default class YouTubeSource {
   async getChapters(trackInfo) {
     const webClient = this.clients.Web
     if (!webClient) {
-      logger('warn', 'YouTube', 'Web client not available for fetching chapters.')
+      logger(
+        'warn',
+        'YouTube',
+        'Web client not available for fetching chapters.'
+      )
       return []
     }
 
