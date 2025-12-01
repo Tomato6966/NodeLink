@@ -15,3 +15,7 @@
 !README.md
 !config.default.js 
 !biome.json
+!.husky
+!.husky/**
+!commitlint.config.mjs
+!.gitmessage
