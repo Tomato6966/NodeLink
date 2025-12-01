@@ -236,7 +236,7 @@ export class Player {
         'Player',
         `Handling player error for guild ${this.guildId}: ${error.message}`
       )
-      
+
       if (error.message.includes('ECONNRESET')) {
         const now = Date.now()
         const reconnectCooldown = 5000
@@ -387,7 +387,8 @@ export class Player {
       fetched.stream,
       fetched.type || urlData.format,
       this.nodelink,
-      this.filters
+      this.filters,
+      this.volumePercent / 100
     )
     return { stream: resource }
   }
@@ -667,9 +668,15 @@ export class Player {
           return resolve(true)
         }
 
-        console.log(startTime);
+        console.log(startTime)
 
-        this._startPlayback(startTime !== undefined ? startTime == 0 && this.position < 1000 ? 0 : startTime : 0)
+        this._startPlayback(
+          startTime !== undefined
+            ? startTime === 0 && this.position < 1000
+              ? 0
+              : startTime
+            : 0
+        )
           .catch((err) => this._onError(err))
           .finally(() => {
             this.isUpdatingTrack = false
@@ -695,8 +702,7 @@ export class Player {
       }
     }
 
-    const seekPosition =
-      position ?? this._realPosition()
+    const seekPosition = position ?? this._realPosition()
 
     if (seekPosition === 0 && this._realPosition() < 1000) {
       logger('debug', 'Player', 'Ignoring seek to 0 as track has just started.')
@@ -715,25 +721,40 @@ export class Player {
       const unsupportedSources = ['deezer', 'local']
 
       let seekPromise
+      if (!this.streamInfo?.url) {
+        logger(
+          'debug',
+          'Player',
+          'No stream info URL available for seek. awaiting getTrackUrl.'
+        )
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+        await sleep(1600)
         if (!this.streamInfo?.url) {
-          logger('debug', 'Player', 'No stream info URL available for seek. awaiting getTrackUrl.')
-          const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-          await sleep(1600);
-          if (!this.streamInfo?.url) {
-            logger('debug', 'Player', 'Still no stream info URL available for seek.')
-            if (this.track) {
-              const urlData = await this.nodelink.sources.getTrackUrl(this.track.info)
-              this.streamInfo = { ...urlData, trackInfo: this.track.info }
-              logger('debug', 'Player', 'Fetched stream info URL for seek after wait.')
-            }
-          } else {
-            logger('debug', 'Player', 'Stream info URL became available during wait.')
+          logger(
+            'debug',
+            'Player',
+            'Still no stream info URL available for seek.'
+          )
+          if (this.track) {
+            const urlData = await this.nodelink.sources.getTrackUrl(
+              this.track.info
+            )
+            this.streamInfo = { ...urlData, trackInfo: this.track.info }
+            logger(
+              'debug',
+              'Player',
+              'Fetched stream info URL for seek after wait.'
+            )
           }
-        } 
-      if (
-        !unsupportedSources.includes(sourceName) &&
-        this.streamInfo?.url
-      ) {
+        } else {
+          logger(
+            'debug',
+            'Player',
+            'Stream info URL became available during wait.'
+          )
+        }
+      }
+      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
         seekPromise = this._seekeableSeek(
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime
@@ -774,7 +795,8 @@ export class Player {
         endTime,
         this.nodelink,
         this.filters,
-        this
+        this,
+        this.volumePercent / 100
       )
 
       if (resourceResult.exception) {
