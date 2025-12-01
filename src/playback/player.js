@@ -695,17 +695,15 @@ export class Player {
     if (this.destroying || !this.track) return false
     if (!this.track.info.isSeekable && this.track.info.isStream) return false
 
-    if (position === 0 && !this._isRecovering) {
-      if (this.track.info.position === 0) {
-        logger('debug', 'Player', 'Ignoring redundant seek to 0 on new track.')
-        return false
-      }
-    }
-
     const seekPosition = position ?? this._realPosition()
 
-    if (seekPosition === 0 && this._realPosition() < 1000) {
+    if (
+      seekPosition === 0 &&
+      !this._isRecovering &&
+      this._realPosition() < 2000
+    ) {
       logger('debug', 'Player', 'Ignoring seek to 0 as track has just started.')
+
       return false
     }
 
