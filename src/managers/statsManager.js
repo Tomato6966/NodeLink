@@ -1,12 +1,10 @@
-import { collectDefaultMetrics, Registry, Counter, Gauge } from 'prom-client'
-import { getStats, logger } from '../utils.js'
+import { logger } from '../utils.js'
 
 export default class StatsManager {
-  
   /**
-   * 
-   * @param {import('../index').NodelinkServer} nodelink 
-   */ 
+   *
+   * @param {import('../index').NodelinkServer} nodelink
+   */
   constructor(nodelink) {
     this.nodelink = nodelink
     this.stats = {
@@ -19,13 +17,39 @@ export default class StatsManager {
         events: {} // { TrackStartEvent: 10, ... }
       }
     }
-    // Initialize Prometheus metrics only if enabled
-    const metricsEnabled = nodelink.options.metrics?.enabled ?? false
-    
-    if (metricsEnabled) {
-      this.promRegister = new Registry();
-      this.promCollectedStats = collectDefaultMetrics({ register: this.promRegister });
       
+    logger('info', 'StatsManager', 'Initialized.')
+  }
+
+  async initialize() {
+    // Initialize Prometheus metrics only if enabled
+    const metricsEnabled = this.nodelink.options.metrics?.enabled ?? false
+
+    if (metricsEnabled) {
+      let promClient
+      try {
+        promClient = await import('prom-client')
+      } catch (e) {
+        logger(
+          'error',
+          'StatsManager',
+          "Metrics are enabled in config but 'prom-client' is not installed."
+        )
+        logger(
+          'error',
+          'StatsManager',
+          "Please install it using 'npm install prom-client' or disable metrics in config."
+        )
+        throw new Error("Optional dependency 'prom-client' is missing.")
+      }
+
+      const { collectDefaultMetrics, Registry, Counter, Gauge } = promClient
+
+      this.promRegister = new Registry()
+      this.promCollectedStats = collectDefaultMetrics({
+        register: this.promRegister
+      })
+
       // API Request Counter - tracks total API requests by endpoint
       this.promApiRequests = new Counter({
         name: 'nodelink_api_requests_total',
@@ -146,11 +170,9 @@ export default class StatsManager {
         help: 'Total number of expected audio frames',
         registers: [this.promRegister]
       })
-    } else {
-      this.promRegister = null
-    }
 
-    logger('info', 'StatsManager', 'Initialized.')
+      logger('info', 'StatsManager', 'Prometheus metrics initialized.')
+    }
   }
 
   getSnapshot() {
@@ -204,9 +226,9 @@ export default class StatsManager {
 
   updateStatsMetrics(statsData) {
     if (!this.promPlayers) return // Metrics not enabled
-    
+
     try {
-      const stats = statsData;
+      const stats = statsData
       // Update player metrics
       this.promPlayers.set(stats.players || 0)
       this.promPlayingPlayers.set(stats.playingPlayers || 0)
@@ -243,7 +265,11 @@ export default class StatsManager {
         this.promFramesExpected.set(0)
       }
     } catch (error) {
-      logger('error', 'StatsManager', `Failed to update stats metrics: ${error.message}`)
+      logger(
+        'error',
+        'StatsManager',
+        `Failed to update stats metrics: ${error.message}`
+      )
     }
   }
 }
