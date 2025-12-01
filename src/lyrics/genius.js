@@ -1,5 +1,12 @@
 import { logger, makeRequest } from '../utils.js'
 
+const CLEAN_PATTERNS = [
+  /\s*\([^)]*(?:official|lyrics?|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^)]*\)/gi,
+  /\s*\[[^\]]*(?:official|lyrics?|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^\]]*\]/gi,
+  /\s*-\s*Topic$/i,
+  /VEVO$/i
+]
+
 export default class GeniusLyrics {
   constructor(nodelink) {
     this.nodelink = nodelink
@@ -10,7 +17,24 @@ export default class GeniusLyrics {
   }
 
   async getLyrics(trackInfo) {
-    const query = `${trackInfo.title} ${trackInfo.author}`
+    let title = trackInfo.title
+    let author = trackInfo.author
+
+    for (const pattern of CLEAN_PATTERNS) {
+      title = title.replace(pattern, '')
+      author = author.replace(pattern, '')
+    }
+
+    title = title.trim()
+    author = author.trim()
+
+    let query
+    if (title.toLowerCase().startsWith(author.toLowerCase())) {
+      query = title
+    } else {
+      query = `${title} ${author}`
+    }
+
     logger('debug', 'Lyrics', `Searching Genius for: ${query}`)
 
     try {
@@ -33,13 +57,18 @@ export default class GeniusLyrics {
         { method: 'GET' }
       )
 
-      const lyricsData = songPage.match(/JSON.parse\('(.*)'\);/)
+      const lyricsData = songPage.match(
+        /window\.__PRELOADED_STATE__\s*=\s*JSON\.parse\('(.*)'\);/
+      )
       if (!lyricsData || !lyricsData[1]) {
         return { loadType: 'empty', data: {} }
       }
 
       const lyricsJson = JSON.parse(lyricsData[1].replace(/\\(.)/g, '$1'))
-      const lyricsContent = lyricsJson.songPage.lyricsData.body.html
+      const lyricsContent = lyricsJson.songPage?.lyricsData?.body?.html
+      if (!lyricsContent) {
+        return { loadType: 'empty', data: {} }
+      }
 
       const lines = lyricsContent
         .replace(/<br>/g, '\n')
