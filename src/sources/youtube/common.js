@@ -618,7 +618,7 @@ export async function buildHoloTrack(
       ]) || (itemData.videoId ? itemData : null)
   }
 
-  let channelData = {
+  const channelData = {
     name: trackInfo.author,
     id: null,
     url: null,
@@ -829,12 +829,8 @@ export async function buildHoloTrack(
     ? extractAudioFormats(fullApiResponse.streamingData)
     : []
 
-  const holoTrack = {
-    encoded: encodeTrack(trackInfo),
-    title: trackInfo.title,
-    author: trackInfo.author,
-    isHolo: true,
-    isVanilla: false,
+  const pluginInfo = {
+    type: 'holo',
     accessibility: accessibilityLabel,
     description,
     keywords,
@@ -872,19 +868,24 @@ export async function buildHoloTrack(
       category: category
     },
     videoQualities,
-    audioFormats
+    audioFormats,
+    captions: fullApiResponse?.captions
   }
 
-  return holoTrack
+  return {
+    encoded: encodeTrack(trackInfo),
+    info: trackInfo,
+    pluginInfo
+  }
 }
 
 export function checkURLType(url, type) {
   const source = type === 'ytmusic' ? 'music' : 'www'
   const videoRegex = new RegExp(
-    `^https?://${source === 'music' ? 'music' : '(?:www\\.)?'}youtube\.com/watch\\?v=[\\w-]+`
+    `^https?://${source === 'music' ? 'music' : '(?:www\\.)?'}youtube.com/watch\\?v=[\\w-]+`
   )
   const playlistRegex = new RegExp(
-    `^https?://${source === 'music' ? 'music' : '(?:www\\.)?'}youtube\.com/playlist\\?list=[\\w-]+`
+    `^https?://${source === 'music' ? 'music' : '(?:www\\.)?'}youtube.com/playlist\\?list=[\\w-]+`
   )
   const shortUrlRegex = /^https?:\/\/youtu\.be\/[\w-]+/
   const shortsRegex = /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+/
@@ -1363,7 +1364,11 @@ export class BaseClient {
     let targetItags = []
 
     if (targetItag) {
-      logger('debug', `youtube-${this.name}`, `Using target itag: ${targetItag}`)
+      logger(
+        'debug',
+        `youtube-${this.name}`,
+        `Using target itag: ${targetItag}`
+      )
       targetItags = [Number(targetItag)]
     } else {
       const qualityPriority = this._getQualityPriority()
@@ -1380,9 +1385,7 @@ export class BaseClient {
 
     const filteredFormats = allFormats
       .filter((format) => targetItags.includes(format.itag))
-      .sort(
-        (a, b) => targetItags.indexOf(a.itag) - targetItags.indexOf(b.itag)
-      )
+      .sort((a, b) => targetItags.indexOf(a.itag) - targetItags.indexOf(b.itag))
 
     if (filteredFormats.length === 0) {
       if (streamingData.hlsManifestUrl) {
@@ -1414,9 +1417,9 @@ export class BaseClient {
       const playerScript = await cipherManager.getCachedPlayerScript()
       for (const format of filteredFormats) {
         let currentStreamUrl = format.url
-        let currentEncryptedSignature = undefined
-        let currentNParam = undefined
-        let currentSignatureKey = undefined
+        let currentEncryptedSignature
+        let currentNParam
+        let currentSignatureKey
 
         if (format.signatureCipher) {
           const cipher = new URLSearchParams(format.signatureCipher)
@@ -1499,12 +1502,12 @@ export class BaseClient {
         }
       }
     }
-    
+
     const resolveFormat = (mimeType) => {
       if (!mimeType) return null
-      
+
       const lowerMime = mimeType.toLowerCase()
-      
+
       if (lowerMime.includes('opus')) {
         return 'webm/opus'
       }
@@ -1517,14 +1520,14 @@ export class BaseClient {
       if (lowerMime.includes('aac')) {
         return 'aac'
       }
-      
+
       if (decodedTrack.isStream) {
         return 'mpegts'
       }
-      
+
       return null
     }
-    
+
     return {
       url: directUrl,
       protocol: directUrl ? 'http' : null,
