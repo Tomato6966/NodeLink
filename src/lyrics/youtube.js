@@ -9,7 +9,7 @@ export default class YouTubeLyrics {
     return true
   }
 
-  async getLyrics(trackInfo) {
+  async getLyrics(trackInfo, language) {
     const resolvedTrack = await this.nodelink.sources.resolve(
       trackInfo.uri,
       trackInfo.sourceName
@@ -34,8 +34,42 @@ export default class YouTubeLyrics {
       return { loadType: 'empty', data: {} }
     }
 
-    const trackLang =
-      captionTracks.find((c) => c.kind !== 'asr') || captionTracks[0]
+    const langs = captionTracks.map((c) => ({
+      code: c.languageCode,
+      name: c.name.simpleText,
+      isTranslatable: c.isTranslatable
+    }))
+
+    let trackLang
+
+    if (language) {
+      trackLang = captionTracks.find((c) => c.languageCode === language)
+
+      if (!trackLang) {
+        const defaultTrack =
+          captionTracks.find((c) => c.languageCode.startsWith('en')) ||
+          captionTracks.find((c) => c.kind !== 'asr') ||
+          captionTracks[0]
+
+        if (defaultTrack && defaultTrack.isTranslatable) {
+          trackLang = {
+            ...defaultTrack,
+            languageCode: language,
+            baseUrl: `${defaultTrack.baseUrl}&tlang=${language}`,
+            name: {
+              simpleText: `${defaultTrack.name.simpleText} (Translated to ${language})`
+            }
+          }
+        }
+      }
+    }
+
+    if (!trackLang) {
+      trackLang =
+        captionTracks.find((c) => c.languageCode.startsWith('en')) ||
+        captionTracks.find((c) => c.kind !== 'asr') ||
+        captionTracks[0]
+    }
 
     const {
       body: lyrics,
@@ -74,7 +108,9 @@ export default class YouTubeLyrics {
       data: {
         name: trackLang.name.simpleText,
         synced: true,
-        lines
+        lang: trackLang.languageCode,
+        lines,
+        langs
       }
     }
   }

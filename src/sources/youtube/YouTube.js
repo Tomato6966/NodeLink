@@ -881,4 +881,19 @@ export default class YouTubeSource {
       }
     }
   }
+
+  async getChapters(trackInfo) {
+    const webClient = this.clients.Web
+    if (!webClient) {
+      logger('warn', 'YouTube', 'Web client not available for fetching chapters.')
+      return []
+    }
+
+    try {
+      return await webClient.getChapters(trackInfo, this.ytContext)
+    } catch (e) {
+      logger('error', 'YouTube', `Failed to fetch chapters: ${e.message}`)
+      return []
+    }
+  }
 }

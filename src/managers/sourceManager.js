@@ -254,6 +254,14 @@ export default class SourcesManager {
     return await instance.loadStream(track, url, protocol, additionalData)
   }
 
+  async getChapters(track) {
+    const instance = this.sources.get(track.info.sourceName)
+    if (!instance || typeof instance.getChapters !== 'function') {
+      return []
+    }
+    return await instance.getChapters(track.info)
+  }
+
   getAllSources() {
     return Array.from(this.sources.values())
   }

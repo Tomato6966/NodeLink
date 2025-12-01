@@ -4,7 +4,8 @@
   "scripts": {
     "prebuild": "node scripts/prebuild.js",
     "start": "node --dns-result-order=ipv4first --openssl-legacy-provider src/index.js",
-    "start:bun": "bun run --dns-result-order=ipv4first src/index.js"
+    "start:bun": "bun run --dns-result-order=ipv4first src/index.js",
+    "prepare": "husky"
   },
   "type": "module",
   "main": "src/index.js",
@@ -24,7 +25,10 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.7",
-    "dotenv": "^17.2.3"
+    "@commitlint/cli": "20.1.0",
+    "@commitlint/config-conventional": "20.0.0",
+    "dotenv": "^17.2.3",
+    "husky": "9.1.7"
   },
   "optionalDependencies": {
     "prom-client": "^15.1.3"

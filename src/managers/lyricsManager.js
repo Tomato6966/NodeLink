@@ -56,7 +56,7 @@ export default class LyricsManager {
     )
   }
 
-  async loadLyrics(decodedTrack) {
+  async loadLyrics(decodedTrack, language) {
     if (
       !decodedTrack ||
       !decodedTrack.info?.sourceName ||
@@ -104,7 +104,10 @@ export default class LyricsManager {
     const lyricsSource = this.lyricsSources.get(sourceName)
 
     if (lyricsSource) {
-      const lyrics = await lyricsSource.getLyrics(reliableTrackData.data.info)
+      const lyrics = await lyricsSource.getLyrics(
+        reliableTrackData.data.info,
+        language
+      )
       if (lyrics && lyrics.loadType !== 'empty') {
         return lyrics
       }
@@ -117,7 +120,10 @@ export default class LyricsManager {
           'Lyrics',
           `Trying lyrics source ${name} for ${reliableTrackData.data.info.title}.`
         )
-        const lyrics = await source.getLyrics(reliableTrackData.data.info)
+        const lyrics = await source.getLyrics(
+          reliableTrackData.data.info,
+          language
+        )
         if (lyrics && lyrics.loadType !== 'empty') {
           return lyrics
         }

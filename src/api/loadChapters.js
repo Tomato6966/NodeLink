@@ -6,20 +6,17 @@ import {
   sendErrorResponse
 } from '../utils.js'
 
-const loadLyricsSchema = myzod.object({
-  encodedTrack: myzod.string(),
-  lang: myzod.string().optional()
+const loadChaptersSchema = myzod.object({
+  encodedTrack: myzod.string()
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const result = loadLyricsSchema.try({
-    encodedTrack: parsedUrl.searchParams.get('encodedTrack'),
-    lang: parsedUrl.searchParams.get('lang') || undefined
+  const result = loadChaptersSchema.try({
+    encodedTrack: parsedUrl.searchParams.get('encodedTrack')
   })
 
   if (result instanceof myzod.ValidationError) {
     const errorMessage = result.message || 'Missing encodedTrack parameter.'
-    logger('warn', 'Lyrics', errorMessage)
     return sendErrorResponse(
       req,
       res,
@@ -31,16 +28,11 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   }
 
   const encodedTrack = result.encodedTrack.replace(/ /g, '+')
-  const language = result.lang
 
   try {
     const decodedTrack = decodeTrack(encodedTrack)
-    if (!decodedTrack) {
-      logger(
-        'warn',
-        'Lyrics',
-        `Invalid encoded track received: ${encodedTrack}`
-      )
+
+    if (!decodedTrack || !decodedTrack.info) {
       return sendErrorResponse(
         req,
         res,
@@ -51,32 +43,35 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       )
     }
 
-    logger(
-      'debug',
-      'Lyrics',
-      `Request to load lyrics for: ${decodedTrack.info.title}${language ? ` (Lang: ${language})` : ''}`
-    )
-
-    let lyricsData
-    if (nodelink.workerManager) {
-      const worker = nodelink.workerManager.getBestWorker()
-      lyricsData = await nodelink.workerManager.execute(worker, 'loadLyrics', {
-        decodedTrack,
-        language
-      })
-    } else {
-      lyricsData = await nodelink.lyrics.loadLyrics(decodedTrack, language)
+    if (decodedTrack.info.sourceName !== 'youtube' && decodedTrack.info.sourceName !== 'ytmusic') {
+      return sendResponse(req, res, [], 200)
     }
 
-    sendResponse(req, res, lyricsData, 200)
+    logger(
+      'debug',
+      'Chapters',
+      `Request to load chapters for: ${decodedTrack.info.title}`
+    )
+
+    let chaptersData
+    if (nodelink.workerManager) {
+      const worker = nodelink.workerManager.getBestWorker()
+      chaptersData = await nodelink.workerManager.execute(worker, 'loadChapters', {
+        decodedTrack
+      })
+    } else {
+      chaptersData = await nodelink.sources.getChapters(decodedTrack)
+    }
+
+    sendResponse(req, res, chaptersData, 200)
   } catch (err) {
-    logger('error', 'Lyrics', 'Failed to load lyrics:', err)
+    logger('error', 'Chapters', 'Failed to load chapters:', err)
     sendErrorResponse(
       req,
       res,
       500,
       'Internal Server Error',
-      err.message || 'Failed to load lyrics.',
+      err.message || 'Failed to load chapters.',
       parsedUrl.pathname,
       true
     )
