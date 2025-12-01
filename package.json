@@ -4,7 +4,8 @@
   "scripts": {
     "prebuild": "node scripts/prebuild.js",
     "start": "node --dns-result-order=ipv4first --openssl-legacy-provider src/index.js",
-    "start:bun": "bun run --dns-result-order=ipv4first src/index.js"
+    "start:bun": "bun run --dns-result-order=ipv4first src/index.js",
+    "prepare": "husky"
   },
   "type": "module",
   "main": "src/index.js",
