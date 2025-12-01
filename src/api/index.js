@@ -67,6 +67,52 @@ async function requestHandler(nodelink, req, res) {
   const isInternal = ['127.0.0.1', '::1', 'localhost'].includes(remoteAddress)
   const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${req.socket.remotePort})`
 
+  // Handle metrics endpoint separately
+  const isMetricsEndpoint = parsedUrl.pathname === `/${PATH_VERSION}/metrics`
+  if (isMetricsEndpoint) {
+    const metricsConfig = nodelink.options.metrics || {}
+    if (!metricsConfig.enabled) {
+      logger(
+        'warn',
+        'Metrics',
+        `Metrics endpoint disabled - ${clientAddress} attempted to access ${parsedUrl.pathname}`
+      )
+      res.writeHead(404, { 'Content-Type': 'text/plain' })
+      res.end('Not Found')
+      return
+    }
+
+    // Metrics authorization check
+    const authConfig = metricsConfig.authorization || {}
+    let authType = authConfig.type;
+    if(!['Bearer', 'Basic'].includes(authType)) {
+      logger('warn',`Config: metrics authorization.type SHOULD BE one of 'Bearer', 'Basic'.... Defaulting to 'Bearer'!`);
+      // Because prom doesn't support any Other Auth(except Bearer & Basic) or Custom Authorization Like the one Server uses by default.
+      authType = 'Bearer';
+    }
+    
+    const metricsPassword = authConfig.password || nodelink.options.server.password
+
+    const authHeader = req.headers?.authorization
+    const isValidAuth =
+      authHeader === metricsPassword
+      || (authType === 'Bearer' && authHeader === `${authType} ${metricsPassword}`)
+      || (authType === 'Basic' && authHeader === `${authType} ${atob(authHeader.slice(authType.length))}`)
+
+    if (!isValidAuth) {
+      logger(
+        'warn',
+        'Metrics',
+        `Unauthorized metrics access attempt from ${clientAddress} - Invalid password provided`
+      )
+      res.writeHead(401, { 'Content-Type': 'text/plain' })
+      res.end('Unauthorized')
+      return
+    }
+
+    // Metrics endpoint is authorized, continue to handler
+  }
+
   const dosCheck = nodelink.dosProtectionManager.check(req)
   if (!dosCheck.allowed) {
     logger(
@@ -107,18 +153,23 @@ async function requestHandler(nodelink, req, res) {
     return
   }
 
-  if (
-    !req.headers ||
-    req.headers.authorization !== nodelink.options.server.password
-  ) {
-    logger(
-      'warn',
-      'Server',
-      `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
-    )
-    res.writeHead(401, { 'Content-Type': 'text/plain' })
-    res.end('Unauthorized')
-    return
+  // Skip general authorization check for metrics endpoint (already checked above)
+  if (!isMetricsEndpoint) {
+    if (
+      !req.headers ||
+      req.headers.authorization !== nodelink.options.server.password &&
+      req.headers.authorization !== `Bearer ${nodelink.options.server.password}`
+    ) {
+      logger(
+        'warn',
+        'Server',
+        `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
+      )
+
+      res.writeHead(401, { 'Content-Type': 'text/plain' })
+      res.end('Unauthorized')
+      return
+    }
   }
 
   let body = ''
@@ -160,11 +211,13 @@ async function requestHandler(nodelink, req, res) {
 
   req.headers.authorization = '[REDACTED]'
   req.headers.host = '[REDACTED]'
-  logger(
-    'info',
-    'Request',
-    `${req.method} | ${clientAddress} [${req.headers['user-agent']}] - ${parsedUrl.pathname} ${JSON.stringify(req.headers)}${req.body ? `\nBody: ${JSON.stringify(req.body)}` : ''}`
-  )
+  if (!isMetricsEndpoint) {
+    logger(
+      'info',
+      'Request',
+      `${req.method} | ${clientAddress} [${req.headers['user-agent']}] - ${parsedUrl.pathname} ${JSON.stringify(req.headers)}${req.body ? `\nBody: ${JSON.stringify(req.body)}` : ''}`
+    )
+  }
 
   const { staticRoutes, dynamicRoutes } = await routesPromise
 

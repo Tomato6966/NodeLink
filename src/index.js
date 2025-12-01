@@ -1,6 +1,6 @@
 import cluster from 'node:cluster'
-import http from 'node:http'
 import { EventEmitter } from 'node:events'
+import http from 'node:http'
 import WebSocketServer from '@performanc/pwsl-server'
 
 import requestHandler from './api/index.js'
@@ -24,10 +24,10 @@ import {
   verifyDiscordID
 } from './utils.js'
 import 'dotenv/config'
+import { GatewayEvents } from './constants.js'
+import DosProtectionManager from './managers/dosProtectionManager.js'
 import PlayerManager from './managers/playerManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
-import DosProtectionManager from './managers/dosProtectionManager.js'
-import { GatewayEvents } from './constants.js'
 
 let config
 
@@ -80,7 +80,6 @@ if (!cluster.isWorker) {
 
 await checkForUpdates()
 
-
 class BunSocketWrapper extends EventEmitter {
   constructor(ws) {
     super()
@@ -109,7 +108,6 @@ class BunSocketWrapper extends EventEmitter {
     this.emit('close', code, reason)
   }
 }
-
 
 class NodelinkServer {
   constructor(options, PlayerManagerClass, isClusterPrimary = false) {
@@ -279,8 +277,12 @@ class NodelinkServer {
     const useBun = this.options.server.useBunServer || false
 
     if (!useBun) {
-      logger('warn', 'Server', 'Bun.serve usage is disabled in config, using standard Node.js HTTP server instead.')
-      return;
+      logger(
+        'warn',
+        'Server',
+        'Bun.serve usage is disabled in config, using standard Node.js HTTP server instead.'
+      )
+      return
     }
     logger(
       'warn',
@@ -296,7 +298,9 @@ class NodelinkServer {
 
       async fetch(req, server) {
         const url = new URL(req.url)
-        const path = url.pathname.endsWith('/') ? url.pathname.slice(0, -1) : url.pathname
+        const path = url.pathname.endsWith('/')
+          ? url.pathname.slice(0, -1)
+          : url.pathname
 
         if (path === '/v4/websocket') {
           const remoteAddress = server.requestIP(req)?.address || 'unknown'
@@ -308,18 +312,35 @@ class NodelinkServer {
           const sessionId = req.headers.get('session-id')
 
           if (auth !== password) {
-            logger('warn', 'Server', `Unauthorized connection attempt from ${clientAddress} - Invalid Password`)
-            return new Response(null, { status: 401, statusText: 'Unauthorized' })
+            logger(
+              'warn',
+              'Server',
+              `Unauthorized connection attempt from ${clientAddress} - Invalid Password`
+            )
+            return new Response(null, {
+              status: 401,
+              statusText: 'Unauthorized'
+            })
           }
 
           if (!clientName) {
-            logger('warn', 'Server', `Missing client-name from ${clientAddress}`)
-            return new Response(null, { status: 400, statusText: 'Bad Request' })
+            logger(
+              'warn',
+              'Server',
+              `Missing client-name from ${clientAddress}`
+            )
+            return new Response(null, {
+              status: 400,
+              statusText: 'Bad Request'
+            })
           }
 
           if (!userId || !verifyDiscordID(userId)) {
             logger('warn', 'Server', `Invalid user ID from ${clientAddress}`)
-            return new Response(null, { status: 400, statusText: 'Bad Request' })
+            return new Response(null, {
+              status: 400,
+              statusText: 'Bad Request'
+            })
           }
 
           const clientInfo = parseClient(clientName)
@@ -342,54 +363,59 @@ class NodelinkServer {
         }
 
         return new Promise((resolve) => {
-            const reqShim = {
-                method: req.method,
-                url: url.pathname + url.search,
-                headers: Object.fromEntries(req.headers),
-                socket: { remoteAddress: server.requestIP(req)?.address },
-                on: (event, cb) => {
-                    if (event === 'data') {
-                        req.arrayBuffer().then(buf => {
-                            cb(Buffer.from(buf))
-                            if (reqShim._endCb) reqShim._endCb()
-                        }).catch(() => {})
-                    }
-                    if (event === 'end') reqShim._endCb = cb
-                }
+          const reqShim = {
+            method: req.method,
+            url: url.pathname + url.search,
+            headers: Object.fromEntries(req.headers),
+            socket: { remoteAddress: server.requestIP(req)?.address },
+            on: (event, cb) => {
+              if (event === 'data') {
+                req
+                  .arrayBuffer()
+                  .then((buf) => {
+                    cb(Buffer.from(buf))
+                    if (reqShim._endCb) reqShim._endCb()
+                  })
+                  .catch(() => {})
+              }
+              if (event === 'end') reqShim._endCb = cb
             }
+          }
 
-            const resShim = {
-                _status: 200,
-                _headers: {},
-                _body: [],
-                writeHead(status, headers) {
-                    this._status = status
-                    if (headers) Object.assign(this._headers, headers)
-                },
-                setHeader(name, value) {
-                    this._headers[name] = value
-                },
-                getHeader(name) {
-                    return this._headers[name]
-                },
-                end(data) {
-                    if (data) this._body.push(data)
-                    const finalBody = Buffer.concat(this._body.map(chunk =>
-                        Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-                    ))
+          const resShim = {
+            _status: 200,
+            _headers: {},
+            _body: [],
+            writeHead(status, headers) {
+              this._status = status
+              if (headers) Object.assign(this._headers, headers)
+            },
+            setHeader(name, value) {
+              this._headers[name] = value
+            },
+            getHeader(name) {
+              return this._headers[name]
+            },
+            end(data) {
+              if (data) this._body.push(data)
+              const finalBody = Buffer.concat(
+                this._body.map((chunk) =>
+                  Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+                )
+              )
 
-                    const response = new Response(finalBody, {
-                        status: this._status,
-                        headers: this._headers
-                    })
-                    resolve(response)
-                },
-                write(data) {
-                   if (data) this._body.push(data)
-                }
+              const response = new Response(finalBody, {
+                status: this._status,
+                headers: this._headers
+              })
+              resolve(response)
+            },
+            write(data) {
+              if (data) this._body.push(data)
             }
+          }
 
-            requestHandler(self, reqShim, resShim)
+          requestHandler(self, reqShim, resShim)
         })
       },
 
@@ -401,9 +427,9 @@ class NodelinkServer {
           const { clientInfo, sessionId, reqHeaders } = ws.data
 
           const reqShim = {
-              headers: reqHeaders,
-              url: ws.data.url,
-              socket: { remoteAddress: ws.data.remoteAddress }
+            headers: reqHeaders,
+            url: ws.data.url,
+            socket: { remoteAddress: ws.data.remoteAddress }
           }
 
           logger(
@@ -412,28 +438,38 @@ class NodelinkServer {
             `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m connected from [External] (${ws.data.remoteAddress}) | \x1b[33mURL:\x1b[0m ${ws.data.url}`
           )
 
-          self.socket.emit('/v4/websocket', wrapper, reqShim, clientInfo, sessionId)
+          self.socket.emit(
+            '/v4/websocket',
+            wrapper,
+            reqShim,
+            clientInfo,
+            sessionId
+          )
         },
         message(ws, message) {
-            if (ws.data.wrapper) {
-                ws.data.wrapper._handleMessage(message)
-            }
+          if (ws.data.wrapper) {
+            ws.data.wrapper._handleMessage(message)
+          }
         },
         close(ws, code, reason) {
-            if (ws.data.wrapper) {
-                ws.data.wrapper._handleClose(code, reason)
-            }
+          if (ws.data.wrapper) {
+            ws.data.wrapper._handleClose(code, reason)
+          }
         }
       }
     })
 
-    logger('started', 'Server', `Successfully listening on ${host}:${port} (Bun Native)`)
+    logger(
+      'started',
+      'Server',
+      `Successfully listening on ${host}:${port} (Bun Native)`
+    )
   }
 
   _createServer() {
     if (isBun) {
-        this._createBunServer()
-        return
+      this._createBunServer()
+      return
     }
 
     this.server = http.createServer((req, res) =>
@@ -522,13 +558,7 @@ class NodelinkServer {
         )
 
         this.socket.handleUpgrade(request, socket, head, {}, (ws) =>
-          this.socket.emit(
-            '/v4/websocket',
-            ws,
-            request,
-            clientInfo,
-            sessionId
-          )
+          this.socket.emit('/v4/websocket', ws, request, clientInfo, sessionId)
         )
       } else {
         logger(
@@ -543,7 +573,7 @@ class NodelinkServer {
   }
 
   _listen() {
-    if (isBun) return;
+    if (isBun) return
 
     const port = this.options.server.port
     const host = this.options.server.host || '0.0.0.0'
@@ -611,9 +641,14 @@ class NodelinkServer {
             playingPlayers: localPlayingPlayers
           }
         })
+      } else if (!clusterEnabled) {
+        // In single-process mode, update the server's own statistics
+        this.statistics.players = localPlayers
+        this.statistics.playingPlayers = localPlayingPlayers
       }
 
       const stats = getStats(this)
+      this.statsManager.updateStatsMetrics(stats)
       const statsPayload = JSON.stringify({ op: 'stats', ...stats })
 
       for (const session of this.sessions.values()) {
@@ -654,9 +689,9 @@ class NodelinkServer {
 
   _cleanupWebSocketServer() {
     if (isBun && this.server) {
-        this.server.stop()
-        logger('info', 'WebSocket', 'Bun server stopped successfully')
-        return
+      this.server.stop()
+      logger('info', 'WebSocket', 'Bun server stopped successfully')
+      return
     }
 
     if (this.socket) {
@@ -723,6 +758,8 @@ class NodelinkServer {
 
   async start(startOptions = {}) {
     this._validateConfig()
+
+    await this.statsManager.initialize()
 
     if (this.options.sources.youtube?.getOAuthToken) {
       logger(

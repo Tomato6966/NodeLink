@@ -29,5 +29,8 @@
     "@commitlint/config-conventional": "20.0.0",
     "dotenv": "^17.2.3",
     "husky": "9.1.7"
+  },
+  "optionalDependencies": {
+    "prom-client": "^15.1.3"
   }
 }

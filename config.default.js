@@ -239,5 +239,12 @@ export default {
       delayMs: 500,
       blockDurationMs: 300000 // 5 minutes
     }
+  },
+  metrics: {
+    enabled: true,
+    authorization: {
+      type: 'Bearer', // Bearer or Basic.
+      password: '' // If empty, uses server.password
+    }
   }
 }

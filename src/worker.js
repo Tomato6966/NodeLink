@@ -2,6 +2,7 @@ import { GatewayEvents } from './constants.js'
 
 let lastCpuUsage = process.cpuUsage()
 let lastCpuTime = Date.now()
+
 import ConnectionManager from './managers/connectionManager.js'
 import LyricsManager from './managers/lyricsManager.js'
 import RoutePlannerManager from './managers/routePlannerManager.js'
@@ -35,6 +36,7 @@ nodelink.connectionManager = new ConnectionManager(nodelink)
 async function initialize() {
   await nodelink.sources.loadFolder()
   await nodelink.lyrics.loadFolder()
+  await nodelink.statsManager.initialize()
   logger(
     'info',
     'Worker',
@@ -346,6 +348,8 @@ setInterval(() => {
 
   let localPlayers = 0
   let localPlayingPlayers = 0
+  const localFrameStats = { sent: 0, nulled: 0, deficit: 0, expected: 0 }
+
   for (const player of players.values()) {
     localPlayers++
     if (!player.isPaused && player.track) {
@@ -353,6 +357,13 @@ setInterval(() => {
     }
 
     if (player?.track && !player.isPaused && player.connection) {
+      if (player.connection.statistics) {
+        localFrameStats.sent += player.connection.statistics.packetsSent || 0
+        localFrameStats.nulled += player.connection.statistics.packetsLost || 0
+        localFrameStats.expected +=
+          player.connection.statistics.packetsExpected || 0
+      }
+
       if (
         player._lastStreamDataTime > 0 &&
         Date.now() - player._lastStreamDataTime >= zombieThreshold
@@ -410,6 +421,11 @@ setInterval(() => {
     }
   }
 
+  localFrameStats.deficit += Math.max(
+    0,
+    localFrameStats.expected - localFrameStats.sent
+  )
+
   try {
     const now = Date.now()
     const elapsedMs = now - lastCpuTime
@@ -433,7 +449,8 @@ setInterval(() => {
         memory: {
           used: mem.heapUsed,
           allocated: mem.heapTotal
-        }
+        },
+        frameStats: localFrameStats
       }
     })
   } catch (e) {
