@@ -1179,6 +1179,43 @@ export function cleanupHttpAgents() {
   }
 }
 
+function applyEnvOverrides(config, prefix = 'NODELINK') {
+  for (const key in config) {
+    if (Object.prototype.hasOwnProperty.call(config, key)) {
+      const envVarName = `${prefix}_${key.toUpperCase()}`;
+      const envValue = process.env[envVarName];
+
+      if (envValue !== undefined) {
+        if (typeof config[key] === 'boolean') {
+          config[key] = envValue.toLowerCase() === 'true';
+        } else if (typeof config[key] === 'number') {
+          const numValue = Number(envValue);
+          if (!isNaN(numValue)) {
+            config[key] = numValue;
+          } else {
+            logger('warn', 'Config', `Environment variable ${envVarName} has non-numeric value "${envValue}"; expected a number, keeping default.`)
+          }
+        } else if (typeof config[key] === 'string') {
+          config[key] = envValue;
+        } else if (Array.isArray(config[key])) {
+          try {
+            const parsedArray = JSON.parse(envValue);
+            if (Array.isArray(parsedArray)) {
+              config[key] = parsedArray;
+            } else {
+              logger('warn', 'Config', `Environment variable ${envVarName} has non-array JSON value "${envValue}"; expected a JSON array, keeping default.`)
+            }
+          } catch (e) {
+            logger('warn', 'Config', `Environment variable ${envVarName} has non-JSON or invalid JSON value "${envValue}"; expected a JSON array, keeping default.`)
+          }
+        }
+      } else if (typeof config[key] === 'object' && config[key] !== null && !Array.isArray(config[key])) {
+        applyEnvOverrides(config[key], envVarName);
+      }
+    }
+  }
+}
+
 export {
   initLogger,
   validateProperty,
@@ -1199,5 +1236,6 @@ export {
   sendResponse,
   loadHLS,
   checkForUpdates,
-  sendErrorResponse
+  sendErrorResponse,
+  applyEnvOverrides
 }

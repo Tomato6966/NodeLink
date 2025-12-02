@@ -19,3 +19,4 @@
 !.husky/**
 !commitlint.config.mjs
 !.gitmessage
+!docker-compose.yml

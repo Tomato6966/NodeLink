@@ -21,7 +21,8 @@ import {
   logger,
   parseClient,
   validateProperty,
-  verifyDiscordID
+  verifyDiscordID,
+  applyEnvOverrides
 } from './utils.js'
 import 'dotenv/config'
 import { GatewayEvents } from './constants.js'
@@ -50,6 +51,9 @@ try {
     throw e
   }
 }
+
+// Apply environment variable overrides after config is loaded
+applyEnvOverrides(config);
 
 const clusterEnabled =
   process.env.CLUSTER_ENABLED?.toLowerCase() === 'true' ||
