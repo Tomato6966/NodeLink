@@ -833,7 +833,7 @@ async function makeRequest(urlString, options, nodelink) {
         const statusCode = headers[':status']
 
         if (statusCode === 429) {
-          nodelink.routePlanner.banIP(localAddress)
+          nodelink?.routePlanner?.banIP(localAddress)
         }
 
         if (REDIRECT_STATUS_CODES.includes(statusCode) && headers.location) {

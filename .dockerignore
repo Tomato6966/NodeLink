@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+logs
+.git
+.github
+.vscode
+Dockerfile
+docker-compose.yml
+README.md
+LICENSE
+biome.json
+commitlint.config.mjs
