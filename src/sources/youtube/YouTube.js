@@ -815,6 +815,27 @@ export default class YouTubeSource {
 
       if (!url) throw new Error('No direct URL')
 
+      const testResponse = await http1makeRequest(url, {
+        method: 'HEAD'
+      })
+
+      const contentLength = testResponse.headers?.['content-length']
+        ? Number.parseInt(testResponse.headers['content-length'], 10)
+        : null
+
+      if (testResponse.statusCode === 403) {
+        throw new Error('URL returned 403 Forbidden')
+      }
+
+      if (contentLength && contentLength > 0) {
+        logger(
+          'debug',
+          'YouTube',
+          `Using range buffering for ${decodedTrack.title} (${Math.round(contentLength / 1024 / 1024)}MB)`
+        )
+        return this._streamWithRangeRequests(url, contentLength, decodedTrack)
+      }
+
       const response = await http1makeRequest(url, {
         method: 'GET',
         streamOnly: true
@@ -824,7 +845,6 @@ export default class YouTubeSource {
         throw new Error(`HTTP status ${response.statusCode}`)
 
       const stream = new PassThrough()
-      // vou salvar a stream pro streamConnector, dai o codigo consegue se comunicar direito, fechando a stream do youtube
       stream.responseStream = response.stream
 
       const cleanupListeners = () => {
@@ -880,6 +900,218 @@ export default class YouTubeSource {
         exception: { message: e.message, severity: 'fault', cause: 'Upstream' }
       }
     }
+  }
+
+  _streamWithRangeRequests(url, contentLength, decodedTrack) {
+    const stream = new PassThrough()
+    const state = {
+      currentPosition: 0,
+      contentLength,
+      buffer: [],
+      bufferSize: 0,
+      isDestroyed: false,
+      isFetching: false,
+      errorCount: 0,
+      urlRefreshCount: 0,
+      currentUrl: url,
+      chunkSize: 512 * 1024,
+      minBufferSize: 256 * 1024,
+      maxBufferSize: 1024 * 1024,
+      lowWaterMark: 128 * 1024,
+      maxRetries: 3,
+      maxUrlRefresh: 5,
+      activeRequest: null
+    }
+
+    const cleanup = () => {
+      state.isDestroyed = true
+      state.buffer = []
+      state.bufferSize = 0
+      if (state.activeRequest) {
+        state.activeRequest.destroy()
+        state.activeRequest = null
+      }
+    }
+
+    stream.on('close', cleanup)
+    stream.on('error', cleanup)
+
+    const fetchNext = async () => {
+      if (
+        state.isFetching ||
+        state.isDestroyed ||
+        state.currentPosition >= state.contentLength
+      )
+        return
+
+      state.isFetching = true
+      const rangeStart = state.currentPosition
+      const rangeEnd = Math.min(
+        rangeStart + state.chunkSize - 1,
+        state.contentLength - 1
+      )
+
+      try {
+        const response = await http1makeRequest(state.currentUrl, {
+          method: 'GET',
+          headers: { Range: `bytes=${rangeStart}-${rangeEnd}` },
+          streamOnly: true
+        })
+
+        if (
+          response.error ||
+          (response.statusCode !== 206 && response.statusCode !== 200)
+        ) {
+          throw new Error(`Range request failed: ${response.statusCode}`)
+        }
+
+        state.activeRequest = response.stream
+        const chunks = []
+        let totalSize = 0
+
+        response.stream.on('data', (chunk) => {
+          chunks.push(chunk)
+          totalSize += chunk.length
+        })
+
+        await new Promise((resolve, reject) => {
+          response.stream.on('end', resolve)
+          response.stream.on('error', reject)
+        })
+
+        if (totalSize > 0 && !state.isDestroyed) {
+          state.buffer.push(Buffer.concat(chunks))
+          state.bufferSize += totalSize
+          state.currentPosition += totalSize
+          state.errorCount = 0
+        }
+
+        state.isFetching = false
+        state.activeRequest = null
+      } catch (error) {
+        state.isFetching = false
+        state.activeRequest = null
+        state.errorCount++
+
+        if (state.errorCount >= state.maxRetries) {
+          recoverWithNewUrl()
+        } else {
+          const backoff = Math.min(
+            1000 * Math.pow(2, state.errorCount - 1),
+            5000
+          )
+          setTimeout(() => fetchNext(), backoff)
+        }
+      }
+    }
+
+    const recoverWithNewUrl = async () => {
+      state.urlRefreshCount++
+
+      if (state.urlRefreshCount > state.maxUrlRefresh) {
+        logger(
+          'error',
+          'YouTube',
+          'Max URL refresh attempts reached, stopping playback'
+        )
+        if (!stream.destroyed) {
+          stream.destroy(new Error('Failed to recover stream'))
+        }
+        return
+      }
+
+      logger(
+        'info',
+        'YouTube',
+        `Attempting URL refresh ${state.urlRefreshCount}/${state.maxUrlRefresh}`
+      )
+
+      try {
+        const newUrlData = await this.getTrackUrl(decodedTrack)
+
+        if (newUrlData.exception || !newUrlData.url) {
+          throw new Error('Failed to get new URL')
+        }
+
+        const testResponse = await http1makeRequest(newUrlData.url, {
+          method: 'GET',
+          headers: {
+            Range: `bytes=${state.currentPosition}-${state.currentPosition}`
+          },
+          streamOnly: true
+        })
+
+        if (testResponse.stream) testResponse.stream.destroy()
+
+        if (
+          testResponse.statusCode !== 206 &&
+          testResponse.statusCode !== 200
+        ) {
+          throw new Error(`New URL test failed: ${testResponse.statusCode}`)
+        }
+
+        state.currentUrl = newUrlData.url
+        state.errorCount = 0
+        logger('info', 'YouTube', 'Successfully recovered with new URL')
+        fetchNext()
+      } catch (error) {
+        logger('error', 'YouTube', `Recovery failed: ${error.message}`)
+
+        if (state.urlRefreshCount < state.maxUrlRefresh) {
+          setTimeout(() => recoverWithNewUrl(), 2000)
+        } else if (!stream.destroyed) {
+          stream.destroy(new Error('Failed to recover stream'))
+        }
+      }
+    }
+
+    const flushBuffer = () => {
+      if (state.buffer.length === 0 || stream.destroyed) return
+
+      while (state.buffer.length > 0 && !stream.writableEnded) {
+        const chunk = state.buffer.shift()
+        state.bufferSize -= chunk.length
+
+        const canWrite = stream.write(chunk)
+        if (!canWrite) break
+      }
+
+      if (
+        state.currentPosition >= state.contentLength &&
+        state.buffer.length === 0 &&
+        !stream.writableEnded
+      ) {
+        stream.emit('finishBuffering')
+        stream.end()
+      }
+    }
+
+    const maintainBuffer = async () => {
+      while (!state.isDestroyed) {
+        await new Promise((resolve) => setTimeout(resolve, 100))
+
+        if (
+          !state.isFetching &&
+          state.bufferSize < state.lowWaterMark &&
+          state.currentPosition < state.contentLength
+        ) {
+          fetchNext()
+        }
+
+        flushBuffer()
+      }
+    }
+
+    stream.on('drain', () => {
+      if (!state.isDestroyed && state.bufferSize < state.lowWaterMark) {
+        fetchNext()
+      }
+    })
+
+    fetchNext()
+    maintainBuffer()
+
+    return { stream }
   }
 
   async getChapters(trackInfo) {
