@@ -27,7 +27,9 @@ export default {
     level: 'debug',
     file: {
       enabled: false,
-      path: 'logs'
+      path: 'logs',
+      rotation: 'daily',
+      ttlDays: 7
     },
     debug: {
       all: false,

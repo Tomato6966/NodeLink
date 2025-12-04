@@ -14,6 +14,7 @@ import OAuth from './sources/youtube/OAuth.js'
 import {
   checkForUpdates,
   cleanupHttpAgents,
+  cleanupLogger,
   getGitInfo,
   getStats,
   getVersion,
@@ -850,6 +851,7 @@ if (clusterEnabled && cluster.isPrimary) {
       workerManager.destroy()
       nserver._cleanupWebSocketServer()
       cleanupHttpAgents()
+      cleanupLogger()
       nserver.rateLimitManager.destroy()
       nserver.dosProtectionManager.destroy()
     })
@@ -875,6 +877,7 @@ if (clusterEnabled && cluster.isPrimary) {
     process.on('beforeExit', () => {
       nserver._cleanupWebSocketServer()
       cleanupHttpAgents()
+      cleanupLogger()
       nserver.rateLimitManager.destroy()
       nserver.dosProtectionManager.destroy()
     })

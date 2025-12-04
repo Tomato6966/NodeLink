@@ -29,26 +29,111 @@ const logLevels = {
 let currentLogLevel = logLevels.info
 let logStream = null
 let gitInfoCache = null
+let currentLogFile = null
+let logRotationInterval = null
+let logCleanupInterval = null
 
-function initFileLogger() {
+function getLogFileName() {
+  const now = new Date()
+  const rotation = loggingConfig.file?.rotation || 'session'
+
+  if (rotation === 'hourly') {
+    const date = now.toISOString().slice(0, 13).replace(/[:.]/g, '-')
+    return `nodelink-${date}.log`
+  }
+
+  if (rotation === 'daily') {
+    const date = now.toISOString().slice(0, 10)
+    return `nodelink-${date}.log`
+  }
+
+  const timestamp = now.toISOString().replace(/[:.]/g, '-')
+  const randomId = crypto.randomBytes(4).toString('hex')
+  return `nodelink-${timestamp}-${randomId}.log`
+}
+
+function cleanOldLogs() {
   if (!loggingConfig.file?.enabled) return
 
   const logDir = loggingConfig.file.path || 'logs'
+  const ttlDays = loggingConfig.file.ttlDays || 7
+  const ttlMs = ttlDays * 24 * 60 * 60 * 1000
+  const now = Date.now()
+
+  try {
+    if (!fs.existsSync(logDir)) return
+
+    const files = fs.readdirSync(logDir)
+    let cleanedCount = 0
+
+    for (const file of files) {
+      if (!file.startsWith('nodelink-') || !file.endsWith('.log')) continue
+
+      const filePath = path.join(logDir, file)
+      const stats = fs.statSync(filePath)
+      const fileAge = now - stats.mtimeMs
+
+      if (fileAge > ttlMs) {
+        fs.unlinkSync(filePath)
+        cleanedCount++
+      }
+    }
+
+    if (cleanedCount > 0) {
+      console.log(
+        `[${new Date().toISOString().slice(11, 23)}] \x1b[1m\x1b[3;42m[INFO] >\x1b[0m: Logs > Cleaned ${cleanedCount} old log files`
+      )
+    }
+  } catch (error) {
+    console.error(
+      `[${new Date().toISOString().slice(11, 23)}] \x1b[1m\x1b[3;41m[ERROR] >\x1b[0m: Logs > Failed to clean old logs: ${error.message}`
+    )
+  }
+}
+
+function rotateLogFile() {
+  if (!loggingConfig.file?.enabled) return
+
+  const logDir = loggingConfig.file.path || 'logs'
+  const newLogFileName = getLogFileName()
+  const newLogFilePath = path.join(logDir, newLogFileName)
+
+  if (currentLogFile === newLogFilePath) return
+
+  if (logStream) {
+    logStream.end()
+    logStream = null
+  }
+
   if (!fs.existsSync(logDir)) {
     fs.mkdirSync(logDir, { recursive: true })
   }
 
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-  const randomId = crypto.randomBytes(4).toString('hex')
-  const logFileName = `${timestamp}-${randomId}.log`
-  const logFilePath = path.join(logDir, logFileName)
-
-  logStream = fs.createWriteStream(logFilePath, { flags: 'a' })
+  currentLogFile = newLogFilePath
+  logStream = fs.createWriteStream(currentLogFile, { flags: 'a' })
 
   const gitInfo = getGitInfo()
   const version = getVersion()
   const initialInfo = `\n--- NodeLink Log ---\nTimestamp: ${new Date().toISOString()}\nVersion: ${version}\nGit Branch: ${gitInfo.branch}\nGit Commit: ${gitInfo.commit}\nOS: ${os.platform()} ${os.release()}\nNode.js: ${process.version}\n--------------------\n`
   logStream.write(initialInfo)
+}
+
+function initFileLogger() {
+  if (!loggingConfig.file?.enabled) return
+
+  rotateLogFile()
+
+  const rotation = loggingConfig.file?.rotation || 'session'
+
+  if (rotation === 'hourly') {
+    logRotationInterval = setInterval(rotateLogFile, 60 * 60 * 1000)
+  } else if (rotation === 'daily') {
+    logRotationInterval = setInterval(rotateLogFile, 24 * 60 * 60 * 1000)
+  }
+
+  cleanOldLogs()
+
+  logCleanupInterval = setInterval(cleanOldLogs, 60 * 60 * 1000)
 }
 
 function initLogger(config) {
@@ -1216,8 +1301,26 @@ function applyEnvOverrides(config, prefix = 'NODELINK') {
   }
 }
 
+function cleanupLogger() {
+  if (logRotationInterval) {
+    clearInterval(logRotationInterval)
+    logRotationInterval = null
+  }
+
+  if (logCleanupInterval) {
+    clearInterval(logCleanupInterval)
+    logCleanupInterval = null
+  }
+
+  if (logStream) {
+    logStream.end()
+    logStream = null
+  }
+}
+
 export {
   initLogger,
+  cleanupLogger,
   validateProperty,
   logger,
   getVersion,
