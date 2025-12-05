@@ -1,7 +1,8 @@
 import { URLSearchParams } from 'node:url'
-import { http1makeRequest, logger, makeRequest } from '../../utils.js'
+import { http1makeRequest, logger, makeRequest, getVersion } from '../../utils.js'
 
 const CACHE_DURATION_MS = 12 * 60 * 60 * 1000
+const VERSION = getVersion()
 
 class CachedPlayerScript {
   constructor(url) {
@@ -14,9 +15,13 @@ export default class CipherManager {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.config = nodelink.options.sources.youtube.cipher
+    if (this.config.url) {
+      this.config.url = this.config.url.replace(/\/+$/, '')
+    }
     this.cachedPlayerScript = null
     this.cipherLoadLock = false
     this.explicitPlayerScriptUrl = null
+    this.userAgent = `nodelink/${VERSION} (https://github.com/PerformanC/NodeLink)`
   }
 
   setPlayerScriptUrl(url) {
@@ -136,7 +141,10 @@ export default class CipherManager {
       player_url: playerUrl
     }
 
-    const headers = { 'Content-Type': 'application/json' }
+    const headers = {
+      'Content-Type': 'application/json',
+      'User-Agent': this.userAgent
+    }
     if (this.config.token) {
       headers.Authorization = this.config.token
     }
@@ -178,7 +186,9 @@ export default class CipherManager {
     }
 
     try {
-      const headers = {}
+      const headers = {
+        'User-Agent': this.userAgent
+      }
       if (this.config.token) {
         headers.Authorization = this.config.token
       }
@@ -237,14 +247,13 @@ export default class CipherManager {
       requestBody.n_param = nParam
     }
 
-    const headers = { 'Content-Type': 'application/json' }
+    const headers = {
+      'Content-Type': 'application/json',
+      'User-Agent': this.userAgent
+    }
 
     if (this.config.token) {
       headers.Authorization = this.config.token
-    }
-
-    if (context?.client?.userAgent) {
-      headers['User-Agent'] = context.client.userAgent
     }
 
     logger(
