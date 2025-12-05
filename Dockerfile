@@ -1,6 +1,9 @@
 # Stage 1: Builder - Install dependencies
 FROM node:20-alpine AS builder
 
+# Install git (required for npm to install dependencies from GitHub)
+RUN apk add --no-cache git
+
 # Set working directory
 WORKDIR /app
 
