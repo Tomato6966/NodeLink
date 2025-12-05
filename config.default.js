@@ -124,8 +124,8 @@ export default {
         }
       },
       cipher: {
-        url: 'http://127.0.0.1:8001',
-        token: 'KEY'
+        url: 'https://cipher.kikkia.dev/api',
+        token: null
       }
     },
     instagram: {
