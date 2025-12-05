@@ -167,11 +167,11 @@ Its modular structure also allows swapping components, adding new sources or fil
 
 Internally, NodeLink combines native and WebAssembly modules for precise audio processing, buffering, and packet handling.
 
-- [`@performanc/pwsl-server`](https://github.com/PerformanC/internals/tree/PWSL-server) *
-- [`@performanc/voice`](https://github.com/PerformanC/voice) *
+- [`@performanc/pwsl-server`](https://github.com/PerformanC/internals/tree/PWSL-server) ⚡
+- [`@performanc/voice`](https://github.com/PerformanC/voice) ⚡
 - [`@alexanderolsen/libsamplerate-js`](https://www.npmjs.com/package/@alexanderolsen/libsamplerate-js)
-- [`@ecliptia/faad2-wasm`](https://www.npmjs.com/package/@ecliptia/faad2-wasm) ⚡
-- [`@ecliptia/seekable-stream`](https://github.com/1Lucas1apk/seekable-stream) ⚡
+- [`@ecliptia/faad2-wasm`](https://www.npmjs.com/package/@ecliptia/faad2-wasm) 💙
+- [`@ecliptia/seekable-stream`](https://github.com/1Lucas1apk/seekable-stream) 💙
 - [`@toddynnn/symphonia-decoder`](https://www.npmjs.com/package/@toddynnn/symphonia-decoder)
 - [`mp4box`](https://www.npmjs.com/package/mp4box)
 - [`myzod`](https://www.npmjs.com/package/myzod)
@@ -182,8 +182,8 @@ Internally, NodeLink combines native and WebAssembly modules for precise audio p
 - [`prom-client`](https://www.npmjs.com/package/prom-client) – Required only if Prometheus metrics are enabled in config. Install with `npm install prom-client`.
 
 > [!NOTE]
-> Dependencies marked with * are maintained by PerformanC.  
-> Dependencies marked with ⚡ are maintained by Ecliptia.
+> Dependencies marked with ⚡ are maintained by PerformanC.  
+> Dependencies marked with 💙 are maintained by Ecliptia.
 
 These modules form the essential foundation that keeps NodeLink’s playback stable and reliable.
 
