@@ -889,34 +889,53 @@ export default class YouTubeSource {
     let fetching = false
     let activeRequest = null
     let recoverTimeout = null
+    let drainListener = null
 
     const cleanup = () => {
       if (destroyed) return
       destroyed = true
       cancelSignal.aborted = true
 
-      stream.removeListener('drain', onDrain)
+      if (drainListener) {
+        stream.removeListener('drain', drainListener)
+        drainListener = null
+      }
 
-      if (activeRequest) activeRequest.destroy()
-      if (recoverTimeout) clearTimeout(recoverTimeout)
+      if (activeRequest) {
+        activeRequest.removeAllListeners()
+        activeRequest.destroy()
+        activeRequest = null
+      }
+
+      if (recoverTimeout) {
+        clearTimeout(recoverTimeout)
+        recoverTimeout = null
+      }
       if (guildId) this.activeStreams.delete(guildId)
     }
 
-    const onDrain = () => {
+    drainListener = () => {
       if (destroyed || cancelSignal.aborted) return
       fetchNext()
     }
 
-    stream.on('drain', onDrain)
+    stream.on('drain', drainListener)
     stream.once('close', cleanup)
+    stream.once('end', cleanup)
     stream.once('error', cleanup)
 
     const fetchNext = async () => {
-      if (destroyed || cancelSignal.aborted || position >= contentLength) {
+      if (destroyed || cancelSignal.aborted || stream.destroyed) {
+        cleanup()
+        return
+      }
+
+      if (position >= contentLength) {
         if (!stream.writableEnded) {
           stream.emit('finishBuffering')
           stream.end()
         }
+        cleanup()
         return
       }
 
@@ -927,15 +946,15 @@ export default class YouTubeSource {
       const end = Math.min(start + CHUNK_SIZE - 1, contentLength - 1)
 
       try {
-        const {
-          stream: responseStream,
-          error,
-          statusCode
-        } = await http1makeRequest(currentUrl, {
+        const result = await http1makeRequest(currentUrl, {
           method: 'GET',
           headers: { Range: `bytes=${start}-${end}` },
-          streamOnly: true
+          streamOnly: true,
+          timeout: 10000
         })
+
+        const responseStream = result.stream
+        const { error, statusCode } = result
 
         if (destroyed || cancelSignal.aborted) {
           responseStream?.destroy()
@@ -944,11 +963,21 @@ export default class YouTubeSource {
 
         activeRequest = responseStream
 
-        if (error || (statusCode !== 206 && statusCode !== 200)) {
+        if (error || (statusCode !== 200 && statusCode !== 206)) {
+          if (statusCode === 403 || statusCode === 404 || statusCode >= 500) {
+            logger(
+              'warn',
+              'YouTube',
+              `Got ${statusCode} at pos ${position} → forcing recovery`
+            )
+            fetching = false
+            recover()
+            return
+          }
           throw new Error(`Range request failed: ${statusCode}`)
         }
 
-        responseStream.on('data', (chunk) => {
+        const onData = (chunk) => {
           if (destroyed || cancelSignal.aborted) {
             responseStream.destroy()
             return
@@ -956,36 +985,56 @@ export default class YouTubeSource {
           position += chunk.length
           const ok = stream.write(chunk)
           if (!ok) responseStream.pause()
-        })
+        }
 
-        responseStream.on('end', () => {
+        const onEnd = () => {
+          cleanupRequestListeners()
           activeRequest = null
           fetching = false
           if (!destroyed && position < contentLength) fetchNext()
-          else if (!stream.writableEnded) {
+          else if (!stream.writableEnded && position >= contentLength) {
             stream.emit('finishBuffering')
             stream.end()
+            cleanup()
           }
-        })
+        }
 
-        responseStream.on('error', () => {
+        const onError = (err) => {
+          cleanupRequestListeners()
           activeRequest = null
           fetching = false
+          if (!destroyed) {
+            if (++errors >= MAX_RETRIES) recover()
+            else
+              setTimeout(
+                fetchNext,
+                Math.min(1000 * Math.pow(2, errors - 1), 5000)
+              )
+          }
+        }
+
+        const cleanupRequestListeners = () => {
+          responseStream.removeListener('data', onData)
+          responseStream.removeListener('end', onEnd)
+          responseStream.removeListener('error', onError)
+        }
+
+        responseStream.on('data', onData)
+        responseStream.on('end', onEnd)
+        responseStream.on('error', onError)
+
+        if (!stream.writableEnded) stream.resume?.()
+      } catch (err) {
+        activeRequest = null
+        fetching = false
+        if (!destroyed) {
           if (++errors >= MAX_RETRIES) recover()
           else
             setTimeout(
               fetchNext,
               Math.min(1000 * Math.pow(2, errors - 1), 5000)
             )
-        })
-
-        stream.once('drain', () => responseStream.resume())
-      } catch (err) {
-        activeRequest = null
-        fetching = false
-        if (++errors >= MAX_RETRIES) recover()
-        else
-          setTimeout(fetchNext, Math.min(1000 * Math.pow(2, errors - 1), 5000))
+        }
       }
     }
 
@@ -993,34 +1042,44 @@ export default class YouTubeSource {
       if (destroyed || cancelSignal.aborted) return
 
       if (++refreshes > MAX_URL_REFRESH) {
+        logger('error', 'YouTube', 'Max URL refresh attempts reached')
         if (!stream.destroyed)
-          stream.destroy(new Error('Max recovery attempts'))
+          stream.destroy(new Error('Failed to recover stream'))
+        return
+      }
+
+      if (stream.destroyed || stream.writableEnded) {
+        cleanup()
         return
       }
 
       try {
         const newUrlData = await this.getTrackUrl(decodedTrack)
+
         if (destroyed || cancelSignal.aborted) return
 
-        if (newUrlData.exception || !newUrlData.url) throw new Error('No URL')
-
-        const test = await http1makeRequest(newUrlData.url, {
-          method: 'GET',
-          headers: { Range: `bytes=${position}-${position}` },
-          streamOnly: true
-        })
-        test.stream?.destroy()
-
-        if (test.statusCode !== 206 && test.statusCode !== 200)
-          throw new Error('Test failed')
+        if (newUrlData.exception || !newUrlData.url) {
+          throw new Error('No valid URL from getTrackUrl')
+        }
 
         currentUrl = newUrlData.url
         errors = 0
+        logger(
+          'info',
+          'YouTube',
+          `URL recovered for ${decodedTrack.title} (resume at ${position} bytes, attempt ${refreshes})`
+        )
+
+        fetching = false
         fetchNext()
       } catch (error) {
-        logger('error', 'YouTube', `Recovery failed: ${error.message}`)
+        logger(
+          'warn',
+          'YouTube',
+          `Recovery failed (attempt ${refreshes}): ${error.message}`
+        )
         if (!destroyed && !cancelSignal.aborted) {
-          recoverTimeout = setTimeout(recover, 2000)
+          recoverTimeout = setTimeout(recover, 4000 + refreshes * 1000)
         }
       }
     }
