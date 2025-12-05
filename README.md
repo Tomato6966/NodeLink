@@ -9,6 +9,13 @@
   Lightweight, modular, and optimized for real-time performance.
 </p>
 
+<p align="center">
+  <a href="https://nodelink.js.org">📚 Documentation</a> •
+  <a href="https://nodelink.js.org/docs/api/rest">API Reference</a> •
+  <a href="https://nodelink.js.org/docs/differences">NodeLink vs Lavalink</a> •
+  <a href="https://nodelink.js.org/docs/troubleshooting">Troubleshooting</a>
+</p>
+
 ---
 
 ## Prerequisites
@@ -26,17 +33,20 @@ Easy to configure, naturally scalable, and with smooth playback, it provides a s
 
 Created by Brazilian developers, NodeLink was born from the desire for a simpler, open, and truly accessible audio server for everyone.
 
+**Full documentation available at [nodelink.js.org](https://nodelink.js.org)** 💚
+
 ---
 
 ## Features
 
-* **100% Node.js implementation** – No external runtime required.
-* **Lavalink-compatible API** – Works with most existing clients.
-* **Optimized decoding** – Powered by WebAssembly and native modules.
-* **Smart clustering** – Automatic scaling with multiple processes.
-* **Real-time audio filters** – Equalizer, timescale, tremolo, compressor, and more.
-* **Low memory footprint** – Efficient even with multiple active players.
-* **Multiple source support** – YouTube, Spotify, SoundCloud, Deezer, Twitch, and more.
+* **100% Node.js implementation** – No external runtime required
+* **Lavalink-compatible API** – Works with most existing clients
+* **Optimized decoding** ⚡ – Powered by WebAssembly and native modules
+* **Worker-based architecture** – Each player can run in its own process for true isolation
+* **Real-time audio filters** – Equalizer, timescale, tremolo, compressor, echo, chorus, phaser, and more
+* **Low memory footprint** – Efficient even with multiple active players
+* **Prometheus metrics** – Production-ready monitoring with detailed statistics
+* **Multiple source support** – 15+ sources including YouTube, Spotify, Apple Music, Deezer, and more
 
 ---
 
@@ -58,6 +68,21 @@ npm run start
 ```
 
 Once started, NodeLink runs a Lavalink-compatible WebSocket server, ready for immediate use.
+
+### Docker
+
+NodeLink also supports Docker for easy deployment:
+
+```bash
+# Using Docker Compose
+docker-compose up -d
+
+# Or using Docker directly
+docker build -t nodelink .
+docker run -p 2333:2333 nodelink
+```
+
+**See the Docker guide:** [nodelink.js.org/docs/advenced/docker](https://nodelink.js.org/docs/advenced/docker)
 
 ---
 
@@ -106,11 +131,25 @@ However, some clients may not work properly, since NodeLink changes certain beha
 
 ### Memory Usage
 
-NodeLink is designed to be memory-efficient.
+NodeLink is designed to be memory-efficient ⚡
+
 At startup, it typically uses around **50 MB**, stabilizing near **24 MB** when idle.
 Each active player adds between **4 and 15 MB**, depending on stream format and applied filters.
 
 Cluster workers run independently, maintaining their own caches and pipelines — enabling parallel, scalable playback without session interference.
+
+### Monitoring Production
+
+NodeLink exposes **Prometheus metrics** at `/v4/metrics` for production monitoring:
+
+* Audio frame statistics (sent, nulled, deficit)
+* Memory breakdown (RSS, heap, external buffers)
+* Event loop lag and GC pauses
+* CPU load and active handles
+* API request tracking per endpoint
+* Source usage tracking
+
+**See the monitoring guide:** [nodelink.js.org/docs/advenced/prometheus](https://nodelink.js.org/docs/advenced/prometheus)
 
 ---
 
@@ -129,20 +168,22 @@ Its modular structure also allows swapping components, adding new sources or fil
 Internally, NodeLink combines native and WebAssembly modules for precise audio processing, buffering, and packet handling.
 
 - [`@performanc/pwsl-server`](https://github.com/PerformanC/internals/tree/PWSL-server) *
-- [`@performanc/voice`](https://npmjs.com/package/@performanc/voice) *
+- [`@performanc/voice`](https://github.com/PerformanC/voice) *
 - [`@alexanderolsen/libsamplerate-js`](https://www.npmjs.com/package/@alexanderolsen/libsamplerate-js)
-- [`@ecliptia/faad2-wasm`](https://www.npmjs.com/package/@ecliptia/faad2-wasm)
-- [`@ecliptia/seekeable-node`](https://www.npmjs.com/package/@ecliptia/seekeable-node)
-- [`@wasm-audio-decoders/flac`](https://www.npmjs.com/package/@wasm-audio-decoders/flac)
-- [`@wasm-audio-decoders/ogg-vorbis`](https://www.npmjs.com/package/@wasm-audio-decoders/ogg-vorbis)
-- [`myzod`](https://www.npmjs.com/package/myzod)
+- [`@ecliptia/faad2-wasm`](https://www.npmjs.com/package/@ecliptia/faad2-wasm) ⚡
+- [`@ecliptia/seekable-stream`](https://github.com/1Lucas1apk/seekable-stream) ⚡
+- [`@toddynnn/symphonia-decoder`](https://www.npmjs.com/package/@toddynnn/symphonia-decoder)
 - [`mp4box`](https://www.npmjs.com/package/mp4box)
-- [`mpg123-decoder`](https://www.npmjs.com/package/mpg123-decoder)
+- [`myzod`](https://www.npmjs.com/package/myzod)
 - [`toddy-mediaplex`](https://www.npmjs.com/package/toddy-mediaplex)
-- [`sodium-native`](https://www.npmjs.com/package/sodium-native)
+
+**Optional Dependencies:**
+
+- [`prom-client`](https://www.npmjs.com/package/prom-client) – Required only if Prometheus metrics are enabled in config. Install with `npm install prom-client`.
 
 > [!NOTE]
-> Dependencies marked with an asterisk (*) are maintained by the PerformanC team.
+> Dependencies marked with * are maintained by PerformanC.  
+> Dependencies marked with ⚡ are maintained by Ecliptia.
 
 These modules form the essential foundation that keeps NodeLink’s playback stable and reliable.
 
@@ -151,8 +192,15 @@ These modules form the essential foundation that keeps NodeLink’s playback sta
 ## Contributing
 
 Pull requests are welcome!
+
 Feel free to open issues, share suggestions, or join discussions on Discord.
 Every contribution helps make NodeLink more stable, accessible, and well-documented.
+
+**Found a bug?** [Report it](https://github.com/PerformanC/NodeLink/issues) and we'll fix it.  
+**Need a feature?** Let us know and we'll consider it.  
+**Want to contribute?** The codebase is waiting for you.
+
+**Together, we make NodeLink better.** 💚
 
 ---
 
@@ -168,6 +216,7 @@ Questions, feedback, or contributions are always welcome:
 
 * [PerformanC Discord Server](https://discord.gg/uPveNfTuCJ)
 * [Ecliptia "Imagine" Server](https://discord.gg/fzjksWS65v)
+* [Official Documentation](https://nodelink.js.org)
 
 ---
 
