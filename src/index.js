@@ -653,7 +653,8 @@ class NodelinkServer {
       }
 
       const stats = getStats(this)
-      this.statsManager.updateStatsMetrics(stats)
+      const workerMetrics = this.workerManager ? this.workerManager.getWorkerMetrics() : null
+      this.statsManager.updateStatsMetrics(stats, workerMetrics)
       const statsPayload = JSON.stringify({ op: 'stats', ...stats })
 
       for (const session of this.sessions.values()) {

@@ -28,6 +28,7 @@ export default class WorkerManager {
     this.statsUpdateBatch = new Map()
     this.statsUpdateTimer = null
     this.workerHealth = new Map()
+    this.workerStartTime = new Map()
     this.commandTimeout = config.cluster?.commandTimeout || 45000
     this.fastCommandTimeout = config.cluster?.fastCommandTimeout || 10000
     this.maxRetries = config.cluster?.maxRetries || 2
@@ -331,6 +332,7 @@ export default class WorkerManager {
     })
     this.workerToGuilds.set(worker.id, new Set())
     this.workerHealth.set(worker.id, Date.now())
+    this.workerStartTime.set(worker.id, Date.now())
     this.workerFailureHistory.set(worker.id, {
       count: 0,
       lastFailure: null,
@@ -363,6 +365,7 @@ export default class WorkerManager {
     this.workerLoad.delete(workerId)
     this.workerStats.delete(workerId)
     this.idleWorkers.delete(workerId)
+    this.workerStartTime.delete(workerId)
 
     const affectedGuilds = Array.from(this.workerToGuilds.get(workerId) || [])
     this.workerToGuilds.delete(workerId)
@@ -612,6 +615,32 @@ export default class WorkerManager {
     logger('info', 'Cluster', `Restoration complete for worker ${worker.id}`)
   }
 
+  getWorkerMetrics() {
+    const workerMetrics = {}
+    const now = Date.now()
+
+    for (const worker of this.workers) {
+      if (!worker.isConnected()) continue
+
+      const workerId = worker.id
+      const pid = worker.process.pid
+      const stats = this.workerStats.get(workerId) || {}
+      const lastHealthCheck = this.workerHealth.get(workerId) || 0
+      const startTime = this.workerStartTime.get(workerId) || now
+      const uptimeSeconds = Math.floor((now - startTime) / 1000)
+      const isHealthy = (now - lastHealthCheck) < 30000
+
+      workerMetrics[workerId] = {
+        pid,
+        stats,
+        health: isHealthy,
+        uptime: uptimeSeconds
+      }
+    }
+
+    return workerMetrics
+  }
+
   destroy() {
     this._stopScalingCheck()
     this._stopHealthCheck()
@@ -629,6 +658,7 @@ export default class WorkerManager {
     this.workerFailureHistory.clear()
     this.statsUpdateBatch.clear()
     this.workerHealth.clear()
+    this.workerStartTime.clear()
     this.idleWorkers.clear()
 
     for (const worker of this.workers) {

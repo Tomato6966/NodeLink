@@ -171,6 +171,90 @@ export default class StatsManager {
         registers: [this.promRegister]
       })
 
+      this.promWorkerPlayers = new Gauge({
+        name: 'nodelink_worker_players',
+        help: 'Number of players per worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerPlayingPlayers = new Gauge({
+        name: 'nodelink_worker_playing_players',
+        help: 'Number of playing players per worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerMemoryUsed = new Gauge({
+        name: 'nodelink_worker_memory_used_bytes',
+        help: 'Worker memory used in bytes',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerMemoryAllocated = new Gauge({
+        name: 'nodelink_worker_memory_allocated_bytes',
+        help: 'Worker memory allocated in bytes',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerCpuLoad = new Gauge({
+        name: 'nodelink_worker_cpu_load',
+        help: 'Worker CPU load',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerCommandQueueLength = new Gauge({
+        name: 'nodelink_worker_command_queue_length',
+        help: 'Worker command queue length',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerFramesSent = new Gauge({
+        name: 'nodelink_worker_frames_sent',
+        help: 'Audio frames sent by worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerFramesNulled = new Gauge({
+        name: 'nodelink_worker_frames_nulled',
+        help: 'Audio frames nulled by worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerFramesDeficit = new Gauge({
+        name: 'nodelink_worker_frames_deficit',
+        help: 'Audio frame deficit by worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerFramesExpected = new Gauge({
+        name: 'nodelink_worker_frames_expected',
+        help: 'Audio frames expected by worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerUptime = new Gauge({
+        name: 'nodelink_worker_uptime_seconds',
+        help: 'Worker uptime in seconds',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerHealth = new Gauge({
+        name: 'nodelink_worker_health',
+        help: 'Worker health status (1 = healthy, 0 = unhealthy)',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
       logger('info', 'StatsManager', 'Prometheus metrics initialized.')
     }
   }
@@ -224,19 +308,16 @@ export default class StatsManager {
     }
   }
 
-  updateStatsMetrics(statsData) {
-    if (!this.promPlayers) return // Metrics not enabled
+  updateStatsMetrics(statsData, workerMetrics = null) {
+    if (!this.promPlayers) return
 
     try {
       const stats = statsData
-      // Update player metrics
       this.promPlayers.set(stats.players || 0)
       this.promPlayingPlayers.set(stats.playingPlayers || 0)
 
-      // Update uptime
       this.promUptime.set(stats.uptime || 0)
 
-      // Update memory metrics
       if (stats.memory) {
         this.promMemoryFree.set(stats.memory.free || 0)
         this.promMemoryUsed.set(stats.memory.used || 0)
@@ -244,31 +325,80 @@ export default class StatsManager {
         this.promMemoryReservable.set(stats.memory.reservable || 0)
       }
 
-      // Update CPU metrics
       if (stats.cpu) {
         this.promCpuCores.set(stats.cpu.cores || 0)
         this.promCpuSystemLoad.set(stats.cpu.systemLoad || 0)
         this.promCpuNodelinkLoad.set(stats.cpu.nodelinkLoad || 0)
       }
 
-      // Update frame statistics
       if (stats.frameStats) {
         this.promFramesSent.set(stats.frameStats.sent || 0)
         this.promFramesNulled.set(stats.frameStats.nulled || 0)
         this.promFramesDeficit.set(stats.frameStats.deficit || 0)
         this.promFramesExpected.set(stats.frameStats.expected || 0)
       } else {
-        // Reset to 0 if no frame stats available
         this.promFramesSent.set(0)
         this.promFramesNulled.set(0)
         this.promFramesDeficit.set(0)
         this.promFramesExpected.set(0)
+      }
+
+      if (workerMetrics && this.promWorkerPlayers) {
+        this._updateWorkerMetrics(workerMetrics)
       }
     } catch (error) {
       logger(
         'error',
         'StatsManager',
         `Failed to update stats metrics: ${error.message}`
+      )
+    }
+  }
+
+  _updateWorkerMetrics(workerMetrics) {
+    if (!this.promWorkerPlayers) return
+
+    try {
+      for (const [workerId, workerData] of Object.entries(workerMetrics)) {
+        const { pid, stats, health, uptime } = workerData
+        const labels = { worker_id: String(workerId), worker_pid: String(pid) }
+
+        this.promWorkerPlayers.set(labels, stats.players || 0)
+        this.promWorkerPlayingPlayers.set(labels, stats.playingPlayers || 0)
+
+        if (stats.memory) {
+          this.promWorkerMemoryUsed.set(labels, stats.memory.used || 0)
+          this.promWorkerMemoryAllocated.set(labels, stats.memory.allocated || 0)
+        }
+
+        if (stats.cpu) {
+          this.promWorkerCpuLoad.set(labels, stats.cpu.nodelinkLoad || 0)
+        }
+
+        if (stats.commandQueueLength !== undefined) {
+          this.promWorkerCommandQueueLength.set(labels, stats.commandQueueLength || 0)
+        }
+
+        if (stats.frameStats) {
+          this.promWorkerFramesSent.set(labels, stats.frameStats.sent || 0)
+          this.promWorkerFramesNulled.set(labels, stats.frameStats.nulled || 0)
+          this.promWorkerFramesDeficit.set(labels, stats.frameStats.deficit || 0)
+          this.promWorkerFramesExpected.set(labels, stats.frameStats.expected || 0)
+        }
+
+        if (uptime !== undefined) {
+          this.promWorkerUptime.set(labels, uptime)
+        }
+
+        if (health !== undefined) {
+          this.promWorkerHealth.set(labels, health ? 1 : 0)
+        }
+      }
+    } catch (error) {
+      logger(
+        'error',
+        'StatsManager',
+        `Failed to update worker metrics: ${error.message}`
       )
     }
   }
