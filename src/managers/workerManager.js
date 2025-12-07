@@ -31,6 +31,7 @@ export default class WorkerManager {
     this.workerStartTime = new Map()
     this.workerUniqueId = new Map()
     this.nextWorkerId = 1
+    this.liveYoutubeConfig = { refreshToken: null, visitorData: null }
     this.commandTimeout = config.cluster?.commandTimeout || 45000
     this.fastCommandTimeout = config.cluster?.fastCommandTimeout || 10000
     this.maxRetries = config.cluster?.maxRetries || 2
@@ -462,9 +463,20 @@ export default class WorkerManager {
         'Cluster',
         `Worker ${worker.id} (PID ${worker.process.pid}) ready`
       )
+
+      if (this.liveYoutubeConfig.refreshToken || this.liveYoutubeConfig.visitorData) {
+        logger('info', 'Cluster', `Syncing live YouTube config to new worker ${worker.id}`)
+        this.execute(worker, 'updateYoutubeConfig', this.liveYoutubeConfig)
+          .catch(err => logger('error', 'Cluster', `Failed to sync config to worker ${worker.id}: ${err.message}`))
+      }
     } else if (global.nodelink) {
       global.nodelink.handleIPCMessage(msg)
     }
+  }
+
+  setLiveYoutubeConfig(config) {
+    if (config.refreshToken) this.liveYoutubeConfig.refreshToken = config.refreshToken
+    if (config.visitorData) this.liveYoutubeConfig.visitorData = config.visitorData
   }
 
   _flushStatsUpdates() {
