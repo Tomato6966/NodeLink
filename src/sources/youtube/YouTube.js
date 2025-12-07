@@ -1,10 +1,5 @@
 import { PassThrough } from 'node:stream'
-import {
-  http1makeRequest,
-  loadHLSPlaylist,
-  logger,
-  makeRequest
-} from '../../utils.js'
+import { http1makeRequest, logger, makeRequest } from '../../utils.js'
 import CipherManager from './CipherManager.js'
 import Android from './clients/Android.js'
 import AndroidVR from './clients/AndroidVR.js'
@@ -16,75 +11,83 @@ import Web from './clients/Web.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
 import OAuth from './OAuth.js'
 
-async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
+const CHUNK_SIZE = 512 * 1024
+const MAX_RETRIES = 3
+const MAX_URL_REFRESH = 5
+const VISITOR_DATA_INTERVAL = 3600000
+const PLAYLIST_FALLBACK_SEGMENTS = 3
+
+async function _manageYoutubeHlsStream(
+  hlsManifestUrl,
+  outputStream,
+  cancelSignal,
+  guildId,
+  source
+) {
   const segmentQueue = []
   const processedSegments = new Set()
-  const stopRef = { stop: false }
 
-  outputStream.on('close', () => {
-    stopRef.stop = true
-  })
-  outputStream.on('error', () => {
-    stopRef.stop = true
-  })
-
-  outputStream.stopHls = () => {
-    stopRef.stop = true
+  const cleanup = () => {
+    cancelSignal.aborted = true
+    outputStream.stopHls = null
+    if (guildId && source) {
+      source.activeStreams.delete(guildId)
+    }
   }
 
-  const fetchWithUserAgent = async (url) => {
-    return http1makeRequest(url, {
-      method: 'GET'
-    })
-  }
+  outputStream.once('close', cleanup)
+  outputStream.once('error', cleanup)
+  outputStream.stopHls = cleanup
 
-  let isFirstFetch = true
+  const fetchWithUserAgent = (url) => http1makeRequest(url, { method: 'GET' })
 
   const playlistFetcher = async (playlistUrl) => {
-    while (!stopRef.stop) {
+    let isFirstFetch = true
+
+    while (!cancelSignal.aborted) {
       try {
         const {
           body: playlistContent,
           error,
           statusCode
         } = await fetchWithUserAgent(playlistUrl)
+
         if (error || statusCode !== 200) {
           logger(
             'error',
             'YouTube-HLS-Fetcher',
             `Playlist fetch failed: ${statusCode} - ${error?.message}`
           )
-          throw new Error(`Playlist fetch failed: ${statusCode}`)
+          return
         }
 
         const lines = playlistContent.split('\n').map((l) => l.trim())
-        let targetDuration = 2 // Default HLS target duration
+        let targetDuration = 2
         const targetDurationLine = lines.find((l) =>
           l.startsWith('#EXT-X-TARGETDURATION:')
         )
-        if (targetDurationLine) {
+        if (targetDurationLine)
           targetDuration = Number.parseInt(targetDurationLine.split(':')[1], 10)
-        }
 
         const currentSegments = []
         for (let i = 0; i < lines.length; i++) {
           if (lines[i].startsWith('#EXTINF:')) {
             const segmentUrl = lines[i + 1]
             if (segmentUrl && !segmentUrl.startsWith('#')) {
-              const absoluteUrl = new URL(segmentUrl, playlistUrl).toString()
-              currentSegments.push(absoluteUrl)
+              currentSegments.push(new URL(segmentUrl, playlistUrl).toString())
             }
           }
         }
 
         if (isFirstFetch) {
-          const startIdx = Math.max(0, currentSegments.length - 3)
+          const startIdx = Math.max(
+            0,
+            currentSegments.length - PLAYLIST_FALLBACK_SEGMENTS
+          )
           for (let i = 0; i < currentSegments.length; i++) {
             const url = currentSegments[i]
             processedSegments.add(url)
-            if (i >= startIdx) {
-              segmentQueue.push(url)
-            }
+            if (i >= startIdx) segmentQueue.push(url)
           }
           isFirstFetch = false
         } else {
@@ -96,37 +99,30 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
           }
         }
 
-        if (playlistContent.includes('#EXT-X-ENDLIST')) {
-          stopRef.stop = true
-        }
+        if (playlistContent.includes('#EXT-X-ENDLIST')) return
 
         await new Promise((resolve) =>
           setTimeout(resolve, Math.max(1, targetDuration) * 1000)
         )
       } catch (e) {
         logger('error', 'YouTube-HLS-Fetcher', `Error: ${e.message}`)
-        stopRef.stop = true
+        return
       }
     }
   }
 
   const segmentDownloader = async () => {
-    while (!stopRef.stop || segmentQueue.length > 0) {
+    while (!cancelSignal.aborted || segmentQueue.length > 0) {
       if (segmentQueue.length === 0) {
         await new Promise((resolve) => setTimeout(resolve, 100))
         continue
       }
 
       const segmentUrl = segmentQueue.shift()
+      if (cancelSignal.aborted) break
 
-      if (stopRef.stop) continue
-
-      let segmentStream = null
       try {
-        const res = await http1makeRequest(segmentUrl, {
-          streamOnly: true
-        })
-        segmentStream = res.stream
+        const res = await http1makeRequest(segmentUrl, { streamOnly: true })
 
         if (res.error || res.statusCode !== 200) {
           logger(
@@ -134,31 +130,26 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
             'YouTube-HLS-Downloader',
             `Failed segment ${segmentUrl}: ${res.statusCode}`
           )
-          if (segmentStream) segmentStream.destroy()
+          if (res.stream) res.stream.destroy()
           continue
         }
 
-        if (outputStream.destroyed) {
-          segmentStream.destroy()
-          continue
+        if (outputStream.destroyed || cancelSignal.aborted) {
+          res.stream.destroy()
+          break
         }
 
         await new Promise((resolve, reject) => {
-          segmentStream.pipe(outputStream, { end: false })
-          segmentStream.on('end', resolve)
-          segmentStream.on('error', (err) => {
-            if (err.message === 'aborted' || err.code === 'ECONNRESET') {
+          res.stream.pipe(outputStream, { end: false })
+          res.stream.on('end', resolve)
+          res.stream.on('error', (err) => {
+            if (err.message === 'aborted' || err.code === 'ECONNRESET')
               resolve()
-            } else {
-              reject(err)
-            }
+            else reject(err)
           })
         })
       } catch (e) {
-        if (segmentStream && !segmentStream.destroyed) {
-          segmentStream.destroy()
-        }
-        if (!stopRef.stop && e.message !== 'aborted') {
+        if (!cancelSignal.aborted && e.message !== 'aborted') {
           logger(
             'error',
             'YouTube-HLS-Downloader',
@@ -180,6 +171,7 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
       error: masterError,
       statusCode: masterStatusCode
     } = await fetchWithUserAgent(hlsManifestUrl)
+
     if (masterError || masterStatusCode !== 200) {
       throw new Error(
         `Master playlist fetch failed: ${masterStatusCode} - ${masterError?.message}`
@@ -187,9 +179,9 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
     }
 
     const lines = masterPlaylistContent.split('\n').map((l) => l.trim())
-    let bestBandwidth = 0
     let bestStreamUrl = null
     let bestAudioOnlyUrl = null
+    let bestBandwidth = 0
     let bestAudioOnlyBandwidth = 0
 
     for (let i = 0; i < lines.length; i++) {
@@ -221,36 +213,15 @@ async function _manageYoutubeHlsStream(hlsManifestUrl, outputStream) {
       }
     }
 
-    let selectedPlaylistUrl = null
-    if (bestStreamUrl) {
-      selectedPlaylistUrl = bestStreamUrl
-      logger(
-        'debug',
-        'YouTube-HLS',
-        `Selected best combined stream: ${selectedPlaylistUrl}`
-      )
-    } else if (bestAudioOnlyUrl) {
-      selectedPlaylistUrl = bestAudioOnlyUrl
-      logger(
-        'debug',
-        'YouTube-HLS',
-        `Selected best audio-only stream: ${selectedPlaylistUrl}`
-      )
-    } else {
-      throw new Error('No suitable HLS stream found in master playlist.')
-    }
+    const selectedPlaylistUrl = bestStreamUrl || bestAudioOnlyUrl
+    if (!selectedPlaylistUrl) throw new Error('No suitable HLS stream found')
 
-    playlistFetcher(selectedPlaylistUrl)
-    segmentDownloader()
+    logger('debug', 'YouTube-HLS', `Selected stream: ${selectedPlaylistUrl}`)
+
+    Promise.all([playlistFetcher(selectedPlaylistUrl), segmentDownloader()])
   } catch (e) {
-    logger(
-      'error',
-      'YouTube-HLS',
-      `Error managing YouTube HLS stream: ${e.message}`
-    )
-    if (!outputStream.destroyed) {
-      outputStream.destroy(e)
-    }
+    logger('error', 'YouTube-HLS', `Error managing HLS stream: ${e.message}`)
+    if (!outputStream.destroyed) outputStream.destroy(e)
   }
 }
 
@@ -266,11 +237,11 @@ export default class YouTubeSource {
     ]
 
     this.priority = 100
-
     this.clients = {}
     this.oauth = null
     this.visitorDataInterval = null
     this.cipherManager = new CipherManager(nodelink)
+    this.activeStreams = new Map()
     this.ytContext = {
       client: {
         screenDensityFloat: 1,
@@ -298,12 +269,14 @@ export default class YouTubeSource {
       TVEmbedded,
       Web
     }
+
     for (const clientName in clientClasses) {
       this.clients[clientName] = new clientClasses[clientName](
         this.nodelink,
         this.oauth
       )
     }
+
     logger(
       'debug',
       'YouTube',
@@ -314,12 +287,10 @@ export default class YouTubeSource {
     await this.cipherManager.getCachedPlayerScript()
     await this.cipherManager.checkCipherServerStatus()
 
-    if (this.visitorDataInterval) {
-      clearInterval(this.visitorDataInterval)
-    }
+    if (this.visitorDataInterval) clearInterval(this.visitorDataInterval)
     this.visitorDataInterval = setInterval(
       () => this._fetchVisitorData(),
-      3600000
+      VISITOR_DATA_INTERVAL
     )
 
     logger('info', 'YouTube', 'YouTube source setup complete.')
@@ -328,15 +299,24 @@ export default class YouTubeSource {
 
   cleanup() {
     logger('info', 'YouTube', 'Cleaning up YouTube source...')
+
+    for (const [guildId, cancelSignal] of this.activeStreams.entries()) {
+      cancelSignal.aborted = true
+    }
+    this.activeStreams.clear()
+
     if (this.visitorDataInterval) {
       clearInterval(this.visitorDataInterval)
       this.visitorDataInterval = null
     }
+
+    if (this.oauth) this.oauth.cleanup?.()
   }
 
   async _fetchVisitorData() {
     logger('debug', 'YouTube', 'Fetching visitor data...')
     let playerScriptUrl = null
+
     try {
       const {
         body: data,
@@ -351,18 +331,14 @@ export default class YouTubeSource {
           this.ytContext.client.visitorData = visitorMatch[1]
           visitorFound = true
         }
+
         const playerScriptMatch = data?.match(/"jsUrl":"([^"]+)"/)
         if (playerScriptMatch?.[1]) {
-          playerScriptUrl = playerScriptMatch[1]
-          playerScriptUrl = playerScriptUrl.replace(
+          playerScriptUrl = playerScriptMatch[1].replace(
             /\/[a-z]{2}_[A-Z]{2}\//,
             '/en_US/'
           )
-          logger(
-            'debug',
-            'YouTube',
-            `Extracted and standardized player script URL from main page: ${playerScriptUrl}`
-          )
+          logger('debug', 'YouTube', `Player script URL: ${playerScriptUrl}`)
         }
       }
 
@@ -370,8 +346,9 @@ export default class YouTubeSource {
         logger(
           'warn',
           'YouTube',
-          `Failed to fetch initial page for visitor data: ${error?.message || `Status ${statusCode}`}`
+          `Failed to fetch visitor data: ${error?.message || `Status ${statusCode}`}`
         )
+
         const {
           body: guideData,
           error: guideError,
@@ -394,9 +371,8 @@ export default class YouTubeSource {
     } catch (e) {
       logger('error', 'YouTube', `Error fetching visitor data: ${e.message}`)
     }
-    if (playerScriptUrl) {
-      this.cipherManager.setPlayerScriptUrl(playerScriptUrl)
-    }
+
+    if (playerScriptUrl) this.cipherManager.setPlayerScriptUrl(playerScriptUrl)
   }
 
   async search(query, type) {
@@ -464,20 +440,15 @@ export default class YouTubeSource {
     let processUrl = url
     if (isMusicUrl) {
       processUrl = url.replace('music.youtube.com', 'www.youtube.com')
-      logger(
-        'debug',
-        'YouTube',
-        `Converted YouTube Music URL to standard format: ${processUrl}`
-      )
+      logger('debug', 'YouTube', `Converted YouTube Music URL: ${processUrl}`)
     }
 
     const clientList =
       this.config.clients.resolve || this.config.clients.playback
-
     logger(
       'debug',
       'YouTube',
-      `Using resolve clients for URL resolution: ${clientList.join(', ')}`
+      `Using resolve clients: ${clientList.join(', ')}`
     )
 
     const clientErrors = []
@@ -490,7 +461,7 @@ export default class YouTubeSource {
           logger(
             'debug',
             'YouTube',
-            'Attempting to resolve playlist URL with Android client (priority).'
+            'Attempting to resolve playlist with Android client.'
           )
           const result = await androidClient.resolve(
             processUrl,
@@ -506,18 +477,18 @@ export default class YouTubeSource {
             logger(
               'debug',
               'YouTube',
-              'Successfully resolved playlist URL with Android client.'
+              'Successfully resolved playlist with Android client.'
             )
             return result
           }
+
           const errorMessage =
-            result?.data?.message ||
-            'Android client returned empty or failed for playlist.'
+            result?.data?.message || 'Android client failed for playlist.'
           clientErrors.push({ client: 'Android', message: errorMessage })
           logger(
             'debug',
             'YouTube',
-            'Android client returned empty or failed to resolve playlist URL.'
+            'Android client returned empty or failed to resolve playlist.'
           )
         } catch (e) {
           clientErrors.push({ client: 'Android', message: e.message })
@@ -602,7 +573,7 @@ export default class YouTubeSource {
 
   async resolveHoloTrack(vanillaTrack, options = {}) {
     try {
-      const { encoded, info, userData } = vanillaTrack
+      const { info, userData } = vanillaTrack
 
       const webClient = this.clients.Web
       if (!webClient) {
@@ -622,15 +593,13 @@ export default class YouTubeSource {
         this.cipherManager
       )
 
-      if (!playerResponse || playerResponse.error) {
-        return vanillaTrack
-      }
+      if (!playerResponse || playerResponse.error) return vanillaTrack
 
       const { buildHoloTrack } = await import('./common.js')
 
       const holoTrack = await buildHoloTrack(
         info,
-        null, // itemData
+        null,
         info.sourceName === 'ytmusic' ? 'ytmusic' : 'youtube',
         playerResponse,
         {
@@ -639,10 +608,7 @@ export default class YouTubeSource {
         }
       )
 
-      if (holoTrack) {
-        holoTrack.userData = userData
-      }
-
+      if (holoTrack) holoTrack.userData = userData
       return holoTrack
     } catch (err) {
       logger('error', 'YouTube', `Failed to resolve Holo track: ${err.message}`)
@@ -685,38 +651,38 @@ export default class YouTubeSource {
         }
 
         if (urlData.url) {
-          const getCheck = await http1makeRequest(urlData.url, {
+          const check = await http1makeRequest(urlData.url, {
             method: 'GET',
             headers: { Range: 'bytes=0-0' },
             streamOnly: true
           })
 
-          if (getCheck.stream) getCheck.stream.destroy()
+          if (check.stream) check.stream.destroy()
 
           if (
-            !getCheck.error &&
-            (getCheck.statusCode === 200 || getCheck.statusCode === 206)
+            !check.error &&
+            (check.statusCode === 200 || check.statusCode === 206)
           ) {
             logger(
               'debug',
               'YouTube',
-              `URL pre-flight GET check successful for client ${clientName}.`
+              `URL pre-flight check successful for client ${clientName}.`
             )
             return urlData
           }
 
-          const errorMessage = `URL pre-flight GET check failed. Status: ${getCheck.statusCode}, Error: ${getCheck.error?.message}`
+          const errorMessage = `URL pre-flight failed. Status: ${check.statusCode}, Error: ${check.error?.message}`
           clientErrors.push({
             client: clientName,
             message: `Direct URL: ${errorMessage}`
           })
           logger('warn', 'YouTube', `Client ${clientName}: ${errorMessage}`)
 
-          if (getCheck.statusCode === 403 && urlData.hlsUrl) {
+          if (check.statusCode === 403 && urlData.hlsUrl) {
             logger(
               'warn',
               'YouTube',
-              `Direct URL failed with 403, attempting HLS fallback for client ${clientName}.`
+              `Direct URL 403, attempting HLS fallback for client ${clientName}.`
             )
             const hlsCheck = await http1makeRequest(urlData.hlsUrl, {
               method: 'GET',
@@ -733,16 +699,12 @@ export default class YouTubeSource {
               logger(
                 'debug',
                 'YouTube',
-                `HLS fallback URL pre-flight GET check successful for client ${clientName}.`
+                `HLS fallback check successful for client ${clientName}.`
               )
-              return {
-                url: urlData.hlsUrl,
-                protocol: 'hls',
-                format: 'mpegts'
-              }
+              return { url: urlData.hlsUrl, protocol: 'hls', format: 'mpegts' }
             }
 
-            const hlsError = `HLS fallback URL pre-flight GET check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
+            const hlsError = `HLS fallback failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
             clientErrors.push({ client: clientName, message: hlsError })
             logger('warn', 'YouTube', `Client ${clientName}: ${hlsError}`)
           }
@@ -762,16 +724,12 @@ export default class YouTubeSource {
             logger(
               'debug',
               'YouTube',
-              `HLS-only URL pre-flight GET check successful for client ${clientName}.`
+              `HLS-only check successful for client ${clientName}.`
             )
-            return {
-              url: urlData.hlsUrl,
-              protocol: 'hls',
-              format: 'mpegts'
-            }
+            return { url: urlData.hlsUrl, protocol: 'hls', format: 'mpegts' }
           }
 
-          const hlsError = `HLS-only URL pre-flight GET check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
+          const hlsError = `HLS-only check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
           clientErrors.push({ client: clientName, message: hlsError })
           logger('warn', 'YouTube', `Client ${clientName}: ${hlsError}`)
         }
@@ -800,32 +758,40 @@ export default class YouTubeSource {
     }
   }
 
-  async loadStream(decodedTrack, url, protocol, additionalData) {
+  async loadStream(decodedTrack, url, protocol, guildId) {
     logger(
       'debug',
       'YouTube',
       `Loading stream for "${decodedTrack.title}" with protocol ${protocol}`
     )
+
+    const cancelSignal = { aborted: false }
+    if (guildId) this.activeStreams.set(guildId, cancelSignal)
+
     try {
       if (protocol === 'hls') {
         const stream = new PassThrough()
-        _manageYoutubeHlsStream(url, stream)
+        _manageYoutubeHlsStream(url, stream, cancelSignal, guildId, this)
+
+        const originalDestroy = stream.destroy.bind(stream)
+        stream.destroy = (err) => {
+          cancelSignal.aborted = true
+          if (guildId) this.activeStreams.delete(guildId)
+          originalDestroy(err)
+        }
+
         return { stream }
       }
 
       if (!url) throw new Error('No direct URL')
 
-      const testResponse = await http1makeRequest(url, {
-        method: 'HEAD'
-      })
-
+      const testResponse = await http1makeRequest(url, { method: 'HEAD' })
       const contentLength = testResponse.headers?.['content-length']
         ? Number.parseInt(testResponse.headers['content-length'], 10)
         : null
 
-      if (testResponse.statusCode === 403) {
+      if (testResponse.statusCode === 403)
         throw new Error('URL returned 403 Forbidden')
-      }
 
       if (contentLength && contentLength > 0) {
         logger(
@@ -833,7 +799,14 @@ export default class YouTubeSource {
           'YouTube',
           `Using range buffering for ${decodedTrack.title} (${Math.round(contentLength / 1024 / 1024)}MB)`
         )
-        return this._streamWithRangeRequests(url, contentLength, decodedTrack)
+        const result = this._streamWithRangeRequests(
+          url,
+          contentLength,
+          decodedTrack,
+          cancelSignal,
+          guildId
+        )
+        return result
       }
 
       const response = await http1makeRequest(url, {
@@ -847,30 +820,25 @@ export default class YouTubeSource {
       const stream = new PassThrough()
       stream.responseStream = response.stream
 
-      const cleanupListeners = () => {
-        response.stream.removeListener('data', dataHandler)
-        response.stream.removeListener('end', endHandler)
-        response.stream.removeListener('error', errorHandler)
-        if (response.stream && !response.stream.destroyed) {
+      const cleanup = () => {
+        cancelSignal.aborted = true
+        response.stream.removeAllListeners()
+        if (response.stream && !response.stream.destroyed)
           response.stream.destroy()
-        }
+        if (guildId) this.activeStreams.delete(guildId)
       }
 
-      const dataHandler = (chunk) => stream.write(chunk)
-      const endHandler = () => {
-        cleanupListeners()
+      response.stream.on('data', (chunk) => stream.write(chunk))
+      response.stream.on('end', () => {
+        cleanup()
         stream.emit('finishBuffering')
-      }
-      const errorHandler = (error) => {
-        cleanupListeners()
+      })
+      response.stream.on('error', (error) => {
+        cleanup()
 
-        const isClientDisconnect =
-          error.message === 'aborted' || error.code === 'ECONNRESET'
-        if (isClientDisconnect) {
+        if (error.message === 'aborted' || error.code === 'ECONNRESET') {
           logger('debug', 'YouTube', 'Client disconnected from stream')
-          if (!stream.destroyed) {
-            stream.destroy()
-          }
+          if (!stream.destroyed) stream.destroy()
           return
         }
 
@@ -879,18 +847,21 @@ export default class YouTubeSource {
           stream.emit('error', new Error(`Stream failed: ${error.message}`))
           stream.destroy()
         }
+      })
+
+      const originalDestroy = stream.destroy.bind(stream)
+      stream.destroy = (err) => {
+        cleanup()
+        originalDestroy(err)
       }
 
-      response.stream.on('data', dataHandler)
-      response.stream.on('end', endHandler)
-      response.stream.on('error', errorHandler)
-
-      stream.on('end', cleanupListeners)
-      stream.on('error', cleanupListeners)
-      stream.on('close', cleanupListeners)
+      stream.once('end', cleanup)
+      stream.once('error', cleanup)
+      stream.once('close', cleanup)
 
       return { stream }
     } catch (e) {
+      if (guildId) this.activeStreams.delete(guildId)
       logger(
         'error',
         'YouTube',
@@ -902,214 +873,224 @@ export default class YouTubeSource {
     }
   }
 
-  _streamWithRangeRequests(url, contentLength, decodedTrack) {
-    const stream = new PassThrough()
-    const state = {
-      currentPosition: 0,
-      contentLength,
-      buffer: [],
-      bufferSize: 0,
-      isDestroyed: false,
-      isFetching: false,
-      errorCount: 0,
-      urlRefreshCount: 0,
-      currentUrl: url,
-      chunkSize: 512 * 1024,
-      minBufferSize: 256 * 1024,
-      maxBufferSize: 1024 * 1024,
-      lowWaterMark: 128 * 1024,
-      maxRetries: 3,
-      maxUrlRefresh: 5,
-      activeRequest: null
-    }
+  _streamWithRangeRequests(
+    url,
+    contentLength,
+    decodedTrack,
+    cancelSignal,
+    guildId
+  ) {
+    const stream = new PassThrough({ highWaterMark: CHUNK_SIZE * 2 })
+    let position = 0
+    let errors = 0
+    let refreshes = 0
+    let currentUrl = url
+    let destroyed = false
+    let fetching = false
+    let activeRequest = null
+    let recoverTimeout = null
+    let drainListener = null
 
     const cleanup = () => {
-      state.isDestroyed = true
-      state.buffer = []
-      state.bufferSize = 0
-      if (state.activeRequest) {
-        state.activeRequest.destroy()
-        state.activeRequest = null
+      if (destroyed) return
+      destroyed = true
+      cancelSignal.aborted = true
+
+      if (drainListener) {
+        stream.removeListener('drain', drainListener)
+        drainListener = null
       }
+
+      if (activeRequest) {
+        activeRequest.removeAllListeners()
+        activeRequest.destroy()
+        activeRequest = null
+      }
+
+      if (recoverTimeout) {
+        clearTimeout(recoverTimeout)
+        recoverTimeout = null
+      }
+      if (guildId) this.activeStreams.delete(guildId)
     }
 
-    stream.on('close', cleanup)
-    stream.on('error', cleanup)
+    drainListener = () => {
+      if (destroyed || cancelSignal.aborted) return
+      fetchNext()
+    }
+
+    stream.on('drain', drainListener)
+    stream.once('close', cleanup)
+    stream.once('end', cleanup)
+    stream.once('error', cleanup)
 
     const fetchNext = async () => {
-      if (
-        state.isFetching ||
-        state.isDestroyed ||
-        state.currentPosition >= state.contentLength
-      )
+      if (destroyed || cancelSignal.aborted || stream.destroyed) {
+        cleanup()
         return
+      }
 
-      state.isFetching = true
-      const rangeStart = state.currentPosition
-      const rangeEnd = Math.min(
-        rangeStart + state.chunkSize - 1,
-        state.contentLength - 1
-      )
+      if (position >= contentLength) {
+        if (!stream.writableEnded) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
+        cleanup()
+        return
+      }
+
+      if (fetching) return
+      fetching = true
+
+      const start = position
+      const end = Math.min(start + CHUNK_SIZE - 1, contentLength - 1)
 
       try {
-        const response = await http1makeRequest(state.currentUrl, {
+        const result = await http1makeRequest(currentUrl, {
           method: 'GET',
-          headers: { Range: `bytes=${rangeStart}-${rangeEnd}` },
-          streamOnly: true
+          headers: { Range: `bytes=${start}-${end}` },
+          streamOnly: true,
+          timeout: 10000
         })
 
-        if (
-          response.error ||
-          (response.statusCode !== 206 && response.statusCode !== 200)
-        ) {
-          throw new Error(`Range request failed: ${response.statusCode}`)
+        const responseStream = result.stream
+        const { error, statusCode } = result
+
+        if (destroyed || cancelSignal.aborted) {
+          responseStream?.destroy()
+          return
         }
 
-        state.activeRequest = response.stream
-        const chunks = []
-        let totalSize = 0
+        activeRequest = responseStream
 
-        response.stream.on('data', (chunk) => {
-          chunks.push(chunk)
-          totalSize += chunk.length
-        })
-
-        await new Promise((resolve, reject) => {
-          response.stream.on('end', resolve)
-          response.stream.on('error', reject)
-        })
-
-        if (totalSize > 0 && !state.isDestroyed) {
-          state.buffer.push(Buffer.concat(chunks))
-          state.bufferSize += totalSize
-          state.currentPosition += totalSize
-          state.errorCount = 0
+        if (error || (statusCode !== 200 && statusCode !== 206)) {
+          if (statusCode === 403 || statusCode === 404 || statusCode >= 500) {
+            logger(
+              'warn',
+              'YouTube',
+              `Got ${statusCode} at pos ${position} → forcing recovery`
+            )
+            fetching = false
+            recover()
+            return
+          }
+          throw new Error(`Range request failed: ${statusCode}`)
         }
 
-        state.isFetching = false
-        state.activeRequest = null
-      } catch (error) {
-        state.isFetching = false
-        state.activeRequest = null
-        state.errorCount++
+        const onData = (chunk) => {
+          if (destroyed || cancelSignal.aborted) {
+            responseStream.destroy()
+            return
+          }
+          position += chunk.length
+          const ok = stream.write(chunk)
+          if (!ok) responseStream.pause()
+        }
 
-        if (state.errorCount >= state.maxRetries) {
-          recoverWithNewUrl()
-        } else {
-          const backoff = Math.min(
-            1000 * Math.pow(2, state.errorCount - 1),
-            5000
-          )
-          setTimeout(() => fetchNext(), backoff)
+        const onEnd = () => {
+          cleanupRequestListeners()
+          activeRequest = null
+          fetching = false
+          if (!destroyed && position < contentLength) fetchNext()
+          else if (!stream.writableEnded && position >= contentLength) {
+            stream.emit('finishBuffering')
+            stream.end()
+            cleanup()
+          }
+        }
+
+        const onError = (err) => {
+          cleanupRequestListeners()
+          activeRequest = null
+          fetching = false
+          if (!destroyed) {
+            if (++errors >= MAX_RETRIES) recover()
+            else
+              setTimeout(
+                fetchNext,
+                Math.min(1000 * Math.pow(2, errors - 1), 5000)
+              )
+          }
+        }
+
+        const cleanupRequestListeners = () => {
+          responseStream.removeListener('data', onData)
+          responseStream.removeListener('end', onEnd)
+          responseStream.removeListener('error', onError)
+        }
+
+        responseStream.on('data', onData)
+        responseStream.on('end', onEnd)
+        responseStream.on('error', onError)
+
+        if (!stream.writableEnded) stream.resume?.()
+      } catch (err) {
+        activeRequest = null
+        fetching = false
+        if (!destroyed) {
+          if (++errors >= MAX_RETRIES) recover()
+          else
+            setTimeout(
+              fetchNext,
+              Math.min(1000 * Math.pow(2, errors - 1), 5000)
+            )
         }
       }
     }
 
-    const recoverWithNewUrl = async () => {
-      state.urlRefreshCount++
+    const recover = async () => {
+      if (destroyed || cancelSignal.aborted) return
 
-      if (state.urlRefreshCount > state.maxUrlRefresh) {
-        logger(
-          'error',
-          'YouTube',
-          'Max URL refresh attempts reached, stopping playback'
-        )
-        if (!stream.destroyed) {
+      if (++refreshes > MAX_URL_REFRESH) {
+        logger('error', 'YouTube', 'Max URL refresh attempts reached')
+        if (!stream.destroyed)
           stream.destroy(new Error('Failed to recover stream'))
-        }
         return
       }
 
-      logger(
-        'info',
-        'YouTube',
-        `Attempting URL refresh ${state.urlRefreshCount}/${state.maxUrlRefresh}`
-      )
+      if (stream.destroyed || stream.writableEnded) {
+        cleanup()
+        return
+      }
 
       try {
         const newUrlData = await this.getTrackUrl(decodedTrack)
 
+        if (destroyed || cancelSignal.aborted) return
+
         if (newUrlData.exception || !newUrlData.url) {
-          throw new Error('Failed to get new URL')
+          throw new Error('No valid URL from getTrackUrl')
         }
 
-        const testResponse = await http1makeRequest(newUrlData.url, {
-          method: 'GET',
-          headers: {
-            Range: `bytes=${state.currentPosition}-${state.currentPosition}`
-          },
-          streamOnly: true
-        })
+        currentUrl = newUrlData.url
+        errors = 0
+        logger(
+          'info',
+          'YouTube',
+          `URL recovered for ${decodedTrack.title} (resume at ${position} bytes, attempt ${refreshes})`
+        )
 
-        if (testResponse.stream) testResponse.stream.destroy()
-
-        if (
-          testResponse.statusCode !== 206 &&
-          testResponse.statusCode !== 200
-        ) {
-          throw new Error(`New URL test failed: ${testResponse.statusCode}`)
-        }
-
-        state.currentUrl = newUrlData.url
-        state.errorCount = 0
-        logger('info', 'YouTube', 'Successfully recovered with new URL')
+        fetching = false
         fetchNext()
       } catch (error) {
-        logger('error', 'YouTube', `Recovery failed: ${error.message}`)
-
-        if (state.urlRefreshCount < state.maxUrlRefresh) {
-          setTimeout(() => recoverWithNewUrl(), 2000)
-        } else if (!stream.destroyed) {
-          stream.destroy(new Error('Failed to recover stream'))
+        logger(
+          'warn',
+          'YouTube',
+          `Recovery failed (attempt ${refreshes}): ${error.message}`
+        )
+        if (!destroyed && !cancelSignal.aborted) {
+          recoverTimeout = setTimeout(recover, 4000 + refreshes * 1000)
         }
       }
     }
-
-    const flushBuffer = () => {
-      if (state.buffer.length === 0 || stream.destroyed) return
-
-      while (state.buffer.length > 0 && !stream.writableEnded) {
-        const chunk = state.buffer.shift()
-        state.bufferSize -= chunk.length
-
-        const canWrite = stream.write(chunk)
-        if (!canWrite) break
-      }
-
-      if (
-        state.currentPosition >= state.contentLength &&
-        state.buffer.length === 0 &&
-        !stream.writableEnded
-      ) {
-        stream.emit('finishBuffering')
-        stream.end()
-      }
-    }
-
-    const maintainBuffer = async () => {
-      while (!state.isDestroyed) {
-        await new Promise((resolve) => setTimeout(resolve, 100))
-
-        if (
-          !state.isFetching &&
-          state.bufferSize < state.lowWaterMark &&
-          state.currentPosition < state.contentLength
-        ) {
-          fetchNext()
-        }
-
-        flushBuffer()
-      }
-    }
-
-    stream.on('drain', () => {
-      if (!state.isDestroyed && state.bufferSize < state.lowWaterMark) {
-        fetchNext()
-      }
-    })
 
     fetchNext()
-    maintainBuffer()
+
+    const originalDestroy = stream.destroy.bind(stream)
+    stream.destroy = (err) => {
+      cleanup()
+      originalDestroy(err)
+    }
 
     return { stream }
   }
