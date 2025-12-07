@@ -207,6 +207,7 @@ class NodelinkServer {
               'Server',
               `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m resumed session with ID: ${oldSessionId}`
             )
+            this.statsManager.incrementSessionResume(clientInfo.name, true)
             socket.send(
               JSON.stringify({
                 op: 'ready',
@@ -242,6 +243,9 @@ class NodelinkServer {
         } else {
           const sessionId = this.sessions.create(request, socket, clientInfo)
 
+          const sessionCount = this.sessions.activeSessions?.size || 0
+          this.statsManager.setWebsocketConnections(sessionCount)
+
           socket.on('close', (code, reason) => {
             if (!this.sessions.has(sessionId)) return
 
@@ -261,6 +265,9 @@ class NodelinkServer {
             } else {
               this.sessions.shutdown(sessionId)
             }
+
+            const sessionCount = this.sessions.activeSessions?.size || 0
+            this.statsManager.setWebsocketConnections(sessionCount)
           })
 
           socket.send(
@@ -628,6 +635,7 @@ class NodelinkServer {
     this._globalUpdater = setInterval(() => {
       let localPlayers = 0
       let localPlayingPlayers = 0
+      let voiceConnections = 0
       for (const session of this.sessions.values()) {
         if (!session.players) continue
         for (const player of session.players.players.values()) {
@@ -635,8 +643,13 @@ class NodelinkServer {
           if (!player.isPaused && player.track) {
             localPlayingPlayers++
           }
+          if (player.connection) {
+            voiceConnections++
+          }
         }
       }
+
+      this.statsManager.setVoiceConnections(voiceConnections)
 
       if (clusterEnabled && cluster.isWorker) {
         process.send({
@@ -830,9 +843,30 @@ class NodelinkServer {
       if (!isBun) this._listen()
     }
 
-    this._startGlobalUpdater()
+    if (startOptions.isClusterPrimary) {
+      this._startMasterMetricsUpdater()
+    } else {
+      this._startGlobalUpdater()
+    }
     this.connectionManager.start()
     return this
+  }
+
+  _startMasterMetricsUpdater() {
+    if (this._globalUpdater) return
+    const updateInterval = Math.max(
+      1,
+      this.options?.playerUpdateInterval ?? 5000
+    )
+
+    this._globalUpdater = setInterval(() => {
+      const stats = getStats(this)
+      const workerMetrics = this.workerManager ? this.workerManager.getWorkerMetrics() : null
+      this.statsManager.updateStatsMetrics(stats, workerMetrics)
+
+      const sessionCount = this.sessions.activeSessions?.size || 0
+      this.statsManager.setWebsocketConnections(sessionCount)
+    }, updateInterval)
   }
 }
 

@@ -406,6 +406,12 @@ function getStats(nodelink) {
     nodelinkLoad: Number.parseFloat((aggregatedNodelinkLoad / cores).toFixed(2))
   }
 
+  if (nodelink.routePlanner && nodelink.statsManager) {
+    const availableIps = nodelink.routePlanner.ipBlocks?.length || 0
+    const bannedIps = nodelink.routePlanner.bannedIps?.size || 0
+    nodelink.statsManager.setRoutePlannerIps(availableIps, bannedIps)
+  }
+
   return {
     players,
     playingPlayers,
