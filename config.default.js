@@ -100,6 +100,14 @@ export default {
     http: {
       enabled: true
     },
+    flowery: {
+      enabled: true,
+      voice: 'Salli',
+      translate: false,
+      silence: 0,
+      speed: 1.0,
+      enforceConfig: false
+    },
     jiosaavn: {
       enabled: true,
       playlistLoadLimit: 50,
