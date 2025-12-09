@@ -1098,6 +1098,7 @@ export default class YouTubeSource {
         }
 
         currentUrl = newUrlData.url
+        refreshes = 0
         errors = 0
         logger(
           'info',
