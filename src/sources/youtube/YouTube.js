@@ -11,7 +11,7 @@ import Web from './clients/Web.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
 import OAuth from './OAuth.js'
 
-const CHUNK_SIZE = 512 * 1024
+const CHUNK_SIZE = 64 * 1024
 const MAX_RETRIES = 3
 const MAX_URL_REFRESH = 5
 const VISITOR_DATA_INTERVAL = 3600000
@@ -21,7 +21,7 @@ async function _manageYoutubeHlsStream(
   hlsManifestUrl,
   outputStream,
   cancelSignal,
-  guildId,
+  streamKey,
   source
 ) {
   const segmentQueue = []
@@ -30,8 +30,8 @@ async function _manageYoutubeHlsStream(
   const cleanup = () => {
     cancelSignal.aborted = true
     outputStream.stopHls = null
-    if (guildId && source) {
-      source.activeStreams.delete(guildId)
+    if (streamKey && source) {
+      source.activeStreams.delete(streamKey)
     }
   }
 
@@ -653,7 +653,7 @@ export default class YouTubeSource {
         if (urlData.url) {
           const check = await http1makeRequest(urlData.url, {
             method: 'GET',
-            headers: { Range: 'bytes=0-0' },
+            headers: { Range: 'bytes=0-' },
             streamOnly: true
           })
 
@@ -663,12 +663,23 @@ export default class YouTubeSource {
             !check.error &&
             (check.statusCode === 200 || check.statusCode === 206)
           ) {
+            let contentLength = null
+            if (check.headers?.['content-length']) {
+              contentLength = Number.parseInt(
+                check.headers['content-length'],
+                10
+              )
+            } else if (check.headers?.['content-range']) {
+              const match = check.headers['content-range'].match(/\/(\d+)/)
+              if (match) contentLength = Number.parseInt(match[1], 10)
+            }
+
             logger(
               'debug',
               'YouTube',
               `URL pre-flight check successful for client ${clientName}.`
             )
-            return urlData
+            return { ...urlData, additionalData: { contentLength } }
           }
 
           const errorMessage = `URL pre-flight failed. Status: ${check.statusCode}, Error: ${check.error?.message}`
@@ -758,7 +769,7 @@ export default class YouTubeSource {
     }
   }
 
-  async loadStream(decodedTrack, url, protocol, guildId) {
+  async loadStream(decodedTrack, url, protocol, additionalData) {
     logger(
       'debug',
       'YouTube',
@@ -766,17 +777,18 @@ export default class YouTubeSource {
     )
 
     const cancelSignal = { aborted: false }
-    if (guildId) this.activeStreams.set(guildId, cancelSignal)
+    const streamKey = additionalData || Symbol('streamKey')
+    this.activeStreams.set(streamKey, cancelSignal)
 
     try {
       if (protocol === 'hls') {
         const stream = new PassThrough()
-        _manageYoutubeHlsStream(url, stream, cancelSignal, guildId, this)
+        _manageYoutubeHlsStream(url, stream, cancelSignal, streamKey, this)
 
         const originalDestroy = stream.destroy.bind(stream)
         stream.destroy = (err) => {
           cancelSignal.aborted = true
-          if (guildId) this.activeStreams.delete(guildId)
+          this.activeStreams.delete(streamKey)
           originalDestroy(err)
         }
 
@@ -785,13 +797,36 @@ export default class YouTubeSource {
 
       if (!url) throw new Error('No direct URL')
 
-      const testResponse = await http1makeRequest(url, { method: 'HEAD' })
-      const contentLength = testResponse.headers?.['content-length']
-        ? Number.parseInt(testResponse.headers['content-length'], 10)
-        : null
+      let contentLength = additionalData?.contentLength || null
 
-      if (testResponse.statusCode === 403)
-        throw new Error('URL returned 403 Forbidden')
+      if (!contentLength) {
+        const testResponse = await http1makeRequest(url, { method: 'HEAD' })
+
+        if (testResponse.headers?.['content-length']) {
+          contentLength = Number.parseInt(
+            testResponse.headers['content-length'],
+            10
+          )
+        }
+
+        if (testResponse.statusCode === 403)
+          throw new Error('URL returned 403 Forbidden')
+
+        if (!contentLength) {
+          const rangeResponse = await http1makeRequest(url, {
+            method: 'GET',
+            headers: { Range: 'bytes=0-0' },
+            streamOnly: true
+          })
+
+          if (rangeResponse.stream) rangeResponse.stream.destroy()
+
+          if (rangeResponse.headers?.['content-range']) {
+            const match = rangeResponse.headers['content-range'].match(/\/(\d+)/)
+            if (match) contentLength = Number.parseInt(match[1], 10)
+          }
+        }
+      }
 
       if (contentLength && contentLength > 0) {
         logger(
@@ -804,7 +839,7 @@ export default class YouTubeSource {
           contentLength,
           decodedTrack,
           cancelSignal,
-          guildId
+          streamKey
         )
         return result
       }
@@ -825,7 +860,7 @@ export default class YouTubeSource {
         response.stream.removeAllListeners()
         if (response.stream && !response.stream.destroyed)
           response.stream.destroy()
-        if (guildId) this.activeStreams.delete(guildId)
+        this.activeStreams.delete(streamKey)
       }
 
       response.stream.on('data', (chunk) => stream.write(chunk))
@@ -861,7 +896,7 @@ export default class YouTubeSource {
 
       return { stream }
     } catch (e) {
-      if (guildId) this.activeStreams.delete(guildId)
+      this.activeStreams.delete(streamKey)
       logger(
         'error',
         'YouTube',
@@ -878,7 +913,7 @@ export default class YouTubeSource {
     contentLength,
     decodedTrack,
     cancelSignal,
-    guildId
+    streamKey
   ) {
     const stream = new PassThrough({ highWaterMark: CHUNK_SIZE * 2 })
     let position = 0
@@ -911,7 +946,7 @@ export default class YouTubeSource {
         clearTimeout(recoverTimeout)
         recoverTimeout = null
       }
-      if (guildId) this.activeStreams.delete(guildId)
+      this.activeStreams.delete(streamKey)
     }
 
     drainListener = () => {
