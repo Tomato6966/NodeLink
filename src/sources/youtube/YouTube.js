@@ -13,7 +13,7 @@ import OAuth from './OAuth.js'
 
 const CHUNK_SIZE = 512 * 1024
 const MAX_RETRIES = 3
-const MAX_URL_REFRESH = 5
+const MAX_URL_REFRESH = 10
 const VISITOR_DATA_INTERVAL = 3600000
 const PLAYLIST_FALLBACK_SEGMENTS = 3
 
@@ -471,14 +471,23 @@ export default class YouTubeSource {
                     return result;
                 }
 
-                const videoIdMatch = url.match(/(?:v=|list=)([\w-]+)/);
+                const listIdMatch = url.match(/[?&]list=([\w-]+)/);
+                const videoIdMatch = url.match(/[?&]v=([\w-]+)/);
+                const listId = listIdMatch ? listIdMatch[1] : null;
                 const videoId = videoIdMatch ? videoIdMatch[1] : null;
+                const fallbackId = listId || videoId;
 
-                if (videoId) {
-                    logger('warn', 'YouTube', `Music client failed for ${videoId}. Attempting fallback to standard YouTube client.`);
-                    const fallbackUrl = url.includes('list=') 
-                        ? `https://www.youtube.com/playlist?list=${videoId}` 
-                        : `https://www.youtube.com/watch?v=${videoId}`;
+                if (fallbackId) {
+                    logger('warn', 'YouTube', `Music client failed for ${fallbackId}. Attempting fallback to standard YouTube client.`);
+                    let fallbackUrl;
+                    if (listId) {
+                        fallbackUrl = `https://www.youtube.com/playlist?list=${listId}`;
+                        if (videoId) {
+                            fallbackUrl += `&v=${videoId}`;
+                        }
+                    } else {
+                        fallbackUrl = `https://www.youtube.com/watch?v=${videoId}`;
+                    }
                     const fallbackResult = await this.resolve(fallbackUrl, 'youtube');
                     
                     if (fallbackResult && (fallbackResult.loadType === 'track' || fallbackResult.loadType === 'playlist')) {
@@ -618,12 +627,23 @@ export default class YouTubeSource {
         )
 
         if (isMusicUrl && clientName === 'Music' && result?.loadType === 'error' && result.data?.cause === 'UpstreamPlayability') {
-            const videoIdMatch = url.match(/(?:v=|list=)([\w-]+)/);
+            const listIdMatch = url.match(/[?&]list=([\w-]+)/);
+            const videoIdMatch = url.match(/[?&]v=([\w-]+)/);
+            const listId = listIdMatch ? listIdMatch[1] : null;
             const videoId = videoIdMatch ? videoIdMatch[1] : null;
+            const fallbackId = listId || videoId;
 
-            if (videoId) {
-                logger('warn', 'YouTube', `Music client returned Playability Error for ${videoId}. Attempting fallback to standard YouTube client.`);
-                const fallbackUrl = url.includes('list=') ? `https://www.youtube.com/playlist?list=${videoId}` : `https://www.youtube.com/watch?v=${videoId}`;
+            if (fallbackId) {
+                logger('warn', 'YouTube', `Music client returned Playability Error for ${fallbackId}. Attempting fallback to standard YouTube client.`);
+                let fallbackUrl;
+                if (listId) {
+                    fallbackUrl = `https://www.youtube.com/playlist?list=${listId}`;
+                    if (videoId) {
+                        fallbackUrl += `&v=${videoId}`;
+                    }
+                } else {
+                    fallbackUrl = `https://www.youtube.com/watch?v=${videoId}`;
+                }
                 const fallbackResult = await this.resolve(fallbackUrl, 'youtube');
                 
                 if (fallbackResult && (fallbackResult.loadType === 'track' || fallbackResult.loadType === 'playlist' || fallbackResult.loadType === 'empty')) {
@@ -1212,14 +1232,13 @@ export default class YouTubeSource {
         }
 
         currentUrl = newUrlData.url
-        refreshes = 0
         errors = 0
         logger(
-          'info',
+          'debug',
           'YouTube',
-          `URL recovered for ${decodedTrack.title} (resume at ${position} bytes, attempt ${refreshes})`
+          `URL recovered for ${decodedTrack.title} (resume at ${position} bytes, attempt ${refreshes}, resettings attempts for 0)`
         )
-
+        refreshes = 0
         fetching = false
         fetchNext()
       } catch (error) {
