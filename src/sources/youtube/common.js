@@ -39,7 +39,6 @@ function parsePublishedAt(publishedText) {
 
   const date = new Date(publishedText)
   if (!isNaN(date.getTime())) {
-    // Check if it's a valid date
     const timestamp = date.getTime()
     const now = Date.now()
     const diffMs = now - timestamp
@@ -743,7 +742,6 @@ export async function buildHoloTrack(
       .filter(Boolean)
 
     if (!channelData.id) {
-      // Only update if not already set from videoDetails
       const channelName =
         getRunsText(
           getItemValue(renderer, [
@@ -882,10 +880,10 @@ export async function buildHoloTrack(
 export function checkURLType(url, type) {
   const source = type === 'ytmusic' ? 'music' : 'www'
   const videoRegex = new RegExp(
-    `^https?://${source === 'music' ? 'music' : '(?:www\\.)?'}youtube.com/watch\\?v=[\\w-]+`
+    `^https?://${source === 'music' ? 'music\\.' : '(?:www\\.)?'}youtube.com/watch\\?v=[\\w-]+`
   )
   const playlistRegex = new RegExp(
-    `^https?://${source === 'music' ? 'music' : '(?:www\\.)?'}youtube.com/playlist\\?list=[\\w-]+`
+    `^https?://${source === 'music' ? 'music\\.' : '(?:www\\.)?'}youtube.com/playlist\\?list=[\\w-]+`
   )
   const shortUrlRegex = /^https?:\/\/youtu\.be\/[\w-]+/
   const shortsRegex = /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+/
@@ -900,8 +898,12 @@ export function checkURLType(url, type) {
     return YOUTUBE_CONSTANTS.VIDEO
   }
   if (type !== 'ytmusic') {
-    if (shortsRegex.test(url)) return YOUTUBE_CONSTANTS.SHORTS
-    if (shortUrlRegex.test(url)) return YOUTUBE_CONSTANTS.VIDEO
+    if (shortsRegex.test(url)) {
+        return YOUTUBE_CONSTANTS.SHORTS;
+    }
+    if (shortUrlRegex.test(url)) {
+        return YOUTUBE_CONSTANTS.VIDEO;
+    }
   }
   return YOUTUBE_CONSTANTS.UNKNOWN
 }
@@ -956,71 +958,69 @@ export async function buildTrack(
     return defaultValue
   }
 
+  let renderer = null
   if (itemType === 'ytmusic') {
-    const renderer = getItemValue(itemData, [
+    renderer = getItemValue(itemData, [
       'musicResponsiveListItemRenderer',
       'playlistPanelVideoRenderer',
       'musicTwoColumnItemRenderer'
     ])
-    if (!renderer) return null
+  } else {
+    renderer =
+      getItemValue(itemData, [
+        'videoRenderer',
+        'compactVideoRenderer',
+        'playlistPanelVideoRenderer',
+        'gridVideoRenderer'
+      ]) || (itemData.videoId ? itemData : null)
+  }
 
-    videoId = getItemValue(
-      renderer,
-      [
-        'playlistItemData.videoId',
-        'navigationEndpoint.watchEndpoint.videoId',
-        'videoId'
-      ],
-      itemData.videoId
-    )
-    title = getRunsText(
-      getItemValue(renderer, [
-        'flexColumns.0.musicResponsiveListItemFlexColumnRenderer.text.runs',
-        'title.runs'
-      ]),
-      getItemValue(itemData, ['title.simpleText'], 'Unknown Title')
-    )
-    author = getRunsText(
-      getItemValue(renderer, [
-        'flexColumns.1.musicResponsiveListItemFlexColumnRenderer.text.runs',
-        'longBylineText.runs',
-        'shortBylineText.runs'
-      ]),
-      getItemValue(itemData, ['ownerText.runs.0.text'], 'Unknown Artist')
-    )
+  if (!renderer && !itemData.videoId) return null
 
+  videoId = getItemValue(
+    renderer,
+    [
+      'playlistItemData.videoId',
+      'navigationEndpoint.watchEndpoint.videoId',
+      'videoId'
+    ],
+    itemData.videoId || renderer?.videoId
+  )
+
+  if (!videoId) return null;
+
+  if (itemType === 'ytmusic') {
+    title = getRunsText(getItemValue(renderer, ['title.runs']), 'Unknown Title')
+    
+    let authorText = 'Unknown Artist';
+    const subtitleRuns = getItemValue(renderer, ['subtitle.runs']);
+    if (Array.isArray(subtitleRuns) && subtitleRuns.length > 0) {
+        authorText = subtitleRuns[0]?.text || authorText;
+    }
+    author = authorText;
+
+    let lengthText = null;
+    if (Array.isArray(subtitleRuns)) {
+        lengthText = subtitleRuns.find(run => run.text && /^\d{1,2}:\d{2}$/.test(run.text || ''))?.text;
+    }
     const { lengthMs: parsedLengthMs, isStream: parsedIsStream } =
       parseLengthAndStream(
-        getRunsText(
-          getItemValue(renderer, [
-            'fixedColumns.0.musicResponsiveListItemFlexColumnRenderer.text.runs',
-            'lengthText.runs'
-          ]),
-          getItemValue(itemData, ['lengthText.simpleText'])
-        ),
-        itemData.lengthSeconds,
+        lengthText,
+        itemData.lengthSeconds, 
         itemData.isLive
       )
     lengthMs = parsedLengthMs
     isStream = parsedIsStream
 
-    artworkUrl = getItemValue(
-      renderer,
-      ['thumbnail.musicThumbnailRenderer.thumbnail.thumbnails.pop.url'],
-      itemData.thumbnail?.thumbnails?.pop()?.url
-    )
+    const thumbnails = getItemValue(renderer, ['thumbnail.musicThumbnailRenderer.thumbnail.thumbnails']);
+    if (Array.isArray(thumbnails) && thumbnails.length > 0) {
+        artworkUrl = thumbnails[thumbnails.length - 1]?.url; 
+    } else {
+        artworkUrl = itemData.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.pop()?.url || itemData.thumbnail?.thumbnails?.pop()?.url;
+    }
+
     uri = `https://music.youtube.com/watch?v=${videoId}`
   } else {
-    let renderer = getItemValue(itemData, [
-      'videoRenderer',
-      'compactVideoRenderer',
-      'playlistPanelVideoRenderer',
-      'gridVideoRenderer'
-    ])
-    if (!renderer && itemData.videoId) renderer = itemData
-    if (!renderer) return null
-
-    videoId = renderer.videoId
     title =
       typeof renderer.title === 'string'
         ? renderer.title
@@ -1060,9 +1060,6 @@ export async function buildTrack(
     uri = `https://www.youtube.com/watch?v=${videoId}`
   }
 
-  if (!videoId) return null
-  artworkUrl = artworkUrl?.split('?')[0] || artworkUrl
-
   const trackInfo = {
     identifier: videoId,
     isSeekable: !isStream,
@@ -1077,6 +1074,23 @@ export async function buildTrack(
     sourceName:
       sourceNameOverride || (itemType === 'ytmusic' ? 'ytmusic' : 'youtube')
   }
+
+  if (trackInfo.uri?.includes('music.youtube.com')) {
+    trackInfo.sourceName = 'ytmusic'
+  } else if (trackInfo.uri?.includes('youtube.com') || trackInfo.uri?.includes('youtu.be')) {
+    trackInfo.sourceName = 'youtube'
+  }
+
+  if (trackInfo.sourceName === 'ytmusic' && renderer) {
+    const musicThumbnails = getItemValue(renderer, ['thumbnail.musicThumbnailRenderer.thumbnail.thumbnails']);
+    if (Array.isArray(musicThumbnails) && musicThumbnails.length > 0) {
+        trackInfo.artworkUrl = musicThumbnails[musicThumbnails.length - 1]?.url;
+    }
+  }
+  if (!trackInfo.artworkUrl) {
+    trackInfo.artworkUrl = artworkUrl;
+  }
+  trackInfo.artworkUrl = trackInfo.artworkUrl?.split('?')[0] || trackInfo.artworkUrl;
 
   const basicTrack = {
     encoded: encodeTrack(trackInfo),
@@ -1152,12 +1166,14 @@ export class BaseClient {
     if (this.requirePlayerScript() && cipherManager) {
       try {
         const playerScript = await cipherManager.getCachedPlayerScript()
-        const signatureTimestamp = await cipherManager.getTimestamp(
-          playerScript.url
-        )
-        requestBody.playbackContext = {
-          contentPlaybackContext: {
-            signatureTimestamp: signatureTimestamp
+        if (playerScript && playerScript.url) {
+          const signatureTimestamp = await cipherManager.getTimestamp(
+            playerScript.url
+          )
+          requestBody.playbackContext = {
+            contentPlaybackContext: {
+              signatureTimestamp: signatureTimestamp
+            }
           }
         }
       } catch (e) {
@@ -1270,10 +1286,32 @@ export class BaseClient {
       }
     }
 
-    const contentsRoot = playlistResponse.contents.singleColumnWatchNextResults
-    const playlistContent = contentsRoot?.playlist?.playlist?.contents
+    const contentsRoot = playlistResponse.contents.singleColumnWatchNextResults || 
+                         playlistResponse.contents.singleColumnMusicWatchNextResultsRenderer
+    
+    let playlistContent = null
+    
+    if (contentsRoot?.playlist?.playlist?.contents) {
+      playlistContent = contentsRoot.playlist.playlist.contents
+    } else if (contentsRoot?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.musicQueueRenderer) {
+      const musicQueue = contentsRoot.tabbedRenderer.watchNextTabbedResultsRenderer.tabs[0].tabRenderer.content.musicQueueRenderer
+      playlistContent = musicQueue.content?.playlistPanelRenderer?.contents || musicQueue.contents
+    }
 
     if (!playlistContent || playlistContent.length === 0) {
+      logger(
+        'debug',
+        `youtube-${this.name}`,
+        `Playlist structure keys: ${Object.keys(playlistResponse.contents || {}).join(', ')}`
+      )
+      if (contentsRoot?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.musicQueueRenderer) {
+        const musicQueue = contentsRoot.tabbedRenderer.watchNextTabbedResultsRenderer.tabs[0].tabRenderer.content.musicQueueRenderer
+        logger(
+          'debug',
+          `youtube-${this.name}`,
+          `musicQueueRenderer keys: ${Object.keys(musicQueue).join(', ')}`
+        )
+      }
       logger(
         'info',
         `youtube-${this.name}`,
@@ -1331,6 +1369,72 @@ export class BaseClient {
       loadType: 'playlist',
       data: {
         info: { name: playlistTitle, selectedTrack },
+        pluginInfo: {},
+        tracks
+      }
+    }
+  }
+
+  async _handleBrowsePlaylistResponse(
+    playlistId,
+    browseResponse,
+    sourceName,
+    context
+  ) {
+    if (browseResponse?.error) {
+      const errMsg = browseResponse?.error?.message || 'Failed to browse playlist.'
+      logger('error', `youtube-${this.name}`, `Error browsing playlist ${playlistId}: ${errMsg}`)
+      return {
+        loadType: 'error',
+        data: { message: errMsg, severity: 'common', cause: 'Upstream' }
+      }
+    }
+
+    const shelf = browseResponse.contents?.singleColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.musicPlaylistShelfRenderer
+    
+    if (!shelf || !shelf.contents || shelf.contents.length === 0) {
+      logger('info', `youtube-${this.name}`, `Browse playlist ${playlistId} is empty or inaccessible.`)
+      return { loadType: 'empty', data: {} }
+    }
+
+    const tracks = []
+    const maxLength = this.config.maxAlbumPlaylistLength || 100
+
+    for (let i = 0; i < Math.min(shelf.contents.length, maxLength); i++) {
+      const item = shelf.contents[i]
+      try {
+        const track = await buildTrack(
+          item,
+          sourceName || 'ytmusic',
+          sourceName,
+          browseResponse,
+          this.config.enableHoloTracks,
+          {
+            fetchChannelInfo: false,
+            resolveExternalLinks: false
+          }
+        )
+        if (track) {
+          tracks.push(track)
+        }
+      } catch (err) {
+        logger('warn', `youtube-${this.name}`, `Failed to build track: ${err.message}`)
+      }
+    }
+
+    if (tracks.length === 0) {
+      logger('info', `youtube-${this.name}`, `No valid tracks parsed from browse playlist ${playlistId}.`)
+      return { loadType: 'empty', data: {} }
+    }
+
+    const playlistTitle = browseResponse.header?.musicDetailHeaderRenderer?.title?.runs?.[0]?.text || 
+                         browseResponse.header?.musicEditablePlaylistDetailHeaderRenderer?.header?.musicDetailHeaderRenderer?.title?.runs?.[0]?.text ||
+                         'Unknown Playlist'
+
+    return {
+      loadType: 'playlist',
+      data: {
+        info: { name: playlistTitle, selectedTrack: 0 },
         pluginInfo: {},
         tracks
       }
@@ -1431,6 +1535,20 @@ export class BaseClient {
 
     if (this.requirePlayerScript()) {
       const playerScript = await cipherManager.getCachedPlayerScript()
+      if (!playerScript) {
+        logger(
+          'error',
+          `youtube-${this.name}`,
+          'Failed to obtain player script for deciphering. Cannot extract stream data.'
+        )
+        return {
+          exception: {
+            message: 'Failed to obtain player script for deciphering.',
+            severity: 'fault',
+            cause: 'Internal'
+          }
+        }
+      }
       for (const format of filteredFormats) {
         let currentStreamUrl = format.url
         let currentEncryptedSignature

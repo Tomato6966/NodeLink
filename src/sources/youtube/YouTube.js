@@ -376,7 +376,12 @@ export default class YouTubeSource {
   }
 
   async search(query, type) {
-    const clientList = this.config.clients.search
+    let clientList = this.config.clients.search
+
+    if (type === 'ytmsearch') {
+      clientList = ['Music']
+    }
+
     const clientErrors = []
 
     for (const clientName of clientList) {
@@ -438,11 +443,7 @@ export default class YouTubeSource {
     const sourceType = isMusicUrl ? 'ytmusic' : 'youtube'
 
     let processUrl = url
-    if (isMusicUrl) {
-      processUrl = url.replace('music.youtube.com', 'www.youtube.com')
-      logger('debug', 'YouTube', `Converted YouTube Music URL: ${processUrl}`)
-    }
-
+    
     const clientList =
       this.config.clients.resolve || this.config.clients.playback
     logger(
@@ -453,6 +454,86 @@ export default class YouTubeSource {
 
     const clientErrors = []
     const urlType = checkURLType(processUrl, sourceType)
+
+    if (isMusicUrl) {
+        const musicClient = this.clients.Music;
+        if (musicClient) {
+            try {
+                logger('debug', 'YouTube', 'Attempting to resolve YouTube Music URL with Music client.');
+                const result = await musicClient.resolve(
+                    processUrl,
+                    sourceType,
+                    this.ytContext,
+                    this.cipherManager
+                );
+                if (result && (result.loadType === 'track' || result.loadType === 'playlist')) {
+                    logger('debug', 'YouTube', 'Successfully resolved YouTube Music URL with Music client.');
+                    return result;
+                }
+
+                const videoIdMatch = url.match(/(?:v=|list=)([\w-]+)/);
+                const videoId = videoIdMatch ? videoIdMatch[1] : null;
+
+                if (videoId) {
+                    logger('warn', 'YouTube', `Music client failed for ${videoId}. Attempting fallback to standard YouTube client.`);
+                    const fallbackUrl = url.includes('list=') 
+                        ? `https://www.youtube.com/playlist?list=${videoId}` 
+                        : `https://www.youtube.com/watch?v=${videoId}`;
+                    const fallbackResult = await this.resolve(fallbackUrl, 'youtube');
+                    
+                    if (fallbackResult && (fallbackResult.loadType === 'track' || fallbackResult.loadType === 'playlist')) {
+                        if (fallbackResult.loadType === 'track' && fallbackResult.data?.info) {
+                            fallbackResult.data.info.sourceName = 'ytmusic';
+                            fallbackResult.data.info.uri = url;
+                        } else if (fallbackResult.loadType === 'playlist' && fallbackResult.data?.tracks) {
+                            for (const track of fallbackResult.data.tracks) {
+                                if (track.info) {
+                                    track.info.sourceName = 'ytmusic';
+                                    const trackVideoId = track.info.identifier;
+                                    track.info.uri = `https://music.youtube.com/watch?v=${trackVideoId}`;
+                                }
+                            }
+                        }
+                        return fallbackResult;
+                    }
+                }
+                clientErrors.push({ client: 'Music', message: 'Music client failed or fallback unsuccessful for direct Music URL.' });
+                logger('error', 'YouTube', 'Music client failed for direct Music URL and no fallback yielded a track.');
+                return {
+                    exception: {
+                        message: 'Music client failed for direct Music URL and no fallback yielded a track.',
+                        severity: 'fault',
+                        cause: 'MusicClientFailure',
+                        errors: clientErrors
+                    }
+                };
+            } catch (e) {
+                clientErrors.push({ client: 'Music', message: e.message });
+                logger('warn', 'YouTube', `Music client threw an exception during direct Music URL resolve: ${e.message}`);
+                return { 
+                    exception: {
+                        message: `Music client failed for direct Music URL: ${e.message}`,
+                        severity: 'fault',
+                        cause: 'MusicClientException',
+                        errors: clientErrors
+                    }
+                };
+            }
+        } else {
+            const msg = 'Music client not available for direct Music URL.';
+            clientErrors.push({ client: 'Music', message: msg });
+            logger('error', 'YouTube', msg);
+            return { 
+                exception: {
+                    message: msg,
+                    severity: 'fault',
+                    cause: 'MusicClientNotAvailable',
+                    errors: clientErrors
+                }
+            };
+        }
+    }
+
 
     if (urlType === YOUTUBE_CONSTANTS.PLAYLIST) {
       const androidClient = this.clients.Android
@@ -465,14 +546,14 @@ export default class YouTubeSource {
           )
           const result = await androidClient.resolve(
             processUrl,
-            type,
+            sourceType,
             this.ytContext,
             this.cipherManager
           )
 
           if (
             result &&
-            (result.loadType === 'track' || result.loadType === 'playlist')
+            (result.loadType === 'track' || result.loadType === 'playlist' || result.loadType === 'empty')
           ) {
             logger(
               'debug',
@@ -514,8 +595,14 @@ export default class YouTubeSource {
     for (const clientName of clientList) {
       const client = this.clients[clientName]
       if (!client) continue
-      if (urlType === YOUTUBE_CONSTANTS.PLAYLIST && clientName === 'Android')
-        continue
+
+      if (!isMusicUrl && clientName === 'Music') continue 
+      if (isMusicUrl && clientName !== 'Music' && type !== 'youtube-fallback') {
+          continue; 
+      }
+      if (type === 'youtube-fallback' && !['Android', 'Web'].includes(clientName)) {
+          continue;
+      }
 
       try {
         logger(
@@ -525,21 +612,48 @@ export default class YouTubeSource {
         )
         const result = await client.resolve(
           processUrl,
-          type,
+          sourceType,
           this.ytContext,
           this.cipherManager
         )
 
+        if (isMusicUrl && clientName === 'Music' && result?.loadType === 'error' && result.data?.cause === 'UpstreamPlayability') {
+            const videoIdMatch = url.match(/(?:v=|list=)([\w-]+)/);
+            const videoId = videoIdMatch ? videoIdMatch[1] : null;
+
+            if (videoId) {
+                logger('warn', 'YouTube', `Music client returned Playability Error for ${videoId}. Attempting fallback to standard YouTube client.`);
+                const fallbackUrl = url.includes('list=') ? `https://www.youtube.com/playlist?list=${videoId}` : `https://www.youtube.com/watch?v=${videoId}`;
+                const fallbackResult = await this.resolve(fallbackUrl, 'youtube');
+                
+                if (fallbackResult && (fallbackResult.loadType === 'track' || fallbackResult.loadType === 'playlist' || fallbackResult.loadType === 'empty')) {
+                    if (fallbackResult.loadType === 'track' && fallbackResult.data?.info) {
+                        fallbackResult.data.info.sourceName = 'ytmusic';
+                        fallbackResult.data.info.uri = url;
+                    } else if (fallbackResult.loadType === 'playlist' && fallbackResult.data?.tracks) {
+                        for (const track of fallbackResult.data.tracks) {
+                            if (track.info) {
+                                track.info.sourceName = 'ytmusic';
+                                const trackVideoId = track.info.identifier;
+                                track.info.uri = `https://music.youtube.com/watch?v=${trackVideoId}`;
+                            }
+                        }
+                    }
+                    return fallbackResult;
+                }
+            }
+        }
+        
         if (
           result &&
-          (result.loadType === 'track' || result.loadType === 'playlist')
+          (result.loadType === 'track' || result.loadType === 'playlist' || result.loadType === 'empty')
         ) {
           logger(
             'debug',
             'YouTube',
             `Successfully resolved URL with client: ${clientName}`
           )
-          return result
+          return result;
         }
 
         const errorMessage =
