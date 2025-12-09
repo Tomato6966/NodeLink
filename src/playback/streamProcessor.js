@@ -624,127 +624,128 @@ class MPEGTSToAACStream extends Transform {
     super._destroy(err, callback)
   }
 }
-
+/**********************************************************************
+ * ATENÇÃO: Não altere este trecho; ajustes aqui quebram a cadeia de decodificação.
+ * WARNING: Do not edit this section; changes here will break the decoding pipeline.
+ **********************************************************************/
 class AACDecoderStream extends Transform {
   constructor(options) {
-    super({
-      ...options,
-      highWaterMark: AUDIO_CONFIG.highWaterMark
-    })
-
+    super(options)
     this.decoder = new FAAD2NodeDecoder()
     this.resampler = null
-    this.resamplerCreationPromise = null
-    this.resamplingQuality = options?.resamplingQuality || 'fastest'
-
     this.isDecoderReady = false
     this.isConfigured = false
     this.pendingChunks = []
-    this.buffer = EMPTY_BUFFER
-    this._aborted = false
+    this.buffer = Buffer.alloc(0)
+    this.resamplingQuality = options?.resamplingQuality || 'fastest'
+    this.resamplerCreationPromise = null
 
     this.decoder.ready
       .then(() => {
-        if (this._aborted) return
         this.isDecoderReady = true
         this.emit('decoderReady')
         this._processPendingChunks()
       })
-      .catch((err) => {
-        if (!this._aborted) this.emit('error', err)
-      })
-  }
-
-  abort() {
-    this._aborted = true
-    this.buffer = EMPTY_BUFFER
-    this.pendingChunks = []
+      .catch((err) => this.emit('error', err))
   }
 
   _downmixToStereo(interleavedPCM, channels, samplesPerChannel) {
-    if (channels === AUDIO_CONFIG.channels) return interleavedPCM
+    if (channels === 2) return interleavedPCM
 
     const stereo = new Float32Array(samplesPerChannel * 2)
-    const { center, surround, lfe } = DOWNMIX_COEFFICIENTS
 
     if (channels === 1) {
       for (let i = 0; i < samplesPerChannel; i++) {
-        const value = interleavedPCM[i]
-        stereo[i * 2] = value
-        stereo[i * 2 + 1] = value
+        const val = interleavedPCM[i]
+        stereo[i * 2] = val
+        stereo[i * 2 + 1] = val
       }
       return stereo
     }
 
+    const CENTER_MIX = 0.7071
+    const SURROUND_MIX = 0.7071
+    const LFE_MIX = 0.5
+
     for (let i = 0; i < samplesPerChannel; i++) {
-      const offset = i * channels
       let left = 0
       let right = 0
+      const offset = i * channels
 
       switch (channels) {
-        case 3:
-          left = interleavedPCM[offset + 1] + interleavedPCM[offset] * center
-          right = interleavedPCM[offset + 2] + interleavedPCM[offset] * center
+        case 3: {
+          const C = interleavedPCM[offset]
+          const L = interleavedPCM[offset + 1]
+          const R = interleavedPCM[offset + 2]
+          left = L + C * CENTER_MIX
+          right = R + C * CENTER_MIX
           break
-
-        case 4:
-          left = interleavedPCM[offset + 1] + interleavedPCM[offset] * center +
-                 interleavedPCM[offset + 3] * surround * 0.5
-          right = interleavedPCM[offset + 2] + interleavedPCM[offset] * center +
-                  interleavedPCM[offset + 3] * surround * 0.5
+        }
+        case 4: {
+          const C = interleavedPCM[offset]
+          const L = interleavedPCM[offset + 1]
+          const R = interleavedPCM[offset + 2]
+          const Cs = interleavedPCM[offset + 3]
+          left = L + C * CENTER_MIX + Cs * SURROUND_MIX * 0.5
+          right = R + C * CENTER_MIX + Cs * SURROUND_MIX * 0.5
           break
-
-        case 5:
-          left = interleavedPCM[offset + 1] + interleavedPCM[offset] * center +
-                 interleavedPCM[offset + 3] * surround
-          right = interleavedPCM[offset + 2] + interleavedPCM[offset] * center +
-                  interleavedPCM[offset + 4] * surround
+        }
+        case 5: {
+          const C = interleavedPCM[offset]
+          const L = interleavedPCM[offset + 1]
+          const R = interleavedPCM[offset + 2]
+          const Ls = interleavedPCM[offset + 3]
+          const Rs = interleavedPCM[offset + 4]
+          left = L + C * CENTER_MIX + Ls * SURROUND_MIX
+          right = R + C * CENTER_MIX + Rs * SURROUND_MIX
           break
-
-        case 6:
-          left = interleavedPCM[offset + 1] + interleavedPCM[offset] * center +
-                 interleavedPCM[offset + 3] * surround + interleavedPCM[offset + 5] * lfe
-          right = interleavedPCM[offset + 2] + interleavedPCM[offset] * center +
-                  interleavedPCM[offset + 4] * surround + interleavedPCM[offset + 5] * lfe
+        }
+        case 6: {
+          const C = interleavedPCM[offset]
+          const L = interleavedPCM[offset + 1]
+          const R = interleavedPCM[offset + 2]
+          const Ls = interleavedPCM[offset + 3]
+          const Rs = interleavedPCM[offset + 4]
+          const LFE = interleavedPCM[offset + 5]
+          left = L + C * CENTER_MIX + Ls * SURROUND_MIX + LFE * LFE_MIX
+          right = R + C * CENTER_MIX + Rs * SURROUND_MIX + LFE * LFE_MIX
           break
-
+        }
         default:
           left = interleavedPCM[offset]
           right = interleavedPCM[offset + 1] || left
+          break
       }
 
-      stereo[i * 2] = _clampSample(left)
-      stereo[i * 2 + 1] = _clampSample(right)
+      if (left > 1.0) left = 1.0
+      else if (left < -1.0) left = -1.0
+      if (right > 1.0) right = 1.0
+      else if (right < -1.0) right = -1.0
+
+      stereo[i * 2] = left
+      stereo[i * 2 + 1] = right
     }
 
     return stereo
   }
 
   async _processPendingChunks() {
-    if (!this.isDecoderReady || this.pendingChunks.length === 0 || this._aborted) return
+    if (!this.isDecoderReady || this.pendingChunks.length === 0) return
 
-    const chunks = this.pendingChunks
-    this.pendingChunks = []
-
-    for (const { chunk, encoding, callback } of chunks) {
-      if (this._aborted) {
-        callback()
-        continue
-      }
+    for (const { chunk, encoding, callback } of this.pendingChunks) {
       await this._decodeChunk(chunk, encoding, callback)
     }
+    this.pendingChunks = []
   }
 
   _findADTSFrame(buffer) {
-    const minLength = 7
-
-    for (let i = 0; i < buffer.length - minLength; i++) {
+    for (let i = 0; i < buffer.length - 7; i++) {
       const syncword = (buffer[i] << 4) | (buffer[i + 1] >> 4)
-
       if (syncword === 0xfff) {
-        const frameLength = ((buffer[i + 3] & 0x03) << 11) |
-                           (buffer[i + 4] << 3) |
-                           ((buffer[i + 5] >> 5) & 0x07)
+        const frameLength =
+          ((buffer[i + 3] & 0x03) << 11) |
+          (buffer[i + 4] << 3) |
+          ((buffer[i + 5] >> 5) & 0x07)
 
         if (i + frameLength <= buffer.length) {
           return {
@@ -756,29 +757,19 @@ class AACDecoderStream extends Transform {
         break
       }
     }
-
     return null
   }
 
   _transform(chunk, encoding, callback) {
-    if (this._aborted) {
-      callback()
-      return
-    }
-
     if (!this.isDecoderReady) {
       this.pendingChunks.push({ chunk, encoding, callback })
       return
     }
+
     this._decodeChunk(chunk, encoding, callback)
   }
 
   async _decodeChunk(chunk, encoding, callback) {
-    if (this._aborted || !this.decoder) {
-      callback()
-      return
-    }
-
     try {
       this.buffer = Buffer.concat([this.buffer, chunk])
 
@@ -797,7 +788,64 @@ class AACDecoderStream extends Transform {
         }
       }
 
-      await this._decodeFrames()
+      while (this.buffer.length > 0) {
+        const frameInfo = this._findADTSFrame(this.buffer)
+
+        if (!frameInfo) break
+
+        try {
+          const result = this.decoder.decode(frameInfo.frame)
+
+          if (result?.pcm && result.pcm.length > 0) {
+            let { pcm, sampleRate, channels, samplesPerChannel } = result
+
+            if (channels > 2 || channels === 1) {
+              pcm = this._downmixToStereo(pcm, channels, samplesPerChannel)
+              channels = 2
+            }
+
+            if (sampleRate !== 48000) {
+              if (!this.resampler && !this.resamplerCreationPromise) {
+                this.resamplerCreationPromise = LibSampleRate.create(
+                  2,
+                  sampleRate,
+                  48000,
+                  {
+                    converterType: _getResamplerConverterType(
+                      this.resamplingQuality
+                    )
+                  }
+                ).then((resampler) => {
+                  this.resampler = resampler
+                  this.resamplerCreationPromise = null
+                  return resampler
+                })
+              }
+
+              if (!this.resampler) {
+                await this.resamplerCreationPromise
+              }
+
+              const resampled = this.resampler.full(pcm)
+              const pcmInt16 = new Int16Array(resampled.length)
+              for (let i = 0; i < resampled.length; i++) {
+                pcmInt16[i] = Math.max(-1, Math.min(1, resampled[i])) * 32767
+              }
+              this.push(Buffer.from(pcmInt16.buffer))
+            } else {
+              const pcmInt16 = new Int16Array(pcm.length)
+              for (let i = 0; i < pcm.length; i++) {
+                pcmInt16[i] = Math.max(-1, Math.min(1, pcm[i])) * 32767
+              }
+              this.push(Buffer.from(pcmInt16.buffer))
+            }
+          }
+        } catch (decodeErr) {
+          // Skip bad frame
+        }
+
+        this.buffer = this.buffer.subarray(frameInfo.end)
+      }
 
       callback()
     } catch (err) {
@@ -805,120 +853,28 @@ class AACDecoderStream extends Transform {
     }
   }
 
-  async _decodeFrames() {
-    let framesDecoded = 0
-    const maxFramesPerCall = 5
-
-    while (this.buffer.length > 0 && framesDecoded < maxFramesPerCall && !this._aborted && this.decoder) {
-      const frameInfo = this._findADTSFrame(this.buffer)
-      if (!frameInfo) break
-
-      try {
-        const result = this.decoder?.decode(frameInfo.frame)
-
-        if (result?.pcm?.length > 0 && !this._aborted) {
-          await this._processDecodedFrame(result)
-          framesDecoded++
-        }
-      } catch {}
-
-      this.buffer = this.buffer.subarray(frameInfo.end)
-    }
-  }
-
-  async _processDecodedFrame(result) {
-    if (this._aborted) return
-
-    let { pcm, sampleRate, channels, samplesPerChannel } = result
-
-    if (channels !== AUDIO_CONFIG.channels) {
-      pcm = this._downmixToStereo(pcm, channels, samplesPerChannel)
-    }
-
-    if (sampleRate !== AUDIO_CONFIG.sampleRate) {
-      await this._ensureResampler(sampleRate)
-      if (!this._aborted && this.resampler) {
-        this.push(_floatToInt16Buffer(this.resampler.full(pcm)))
-      }
-    } else if (!this._aborted) {
-      this.push(_floatToInt16Buffer(pcm))
-    }
-  }
-
-  async _ensureResampler(sampleRate) {
-    if (this._aborted) return
-
-    if (!this.resampler && !this.resamplerCreationPromise) {
-      this.resamplerCreationPromise = LibSampleRate.create(
-        AUDIO_CONFIG.channels,
-        sampleRate,
-        AUDIO_CONFIG.sampleRate,
-        { converterType: _getResamplerConverterType(this.resamplingQuality) }
-      ).then((resampler) => {
-        this.resampler = resampler
-        this.resamplerCreationPromise = null
-        return resampler
-      })
-    }
-
-    if (!this.resampler) {
-      await this.resamplerCreationPromise
-    }
-  }
-
   _flush(callback) {
-    if (this._aborted || !this.decoder) {
-      this._cleanup()
-      callback()
-      return
-    }
-
     if (this.buffer.length > 0 && this.isConfigured) {
       try {
         const frameInfo = this._findADTSFrame(this.buffer)
         if (frameInfo) {
-          const result = this.decoder?.decode(frameInfo.frame)
+          const result = this.decoder.decode(frameInfo.frame)
           if (result?.pcm) {
-            this.push(_floatToInt16Buffer(result.pcm))
+            const pcmInt16 = new Int16Array(result.pcm.length)
+            for (let i = 0; i < result.pcm.length; i++) {
+              pcmInt16[i] = Math.max(-1, Math.min(1, result.pcm[i])) * 32767
+            }
+            this.push(Buffer.from(pcmInt16.buffer))
           }
         }
-      } catch {}
+      } catch (err) {}
     }
 
-    this._cleanup()
+    if (this.resampler) this.resampler.destroy?.()
+    if (this.decoder) this.decoder.destroy?.()
     callback()
   }
-
-  _destroy(err, callback) {
-    this._aborted = true
-
-    for (const { callback: cb } of this.pendingChunks) {
-      cb()
-    }
-    this.pendingChunks = []
-    this.buffer = EMPTY_BUFFER
-
-    this._cleanup()
-    super._destroy(err, callback)
-  }
-
-  _cleanup() {
-    if (this.resampler) {
-      try {
-        this.resampler.destroy()
-      } catch {}
-      this.resampler = null
-    }
-
-    if (this.decoder) {
-      try {
-        this.decoder.destroy()
-      } catch {}
-      this.decoder = null
-    }
-  }
 }
-
 class MP4ToAACStream extends Transform {
   constructor(options) {
     super({
@@ -1079,38 +1035,78 @@ class MP4ToAACStream extends Transform {
     }
   }
 }
-
+/**********************************************************************
+ * ATENÇÃO: Não altere este trecho; ajustes aqui quebram a cadeia de decodificação.
+ * WARNING: Do not edit this section; changes here will break the decoding pipeline.
+ **********************************************************************/
 class FMP4ToAACStream extends Transform {
   constructor(options) {
-    super({
-      ...options,
-      highWaterMark: AUDIO_CONFIG.highWaterMark
-    })
+    super(options)
     this.audioConfig = null
     this.initSegmentProcessed = false
-    this._aborted = false
   }
 
-  abort() {
-    this._aborted = true
+  _parseBoxes(buffer, offset = 0) {
+    const boxes = []
+    while (offset < buffer.length) {
+      if (offset + 8 > buffer.length) break
+
+      const size = buffer.readUInt32BE(offset)
+      const type = buffer.toString('ascii', offset + 4, offset + 8)
+
+      if (size === 0 || size > buffer.length - offset) break
+      if (type === '\0\0\0\0') break
+
+      const boxData = buffer.subarray(offset + 8, offset + size)
+      boxes.push({ type, size, data: boxData, offset })
+      offset += size
+    }
+    return boxes
   }
 
   _extractAudioConfigFromInit(initSegment) {
-    const boxes = _parseBoxes(initSegment)
+    const boxes = this._parseBoxes(initSegment)
+    const moovBox = boxes.find((b) => b.type === 'moov')
+    if (!moovBox) return null
 
-    const stblBoxes = _findNestedBox(boxes, 'moov', 'trak', 'mdia', 'minf', 'stbl')
-    if (!stblBoxes) return null
+    const moovBoxes = this._parseBoxes(moovBox.data)
+    const trakBox = moovBoxes.find((b) => b.type === 'trak')
+    if (!trakBox) return null
 
+    const trakBoxes = this._parseBoxes(trakBox.data)
+    const mdiaBox = trakBoxes.find((b) => b.type === 'mdia')
+    if (!mdiaBox) return null
+
+    const mdiaBoxes = this._parseBoxes(mdiaBox.data)
+    const minfBox = mdiaBoxes.find((b) => b.type === 'minf')
+    if (!minfBox) return null
+
+    const minfBoxes = this._parseBoxes(minfBox.data)
+    const stblBox = minfBoxes.find((b) => b.type === 'stbl')
+    if (!stblBox) return null
+
+    const stblBoxes = this._parseBoxes(stblBox.data)
     const stsdBox = stblBoxes.find((b) => b.type === 'stsd')
-    if (!stsdBox || stsdBox.data.length < 16) return null
+    if (!stsdBox) return null
 
-    const mp4aBox = _parseBoxes(stsdBox.data, 8).find((b) => b.type === 'mp4a')
-    if (!mp4aBox || mp4aBox.data.length < 28) return null
+    const stsd = stsdBox.data
+    if (stsd.length < 16) return null
+
+    const stsdBoxes = this._parseBoxes(stsd, 8)
+    const mp4aBox = stsdBoxes.find((b) => b.type === 'mp4a')
+    if (!mp4aBox) return null
 
     const mp4a = mp4aBox.data
+    if (mp4a.length < 28) return null
+
     const channelCount = mp4a.readUInt16BE(16)
     const sampleRate = mp4a.readUInt32BE(24) >> 16
-    const samplingIndex = SAMPLE_RATES.indexOf(sampleRate)
+
+    const sampleRates = [
+      96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000,
+      11025, 8000, 7350
+    ]
+    const samplingIndex = sampleRates.indexOf(sampleRate)
 
     return {
       profile: 2,
@@ -1120,48 +1116,59 @@ class FMP4ToAACStream extends Transform {
     }
   }
 
+  _createAdtsHeader(sampleLength, audioConfig) {
+    const adts = Buffer.alloc(7)
+    const frameLength = sampleLength + 7
+
+    const profile = (audioConfig.profile || 2) - 1
+    const samplingIndex = audioConfig.samplingIndex || 4
+    const channelCount = audioConfig.channelCount || 2
+
+    adts[0] = 0xff
+    adts[1] = 0xf1
+    adts[2] =
+      ((profile & 0x03) << 6) |
+      ((samplingIndex & 0x0f) << 2) |
+      ((channelCount & 0x04) >> 2)
+    adts[3] = ((channelCount & 0x03) << 6) | ((frameLength & 0x1800) >> 11)
+    adts[4] = (frameLength & 0x7f8) >> 3
+    adts[5] = ((frameLength & 0x7) << 5) | 0x1f
+    adts[6] = 0xfc
+
+    return adts
+  }
+
   _extractAACFromSegment(buffer) {
     if (!this.audioConfig) return null
 
-    const boxes = _parseBoxes(buffer)
-
+    const boxes = this._parseBoxes(buffer)
     const mdatBox = boxes.find((b) => b.type === 'mdat')
     if (!mdatBox) return null
 
     const aacData = mdatBox.data
-
-    const sampleSizes = this._extractSampleSizes(boxes)
-
-    if (sampleSizes && sampleSizes.length > 0) {
-      return this._wrapSamplesWithADTS(aacData, sampleSizes)
-    }
-
-    return null
-  }
-
-  _extractSampleSizes(boxes) {
     const moofBox = boxes.find((b) => b.type === 'moof')
-    if (!moofBox) return null
+    if (!moofBox) return aacData
 
-    const moofBoxes = _parseBoxes(moofBox.data)
+    const moofBoxes = this._parseBoxes(moofBox.data)
     const trafBox = moofBoxes.find((b) => b.type === 'traf')
-    if (!trafBox) return null
+    if (!trafBox) return aacData
 
-    const trafBoxes = _parseBoxes(trafBox.data)
+    const trafBoxes = this._parseBoxes(trafBox.data)
     const trunBox = trafBoxes.find((b) => b.type === 'trun')
-    if (!trunBox || trunBox.data.length < 8) return null
+    if (!trunBox) return aacData
 
     const trun = trunBox.data
+    if (trun.length < 8) return aacData
+
     const flags = (trun[1] << 16) | (trun[2] << 8) | trun[3]
     const sampleCount = trun.readUInt32BE(4)
 
     let offset = 8
-
     if (flags & 0x1) offset += 4
     if (flags & 0x4) offset += 4
 
     const sampleSizes = []
-    const hasSampleSize = !!(flags & 0x200)
+    const hasSampleSize = flags & 0x200
 
     for (let i = 0; i < sampleCount && offset < trun.length; i++) {
       if (flags & 0x100) offset += 4
@@ -1173,35 +1180,33 @@ class FMP4ToAACStream extends Transform {
       if (flags & 0x800) offset += 4
     }
 
-    return sampleSizes
-  }
-
-  _wrapSamplesWithADTS(aacData, sampleSizes) {
-    const { profile, samplingIndex, channelCount } = this.audioConfig
-    const frames = []
-    let dataOffset = 0
-
-    for (const sampleSize of sampleSizes) {
-      if (dataOffset + sampleSize <= aacData.length) {
-        frames.push(_createAdtsHeader(sampleSize, profile, samplingIndex, channelCount))
-        frames.push(aacData.subarray(dataOffset, dataOffset + sampleSize))
-        dataOffset += sampleSize
+    if (sampleSizes.length > 0) {
+      const frames = []
+      let dataOffset = 0
+      for (const sampleSize of sampleSizes) {
+        if (dataOffset + sampleSize <= aacData.length) {
+          const adtsHeader = this._createAdtsHeader(
+            sampleSize,
+            this.audioConfig
+          )
+          const aacSample = aacData.subarray(
+            dataOffset,
+            dataOffset + sampleSize
+          )
+          frames.push(Buffer.concat([adtsHeader, aacSample]))
+          dataOffset += sampleSize
+        }
       }
+      return frames.length > 0 ? Buffer.concat(frames) : null
     }
 
-    return frames.length > 0 ? Buffer.concat(frames) : null
+    return null
   }
 
   _transform(chunk, encoding, callback) {
-    if (this._aborted) {
-      callback()
-      return
-    }
-
     try {
       if (!this.initSegmentProcessed && chunk.length > 8) {
         const boxType = chunk.toString('ascii', 4, 8)
-
         if (boxType === 'ftyp') {
           this.audioConfig = this._extractAudioConfigFromInit(chunk)
           this.initSegmentProcessed = true
@@ -1210,7 +1215,7 @@ class FMP4ToAACStream extends Transform {
         }
       }
 
-      if (this.audioConfig && !this._aborted) {
+      if (this.audioConfig) {
         const aacData = this._extractAACFromSegment(chunk)
         if (aacData) {
           this.push(aacData)
@@ -1218,7 +1223,7 @@ class FMP4ToAACStream extends Transform {
       }
 
       callback()
-    } catch {
+    } catch (err) {
       callback()
     }
   }
@@ -1226,13 +1231,7 @@ class FMP4ToAACStream extends Transform {
   _flush(callback) {
     callback()
   }
-
-  _destroy(err, callback) {
-    this._aborted = true
-    super._destroy(err, callback)
-  }
 }
-
 class StreamAudioResource extends BaseAudioResource {
   constructor(stream, type, nodelink, initialFilters = {}, volume = 1.0) {
     super()

@@ -171,6 +171,259 @@ export default class StatsManager {
         registers: [this.promRegister]
       })
 
+      this.promWorkerPlayers = new Gauge({
+        name: 'nodelink_worker_players',
+        help: 'Number of players per worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerPlayingPlayers = new Gauge({
+        name: 'nodelink_worker_playing_players',
+        help: 'Number of playing players per worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerMemoryUsed = new Gauge({
+        name: 'nodelink_worker_memory_used_bytes',
+        help: 'Worker memory used in bytes',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerMemoryAllocated = new Gauge({
+        name: 'nodelink_worker_memory_allocated_bytes',
+        help: 'Worker memory allocated in bytes',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerCpuLoad = new Gauge({
+        name: 'nodelink_worker_cpu_load',
+        help: 'Worker CPU load',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerCommandQueueLength = new Gauge({
+        name: 'nodelink_worker_command_queue_length',
+        help: 'Worker command queue length',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerFramesSent = new Gauge({
+        name: 'nodelink_worker_frames_sent',
+        help: 'Audio frames sent by worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerFramesNulled = new Gauge({
+        name: 'nodelink_worker_frames_nulled',
+        help: 'Audio frames nulled by worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerFramesDeficit = new Gauge({
+        name: 'nodelink_worker_frames_deficit',
+        help: 'Audio frame deficit by worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerFramesExpected = new Gauge({
+        name: 'nodelink_worker_frames_expected',
+        help: 'Audio frames expected by worker',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerUptime = new Gauge({
+        name: 'nodelink_worker_uptime_seconds',
+        help: 'Worker uptime in seconds',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerHealth = new Gauge({
+        name: 'nodelink_worker_health',
+        help: 'Worker health status (1 = healthy, 0 = unhealthy)',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
+      this.promTotalWorkers = new Gauge({
+        name: 'nodelink_total_workers',
+        help: 'Total number of active workers',
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerRestarts = new Counter({
+        name: 'nodelink_worker_restarts_total',
+        help: 'Total number of worker restarts',
+        labelNames: ['worker_id'],
+        registers: [this.promRegister]
+      })
+
+      this.promWorkerFailures = new Counter({
+        name: 'nodelink_worker_failures_total',
+        help: 'Total number of worker failures',
+        labelNames: ['worker_id', 'exit_code'],
+        registers: [this.promRegister]
+      })
+
+      this.promCommandQueueSize = new Gauge({
+        name: 'nodelink_command_queue_size',
+        help: 'Total size of command queue across all workers',
+        registers: [this.promRegister]
+      })
+
+      this.promCommandExecutionTime = new Gauge({
+        name: 'nodelink_command_execution_time_ms',
+        help: 'Command execution time in milliseconds',
+        labelNames: ['command_type', 'worker_id'],
+        registers: [this.promRegister]
+      })
+
+      this.promCommandTimeouts = new Counter({
+        name: 'nodelink_command_timeouts_total',
+        help: 'Total number of command timeouts',
+        labelNames: ['command_type'],
+        registers: [this.promRegister]
+      })
+
+      this.promCommandRetries = new Counter({
+        name: 'nodelink_command_retries_total',
+        help: 'Total number of command retries',
+        labelNames: ['command_type'],
+        registers: [this.promRegister]
+      })
+
+      this.promPlayerRestorations = new Counter({
+        name: 'nodelink_player_restorations_total',
+        help: 'Total number of player restorations',
+        labelNames: ['worker_id'],
+        registers: [this.promRegister]
+      })
+
+      this.promPlayerDestructions = new Counter({
+        name: 'nodelink_player_destructions_total',
+        help: 'Total number of player destructions',
+        labelNames: ['session_id', 'reason'],
+        registers: [this.promRegister]
+      })
+
+      this.promTrackLoads = new Counter({
+        name: 'nodelink_track_loads_total',
+        help: 'Total number of track loads',
+        labelNames: ['source', 'status'],
+        registers: [this.promRegister]
+      })
+
+      this.promTrackLoadDuration = new Gauge({
+        name: 'nodelink_track_load_duration_ms',
+        help: 'Track load duration in milliseconds',
+        labelNames: ['source'],
+        registers: [this.promRegister]
+      })
+
+      this.promStreamErrors = new Counter({
+        name: 'nodelink_stream_errors_total',
+        help: 'Total number of stream errors',
+        labelNames: ['error_type', 'source'],
+        registers: [this.promRegister]
+      })
+
+      this.promPlayerStuck = new Counter({
+        name: 'nodelink_player_stuck_total',
+        help: 'Total number of stuck players',
+        labelNames: ['guild_id', 'reason'],
+        registers: [this.promRegister]
+      })
+
+      this.promVoiceConnections = new Gauge({
+        name: 'nodelink_voice_connections',
+        help: 'Number of active voice connections',
+        registers: [this.promRegister]
+      })
+
+      this.promVoiceConnectionErrors = new Counter({
+        name: 'nodelink_voice_connection_errors_total',
+        help: 'Total number of voice connection errors',
+        labelNames: ['error_type'],
+        registers: [this.promRegister]
+      })
+
+      this.promWebsocketConnections = new Gauge({
+        name: 'nodelink_websocket_connections',
+        help: 'Number of active WebSocket connections',
+        registers: [this.promRegister]
+      })
+
+      this.promWebsocketMessages = new Counter({
+        name: 'nodelink_websocket_messages_total',
+        help: 'Total number of WebSocket messages',
+        labelNames: ['direction', 'op_type'],
+        registers: [this.promRegister]
+      })
+
+      this.promSessionResumes = new Counter({
+        name: 'nodelink_session_resumes_total',
+        help: 'Total number of session resumes',
+        labelNames: ['client_name', 'success'],
+        registers: [this.promRegister]
+      })
+
+      this.promRoutePlannerIps = new Gauge({
+        name: 'nodelink_route_planner_ips',
+        help: 'Number of available IPs in route planner',
+        registers: [this.promRegister]
+      })
+
+      this.promRoutePlannerBannedIps = new Gauge({
+        name: 'nodelink_route_planner_banned_ips',
+        help: 'Number of banned IPs in route planner',
+        registers: [this.promRegister]
+      })
+
+      this.promLyricsRequests = new Counter({
+        name: 'nodelink_lyrics_requests_total',
+        help: 'Total number of lyrics requests',
+        labelNames: ['provider', 'status'],
+        registers: [this.promRegister]
+      })
+
+      this.promFilterUsage = new Counter({
+        name: 'nodelink_filter_usage_total',
+        help: 'Total number of filter usage',
+        labelNames: ['filter_type'],
+        registers: [this.promRegister]
+      })
+
+      this.promHttpRequestDuration = new Gauge({
+        name: 'nodelink_http_request_duration_ms',
+        help: 'HTTP request duration in milliseconds',
+        labelNames: ['endpoint', 'method', 'status_code'],
+        registers: [this.promRegister]
+      })
+
+      this.promRateLimitHits = new Counter({
+        name: 'nodelink_rate_limit_hits_total',
+        help: 'Total number of rate limit hits',
+        labelNames: ['endpoint', 'ip'],
+        registers: [this.promRegister]
+      })
+
+      this.promDosProtectionBlocks = new Counter({
+        name: 'nodelink_dos_protection_blocks_total',
+        help: 'Total number of DoS protection blocks',
+        labelNames: ['ip', 'reason'],
+        registers: [this.promRegister]
+      })
+
       logger('info', 'StatsManager', 'Prometheus metrics initialized.')
     }
   }
@@ -185,18 +438,27 @@ export default class StatsManager {
     }
   }
 
+  _sanitizeEndpoint(endpoint) {
+    return endpoint
+      .replace(/\/sessions\/[A-Za-z0-9]+/g, '/sessions/:sessionId')
+      .replace(/\/players\/[0-9]+/g, '/players/:guildId')
+      .replace(/\/tracks\/[A-Za-z0-9_-]+/g, '/tracks/:identifier')
+  }
+
   incrementApiRequest(endpoint) {
-    this.stats.api.requests[endpoint] =
-      (this.stats.api.requests[endpoint] || 0) + 1
+    const sanitized = this._sanitizeEndpoint(endpoint)
+    this.stats.api.requests[sanitized] =
+      (this.stats.api.requests[sanitized] || 0) + 1
     if (this.promApiRequests) {
-      this.promApiRequests.inc({ endpoint })
+      this.promApiRequests.inc({ endpoint: sanitized })
     }
   }
 
   incrementApiError(endpoint) {
-    this.stats.api.errors[endpoint] = (this.stats.api.errors[endpoint] || 0) + 1
+    const sanitized = this._sanitizeEndpoint(endpoint)
+    this.stats.api.errors[sanitized] = (this.stats.api.errors[sanitized] || 0) + 1
     if (this.promApiErrors) {
-      this.promApiErrors.inc({ endpoint })
+      this.promApiErrors.inc({ endpoint: sanitized })
     }
   }
 
@@ -224,19 +486,16 @@ export default class StatsManager {
     }
   }
 
-  updateStatsMetrics(statsData) {
-    if (!this.promPlayers) return // Metrics not enabled
+  updateStatsMetrics(statsData, workerMetrics = null) {
+    if (!this.promPlayers) return
 
     try {
       const stats = statsData
-      // Update player metrics
       this.promPlayers.set(stats.players || 0)
       this.promPlayingPlayers.set(stats.playingPlayers || 0)
 
-      // Update uptime
       this.promUptime.set(stats.uptime || 0)
 
-      // Update memory metrics
       if (stats.memory) {
         this.promMemoryFree.set(stats.memory.free || 0)
         this.promMemoryUsed.set(stats.memory.used || 0)
@@ -244,25 +503,26 @@ export default class StatsManager {
         this.promMemoryReservable.set(stats.memory.reservable || 0)
       }
 
-      // Update CPU metrics
       if (stats.cpu) {
         this.promCpuCores.set(stats.cpu.cores || 0)
         this.promCpuSystemLoad.set(stats.cpu.systemLoad || 0)
         this.promCpuNodelinkLoad.set(stats.cpu.nodelinkLoad || 0)
       }
 
-      // Update frame statistics
       if (stats.frameStats) {
         this.promFramesSent.set(stats.frameStats.sent || 0)
         this.promFramesNulled.set(stats.frameStats.nulled || 0)
         this.promFramesDeficit.set(stats.frameStats.deficit || 0)
         this.promFramesExpected.set(stats.frameStats.expected || 0)
       } else {
-        // Reset to 0 if no frame stats available
         this.promFramesSent.set(0)
         this.promFramesNulled.set(0)
         this.promFramesDeficit.set(0)
         this.promFramesExpected.set(0)
+      }
+
+      if (workerMetrics && this.promWorkerPlayers) {
+        this._updateWorkerMetrics(workerMetrics)
       }
     } catch (error) {
       logger(
@@ -270,6 +530,223 @@ export default class StatsManager {
         'StatsManager',
         `Failed to update stats metrics: ${error.message}`
       )
+    }
+  }
+
+  _updateWorkerMetrics(workerMetrics) {
+    if (!this.promWorkerPlayers) return
+
+    try {
+      const totalQueueSize = Object.values(workerMetrics).reduce(
+        (sum, w) => sum + (w.stats.commandQueueLength || 0),
+        0
+      )
+
+      if (this.promCommandQueueSize) {
+        this.promCommandQueueSize.set(totalQueueSize)
+      }
+
+      if (this.promTotalWorkers) {
+        this.promTotalWorkers.set(Object.keys(workerMetrics).length)
+      }
+
+      for (const [uniqueWorkerId, workerData] of Object.entries(workerMetrics)) {
+        const { pid, stats, health, uptime } = workerData
+        const labels = { worker_id: String(uniqueWorkerId), worker_pid: String(pid) }
+
+        this.promWorkerPlayers.set(labels, stats.players || 0)
+        this.promWorkerPlayingPlayers.set(labels, stats.playingPlayers || 0)
+
+        if (stats.memory) {
+          this.promWorkerMemoryUsed.set(labels, stats.memory.used || 0)
+          this.promWorkerMemoryAllocated.set(labels, stats.memory.allocated || 0)
+        }
+
+        if (stats.cpu) {
+          this.promWorkerCpuLoad.set(labels, stats.cpu.nodelinkLoad || 0)
+        }
+
+        if (stats.commandQueueLength !== undefined) {
+          this.promWorkerCommandQueueLength.set(labels, stats.commandQueueLength || 0)
+        }
+
+        if (stats.frameStats) {
+          this.promWorkerFramesSent.set(labels, stats.frameStats.sent || 0)
+          this.promWorkerFramesNulled.set(labels, stats.frameStats.nulled || 0)
+          this.promWorkerFramesDeficit.set(labels, stats.frameStats.deficit || 0)
+          this.promWorkerFramesExpected.set(labels, stats.frameStats.expected || 0)
+        }
+
+        if (uptime !== undefined) {
+          this.promWorkerUptime.set(labels, uptime)
+        }
+
+        if (health !== undefined) {
+          this.promWorkerHealth.set(labels, health ? 1 : 0)
+        }
+      }
+    } catch (error) {
+      logger(
+        'error',
+        'StatsManager',
+        `Failed to update worker metrics: ${error.message}`
+      )
+    }
+  }
+
+  incrementWorkerRestart(workerId) {
+    if (this.promWorkerRestarts && workerId) {
+      this.promWorkerRestarts.inc({ worker_id: String(workerId) })
+    }
+  }
+
+  incrementWorkerFailure(workerId, exitCode) {
+    if (this.promWorkerFailures && workerId) {
+      this.promWorkerFailures.inc({
+        worker_id: String(workerId),
+        exit_code: String(exitCode || 'unknown')
+      })
+    }
+  }
+
+  recordCommandExecutionTime(commandType, workerId, durationMs) {
+    if (this.promCommandExecutionTime && commandType && workerId && typeof durationMs === 'number') {
+      this.promCommandExecutionTime.set(
+        { command_type: commandType, worker_id: String(workerId) },
+        durationMs
+      )
+    }
+  }
+
+  incrementCommandTimeout(commandType) {
+    if (this.promCommandTimeouts && commandType) {
+      this.promCommandTimeouts.inc({ command_type: commandType })
+    }
+  }
+
+  incrementCommandRetry(commandType) {
+    if (this.promCommandRetries && commandType) {
+      this.promCommandRetries.inc({ command_type: commandType })
+    }
+  }
+
+  incrementPlayerRestoration(workerId) {
+    if (this.promPlayerRestorations && workerId) {
+      this.promPlayerRestorations.inc({ worker_id: String(workerId) })
+    }
+  }
+
+  incrementPlayerDestruction(sessionId, reason) {
+    if (this.promPlayerDestructions && sessionId) {
+      const sanitizedSessionId = 'session_' + sessionId.substring(0, 4) + '...'
+      this.promPlayerDestructions.inc({
+        session_id: sanitizedSessionId,
+        reason: reason || 'unknown'
+      })
+    }
+  }
+
+  incrementTrackLoad(source, status) {
+    if (this.promTrackLoads && source && status) {
+      this.promTrackLoads.inc({ source, status })
+    }
+  }
+
+  recordTrackLoadDuration(source, durationMs) {
+    if (this.promTrackLoadDuration && source && typeof durationMs === 'number') {
+      this.promTrackLoadDuration.set({ source }, durationMs)
+    }
+  }
+
+  incrementStreamError(errorType, source) {
+    if (this.promStreamErrors && errorType && source) {
+      this.promStreamErrors.inc({ error_type: errorType, source })
+    }
+  }
+
+  incrementPlayerStuck(guildId, reason) {
+    if (this.promPlayerStuck && guildId && reason) {
+      const sanitizedGuildId = 'guild_' + guildId.substring(0, 4) + '...'
+      this.promPlayerStuck.inc({ guild_id: sanitizedGuildId, reason })
+    }
+  }
+
+  setVoiceConnections(count) {
+    if (this.promVoiceConnections && typeof count === 'number') {
+      this.promVoiceConnections.set(count)
+    }
+  }
+
+  incrementVoiceConnectionError(errorType) {
+    if (this.promVoiceConnectionErrors && errorType) {
+      this.promVoiceConnectionErrors.inc({ error_type: errorType })
+    }
+  }
+
+  setWebsocketConnections(count) {
+    if (this.promWebsocketConnections && typeof count === 'number') {
+      this.promWebsocketConnections.set(count)
+    }
+  }
+
+  incrementWebsocketMessage(direction, opType) {
+    if (this.promWebsocketMessages && direction && opType) {
+      this.promWebsocketMessages.inc({ direction, op_type: opType })
+    }
+  }
+
+  incrementSessionResume(clientName, success) {
+    if (this.promSessionResumes && clientName) {
+      this.promSessionResumes.inc({
+        client_name: clientName,
+        success: success ? 'true' : 'false'
+      })
+    }
+  }
+
+  setRoutePlannerIps(available, banned) {
+    if (this.promRoutePlannerIps && typeof available === 'number') {
+      this.promRoutePlannerIps.set(available)
+    }
+    if (this.promRoutePlannerBannedIps && typeof banned === 'number') {
+      this.promRoutePlannerBannedIps.set(banned)
+    }
+  }
+
+  incrementLyricsRequest(provider, status) {
+    if (this.promLyricsRequests && provider && status) {
+      this.promLyricsRequests.inc({ provider, status })
+    }
+  }
+
+  incrementFilterUsage(filterType) {
+    if (this.promFilterUsage && filterType) {
+      this.promFilterUsage.inc({ filter_type: filterType })
+    }
+  }
+
+  recordHttpRequestDuration(endpoint, method, statusCode, durationMs) {
+    if (this.promHttpRequestDuration && endpoint && method && statusCode && typeof durationMs === 'number') {
+      const sanitized = this._sanitizeEndpoint(endpoint)
+      this.promHttpRequestDuration.set(
+        { endpoint: sanitized, method, status_code: String(statusCode) },
+        durationMs
+      )
+    }
+  }
+
+  incrementRateLimitHit(endpoint, ip) {
+    if (this.promRateLimitHits && endpoint && ip) {
+      const sanitized = this._sanitizeEndpoint(endpoint)
+      const sanitizedIp = ip.includes(':') ? '[IPv6]' : ip.split('.').slice(0, 2).join('.') + '.xxx.xxx'
+      this.promRateLimitHits.inc({ endpoint: sanitized, ip: sanitizedIp })
+    }
+  }
+
+  incrementDosProtectionBlock(ip, reason) {
+    if (this.promDosProtectionBlocks && ip && reason) {
+      const sanitizedIp = ip.includes(':') ? '[IPv6]' : ip.split('.').slice(0, 2).join('.') + '.xxx.xxx'
+      this.promDosProtectionBlocks.inc({ ip: sanitizedIp, reason })
     }
   }
 }

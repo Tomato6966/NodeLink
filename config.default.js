@@ -100,11 +100,23 @@ export default {
     http: {
       enabled: true
     },
+    flowery: {
+      enabled: true,
+      voice: 'Salli',
+      translate: false,
+      silence: 0,
+      speed: 1.0,
+      enforceConfig: false
+    },
     jiosaavn: {
       enabled: true,
       playlistLoadLimit: 50,
       artistLoadLimit: 20
       // "secretKey": "38346591" // Optional, defaults to standard key
+    },
+    "google-tts": {
+      enabled: true,
+      language: 'en-US'
     },
     youtube: {
       enabled: true,

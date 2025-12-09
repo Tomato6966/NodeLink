@@ -275,6 +275,45 @@ async function processQueue() {
         result = await nodelink.sources.getTrackUrl(decodedTrackInfo, itag)
         break
       }
+
+      case 'updateYoutubeConfig': {
+        try {
+          const { refreshToken, visitorData } = payload
+          const youtube = nodelink.sources.sources.get('youtube')
+
+          if (!youtube) {
+            result = { success: false, reason: 'YouTube source not loaded on this worker' }
+            break
+          }
+
+          if (refreshToken) {
+            if (youtube.oauth) {
+              youtube.oauth.refreshToken = refreshToken
+              youtube.oauth.accessToken = null
+              youtube.oauth.tokenExpiry = 0
+              logger('info', 'Worker', 'YouTube OAuth refresh token updated via API.')
+            } else {
+              logger('warn', 'Worker', 'Cannot update refreshToken: youtube.oauth is undefined.')
+            }
+          }
+
+          if (visitorData) {
+            if (youtube.ytContext?.client) {
+              youtube.ytContext.client.visitorData = visitorData
+              logger('info', 'Worker', 'YouTube visitorData updated via API.')
+            } else {
+              logger('warn', 'Worker', 'Cannot update visitorData: youtube.ytContext.client is undefined.')
+            }
+          }
+
+          result = { success: true }
+        } catch (err) {
+          logger('error', 'Worker', `Error updating YouTube config: ${err.message}`)
+          result = { success: false, error: err.message }
+        }
+        break
+      }
+
       default:
         throw new Error(`Unknown command type: ${type}`)
     }

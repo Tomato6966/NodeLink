@@ -151,7 +151,7 @@ export default class SourcesManager {
       throw new Error(`Source not found for term: ${sourceTerm}`)
     }
     logger('debug', 'Sources', `Searching on ${sourceName} for: "${query}"`)
-    return this._instrumentedSourceCall(sourceName, 'search', query)
+    return this._instrumentedSourceCall(sourceName, 'search', query, sourceTerm)
   }
 
   async searchWithDefault(query) {

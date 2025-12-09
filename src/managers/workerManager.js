@@ -28,6 +28,10 @@ export default class WorkerManager {
     this.statsUpdateBatch = new Map()
     this.statsUpdateTimer = null
     this.workerHealth = new Map()
+    this.workerStartTime = new Map()
+    this.workerUniqueId = new Map()
+    this.nextWorkerId = 1
+    this.liveYoutubeConfig = { refreshToken: null, visitorData: null }
     this.commandTimeout = config.cluster?.commandTimeout || 45000
     this.fastCommandTimeout = config.cluster?.fastCommandTimeout || 10000
     this.maxRetries = config.cluster?.maxRetries || 2
@@ -59,6 +63,10 @@ export default class WorkerManager {
       )
       this._updateWorkerFailureHistory(worker.id, code, signal)
 
+      if (global.nodelink?.statsManager) {
+        global.nodelink.statsManager.incrementWorkerFailure(worker.id, code)
+      }
+
       const affectedGuilds = Array.from(
         this.workerToGuilds.get(worker.id) || []
       )
@@ -83,6 +91,9 @@ export default class WorkerManager {
           const newWorker = this.forkWorker()
           if (newWorker && snapshots.length > 0) {
             this._restorePlayers(newWorker, snapshots)
+          }
+          if (global.nodelink?.statsManager) {
+            global.nodelink.statsManager.incrementWorkerRestart(worker.id)
           }
         }, 500)
       }
@@ -331,6 +342,8 @@ export default class WorkerManager {
     })
     this.workerToGuilds.set(worker.id, new Set())
     this.workerHealth.set(worker.id, Date.now())
+    this.workerStartTime.set(worker.id, Date.now())
+    this.workerUniqueId.set(worker.id, this.nextWorkerId++)
     this.workerFailureHistory.set(worker.id, {
       count: 0,
       lastFailure: null,
@@ -363,6 +376,8 @@ export default class WorkerManager {
     this.workerLoad.delete(workerId)
     this.workerStats.delete(workerId)
     this.idleWorkers.delete(workerId)
+    this.workerStartTime.delete(workerId)
+    this.workerUniqueId.delete(workerId)
 
     const affectedGuilds = Array.from(this.workerToGuilds.get(workerId) || [])
     this.workerToGuilds.delete(workerId)
@@ -448,9 +463,20 @@ export default class WorkerManager {
         'Cluster',
         `Worker ${worker.id} (PID ${worker.process.pid}) ready`
       )
+
+      if (this.liveYoutubeConfig.refreshToken || this.liveYoutubeConfig.visitorData) {
+        logger('info', 'Cluster', `Syncing live YouTube config to new worker ${worker.id}`)
+        this.execute(worker, 'updateYoutubeConfig', this.liveYoutubeConfig)
+          .catch(err => logger('error', 'Cluster', `Failed to sync config to worker ${worker.id}: ${err.message}`))
+      }
     } else if (global.nodelink) {
       global.nodelink.handleIPCMessage(msg)
     }
+  }
+
+  setLiveYoutubeConfig(config) {
+    if (config.refreshToken) this.liveYoutubeConfig.refreshToken = config.refreshToken
+    if (config.visitorData) this.liveYoutubeConfig.visitorData = config.visitorData
   }
 
   _flushStatsUpdates() {
@@ -599,6 +625,10 @@ export default class WorkerManager {
           snapshot
         })
 
+        if (global.nodelink?.statsManager) {
+          global.nodelink.statsManager.incrementPlayerRestoration(worker.id)
+        }
+
         logger('debug', 'Cluster', `Restored player for ${playerKey}`)
       } catch (error) {
         logger(
@@ -610,6 +640,34 @@ export default class WorkerManager {
     }
 
     logger('info', 'Cluster', `Restoration complete for worker ${worker.id}`)
+  }
+
+  getWorkerMetrics() {
+    const workerMetrics = {}
+    const now = Date.now()
+
+    for (const worker of this.workers) {
+      if (!worker.isConnected()) continue
+
+      const workerId = worker.id
+      const uniqueId = this.workerUniqueId.get(workerId) || workerId
+      const pid = worker.process.pid
+      const stats = this.workerStats.get(workerId) || {}
+      const lastHealthCheck = this.workerHealth.get(workerId) || 0
+      const startTime = this.workerStartTime.get(workerId) || now
+      const uptimeSeconds = Math.floor((now - startTime) / 1000)
+      const isHealthy = (now - lastHealthCheck) < 30000
+
+      workerMetrics[uniqueId] = {
+        clusterId: workerId,
+        pid,
+        stats,
+        health: isHealthy,
+        uptime: uptimeSeconds
+      }
+    }
+
+    return workerMetrics
   }
 
   destroy() {
@@ -629,6 +687,8 @@ export default class WorkerManager {
     this.workerFailureHistory.clear()
     this.statsUpdateBatch.clear()
     this.workerHealth.clear()
+    this.workerStartTime.clear()
+    this.workerUniqueId.clear()
     this.idleWorkers.clear()
 
     for (const worker of this.workers) {
@@ -667,9 +727,14 @@ export default class WorkerManager {
   _executeCommand(worker, type, payload, resolve, reject, retryCount, isFast) {
     const requestId = crypto.randomBytes(16).toString('hex')
     const timeoutMs = isFast ? this.fastCommandTimeout : this.commandTimeout
+    const startTime = Date.now()
 
     const timeout = setTimeout(() => {
       this.pendingRequests.delete(requestId)
+
+      if (global.nodelink?.statsManager) {
+        global.nodelink.statsManager.incrementCommandTimeout(type)
+      }
 
       if (retryCount < this.maxRetries && worker.isConnected()) {
         logger(
@@ -679,6 +744,10 @@ export default class WorkerManager {
           payload,
           `, retrying... (${retryCount + 1}/${this.maxRetries})`
         )
+
+        if (global.nodelink?.statsManager) {
+          global.nodelink.statsManager.incrementCommandRetry(type)
+        }
 
         setTimeout(() => {
           const newWorker = this.getBestWorker() || worker
@@ -700,7 +769,17 @@ export default class WorkerManager {
     }, timeoutMs)
 
     this.pendingRequests.set(requestId, {
-      resolve,
+      resolve: (result) => {
+        const duration = Date.now() - startTime
+        if (global.nodelink?.statsManager) {
+          global.nodelink.statsManager.recordCommandExecutionTime(
+            type,
+            worker.id,
+            duration
+          )
+        }
+        resolve(result)
+      },
       reject,
       timeout,
       workerId: worker.id,
@@ -708,7 +787,7 @@ export default class WorkerManager {
       payload,
       retryCount,
       isFast,
-      startTime: Date.now()
+      startTime
     })
 
     try {
@@ -744,6 +823,9 @@ export default class WorkerManager {
 
       if (retryCount < this.maxRetries) {
         logger('error', 'Cluster', `Send error: ${error.message}, retrying...`)
+        if (global.nodelink?.statsManager) {
+          global.nodelink.statsManager.incrementCommandRetry(type)
+        }
         setTimeout(() => {
           const newWorker = this.getBestWorker()
           if (newWorker) {

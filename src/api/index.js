@@ -60,12 +60,25 @@ async function loadRoutes() {
 const routesPromise = loadRoutes()
 
 async function requestHandler(nodelink, req, res) {
+  const startTime = Date.now()
   const parsedUrl = new URL(req.url, `http://${req.headers.host}`)
   nodelink.statsManager.incrementApiRequest(parsedUrl.pathname)
   const trace = parsedUrl.searchParams.get('trace') === 'true'
   const remoteAddress = req.socket.remoteAddress
   const isInternal = ['127.0.0.1', '::1', 'localhost'].includes(remoteAddress)
   const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${req.socket.remotePort})`
+
+  const originalEnd = res.end
+  res.end = function(...args) {
+    const duration = Date.now() - startTime
+    nodelink.statsManager.recordHttpRequestDuration(
+      parsedUrl.pathname,
+      req.method,
+      res.statusCode,
+      duration
+    )
+    originalEnd.apply(res, args)
+  }
 
   // Handle metrics endpoint separately
   const isMetricsEndpoint = parsedUrl.pathname === `/${PATH_VERSION}/metrics`
@@ -120,6 +133,10 @@ async function requestHandler(nodelink, req, res) {
       'DosProtection',
       `DoS protection triggered for ${clientAddress} on ${parsedUrl.pathname}`
     )
+    nodelink.statsManager.incrementDosProtectionBlock(
+      remoteAddress,
+      dosCheck.message
+    )
     sendErrorResponse(
       req,
       res,
@@ -140,6 +157,10 @@ async function requestHandler(nodelink, req, res) {
       'warn',
       'RateLimit',
       `Rate limit exceeded for ${clientAddress} on ${parsedUrl.pathname}`
+    )
+    nodelink.statsManager.incrementRateLimitHit(
+      parsedUrl.pathname,
+      remoteAddress
     )
     sendErrorResponse(
       req,
