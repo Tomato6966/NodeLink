@@ -114,6 +114,10 @@ export default {
       artistLoadLimit: 20
       // "secretKey": "38346591" // Optional, defaults to standard key
     },
+    "google-tts": {
+      enabled: true,
+      language: 'en-US'
+    },
     youtube: {
       enabled: true,
       allowItag: [], // additional itags for audio streams, e.g., [140, 141]
