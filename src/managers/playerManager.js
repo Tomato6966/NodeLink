@@ -329,4 +329,116 @@ export default class PlayerManager {
     if (!player) throw new Error('Player not found locally.')
     return player.toJSON()
   }
+
+  async addMix(guildId, trackPayload, volume = null) {
+    const session = this.nodelink.sessions.get(this.sessionId)
+    const playerKey = `${this.sessionId}:${guildId}`
+
+    if (this.isCluster) {
+      const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
+      if (!worker) throw new Error('Player not assigned to a worker.')
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          sessionId: this.sessionId,
+          guildId,
+          userId: session.userId,
+          command: 'addMix',
+          args: [trackPayload, volume]
+        }
+      )
+      if (result && result.playerNotFound) {
+        throw new Error('Player not found.')
+      }
+      return result
+    }
+    const player = this.players.get(playerKey)
+    if (!player) throw new Error('Player not found locally.')
+    return player.addMix(trackPayload, volume)
+  }
+
+  async removeMix(guildId, mixId) {
+    const session = this.nodelink.sessions.get(this.sessionId)
+    const playerKey = `${this.sessionId}:${guildId}`
+
+    if (this.isCluster) {
+      const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
+      if (!worker) throw new Error('Player not assigned to a worker.')
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          sessionId: this.sessionId,
+          guildId,
+          userId: session.userId,
+          command: 'removeMix',
+          args: [mixId]
+        }
+      )
+      if (result && result.playerNotFound) {
+        throw new Error('Player not found.')
+      }
+      return result
+    }
+    const player = this.players.get(playerKey)
+    if (!player) throw new Error('Player not found locally.')
+    return player.removeMix(mixId)
+  }
+
+  async updateMix(guildId, mixId, volume) {
+    const session = this.nodelink.sessions.get(this.sessionId)
+    const playerKey = `${this.sessionId}:${guildId}`
+
+    if (this.isCluster) {
+      const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
+      if (!worker) throw new Error('Player not assigned to a worker.')
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          sessionId: this.sessionId,
+          guildId,
+          userId: session.userId,
+          command: 'updateMix',
+          args: [mixId, volume]
+        }
+      )
+      if (result && result.playerNotFound) {
+        throw new Error('Player not found.')
+      }
+      return result
+    }
+    const player = this.players.get(playerKey)
+    if (!player) throw new Error('Player not found locally.')
+    return player.updateMix(mixId, volume)
+  }
+
+  async getMixes(guildId) {
+    const session = this.nodelink.sessions.get(this.sessionId)
+    const playerKey = `${this.sessionId}:${guildId}`
+
+    if (this.isCluster) {
+      const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
+      if (!worker) throw new Error('Player not assigned to a worker.')
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          sessionId: this.sessionId,
+          guildId,
+          userId: session.userId,
+          command: 'getMixes',
+          args: []
+        }
+      )
+      if (result && result.playerNotFound) {
+        throw new Error('Player not found.')
+      }
+      return result
+    }
+    const player = this.players.get(playerKey)
+    if (!player) throw new Error('Player not found locally.')
+    return player.getMixes()
+  }
 }
