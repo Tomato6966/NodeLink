@@ -11,7 +11,7 @@ import Web from './clients/Web.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
 import OAuth from './OAuth.js'
 
-const CHUNK_SIZE = 64 * 1024
+const CHUNK_SIZE = 512 * 1024
 const MAX_RETRIES = 3
 const MAX_URL_REFRESH = 5
 const VISITOR_DATA_INTERVAL = 3600000
