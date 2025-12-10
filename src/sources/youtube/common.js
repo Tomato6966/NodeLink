@@ -12,6 +12,15 @@ export const YOUTUBE_CONSTANTS = {
   UNKNOWN: -1
 }
 
+const FALLBACK_TITLE = 'Unknown Title'
+const FALLBACK_AUTHOR = 'Unknown Artist'
+const FALLBACK_CHANNEL = 'Unknown Channel'
+
+function safeString(value, fallback = '') {
+  if (value === null || value === undefined) return fallback
+  return String(value)
+}
+
 function formatDuration(ms) {
   if (!ms || ms === 0) return { ms: 0, formatted: '🔴 LIVE', hms: '🔴 LIVE' }
   const seconds = Math.floor(ms / 1000)
@@ -28,9 +37,10 @@ function formatDuration(ms) {
 }
 
 function formatNumber(num) {
+  if (!num || isNaN(num)) return '0'
   if (num >= 1000000000) return `${(num / 1000000000).toFixed(1)}B`
-  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
-  if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
+  if (num >= 1000000) return `${(num / 1000000000).toFixed(1)}M`
+  if (num >= 1000) return `${(num / 1000000).toFixed(1)}K`
   return String(num)
 }
 
@@ -140,16 +150,203 @@ function parsePublishedAt(publishedText) {
   }
 }
 
+function getItemValue(obj, paths, defaultValue = null) {
+  if (!obj) return defaultValue
+  for (const path of paths) {
+    const value = path.split('.').reduce((o, k) => o?.[k], obj)
+    if (value !== undefined && value !== null) return value
+  }
+  return defaultValue
+}
+
+function getRunsText(runsArray) {
+  if (Array.isArray(runsArray) && runsArray.length > 0) {
+    return runsArray.map((run) => run.text || '').join('')
+  }
+  return null
+}
+
+function extractMetadataFromResponse(fullApiResponse) {
+  const metadata = { title: null, author: null }
+
+  if (fullApiResponse?.videoDetails) {
+    const vd = fullApiResponse.videoDetails
+    if (vd.title && vd.title !== 'undefined') metadata.title = vd.title
+    if (vd.author && vd.author !== 'undefined') metadata.author = vd.author
+  }
+
+  if (fullApiResponse?.microformat?.playerMicroformatRenderer) {
+    const mf = fullApiResponse.microformat.playerMicroformatRenderer
+    if (mf.title && mf.title !== 'undefined' && !metadata.title)
+      metadata.title = mf.title
+    if (
+      mf.ownerChannelName &&
+      mf.ownerChannelName !== 'undefined' &&
+      !metadata.author
+    )
+      metadata.author = mf.ownerChannelName
+  }
+
+  if (!metadata.title || !metadata.author) {
+    const searchInObject = (obj, depth = 0) => {
+      if (depth > 5) return
+
+      if (typeof obj === 'object' && obj !== null) {
+        if (
+          obj.title &&
+          typeof obj.title === 'string' &&
+          obj.title !== 'undefined' &&
+          !metadata.title
+        ) {
+          metadata.title = obj.title
+        }
+        if (
+          obj.author &&
+          typeof obj.author === 'string' &&
+          obj.author !== 'undefined' &&
+          !metadata.author
+        ) {
+          metadata.author = obj.author
+        }
+        if (
+          obj.name &&
+          typeof obj.name === 'string' &&
+          obj.name !== 'undefined' &&
+          !metadata.author
+        ) {
+          metadata.author = obj.name
+        }
+
+        for (const key in obj) {
+          if (typeof obj[key] === 'object') {
+            searchInObject(obj[key], depth + 1)
+          }
+        }
+      }
+    }
+
+    searchInObject(fullApiResponse)
+  }
+
+  return metadata
+}
+
+async function fetchOEmbedMetadata(videoId, makeRequest) {
+  try {
+    const { body, statusCode } = await makeRequest(
+      `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
+      {
+        method: 'GET',
+        timeout: 5000
+      }
+    )
+
+    if (statusCode === 200 && body) {
+      return {
+        title: body.title || null,
+        author: body.author_name || null,
+        thumbnail_url: body.thumbnail_url || null
+      }
+    }
+  } catch (e) {
+    logger(
+      'debug',
+      'fetchOEmbedMetadata',
+      `Failed to fetch oEmbed data: ${e.message}`
+    )
+  }
+  return null
+}
+
+function extractTitle(
+  renderer,
+  fullApiResponse,
+  videoId,
+  makeRequestFn = null
+) {
+  const metadata = extractMetadataFromResponse(fullApiResponse)
+  if (metadata.title) {
+    return metadata.title
+  }
+
+  if (typeof renderer?.title === 'string' && renderer.title !== 'undefined') {
+    return renderer.title
+  }
+
+  const title =
+    getRunsText(renderer?.title?.runs) ||
+    getItemValue(fullApiResponse, [
+      'videoDetails.endscreen.endscreenRenderer.elements.1.endscreenElementRenderer.title.simpleText'
+    ]) ||
+    getItemValue(renderer, ['title.simpleText'])
+
+  if (title && title !== 'undefined') {
+    return title
+  }
+
+  if (videoId && makeRequestFn) {
+    return null
+  }
+
+  return FALLBACK_TITLE
+}
+
+function extractAuthor(
+  renderer,
+  fullApiResponse,
+  videoId,
+  makeRequestFn = null
+) {
+  const metadata = extractMetadataFromResponse(fullApiResponse)
+  if (metadata.author) {
+    return metadata.author
+  }
+
+  if (renderer?.author && renderer.author !== 'undefined') {
+    return renderer.author
+  }
+
+  const author =
+    getRunsText(
+      getItemValue(renderer, [
+        'longBylineText.runs',
+        'shortBylineText.runs',
+        'ownerText.runs'
+      ])
+    ) || getItemValue(fullApiResponse, ['videoDetails.author'])
+
+  if (author && author !== 'undefined') {
+    return author
+  }
+
+  if (videoId && makeRequestFn) {
+    return null
+  }
+
+  return FALLBACK_CHANNEL
+}
+
+function extractThumbnail(renderer, videoId) {
+  const thumbnails =
+    renderer?.thumbnail?.thumbnails ||
+    renderer?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails
+
+  if (Array.isArray(thumbnails) && thumbnails.length > 0) {
+    const url = thumbnails[thumbnails.length - 1]?.url
+    return url?.split('?')[0] || null
+  }
+
+  if (videoId) {
+    return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+  }
+
+  return null
+}
+
 async function fetchChannelInfo(channelId, makeRequest, context) {
   if (!channelId) return null
 
   try {
-    logger(
-      'debug',
-      'fetchChannelInfo',
-      `Fetching info for channel: ${channelId}`
-    )
-
     const { body: channelResponse, statusCode } = await makeRequest(
       'https://www.youtube.com/youtubei/v1/browse',
       {
@@ -161,7 +358,10 @@ async function fetchChannelInfo(channelId, makeRequest, context) {
           context: {
             client: {
               clientName: 'WEB',
-              clientVersion: '2.20241106.01.00',
+              clientVersion: '2.20251030.01.00',
+              platform: 'DESKTOP',
+              userAgent:
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36,gzip(gfe)',
               hl: context?.client?.hl || 'en',
               gl: context?.client?.gl || 'US'
             }
@@ -340,11 +540,6 @@ async function fetchChannelInfo(channelId, makeRequest, context) {
       }
     }
 
-    logger(
-      'debug',
-      'fetchChannelInfo',
-      `Channel info: icon=${channelInfo.icon ? 'yes' : 'no'}, subscribers=${channelInfo.subscribers}, verified=${channelInfo.verified}`
-    )
     return channelInfo
   } catch (e) {
     logger(
@@ -571,6 +766,229 @@ function extractAudioFormats(streamingData) {
   return Array.from(qualityMap.values()).sort((a, b) => b.bitrate - a.bitrate)
 }
 
+function parseLengthAndStream(lengthText, lengthSeconds, isLive) {
+  if (isLive) {
+    return { lengthMs: -1, isStream: true }
+  }
+
+  let lengthMs = 0
+  let isStream = true
+
+  if (lengthText && /[:\d]+/.test(lengthText)) {
+    const parts = lengthText.split(':').map(Number)
+    lengthMs = parts.reduce((acc, val) => acc * 60 + val, 0) * 1000
+    isStream = !Number.isFinite(lengthMs) || lengthMs <= 0
+  } else if (lengthSeconds) {
+    lengthMs = Number.parseInt(lengthSeconds, 10) * 1000
+    isStream = false
+  }
+  return { lengthMs, isStream }
+}
+
+function getRendererFromItemData(itemData, itemType) {
+  if (!itemData) return null
+
+  if (itemType === 'ytmusic') {
+    return getItemValue(itemData, [
+      'musicResponsiveListItemRenderer',
+      'playlistPanelVideoRenderer',
+      'musicTwoColumnItemRenderer'
+    ])
+  }
+
+  return (
+    getItemValue(itemData, [
+      'videoRenderer',
+      'compactVideoRenderer',
+      'playlistPanelVideoRenderer',
+      'gridVideoRenderer'
+    ]) || (itemData.videoId ? itemData : null)
+  )
+}
+
+export async function buildTrack(
+  itemData,
+  itemType,
+  sourceNameOverride = null,
+  fullApiResponse = null,
+  enableHolo = false,
+  config = {}
+) {
+  if (!itemData) {
+    logger('warn', 'buildTrack', 'itemData is null or undefined')
+    return null
+  }
+
+  const renderer = getRendererFromItemData(itemData, itemType)
+
+  const videoId =
+    getItemValue(renderer, [
+      'playlistItemData.videoId',
+      'navigationEndpoint.watchEndpoint.videoId',
+      'videoId'
+    ]) ||
+    itemData.videoId ||
+    renderer?.videoId
+
+  if (!videoId) {
+    logger('warn', 'buildTrack', 'Could not extract videoId from item data')
+    return null
+  }
+
+  let title = FALLBACK_TITLE
+  let author = FALLBACK_AUTHOR
+  let lengthMs = 0
+  let isStream = true
+  let artworkUrl = null
+  let uri = ''
+
+  if (itemType === 'ytmusic') {
+    title = safeString(
+      getRunsText(getItemValue(renderer, ['title.runs'])),
+      FALLBACK_TITLE
+    )
+
+    const subtitleRuns = getItemValue(renderer, ['subtitle.runs'])
+    if (Array.isArray(subtitleRuns) && subtitleRuns.length > 0) {
+      author = safeString(subtitleRuns[0]?.text, FALLBACK_AUTHOR)
+    }
+
+    let lengthText = null
+    if (Array.isArray(subtitleRuns)) {
+      const lengthRun = subtitleRuns.find(
+        (run) => run.text && /^\d{1,2}:\d{2}(:\d{2})?$/.test(run.text)
+      )
+      lengthText = lengthRun?.text
+    }
+
+    const parsed = parseLengthAndStream(
+      lengthText,
+      itemData.lengthSeconds,
+      itemData.isLive
+    )
+    lengthMs = parsed.lengthMs
+    isStream = parsed.isStream
+
+    artworkUrl = extractThumbnail(renderer, videoId)
+    uri = `https://music.youtube.com/watch?v=${videoId}`
+  } else {
+    const extractedTitle = extractTitle(
+      renderer,
+      fullApiResponse,
+      videoId,
+      makeRequest
+    )
+    const extractedAuthor = extractAuthor(
+      renderer,
+      fullApiResponse,
+      videoId,
+      makeRequest
+    )
+
+    if (extractedTitle === null || extractedAuthor === null) {
+      try {
+        const oEmbedData = await fetchOEmbedMetadata(videoId, makeRequest)
+        if (oEmbedData) {
+          title = safeString(oEmbedData.title, FALLBACK_TITLE)
+          author = safeString(oEmbedData.author, FALLBACK_AUTHOR)
+          logger(
+            'debug',
+            'buildTrack',
+            `Got metadata from oEmbed: title="${title}", author="${author}"`
+          )
+
+          if (oEmbedData.thumbnail_url && !artworkUrl) {
+            artworkUrl = oEmbedData.thumbnail_url
+          }
+        } else {
+          title = FALLBACK_TITLE
+          author = FALLBACK_AUTHOR
+        }
+      } catch (e) {
+        logger(
+          'warn',
+          'buildTrack',
+          `Failed to fetch oEmbed metadata: ${e.message}`
+        )
+        title = FALLBACK_TITLE
+        author = FALLBACK_AUTHOR
+      }
+    } else {
+      title = safeString(extractedTitle, FALLBACK_TITLE)
+      author = safeString(extractedAuthor, FALLBACK_AUTHOR)
+    }
+
+    const lengthText =
+      getItemValue(renderer, ['lengthText.simpleText']) ||
+      getRunsText(renderer?.lengthText?.runs)
+
+    const parsed = parseLengthAndStream(
+      lengthText,
+      renderer?.lengthSeconds,
+      renderer?.isLive
+    )
+    lengthMs = parsed.lengthMs
+    isStream = parsed.isStream
+
+    artworkUrl = artworkUrl || extractThumbnail(renderer, videoId)
+    uri = `https://www.youtube.com/watch?v=${videoId}`
+  }
+
+  let sourceName = sourceNameOverride
+  if (!sourceName) {
+    if (uri.includes('music.youtube.com')) {
+      sourceName = 'ytmusic'
+    } else {
+      sourceName = 'youtube'
+    }
+  }
+
+  const trackInfo = {
+    identifier: videoId,
+    isSeekable: !isStream,
+    author,
+    length: lengthMs,
+    isStream,
+    position: 0,
+    title,
+    uri,
+    artworkUrl,
+    isrc: null,
+    sourceName
+  }
+
+  trackInfo.title = safeString(trackInfo.title, FALLBACK_TITLE)
+  trackInfo.author = safeString(trackInfo.author, FALLBACK_AUTHOR)
+  trackInfo.identifier = safeString(trackInfo.identifier, '')
+  trackInfo.uri = safeString(trackInfo.uri, '')
+  trackInfo.sourceName = safeString(trackInfo.sourceName, 'youtube')
+
+  if (!trackInfo.identifier) {
+    logger('warn', 'buildTrack', 'Track identifier is empty after processing')
+    return null
+  }
+
+  const basicTrack = {
+    encoded: encodeTrack(trackInfo),
+    info: trackInfo,
+    pluginInfo: {
+      captions: fullApiResponse?.captions
+    }
+  }
+
+  if (enableHolo) {
+    return await buildHoloTrack(
+      trackInfo,
+      itemData,
+      itemType,
+      fullApiResponse,
+      config
+    )
+  }
+
+  return basicTrack
+}
+
 export async function buildHoloTrack(
   trackInfo,
   itemData,
@@ -585,43 +1003,14 @@ export async function buildHoloTrack(
       ? 'https://music.youtube.com'
       : 'https://www.youtube.com'
 
-  const getItemValue = (obj, paths, defaultValue = null) => {
-    for (const path of paths) {
-      const value = path.split('.').reduce((o, k) => o?.[k], obj)
-      if (value !== undefined && value !== null) return value
-    }
-    return defaultValue
-  }
-
-  const getRunsText = (runsArray, defaultValue = null) => {
-    if (Array.isArray(runsArray) && runsArray.length > 0) {
-      return runsArray.map((run) => run.text).join('')
-    }
-    return defaultValue
-  }
-
-  let renderer = null
-  if (itemType === 'ytmusic') {
-    renderer = getItemValue(itemData, [
-      'musicResponsiveListItemRenderer',
-      'playlistPanelVideoRenderer',
-      'musicTwoColumnItemRenderer'
-    ])
-  } else {
-    renderer =
-      getItemValue(itemData, [
-        'videoRenderer',
-        'compactVideoRenderer',
-        'playlistPanelVideoRenderer',
-        'gridVideoRenderer'
-      ]) || (itemData.videoId ? itemData : null)
-  }
+  const renderer = getRendererFromItemData(itemData, itemType)
 
   const channelData = {
     name: trackInfo.author,
     id: null,
     url: null,
     icon: null,
+    banner: null,
     subscribers: null,
     verified: false,
     description: null,
@@ -629,6 +1018,7 @@ export async function buildHoloTrack(
     featuredVideo: null,
     links: []
   }
+
   let thumbnails = {}
   let viewCount = null
   let badges = []
@@ -899,218 +1289,13 @@ export function checkURLType(url, type) {
   }
   if (type !== 'ytmusic') {
     if (shortsRegex.test(url)) {
-        return YOUTUBE_CONSTANTS.SHORTS;
+      return YOUTUBE_CONSTANTS.SHORTS
     }
     if (shortUrlRegex.test(url)) {
-        return YOUTUBE_CONSTANTS.VIDEO;
+      return YOUTUBE_CONSTANTS.VIDEO
     }
   }
   return YOUTUBE_CONSTANTS.UNKNOWN
-}
-
-function parseLengthAndStream(lengthText, lengthSeconds, isLive) {
-  if (isLive) {
-    return { lengthMs: -1, isStream: true }
-  }
-
-  let lengthMs = 0
-  let isStream = true
-
-  if (lengthText && /[:\d]+/.test(lengthText)) {
-    const parts = lengthText.split(':').map(Number)
-    lengthMs = parts.reduce((acc, val) => acc * 60 + val, 0) * 1000
-    isStream = !Number.isFinite(lengthMs)
-  } else if (lengthSeconds) {
-    lengthMs = Number.parseInt(lengthSeconds, 10) * 1000
-    isStream = !!isLive
-  }
-  return { lengthMs, isStream }
-}
-
-export async function buildTrack(
-  itemData,
-  itemType,
-  sourceNameOverride = null,
-  fullApiResponse = null,
-  enableHolo = false,
-  config = {}
-) {
-  let videoId
-  let title
-  let author
-  let lengthMs = 0
-  let isStream = true
-  let artworkUrl
-  let uri
-
-  const getItemValue = (obj, paths, defaultValue = null) => {
-    for (const path of paths) {
-      const value = path.split('.').reduce((o, k) => o?.[k], obj)
-      if (value !== undefined && value !== null) return value
-    }
-    return defaultValue
-  }
-
-  const getRunsText = (runsArray, defaultValue = 'Unknown') => {
-    if (Array.isArray(runsArray) && runsArray.length > 0) {
-      return runsArray.map((run) => run.text).join('')
-    }
-    return defaultValue
-  }
-
-  let renderer = null
-  if (itemType === 'ytmusic') {
-    renderer = getItemValue(itemData, [
-      'musicResponsiveListItemRenderer',
-      'playlistPanelVideoRenderer',
-      'musicTwoColumnItemRenderer'
-    ])
-  } else {
-    renderer =
-      getItemValue(itemData, [
-        'videoRenderer',
-        'compactVideoRenderer',
-        'playlistPanelVideoRenderer',
-        'gridVideoRenderer'
-      ]) || (itemData.videoId ? itemData : null)
-  }
-
-  if (!renderer && !itemData.videoId) return null
-
-  videoId = getItemValue(
-    renderer,
-    [
-      'playlistItemData.videoId',
-      'navigationEndpoint.watchEndpoint.videoId',
-      'videoId'
-    ],
-    itemData.videoId || renderer?.videoId
-  )
-
-  if (!videoId) return null;
-
-  if (itemType === 'ytmusic') {
-    title = getRunsText(getItemValue(renderer, ['title.runs']), 'Unknown Title')
-    
-    let authorText = 'Unknown Artist';
-    const subtitleRuns = getItemValue(renderer, ['subtitle.runs']);
-    if (Array.isArray(subtitleRuns) && subtitleRuns.length > 0) {
-        authorText = subtitleRuns[0]?.text || authorText;
-    }
-    author = authorText;
-
-    let lengthText = null;
-    if (Array.isArray(subtitleRuns)) {
-        lengthText = subtitleRuns.find(run => run.text && /^\d{1,2}:\d{2}$/.test(run.text || ''))?.text;
-    }
-    const { lengthMs: parsedLengthMs, isStream: parsedIsStream } =
-      parseLengthAndStream(
-        lengthText,
-        itemData.lengthSeconds, 
-        itemData.isLive
-      )
-    lengthMs = parsedLengthMs
-    isStream = parsedIsStream
-
-    const thumbnails = getItemValue(renderer, ['thumbnail.musicThumbnailRenderer.thumbnail.thumbnails']);
-    if (Array.isArray(thumbnails) && thumbnails.length > 0) {
-        artworkUrl = thumbnails[thumbnails.length - 1]?.url; 
-    } else {
-        artworkUrl = itemData.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.pop()?.url || itemData.thumbnail?.thumbnails?.pop()?.url;
-    }
-
-    uri = `https://music.youtube.com/watch?v=${videoId}`
-  } else {
-    title =
-      typeof renderer.title === 'string'
-        ? renderer.title
-        : getRunsText(
-            renderer.title?.runs,
-            getItemValue(fullApiResponse, [
-              'videoDetails.endscreen.endscreenRenderer.elements.1.endscreenElementRenderer.title.simpleText'
-            ]),
-            getItemValue(renderer, ['title.simpleText'], 'Unknown Title')
-          )
-    author =
-      renderer.author ||
-      getRunsText(
-        getItemValue(renderer, [
-          'longBylineText.runs',
-          'shortBylineText.runs',
-          'ownerText.runs'
-        ]),
-        getItemValue(fullApiResponse, [
-          'videoDetails.endscreen.endscreenRenderer.elements.0.endscreenElementRenderer.title.simpleText'
-        ]),
-        'Unknown Channel'
-      )
-    const { lengthMs: parsedLengthMs, isStream: parsedIsStream } =
-      parseLengthAndStream(
-        getItemValue(
-          renderer,
-          ['lengthText.simpleText'],
-          getRunsText(renderer.lengthText?.runs)
-        ),
-        renderer.lengthSeconds,
-        renderer.isLive
-      )
-    lengthMs = parsedLengthMs
-    isStream = parsedIsStream
-    artworkUrl = renderer.thumbnail?.thumbnails?.pop()?.url
-    uri = `https://www.youtube.com/watch?v=${videoId}`
-  }
-
-  const trackInfo = {
-    identifier: videoId,
-    isSeekable: !isStream,
-    author,
-    length: lengthMs,
-    isStream,
-    position: 0,
-    title,
-    uri,
-    artworkUrl: artworkUrl || null,
-    isrc: null,
-    sourceName:
-      sourceNameOverride || (itemType === 'ytmusic' ? 'ytmusic' : 'youtube')
-  }
-
-  if (trackInfo.uri?.includes('music.youtube.com')) {
-    trackInfo.sourceName = 'ytmusic'
-  } else if (trackInfo.uri?.includes('youtube.com') || trackInfo.uri?.includes('youtu.be')) {
-    trackInfo.sourceName = 'youtube'
-  }
-
-  if (trackInfo.sourceName === 'ytmusic' && renderer) {
-    const musicThumbnails = getItemValue(renderer, ['thumbnail.musicThumbnailRenderer.thumbnail.thumbnails']);
-    if (Array.isArray(musicThumbnails) && musicThumbnails.length > 0) {
-        trackInfo.artworkUrl = musicThumbnails[musicThumbnails.length - 1]?.url;
-    }
-  }
-  if (!trackInfo.artworkUrl) {
-    trackInfo.artworkUrl = artworkUrl;
-  }
-  trackInfo.artworkUrl = trackInfo.artworkUrl?.split('?')[0] || trackInfo.artworkUrl;
-
-  const basicTrack = {
-    encoded: encodeTrack(trackInfo),
-    info: trackInfo,
-    pluginInfo: {
-      captions: fullApiResponse?.captions
-    }
-  }
-
-  if (enableHolo) {
-    return await buildHoloTrack(
-      trackInfo,
-      itemData,
-      itemType,
-      fullApiResponse,
-      config
-    )
-  }
-
-  return basicTrack
 }
 
 export class BaseClient {
@@ -1211,6 +1396,15 @@ export class BaseClient {
   }
 
   async _handlePlayerResponse(playerResponse, sourceName, videoId, context) {
+    if (!playerResponse || typeof playerResponse !== 'object') {
+      logger(
+        'error',
+        `youtube-${this.name}`,
+        `Null or invalid player response for ${videoId}`
+      )
+      return { loadType: 'empty', data: {} }
+    }
+
     if (playerResponse.error) {
       logger(
         'error',
@@ -1241,8 +1435,25 @@ export class BaseClient {
       }
     }
 
+    const videoDetails = playerResponse.videoDetails
+    if (!videoDetails || !videoDetails.videoId) {
+      logger(
+        'error',
+        `youtube-${this.name}`,
+        `Missing videoDetails for ${videoId}`
+      )
+      return {
+        loadType: 'error',
+        data: {
+          message: 'No video details in response.',
+          severity: 'fault',
+          cause: 'NoVideoDetails'
+        }
+      }
+    }
+
     const track = await buildTrack(
-      playerResponse.videoDetails,
+      videoDetails,
       sourceName,
       null,
       playerResponse,
@@ -1252,16 +1463,23 @@ export class BaseClient {
         fetchChannelInfo: this.config.fetchChannelInfo
       }
     )
+
     if (!track) {
+      logger(
+        'error',
+        `youtube-${this.name}`,
+        `Failed to build track for ${videoId}`
+      )
       return {
         loadType: 'error',
         data: {
           message: 'Failed to process video data.',
           severity: 'fault',
-          cause: 'Internal'
+          cause: 'TrackBuildFailed'
         }
       }
     }
+
     return { loadType: 'track', data: track }
   }
 
@@ -1286,32 +1504,27 @@ export class BaseClient {
       }
     }
 
-    const contentsRoot = playlistResponse.contents.singleColumnWatchNextResults || 
-                         playlistResponse.contents.singleColumnMusicWatchNextResultsRenderer
-    
+    const contentsRoot =
+      playlistResponse.contents.singleColumnWatchNextResults ||
+      playlistResponse.contents.singleColumnMusicWatchNextResultsRenderer
+
     let playlistContent = null
-    
+
     if (contentsRoot?.playlist?.playlist?.contents) {
       playlistContent = contentsRoot.playlist.playlist.contents
-    } else if (contentsRoot?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.musicQueueRenderer) {
-      const musicQueue = contentsRoot.tabbedRenderer.watchNextTabbedResultsRenderer.tabs[0].tabRenderer.content.musicQueueRenderer
-      playlistContent = musicQueue.content?.playlistPanelRenderer?.contents || musicQueue.contents
+    } else if (
+      contentsRoot?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]
+        ?.tabRenderer?.content?.musicQueueRenderer
+    ) {
+      const musicQueue =
+        contentsRoot.tabbedRenderer.watchNextTabbedResultsRenderer.tabs[0]
+          .tabRenderer.content.musicQueueRenderer
+      playlistContent =
+        musicQueue.content?.playlistPanelRenderer?.contents ||
+        musicQueue.contents
     }
 
     if (!playlistContent || playlistContent.length === 0) {
-      logger(
-        'debug',
-        `youtube-${this.name}`,
-        `Playlist structure keys: ${Object.keys(playlistResponse.contents || {}).join(', ')}`
-      )
-      if (contentsRoot?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.musicQueueRenderer) {
-        const musicQueue = contentsRoot.tabbedRenderer.watchNextTabbedResultsRenderer.tabs[0].tabRenderer.content.musicQueueRenderer
-        logger(
-          'debug',
-          `youtube-${this.name}`,
-          `musicQueueRenderer keys: ${Object.keys(musicQueue).join(', ')}`
-        )
-      }
       logger(
         'info',
         `youtube-${this.name}`,
@@ -1382,18 +1595,30 @@ export class BaseClient {
     context
   ) {
     if (browseResponse?.error) {
-      const errMsg = browseResponse?.error?.message || 'Failed to browse playlist.'
-      logger('error', `youtube-${this.name}`, `Error browsing playlist ${playlistId}: ${errMsg}`)
+      const errMsg =
+        browseResponse?.error?.message || 'Failed to browse playlist.'
+      logger(
+        'error',
+        `youtube-${this.name}`,
+        `Error browsing playlist ${playlistId}: ${errMsg}`
+      )
       return {
         loadType: 'error',
         data: { message: errMsg, severity: 'common', cause: 'Upstream' }
       }
     }
 
-    const shelf = browseResponse.contents?.singleColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.musicPlaylistShelfRenderer
-    
+    const shelf =
+      browseResponse.contents?.singleColumnBrowseResultsRenderer?.tabs?.[0]
+        ?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]
+        ?.musicPlaylistShelfRenderer
+
     if (!shelf || !shelf.contents || shelf.contents.length === 0) {
-      logger('info', `youtube-${this.name}`, `Browse playlist ${playlistId} is empty or inaccessible.`)
+      logger(
+        'info',
+        `youtube-${this.name}`,
+        `Browse playlist ${playlistId} is empty or inaccessible.`
+      )
       return { loadType: 'empty', data: {} }
     }
 
@@ -1418,18 +1643,29 @@ export class BaseClient {
           tracks.push(track)
         }
       } catch (err) {
-        logger('warn', `youtube-${this.name}`, `Failed to build track: ${err.message}`)
+        logger(
+          'warn',
+          `youtube-${this.name}`,
+          `Failed to build track: ${err.message}`
+        )
       }
     }
 
     if (tracks.length === 0) {
-      logger('info', `youtube-${this.name}`, `No valid tracks parsed from browse playlist ${playlistId}.`)
+      logger(
+        'info',
+        `youtube-${this.name}`,
+        `No valid tracks parsed from browse playlist ${playlistId}.`
+      )
       return { loadType: 'empty', data: {} }
     }
 
-    const playlistTitle = browseResponse.header?.musicDetailHeaderRenderer?.title?.runs?.[0]?.text || 
-                         browseResponse.header?.musicEditablePlaylistDetailHeaderRenderer?.header?.musicDetailHeaderRenderer?.title?.runs?.[0]?.text ||
-                         'Unknown Playlist'
+    const playlistTitle =
+      browseResponse.header?.musicDetailHeaderRenderer?.title?.runs?.[0]
+        ?.text ||
+      browseResponse.header?.musicEditablePlaylistDetailHeaderRenderer?.header
+        ?.musicDetailHeaderRenderer?.title?.runs?.[0]?.text ||
+      'Unknown Playlist'
 
     return {
       loadType: 'playlist',
@@ -1469,16 +1705,8 @@ export class BaseClient {
     let targetItags = []
 
     if (itag) {
-      logger('debug', `youtube-${this.name}`, `Using requested itag: ${itag}`)
-
       targetItags = [Number(itag)]
     } else if (targetItag) {
-      logger(
-        'debug',
-        `youtube-${this.name}`,
-        `Using target itag: ${targetItag}`
-      )
-
       targetItags = [Number(targetItag)]
     } else {
       const qualityPriority = this._getQualityPriority()
@@ -1508,18 +1736,7 @@ export class BaseClient {
       .sort((a, b) => targetItags.indexOf(a.itag) - targetItags.indexOf(b.itag))
 
     if (filteredFormats.length === 0) {
-      if (streamingData.hlsManifestUrl) {
-        logger(
-          'debug',
-          `youtube-${this.name}`,
-          `No suitable audio stream found for the configured quality. Falling back to HLS.`
-        )
-      } else {
-        logger(
-          'debug',
-          `youtube-${this.name}`,
-          `No suitable audio stream found for the configured quality. Available itags: ${allFormats.map((f) => f.itag).join(', ')}`
-        )
+      if (!streamingData.hlsManifestUrl) {
         return {
           exception: {
             message:
@@ -1575,11 +1792,6 @@ export class BaseClient {
             )
             format.url = decipheredUrl
             resolvedFormat = format
-            logger(
-              'debug',
-              `youtube-${this.name}`,
-              `Successfully resolved URL for itag ${format.itag}.`
-            )
             break
           } catch (e) {
             logger(
@@ -1595,18 +1807,7 @@ export class BaseClient {
     }
 
     if (!resolvedFormat) {
-      if (streamingData.hlsManifestUrl) {
-        logger(
-          'debug',
-          `youtube-${this.name}`,
-          'Could not resolve a working URL from the filtered formats. Falling back to HLS.'
-        )
-      } else {
-        logger(
-          'debug',
-          `youtube-${this.name}`,
-          'Could not resolve a working URL from the filtered formats.'
-        )
+      if (!streamingData.hlsManifestUrl) {
         return {
           exception: {
             message: 'Could not resolve a working URL.',
@@ -1623,14 +1824,6 @@ export class BaseClient {
         : undefined
 
     if (!directUrl && !streamingData.hlsManifestUrl) {
-      logger(
-        'debug',
-
-        `youtube-${this.name}`,
-
-        `No suitable audio stream found. Available streamingData: ${JSON.stringify(streamingData)}`
-      )
-
       return {
         exception: {
           message: 'No suitable audio stream found.',
@@ -1819,12 +2012,6 @@ export class BaseClient {
 
   async getTrackUrl(decodedTrack, context, cipherManager) {
     const sourceName = decodedTrack.sourceName || 'youtube'
-    const apiEndpoint = this.getApiEndpoint()
-    logger(
-      'debug',
-      `youtube-${this.name}`,
-      `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`
-    )
 
     const headers = this.oauth ? await this.getAuthHeaders() : {}
     const { body: playerResponse, statusCode } = await this._makePlayerRequest(
