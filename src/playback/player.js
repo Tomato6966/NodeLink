@@ -40,6 +40,8 @@ export class Player {
     this.voice = { sessionId: null, token: null, endpoint: null }
     this.streamInfo = null
     this.lastManualReconnect = 0
+    this.audioMixer = null
+    this._initAudioMixer()
 
     logger(
       'debug',
@@ -94,6 +96,30 @@ export class Player {
     this.destroying = false
     this.isUpdatingTrack = false
     this._initConnection()
+  }
+
+  async _initAudioMixer() {
+    const { AudioMixer } = await import('./AudioMixer.js')
+    this.audioMixer = new AudioMixer(this.nodelink.options?.mix ?? { enabled: true, defaultVolume: 0.8, maxLayersMix: 5, autoCleanup: true })
+    
+    this.audioMixer.on('mixStarted', (data) => {
+      this.emitEvent(GatewayEvents.MIX_STARTED, {
+        mixId: data.id,
+        track: data.track,
+        volume: data.volume
+      })
+    })
+    
+    this.audioMixer.on('mixEnded', (data) => {
+      this.emitEvent(GatewayEvents.MIX_ENDED, {
+        mixId: data.id,
+        reason: data.reason
+      })
+    })
+    
+    this.audioMixer.on('mixError', (data) => {
+      logger('error', 'Player', `Mix error for ${data.id}: ${data.error.message}`)
+    })
   }
 
   _initConnection() {
@@ -333,6 +359,10 @@ export class Player {
       track: trackToEmit,
       reason: reason
     })
+    
+    if (this.audioMixer && this.audioMixer.autoCleanup) {
+      this.audioMixer.clearLayers('MAIN_ENDED')
+    }
   }
 
   async _resolveTrackForEvent(track) {
@@ -388,7 +418,8 @@ export class Player {
       fetched.type || urlData.format,
       this.nodelink,
       this.filters,
-      this.volumePercent / 100
+      this.volumePercent / 100,
+      this.audioMixer
     )
     return { stream: resource }
   }
@@ -794,7 +825,8 @@ export class Player {
         this.nodelink,
         this.filters,
         this,
-        this.volumePercent / 100
+        this.volumePercent / 100,
+        this.audioMixer
       )
 
       if (resourceResult.exception) {
@@ -1137,6 +1169,89 @@ export class Player {
     this._resetTrack()
     this.connStatus = 'destroyed'
     this.volumePercent = this.nodelink.options?.defaultVolume ?? 100
+  }
+
+  async addMix(trackPayload, volume = null) {
+    if (!this.track || this.isPaused) {
+      throw new Error('Cannot add mix without an active stream')
+    }
+
+    if (!this.audioMixer) {
+      throw new Error('AudioMixer not initialized')
+    }
+
+    const mixConfig = this.nodelink?.options?.mix ?? { 
+      enabled: true, 
+      defaultVolume: 0.8, 
+      maxLayersMix: 5 
+    }
+
+    if (this.audioMixer.mixLayers.size >= mixConfig.maxLayersMix) {
+      throw new Error(`Maximum number of mix layers (${mixConfig.maxLayersMix}) reached`)
+    }
+
+    const mixVolume = volume ?? mixConfig.defaultVolume
+
+    const { createAudioResource: createResource } = await import('./streamProcessor.js')
+
+    const urlData = await this.nodelink.sources.getTrackUrl(trackPayload.info)
+    if (!urlData || !urlData.url) {
+      throw new Error('Failed to get stream URL for mix track')
+    }
+
+    const fetched = await this.nodelink.sources.getTrackStream(
+      trackPayload.info,
+      urlData.url,
+      urlData.protocol,
+      urlData.additionalData
+    )
+
+    if (fetched.exception) {
+      throw new Error(fetched.exception.message)
+    }
+
+    const pcmResource = createResource(
+      fetched.stream,
+      fetched.type || urlData.format,
+      this.nodelink,
+      {},
+      mixVolume,
+      null,
+      true
+    )
+
+    const mixId = this.audioMixer.addLayer(
+      pcmResource.stream,
+      trackPayload,
+      mixVolume
+    )
+
+    return {
+      id: mixId,
+      track: trackPayload,
+      volume: mixVolume
+    }
+  }
+
+  removeMix(mixId) {
+    if (!this.audioMixer) {
+      return false
+    }
+    return this.audioMixer.removeLayer(mixId)
+  }
+
+  updateMix(mixId, volume) {
+    if (!this.audioMixer) {
+      return false
+    }
+    return this.audioMixer.updateLayerVolume(mixId, volume)
+  }
+
+  getMixes() {
+    if (!this.audioMixer) {
+      return []
+    }
+    return this.audioMixer.getLayers()
   }
 
   toJSON() {

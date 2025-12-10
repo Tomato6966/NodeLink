@@ -1232,8 +1232,30 @@ class FMP4ToAACStream extends Transform {
     callback()
   }
 }
+
+class MixerTransform extends Transform {
+  constructor(audioMixer) {
+    super()
+    this.audioMixer = audioMixer
+  }
+
+  _transform(mainChunk, encoding, callback) {
+    if (!this.audioMixer || !this.audioMixer.enabled || !this.audioMixer.hasActiveLayers()) {
+      return callback(null, mainChunk)
+    }
+
+    try {
+      const layerChunks = this.audioMixer.readLayerChunks(mainChunk.length)
+      const mixed = this.audioMixer.mixBuffers(mainChunk, layerChunks)
+      callback(null, mixed)
+    } catch (error) {
+      callback(null, mainChunk)
+    }
+  }
+}
+
 class StreamAudioResource extends BaseAudioResource {
-  constructor(stream, type, nodelink, initialFilters = {}, volume = 1.0) {
+  constructor(stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false) {
     super()
 
     this._validateInputStream(stream)
@@ -1250,7 +1272,12 @@ class StreamAudioResource extends BaseAudioResource {
       resamplingQuality
     )
 
-    this._createOutputPipeline(pcmStream, nodelink, initialFilters, volume)
+    if (returnPCM) {
+      this._createPCMOutputPipeline(pcmStream, volume)
+    } else {
+      this._createOutputPipeline(pcmStream, nodelink, initialFilters, volume, audioMixer)
+    }
+    
     this._setupEventHandlers(stream)
   }
 
@@ -1326,7 +1353,7 @@ class StreamAudioResource extends BaseAudioResource {
     return stream.pipe(decoder)
   }
 
-  _createOutputPipeline(pcmStream, nodelink, initialFilters, volume) {
+  _createOutputPipeline(pcmStream, nodelink, initialFilters, volume, audioMixer = null) {
     const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
     const filters = new FiltersManager(nodelink, initialFilters)
     const opusEncoder = new OpusEncoder({
@@ -1335,10 +1362,29 @@ class StreamAudioResource extends BaseAudioResource {
       frameSize: AUDIO_CONFIG.frameSize
     })
 
-    pcmStream.pipe(volumeTransformer).pipe(filters).pipe(opusEncoder)
+    let pipeline = pcmStream.pipe(volumeTransformer)
+
+    if (audioMixer && (nodelink.options?.mix?.enabled ?? true)) {
+      const mixer = new MixerTransform(audioMixer)
+      pipeline = pipeline.pipe(mixer)
+      this.pipes.push(mixer)
+    }
+
+    pipeline.pipe(filters).pipe(opusEncoder)
 
     this.pipes.push(volumeTransformer, filters, opusEncoder)
     this.stream = opusEncoder
+  }
+
+  _createPCMOutputPipeline(pcmStream, volume) {
+    if (volume !== 1.0) {
+      const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
+      const outputStream = pcmStream.pipe(volumeTransformer)
+      this.pipes.push(volumeTransformer)
+      this.stream = outputStream
+    } else {
+      this.stream = pcmStream
+    }
   }
 
   _setupEventHandlers(inputStream) {
@@ -1381,8 +1427,8 @@ class StreamAudioResource extends BaseAudioResource {
   }
 }
 
-export const createAudioResource = (stream, type, nodelink, initialFilters = {}, volume = 1.0) =>
-  new StreamAudioResource(stream, type, nodelink, initialFilters, volume)
+export const createAudioResource = (stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false) =>
+  new StreamAudioResource(stream, type, nodelink, initialFilters, volume, audioMixer, returnPCM)
 
 export const createSeekeableAudioResource = async (
   url,
@@ -1391,7 +1437,8 @@ export const createSeekeableAudioResource = async (
   nodelink,
   initialFilters,
   player,
-  volume = 1.0
+  volume = 1.0,
+  audioMixer = null
 ) => {
   try {
     const { stream, meta } = await seekableStream(url, seekTime, endTime, {})
@@ -1412,10 +1459,39 @@ export const createSeekeableAudioResource = async (
       format,
       nodelink,
       initialFilters,
-      volume
+      volume,
+      audioMixer
     )
   } catch (err) {
     const cause = err instanceof SeekError ? err.code : 'UNKNOWN'
     return _createErrorResponse(err.message, cause)
   }
+}
+
+export const createPCMStream = (stream, type, nodelink, volume = 1.0) => {
+  const resamplingQuality = nodelink.options.audio.resamplingQuality || 'fastest'
+  const normalizedType = normalizeFormat(type)
+  
+  const resource = new StreamAudioResource.__proto__.constructor.call({
+    pipes: [stream],
+    _createDecoderPipeline: StreamAudioResource.prototype._createDecoderPipeline,
+    _createSymphoniaPipeline: StreamAudioResource.prototype._createSymphoniaPipeline,
+    _createOpusPipeline: StreamAudioResource.prototype._createOpusPipeline,
+    _createAACPipeline: StreamAudioResource.prototype._createAACPipeline
+  })
+  
+  const pcmStream = resource._createDecoderPipeline.call(
+    { pipes: [] },
+    stream,
+    type,
+    normalizedType,
+    resamplingQuality
+  )
+  
+  if (volume !== 1.0) {
+    const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
+    return pcmStream.pipe(volumeTransformer)
+  }
+  
+  return pcmStream
 }

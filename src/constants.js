@@ -23,7 +23,9 @@ export const GatewayEvents = {
   PLAYER_CREATED: 'PlayerCreatedEvent',
   PLAYER_DESTROYED: 'PlayerDestroyedEvent',
   PLAYER_RECONNECTING: 'PlayerReconnectingEvent',
-  PLAYER_CONNECTED: 'PlayerConnectedEvent'
+  PLAYER_CONNECTED: 'PlayerConnectedEvent',
+  MIX_STARTED: 'MixStartedEvent',
+  MIX_ENDED: 'MixEndedEvent'
 }
 export const EndReasons = {
   STOPPED: 'stopped',

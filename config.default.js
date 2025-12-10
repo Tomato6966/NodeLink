@@ -260,5 +260,11 @@ export default {
       type: 'Bearer', // Bearer or Basic.
       password: '' // If empty, uses server.password
     }
+  },
+  mix: {
+    enabled: true,
+    defaultVolume: 0.8,
+    maxLayersMix: 5,
+    autoCleanup: true
   }
 }
