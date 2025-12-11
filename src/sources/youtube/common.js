@@ -1,9 +1,4 @@
-import {
-  encodeTrack,
-  generateRandomLetters,
-  logger,
-  makeRequest
-} from '../../utils.js'
+import { encodeTrack, logger, makeRequest } from '../../utils.js'
 
 export const YOUTUBE_CONSTANTS = {
   VIDEO: 0,
@@ -15,6 +10,31 @@ export const YOUTUBE_CONSTANTS = {
 const FALLBACK_TITLE = 'Unknown Title'
 const FALLBACK_AUTHOR = 'Unknown Artist'
 const FALLBACK_CHANNEL = 'Unknown Channel'
+
+const URL_PATTERNS = {
+  video: /^https?:\/\/(?:music\.)?(?:www\.)?youtube\.com\/watch\?v=[\w-]+/,
+  musicVideo: /^https?:\/\/music\.youtube\.com\/watch\?v=[\w-]+/,
+  playlist:
+    /^https?:\/\/(?:music\.)?(?:www\.)?youtube\.com\/playlist\?list=[\w-]+/,
+  shortUrl: /^https?:\/\/youtu\.be\/[\w-]+/,
+  shorts: /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+/,
+  listParam: /[?&]list=/,
+  videoId: /(?:v=|shorts\/|youtu\.be\/)([^&?]+)/,
+  playlistId: /[?&]list=([\w-]+)/,
+  videoIdParam: /[?&]v=([\w-]+)/
+}
+
+const TIME_UNIT_MULTIPLIERS = {
+  year: 365.25 * 24 * 60 * 60 * 1000,
+  month: 30.44 * 24 * 60 * 60 * 1000,
+  week: 7 * 24 * 60 * 60 * 1000,
+  day: 24 * 60 * 60 * 1000,
+  hour: 60 * 60 * 1000,
+  minute: 60 * 1000,
+  second: 1000
+}
+
+const TIME_UNIT_REGEX = /(\d+)\s*(year|month|week|day|hour|minute|second)/gi
 
 function safeString(value, fallback = '') {
   if (value === null || value === undefined) return fallback
@@ -39,8 +59,8 @@ function formatDuration(ms) {
 function formatNumber(num) {
   if (!num || isNaN(num)) return '0'
   if (num >= 1000000000) return `${(num / 1000000000).toFixed(1)}B`
-  if (num >= 1000000) return `${(num / 1000000000).toFixed(1)}M`
-  if (num >= 1000) return `${(num / 1000000).toFixed(1)}K`
+  if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
+  if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
   return String(num)
 }
 
@@ -48,105 +68,56 @@ function parsePublishedAt(publishedText) {
   if (!publishedText) return null
 
   const date = new Date(publishedText)
+
   if (!isNaN(date.getTime())) {
-    const timestamp = date.getTime()
-    const now = Date.now()
-    const diffMs = now - timestamp
-
-    const years = Math.floor(diffMs / (365.25 * 24 * 60 * 60 * 1000))
-    const months = Math.floor(
-      (diffMs % (365.25 * 24 * 60 * 60 * 1000)) / (30.44 * 24 * 60 * 60 * 1000)
-    )
-    const weeks = Math.floor(
-      (diffMs % (30.44 * 24 * 60 * 60 * 1000)) / (7 * 24 * 60 * 60 * 1000)
-    )
-    const days = Math.floor(
-      (diffMs % (7 * 24 * 60 * 60 * 1000)) / (24 * 60 * 60 * 1000)
-    )
-    const hours = Math.floor(
-      (diffMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000)
-    )
-    const minutes = Math.floor((diffMs % (60 * 60 * 1000)) / (60 * 1000))
-    const seconds = Math.floor((diffMs % (60 * 1000)) / 1000)
-
-    const parts = []
-    if (years > 0) parts.push(`${years} year${years > 1 ? 's' : ''}`)
-    if (months > 0) parts.push(`${months} month${months > 1 ? 's' : ''}`)
-    if (weeks > 0) parts.push(`${weeks} week${weeks > 1 ? 's' : ''}`)
-    if (days > 0) parts.push(`${days} day${days > 1 ? 's' : ''}`)
-    if (hours > 0) parts.push(`${hours} hour${hours > 1 ? 's' : ''}`)
-    if (minutes > 0) parts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`)
-    if (seconds > 0) parts.push(`${seconds} second${seconds > 1 ? 's' : ''}`)
-
-    const readable = parts.length > 0 ? parts.join(' ') + ' ago' : 'just now'
-    const compact = `${years}y ${months}mo ${weeks}w ${days}d ${hours}h ${minutes}m ${seconds}s`
-
-    return {
-      original: publishedText,
-      timestamp: Math.floor(timestamp),
-      date: date.toISOString(),
-      readable,
-      compact
-    }
+    return _buildPublishedAtFromTimestamp(date.getTime(), publishedText)
   }
 
   const text = publishedText.toLowerCase()
+  const units = {
+    years: 0,
+    months: 0,
+    weeks: 0,
+    days: 0,
+    hours: 0,
+    minutes: 0,
+    seconds: 0
+  }
 
-  const yearMatch = text.match(/(\d+)\s*year/)
-  const monthMatch = text.match(/(\d+)\s*month/)
-  const weekMatch = text.match(/(\d+)\s*week/)
-  const dayMatch = text.match(/(\d+)\s*day/)
-  const hourMatch = text.match(/(\d+)\s*hour/)
-  const minuteMatch = text.match(/(\d+)\s*minute/)
-  const secondMatch = text.match(/(\d+)\s*second/)
+  let match
+  const regex = new RegExp(TIME_UNIT_REGEX.source, TIME_UNIT_REGEX.flags)
 
-  const years = yearMatch ? Number.parseInt(yearMatch[1], 10) : 0
-  const months = monthMatch ? Number.parseInt(monthMatch[1], 10) : 0
-  const weeks = weekMatch ? Number.parseInt(weekMatch[1], 10) : 0
-  const days = dayMatch ? Number.parseInt(dayMatch[1], 10) : 0
-  const hours = hourMatch ? Number.parseInt(hourMatch[1], 10) : 0
-  const minutes = minuteMatch ? Number.parseInt(minuteMatch[1], 10) : 0
-  const seconds = secondMatch ? Number.parseInt(secondMatch[1], 10) : 0
+  while ((match = regex.exec(text)) !== null) {
+    const value = parseInt(match[1], 10)
+    const unit = match[2].toLowerCase()
 
-  const now = Date.now()
+    if (unit.startsWith('year')) units.years = value
+    else if (unit.startsWith('month')) units.months = value
+    else if (unit.startsWith('week')) units.weeks = value
+    else if (unit.startsWith('day')) units.days = value
+    else if (unit.startsWith('hour')) units.hours = value
+    else if (unit.startsWith('minute')) units.minutes = value
+    else if (unit.startsWith('second')) units.seconds = value
+  }
+
   const msAgo =
-    years * 365.25 * 24 * 60 * 60 * 1000 +
-    months * 30.44 * 24 * 60 * 60 * 1000 +
-    weeks * 7 * 24 * 60 * 60 * 1000 +
-    days * 24 * 60 * 60 * 1000 +
-    hours * 60 * 60 * 1000 +
-    minutes * 60 * 1000 +
-    seconds * 1000
-  const timestamp = now - msAgo
+    units.years * TIME_UNIT_MULTIPLIERS.year +
+    units.months * TIME_UNIT_MULTIPLIERS.month +
+    units.weeks * TIME_UNIT_MULTIPLIERS.week +
+    units.days * TIME_UNIT_MULTIPLIERS.day +
+    units.hours * TIME_UNIT_MULTIPLIERS.hour +
+    units.minutes * TIME_UNIT_MULTIPLIERS.minute +
+    units.seconds * TIME_UNIT_MULTIPLIERS.second
 
-  const parts = []
-  if (years > 0) parts.push(`${years} year${years > 1 ? 's' : ''}`)
-  if (months > 0) parts.push(`${months} month${months > 1 ? 's' : ''}`)
-  if (weeks > 0) parts.push(`${weeks} week${weeks > 1 ? 's' : ''}`)
-  if (days > 0) parts.push(`${days} day${days > 1 ? 's' : ''}`)
-  if (hours > 0) parts.push(`${hours} hour${hours > 1 ? 's' : ''}`)
-  if (minutes > 0) parts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`)
-  if (seconds > 0) parts.push(`${seconds} second${seconds > 1 ? 's' : ''}`)
-
-  const readable = parts.length > 0 ? parts.join(' ') + ' ago' : 'just now'
-
-  const compact = `${years}y ${months}mo ${weeks}w ${days}d ${hours}h ${minutes}m ${seconds}s`
+  const timestamp = Date.now() - msAgo
 
   return {
     original: publishedText,
     timestamp: Math.floor(timestamp),
     date: new Date(timestamp).toISOString(),
-    readable,
-    compact,
-    ago: {
-      years,
-      months,
-      weeks,
-      days,
-      hours,
-      minutes,
-      seconds
-    }
+    readable: _buildReadableTime(units),
+    compact: `${units.years}y ${units.months}mo ${units.weeks}w ${units.days}d ${units.hours}h ${units.minutes}m ${units.seconds}s`,
+    ago: units
   }
 }
 
@@ -169,63 +140,18 @@ function getRunsText(runsArray) {
 function extractMetadataFromResponse(fullApiResponse) {
   const metadata = { title: null, author: null }
 
-  if (fullApiResponse?.videoDetails) {
-    const vd = fullApiResponse.videoDetails
+  const vd = fullApiResponse?.videoDetails
+  if (vd) {
     if (vd.title && vd.title !== 'undefined') metadata.title = vd.title
     if (vd.author && vd.author !== 'undefined') metadata.author = vd.author
   }
+  if (metadata.title && metadata.author) return metadata
 
-  if (fullApiResponse?.microformat?.playerMicroformatRenderer) {
-    const mf = fullApiResponse.microformat.playerMicroformatRenderer
-    if (mf.title && mf.title !== 'undefined' && !metadata.title)
-      metadata.title = mf.title
-    if (
-      mf.ownerChannelName &&
-      mf.ownerChannelName !== 'undefined' &&
-      !metadata.author
-    )
+  const mf = fullApiResponse?.microformat?.playerMicroformatRenderer
+  if (mf) {
+    if (mf.title && !metadata.title) metadata.title = mf.title
+    if (mf.ownerChannelName && !metadata.author)
       metadata.author = mf.ownerChannelName
-  }
-
-  if (!metadata.title || !metadata.author) {
-    const searchInObject = (obj, depth = 0) => {
-      if (depth > 5) return
-
-      if (typeof obj === 'object' && obj !== null) {
-        if (
-          obj.title &&
-          typeof obj.title === 'string' &&
-          obj.title !== 'undefined' &&
-          !metadata.title
-        ) {
-          metadata.title = obj.title
-        }
-        if (
-          obj.author &&
-          typeof obj.author === 'string' &&
-          obj.author !== 'undefined' &&
-          !metadata.author
-        ) {
-          metadata.author = obj.author
-        }
-        if (
-          obj.name &&
-          typeof obj.name === 'string' &&
-          obj.name !== 'undefined' &&
-          !metadata.author
-        ) {
-          metadata.author = obj.name
-        }
-
-        for (const key in obj) {
-          if (typeof obj[key] === 'object') {
-            searchInObject(obj[key], depth + 1)
-          }
-        }
-      }
-    }
-
-    searchInObject(fullApiResponse)
   }
 
   return metadata
@@ -581,7 +507,7 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
           }
         }
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (
@@ -598,7 +524,7 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
       if (response.finalUrl && response.finalUrl.includes('music.apple.com')) {
         resolved.appleMusic = response.finalUrl
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return resolved
@@ -1268,34 +1194,64 @@ export async function buildHoloTrack(
 }
 
 export function checkURLType(url, type) {
-  const source = type === 'ytmusic' ? 'music' : 'www'
-  const videoRegex = new RegExp(
-    `^https?://${source === 'music' ? 'music\\.' : '(?:www\\.)?'}youtube.com/watch\\?v=[\\w-]+`
-  )
-  const playlistRegex = new RegExp(
-    `^https?://${source === 'music' ? 'music\\.' : '(?:www\\.)?'}youtube.com/playlist\\?list=[\\w-]+`
-  )
-  const shortUrlRegex = /^https?:\/\/youtu\.be\/[\w-]+/
-  const shortsRegex = /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+/
+  const isMusicSource = type === 'ytmusic'
 
-  if (
-    playlistRegex.test(url) ||
-    (videoRegex.test(url) && url.includes('&list='))
-  ) {
+  if (URL_PATTERNS.listParam.test(url)) {
     return YOUTUBE_CONSTANTS.PLAYLIST
   }
-  if (videoRegex.test(url)) {
-    return YOUTUBE_CONSTANTS.VIDEO
-  }
-  if (type !== 'ytmusic') {
-    if (shortsRegex.test(url)) {
+
+  if (isMusicSource) {
+    if (URL_PATTERNS.musicVideo.test(url)) {
+      return YOUTUBE_CONSTANTS.VIDEO
+    }
+  } else {
+    if (URL_PATTERNS.video.test(url)) {
+      return YOUTUBE_CONSTANTS.VIDEO
+    }
+    if (URL_PATTERNS.shorts.test(url)) {
       return YOUTUBE_CONSTANTS.SHORTS
     }
-    if (shortUrlRegex.test(url)) {
+    if (URL_PATTERNS.shortUrl.test(url)) {
       return YOUTUBE_CONSTANTS.VIDEO
     }
   }
+
   return YOUTUBE_CONSTANTS.UNKNOWN
+}
+
+export async function fetchEncryptedHostFlags(videoId) {
+  try {
+    const embedUrl = `https://www.youtube.com/embed/${videoId}`
+
+    const { body, statusCode, error } = await makeRequest(embedUrl, {
+      method: 'GET',
+      headers: {
+        'Referer': 'https://www.google.com',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    })
+
+    if (error || statusCode !== 200 || !body) {
+      logger('warn', 'fetchEncryptedHostFlags',
+        `Failed to fetch embed page: ${statusCode} - ${error?.message}`)
+      return null
+    }
+    const match = body.match(/"encryptedHostFlags":"([^"]+)"/)
+
+    if (match && match[1]) {
+      logger('debug', 'fetchEncryptedHostFlags',
+        `Successfully extracted encryptedHostFlags for ${videoId}`)
+      return match[1]
+    }
+
+    logger('debug', 'fetchEncryptedHostFlags',
+      'encryptedHostFlags not found in embed page')
+    return null
+  } catch (e) {
+    logger('error', 'fetchEncryptedHostFlags',
+      `Error fetching encryptedHostFlags: ${e.message}`)
+    return null
+  }
 }
 
 export class BaseClient {
@@ -1348,6 +1304,17 @@ export class BaseClient {
       requestBody.params = playerParams
     }
 
+    if (this.isEmbedded()) {
+      const encryptedHostFlags = await fetchEncryptedHostFlags(videoId)
+      if (encryptedHostFlags) {
+        requestBody.playbackContext = requestBody.playbackContext || {}
+        requestBody.playbackContext.contentPlaybackContext =
+          requestBody.playbackContext.contentPlaybackContext || {}
+        requestBody.playbackContext.contentPlaybackContext.encryptedHostFlags =
+          encryptedHostFlags
+      }
+    }
+
     if (this.requirePlayerScript() && cipherManager) {
       try {
         const playerScript = await cipherManager.getCachedPlayerScript()
@@ -1355,20 +1322,18 @@ export class BaseClient {
           const signatureTimestamp = await cipherManager.getTimestamp(
             playerScript.url
           )
-          requestBody.playbackContext = {
-            contentPlaybackContext: {
-              signatureTimestamp: signatureTimestamp
-            }
-          }
+          requestBody.playbackContext = requestBody.playbackContext || {}
+          requestBody.playbackContext.contentPlaybackContext =
+            requestBody.playbackContext.contentPlaybackContext || {}
+          requestBody.playbackContext.contentPlaybackContext.signatureTimestamp =
+            signatureTimestamp
         }
       } catch (e) {
-        logger(
-          'warn',
-          `youtube-${this.name}`,
-          `Failed to get signature timestamp for player request: ${e.message}`
-        )
+        logger('warn', `youtube-${this.name}`,
+          `Failed to get signature timestamp: ${e.message}`)
       }
     }
+
     const response = await makeRequest(
       `${apiEndpoint}/youtubei/v1/player?prettyPrint=false`,
       {
@@ -1376,9 +1341,7 @@ export class BaseClient {
         headers: {
           'User-Agent': this.getClient(context).client.userAgent,
           ...(this.getClient(context).client.visitorData
-            ? {
-                'X-Goog-Visitor-Id': this.getClient(context).client.visitorData
-              }
+            ? { 'X-Goog-Visitor-Id': this.getClient(context).client.visitorData }
             : {}),
           ...(this.isEmbedded() ? { Referer: 'https://www.youtube.com' } : {}),
           ...headers
@@ -1387,11 +1350,13 @@ export class BaseClient {
         disableBodyCompression: true
       }
     )
+
     if (response.statusCode !== 200) {
-      const message = `Failed to get player data for stream. Status: ${response.statusCode}`
+      const message = `Failed to get player data. Status: ${response.statusCode}`
       logger('error', `youtube-${this.name}`, message)
       return { exception: { message, severity: 'common', cause: 'Upstream' } }
     }
+
     return response
   }
 
