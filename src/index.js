@@ -329,7 +329,7 @@ class NodelinkServer {
               'Server',
               `Unauthorized connection attempt from ${clientAddress} - Invalid Password`
             )
-            return new Response(null, {
+            return new Response('Invalid password provided.', {
               status: 401,
               statusText: 'Unauthorized'
             })
@@ -341,7 +341,7 @@ class NodelinkServer {
               'Server',
               `Missing client-name from ${clientAddress}`
             )
-            return new Response(null, {
+            return new Response('Invalid or missing Client-Name header.', {
               status: 400,
               statusText: 'Bad Request'
             })
@@ -349,7 +349,7 @@ class NodelinkServer {
 
           if (!userId || !verifyDiscordID(userId)) {
             logger('warn', 'Server', `Invalid user ID from ${clientAddress}`)
-            return new Response(null, {
+            return new Response('Invalid or missing User-Id header.', {
               status: 400,
               statusText: 'Bad Request'
             })
@@ -495,6 +495,11 @@ class NodelinkServer {
         /^::ffff:127\.0\.0\.1/.test(remoteAddress)
       const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort})`
 
+      const rejectUpgrade = (status, statusText, body) => {
+        socket.write(`HTTP/1.1 ${status} ${statusText}\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`)
+        socket.destroy()
+      }
+
       const originalHeaders = request.headers
       const headers = {}
       for (const key in originalHeaders) {
@@ -513,8 +518,7 @@ class NodelinkServer {
           'Server',
           `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
         )
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
-        return socket.destroy()
+        return rejectUpgrade(401, 'Unauthorized', 'Invalid password provided.')
       }
       const clientInfo = parseClient(headers['client-name'])
       if (!clientInfo) {
@@ -523,8 +527,7 @@ class NodelinkServer {
           'Server',
           `Unauthorized connection attempt from ${clientAddress} - Invalid client-name provided`
         )
-        socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
-        return socket.destroy()
+        return rejectUpgrade(400, 'Bad Request', 'Invalid or missing Client-Name header.')
       }
 
       let sessionId = headers['session-id']
@@ -549,8 +552,7 @@ class NodelinkServer {
             'Server',
             `Unauthorized connection attempt from ${clientAddress} - Missing user ID`
           )
-          socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
-          return socket.destroy()
+          return rejectUpgrade(400, 'Bad Request', 'User-Id header is missing.')
         }
         if (!verifyDiscordID(headers['user-id'])) {
           logger(
@@ -558,8 +560,7 @@ class NodelinkServer {
             'Server',
             `Unauthorized connection attempt from ${clientAddress} - Invalid user ID provided`
           )
-          socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
-          return socket.destroy()
+          return rejectUpgrade(400, 'Bad Request', 'Invalid User-Id header.')
         }
         request.headers = headers
 
@@ -578,8 +579,7 @@ class NodelinkServer {
           'Server',
           `Unauthorized connection attempt from ${clientAddress} - Invalid path provided`
         )
-        socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
-        return socket.destroy()
+        return rejectUpgrade(404, 'Not Found', 'Invalid path for WebSocket upgrade.')
       }
     })
   }
