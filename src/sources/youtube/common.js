@@ -1880,10 +1880,10 @@ export class BaseClient {
 
   _getQualityPriority() {
     return {
-      high: [251, 141],
+      high: [251, 250, 140],
       medium: [250, 140],
-      low: [249],
-      lowest: [249]
+      low: [249, 250, 140, 18],
+      lowest: [249, 139]
     }
   }
 
