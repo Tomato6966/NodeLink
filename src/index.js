@@ -864,6 +864,13 @@ class NodelinkServer {
       const workerMetrics = this.workerManager ? this.workerManager.getWorkerMetrics() : null
       this.statsManager.updateStatsMetrics(stats, workerMetrics)
 
+      const statsPayload = JSON.stringify({ op: 'stats', ...stats })
+      for (const session of this.sessions.values()) {
+        if (session.socket) {
+          session.socket.send(statsPayload)
+        }
+      }
+
       const sessionCount = this.sessions.activeSessions?.size || 0
       this.statsManager.setWebsocketConnections(sessionCount)
     }, updateInterval)
