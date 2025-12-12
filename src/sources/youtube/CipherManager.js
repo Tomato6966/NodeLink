@@ -22,6 +22,7 @@ export default class CipherManager {
     this.cipherLoadLock = false
     this.explicitPlayerScriptUrl = null
     this.userAgent = `nodelink/${VERSION} (https://github.com/PerformanC/NodeLink)`
+    this.stsCache = new Map()
   }
 
   setPlayerScriptUrl(url) {
@@ -96,6 +97,10 @@ export default class CipherManager {
   }
 
   async getTimestamp(playerUrl) {
+    if (this.stsCache.has(playerUrl)) {
+      return this.stsCache.get(playerUrl)
+    }
+
     if (!this.config.url) {
       const {
         body: scriptContent,
@@ -134,6 +139,7 @@ export default class CipherManager {
         `Extracted timestamp from player script: ${sts}`
       )
 
+      this.stsCache.set(playerUrl, sts)
       return sts
     }
 
@@ -172,6 +178,8 @@ export default class CipherManager {
     }
 
     logger('debug', 'YouTube-Cipher', `Received STS: ${body.sts}`)
+
+    this.stsCache.set(playerUrl, body.sts)
     return body.sts
   }
 
