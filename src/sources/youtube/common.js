@@ -1693,94 +1693,114 @@ export class BaseClient {
       mimeType: f.mimeType,
       qualityLabel: f.qualityLabel,
       bitrate: f.bitrate,
-      audioQuality: f.audioQuality
+      audioQuality: f.audioQuality,
+      url: f.url,
+      signatureCipher: f.signatureCipher
     }))
 
-    const filteredFormats = allFormats
-      .filter((format) => targetItags.includes(format.itag))
-      .sort((a, b) => targetItags.indexOf(a.itag) - targetItags.indexOf(b.itag))
+    const _attemptCipherResolution = async (formatToResolve, playerScript, context) => {
+      let currentStreamUrl = formatToResolve.url
+      let currentEncryptedSignature
+      let currentNParam
+      let currentSignatureKey
 
-    if (filteredFormats.length === 0) {
-      if (!streamingData.hlsManifestUrl) {
-        return {
-          exception: {
-            message:
-              'No suitable audio stream found for the configured quality.',
-            severity: 'common',
-            cause: 'Upstream'
-          }
+      if (formatToResolve.signatureCipher) {
+        const cipher = new URLSearchParams(formatToResolve.signatureCipher)
+        currentStreamUrl = cipher.get('url')
+        currentEncryptedSignature = cipher.get('s')
+        currentSignatureKey = cipher.get('sp') || 'sig'
+        currentNParam = cipher.get('n')
+      }
+
+      if (currentStreamUrl) {
+        try {
+          const decipheredUrl = await cipherManager.resolveUrl(
+            currentStreamUrl,
+            currentEncryptedSignature,
+            currentNParam,
+            currentSignatureKey,
+            playerScript,
+            context
+          )
+          formatToResolve.url = decipheredUrl
+          return formatToResolve
+        } catch (e) {
+          logger(
+            'warn',
+            `youtube-${this.name}`,
+            `Failed to resolve format URL for itag ${formatToResolve.itag}: ${e.message}`
+          )
         }
       }
+      return null
     }
 
     let resolvedFormat = null
+    const playerScript = this.requirePlayerScript()
+      ? await cipherManager.getCachedPlayerScript()
+      : null
 
-    if (this.requirePlayerScript()) {
-      const playerScript = await cipherManager.getCachedPlayerScript()
-      if (!playerScript) {
-        logger(
-          'error',
-          `youtube-${this.name}`,
-          'Failed to obtain player script for deciphering. Cannot extract stream data.'
-        )
-        return {
-          exception: {
-            message: 'Failed to obtain player script for deciphering.',
-            severity: 'fault',
-            cause: 'Internal'
-          }
-        }
+    if (this.requirePlayerScript() && !playerScript) {
+      logger(
+        'error',
+        `youtube-${this.name}`,
+        'Failed to obtain player script for deciphering. Cannot extract stream data.'
+      )
+      return {
+        exception: {
+          message: 'Failed to obtain player script for deciphering.',
+          severity: 'fault',
+          cause: 'Internal',
+        },
       }
-      for (const format of filteredFormats) {
-        let currentStreamUrl = format.url
-        let currentEncryptedSignature
-        let currentNParam
-        let currentSignatureKey
+    }
+    
+    logger('debug', `youtube-${this.name}`, `Initial target itags (from config/quality priority): ${targetItags.join(', ')}`)
 
-        if (format.signatureCipher) {
-          const cipher = new URLSearchParams(format.signatureCipher)
-          currentStreamUrl = cipher.get('url')
-          currentEncryptedSignature = cipher.get('s')
-          currentSignatureKey = cipher.get('sp') || 'sig'
-          currentNParam = cipher.get('n')
-        }
+    const opusAudioCandidates = allFormats
+      .filter((format) => targetItags.includes(format.itag) && format.mimeType?.startsWith('audio/'))
+      .sort((a, b) => targetItags.indexOf(a.itag) - targetItags.indexOf(b.itag))
 
-        if (currentStreamUrl) {
-          try {
-            const decipheredUrl = await cipherManager.resolveUrl(
-              currentStreamUrl,
-              currentEncryptedSignature,
-              currentNParam,
-              currentSignatureKey,
-              playerScript,
-              context
-            )
-            format.url = decipheredUrl
-            resolvedFormat = format
-            break
-          } catch (e) {
-            logger(
-              'warn',
-              `youtube-${this.name}`,
-              `Failed to resolve format URL for itag ${format.itag}: ${e.message}`
-            )
-          }
-        }
+    logger('debug', `youtube-${this.name}`, `Opus audio-only candidates: ${opusAudioCandidates.map(f => f.itag).join(', ')}`)
+
+    for (const format of opusAudioCandidates) {
+      resolvedFormat = await _attemptCipherResolution(format, playerScript, context)
+      if (resolvedFormat) {
+        logger('debug', `youtube-${this.name}`, `Resolved format: itag ${resolvedFormat.itag}, mimeType ${resolvedFormat.mimeType}`)
+        break
       }
-    } else {
-      resolvedFormat = filteredFormats[0]
     }
 
     if (!resolvedFormat) {
-      if (!streamingData.hlsManifestUrl) {
-        return {
-          exception: {
-            message: 'Could not resolve a working URL.',
-            severity: 'fault',
-            cause: 'Cipher'
-          }
+      logger('debug', `youtube-${this.name}`, `Opus audio-only failed. Attempting fallback to itag 18.`)
+      const itag18Format = allFormats.find(format => format.itag === 18)
+
+      if (itag18Format) {
+        resolvedFormat = await _attemptCipherResolution(itag18Format, playerScript, context)
+        if (resolvedFormat) {
+          logger('debug', `youtube-${this.name}`, `Resolved format from itag 18 fallback: itag ${resolvedFormat.itag}, mimeType ${resolvedFormat.mimeType}`)
+        } else {
+          logger('debug', `youtube-${this.name}`, `Itag 18 found but could not be resolved.`)
         }
+      } else {
+        logger('debug', `youtube-${this.name}`, `Itag 18 not found in available formats.`)
       }
+    }
+
+    if (!resolvedFormat && !streamingData.hlsManifestUrl) {
+      logger('debug', `youtube-${this.name}`, 'No suitable stream found after all fallbacks, and no HLS manifest URL.')
+      return {
+        exception: {
+          message: 'No suitable audio stream found after all fallbacks.',
+          severity: 'common',
+          cause: 'Upstream',
+        },
+        formats,
+      }
+    } else if (!resolvedFormat && streamingData.hlsManifestUrl) {
+      logger('debug', `youtube-${this.name}`, 'No suitable stream found after all fallbacks, but HLS manifest URL is available. Proceeding with HLS.')
+    } else {
+      logger('debug', `youtube-${this.name}`, `Final resolved format: itag ${resolvedFormat?.itag}, mimeType ${resolvedFormat?.mimeType}`)
     }
 
     const directUrl =
@@ -1789,16 +1809,17 @@ export class BaseClient {
         : undefined
 
     if (!directUrl && !streamingData.hlsManifestUrl) {
+      logger('debug', `youtube-${this.name}`, 'No direct URL resolved and no HLS manifest. Returning error.')
       return {
         exception: {
           message: 'No suitable audio stream found.',
 
           severity: 'common',
 
-          cause: 'Upstream'
+          cause: 'Upstream',
         },
 
-        formats
+        formats,
       }
     }
 
@@ -1839,7 +1860,7 @@ export class BaseClient {
 
       hlsUrl: streamingData.hlsManifestUrl || null,
 
-      formats
+      formats,
     }
   }
 
@@ -1847,7 +1868,7 @@ export class BaseClient {
     return {
       high: [251, 250, 140],
       medium: [250, 140],
-      low: [249, 250, 140, 18],
+      low: [249, 250, 140],
       lowest: [249, 139]
     }
   }
