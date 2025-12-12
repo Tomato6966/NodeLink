@@ -1712,6 +1712,17 @@ export class BaseClient {
         currentNParam = cipher.get('n')
       }
 
+      if (!playerScript) {
+        if (currentEncryptedSignature) {
+          return null
+        }
+        if (currentStreamUrl) {
+          formatToResolve.url = currentStreamUrl
+          return formatToResolve
+        }
+        return null
+      }
+
       if (currentStreamUrl) {
         try {
           const decipheredUrl = await cipherManager.resolveUrl(
@@ -1754,7 +1765,7 @@ export class BaseClient {
         },
       }
     }
-    
+
     logger('debug', `youtube-${this.name}`, `Initial target itags (from config/quality priority): ${targetItags.join(', ')}`)
 
     const opusAudioCandidates = allFormats
