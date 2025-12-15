@@ -599,6 +599,12 @@ const httpAgent = new http.Agent({ keepAlive: true })
 const httpsAgent = new https.Agent({ keepAlive: true })
 const http2FailedHosts = new Set()
 
+setInterval(() => {
+  if (http2FailedHosts.size > 0) {
+    http2FailedHosts.clear()
+  }
+}, 6 * 60 * 60 * 1000).unref()
+
 async function _internalHttp1Request(urlString, options = {}) {
   const {
     method = 'GET',
