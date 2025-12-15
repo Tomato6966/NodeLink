@@ -193,7 +193,11 @@ export class Player {
         byRemote: true
       })
     } else if (state.status === 'destroyed') {
-      this.connection = null
+      logger(
+        'warn',
+        'Player',
+        `Voice connection destroyed for guild ${this.guildId}`
+      )
     }
     this._sendUpdate()
   }

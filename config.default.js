@@ -135,7 +135,7 @@ export default {
         resolve: ['AndroidVR', 'TV', 'TVEmbedded', 'IOS', 'Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
         settings: {
           TV: {
-            refreshToken: ''
+            refreshToken: [""] // You can use a string "token" or an array ["token1", "token2"] for rotation/fallback
           }
         }
       },
