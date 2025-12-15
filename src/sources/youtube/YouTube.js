@@ -11,7 +11,7 @@ import Web from './clients/Web.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
 import OAuth from './OAuth.js'
 
-const CHUNK_SIZE = 512 * 1024
+const CHUNK_SIZE = 64 * 1024
 const MAX_RETRIES = 3
 const MAX_URL_REFRESH = 10
 const VISITOR_DATA_INTERVAL = 3600000
@@ -1351,6 +1351,7 @@ export default class YouTubeSource {
             responseStream.destroy()
             return
           }
+          if (refreshes > 0) refreshes = 0
           position += chunk.length
           if (!stream.write(chunk)) {
             responseStream.pause()
@@ -1370,13 +1371,14 @@ export default class YouTubeSource {
           }
         }
 
-        const onError = () => {
+        const onError = (err) => {
           cleanupRequestListeners()
           activeRequest = null
           fetching = false
           if (!destroyed) {
+            logger('warn', 'YouTube', `Range request error at pos ${position}: ${err.message}`)
             if (++errors >= MAX_RETRIES) {
-              recover()
+              recover(err)
             } else {
               const timeout = setTimeout(
                 fetchNext,
@@ -1400,8 +1402,9 @@ export default class YouTubeSource {
         activeRequest = null
         fetching = false
         if (!destroyed) {
+          logger('warn', 'YouTube', `Range request exception at pos ${position}: ${err.message}`)
           if (++errors >= MAX_RETRIES) {
-            recover()
+            recover(err)
           } else {
             const timeout = setTimeout(
               fetchNext,
@@ -1413,8 +1416,19 @@ export default class YouTubeSource {
       }
     }
 
-    const recover = async () => {
+    const recover = async (causeError) => {
       if (destroyed || cancelSignal.aborted) return
+
+      const isForbidden = causeError?.message?.includes('403') || causeError?.statusCode === 403
+
+      if (!isForbidden && refreshes === 0) {
+         logger('debug', 'YouTube', `Retrying same URL for recovery first (cause: ${causeError?.message})...`)
+         errors = 0
+         fetching = false
+         fetchNext()
+         refreshes++ 
+         return
+      }
 
       if (++refreshes > MAX_URL_REFRESH) {
         logger('error', 'YouTube', 'Max URL refresh attempts reached')
@@ -1443,9 +1457,8 @@ export default class YouTubeSource {
         logger(
           'debug',
           'YouTube',
-          `URL recovered for ${decodedTrack.title} (resume at ${position} bytes, attempt ${refreshes})`
+          `URL recovered for ${decodedTrack.title} (resume at ${position} bytes, attempt ${refreshes}, cause: ${causeError?.message})`
         )
-        refreshes = 0
         fetching = false
         fetchNext()
       } catch (error) {
@@ -1455,7 +1468,7 @@ export default class YouTubeSource {
           `Recovery failed (attempt ${refreshes}): ${error.message}`
         )
         if (!destroyed && !cancelSignal.aborted) {
-          recoverTimeout = setTimeout(recover, 4000 + refreshes * 1000)
+          recoverTimeout = setTimeout(() => recover(causeError), 4000 + refreshes * 1000)
           if (typeof recoverTimeout.unref === 'function') {
             recoverTimeout.unref()
           }
