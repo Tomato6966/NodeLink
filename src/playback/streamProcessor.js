@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { PassThrough, Readable, Transform } from 'node:stream'
+import { PassThrough, Readable, Transform, pipeline } from 'node:stream'
 
 import LibSampleRate from '@alexanderolsen/libsamplerate-js'
 import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js'
@@ -1309,31 +1309,44 @@ class StreamAudioResource extends BaseAudioResource {
   _createAACPipeline(stream, type, resamplingQuality) {
     const lowerType = type.toLowerCase()
     let aacStream = stream
+    const streams = [stream]
 
     if (_isFmp4Format(lowerType)) {
       const demuxer = new FMP4ToAACStream()
-      aacStream = stream.pipe(demuxer)
-      this.pipes.push(demuxer)
+      streams.push(demuxer)
     } else if (_isMpegtsFormat(lowerType)) {
       const demuxer = new MPEGTSToAACStream()
-      aacStream = stream.pipe(demuxer)
-      this.pipes.push(demuxer)
+      streams.push(demuxer)
     } else if (_isMp4Format(lowerType)) {
       const demuxer = new MP4ToAACStream()
-      aacStream = stream.pipe(demuxer)
-      this.pipes.push(demuxer)
+      streams.push(demuxer)
     }
 
     const decoder = new AACDecoderStream({ resamplingQuality })
-    this.pipes.push(decoder)
+    streams.push(decoder)
 
-    return aacStream.pipe(decoder)
+    this.pipes.push(...streams.slice(1))
+
+    pipeline(streams, (err) => {
+      if (err && !this._destroyed) {
+        this.stream?.emit('error', err)
+      }
+    })
+
+    return decoder
   }
 
   _createSymphoniaPipeline(stream, resamplingQuality) {
     const decoder = new SymphoniaDecoderStream({ resamplingQuality })
     this.pipes.push(decoder)
-    return stream.pipe(decoder)
+    
+    pipeline(stream, decoder, (err) => {
+      if (err && !this._destroyed) {
+        this.stream?.emit('error', err)
+      }
+    })
+
+    return decoder
   }
 
   _createOpusPipeline(stream, type) {
@@ -1343,14 +1356,24 @@ class StreamAudioResource extends BaseAudioResource {
       frameSize: AUDIO_CONFIG.frameSize
     })
 
+    const streams = [stream]
+
     if (_isWebmFormat(type.toLowerCase())) {
       const demuxer = new WebmOpusDemuxer()
-      this.pipes.push(demuxer, decoder)
-      return stream.pipe(demuxer).pipe(decoder)
+      streams.push(demuxer)
+      this.pipes.push(demuxer)
     }
 
+    streams.push(decoder)
     this.pipes.push(decoder)
-    return stream.pipe(decoder)
+
+    pipeline(streams, (err) => {
+      if (err && !this._destroyed) {
+        this.stream?.emit('error', err)
+      }
+    })
+
+    return decoder
   }
 
   _createOutputPipeline(pcmStream, nodelink, initialFilters, volume, audioMixer = null) {
@@ -1362,26 +1385,39 @@ class StreamAudioResource extends BaseAudioResource {
       frameSize: AUDIO_CONFIG.frameSize
     })
 
-    let pipeline = pcmStream.pipe(volumeTransformer)
+    const streams = [pcmStream, volumeTransformer]
+    this.pipes.push(volumeTransformer)
 
     if (audioMixer && (nodelink.options?.mix?.enabled ?? true)) {
       const mixer = new MixerTransform(audioMixer)
-      pipeline = pipeline.pipe(mixer)
+      streams.push(mixer)
       this.pipes.push(mixer)
     }
 
-    pipeline.pipe(filters).pipe(opusEncoder)
+    streams.push(filters, opusEncoder)
+    this.pipes.push(filters, opusEncoder)
 
-    this.pipes.push(volumeTransformer, filters, opusEncoder)
+    pipeline(streams, (err) => {
+      if (err && !this._destroyed) {
+        opusEncoder.emit('error', err)
+      }
+    })
+
     this.stream = opusEncoder
   }
 
   _createPCMOutputPipeline(pcmStream, volume) {
     if (volume !== 1.0) {
       const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
-      const outputStream = pcmStream.pipe(volumeTransformer)
       this.pipes.push(volumeTransformer)
-      this.stream = outputStream
+      
+      pipeline(pcmStream, volumeTransformer, (err) => {
+        if (err && !this._destroyed) {
+          this.stream?.emit('error', err)
+        }
+      })
+
+      this.stream = volumeTransformer
     } else {
       this.stream = pcmStream
     }
