@@ -3,7 +3,6 @@ import crypto from 'node:crypto'
 import os from 'node:os'
 
 import { logger } from '../utils.js'
-import PlayerBackupManager from './playerBackupManager.js'
 
 export default class WorkerManager {
   constructor(config) {
@@ -35,7 +34,6 @@ export default class WorkerManager {
     this.commandTimeout = config.cluster?.commandTimeout || 45000
     this.fastCommandTimeout = config.cluster?.fastCommandTimeout || 10000
     this.maxRetries = config.cluster?.maxRetries || 2
-    this.backupManager = new PlayerBackupManager()
     this.scalingConfig = {
       maxPlayersPerWorker: config.cluster.scaling?.maxPlayersPerWorker || 20,
       targetUtilization: config.cluster.scaling?.targetUtilization || 0.7,
@@ -70,7 +68,6 @@ export default class WorkerManager {
       const affectedGuilds = Array.from(
         this.workerToGuilds.get(worker.id) || []
       )
-      const snapshots = this.backupManager.getWorkerSnapshots(worker.id)
 
       this._retryPendingRequestsForWorker(worker.id)
       this.removeWorker(worker.id)
@@ -85,13 +82,10 @@ export default class WorkerManager {
         logger(
           'info',
           'Cluster',
-          `Respawning worker and restoring ${snapshots.length} players...`
+          'Respawning worker...'
         )
         setTimeout(() => {
-          const newWorker = this.forkWorker()
-          if (newWorker && snapshots.length > 0) {
-            this._restorePlayers(newWorker, snapshots)
-          }
+          this.forkWorker()
           if (global.nodelink?.statsManager) {
             global.nodelink.statsManager.incrementWorkerRestart(worker.id)
           }
@@ -438,14 +432,6 @@ export default class WorkerManager {
         if (msg.error) callback.reject(new Error(String(msg.error)))
         else callback.resolve(msg.payload)
       }
-    } else if (msg.type === 'playerSnapshot') {
-      const { playerKey, playerState } = msg.payload
-      playerState.guildId = playerKey.split(':')[0]
-      this.backupManager.storeSnapshot(playerKey, worker.id, playerState)
-    } else if (msg.type === 'playerDestroyed') {
-      const { guildId, userId } = msg.payload
-      const playerKey = `${guildId}:${userId}`
-      this.backupManager.removeSnapshot(playerKey)
     } else if (msg.type === 'workerStats') {
       this.statsUpdateBatch.set(worker.id, msg.stats)
 
@@ -609,39 +595,6 @@ export default class WorkerManager {
     }
   }
 
-  async _restorePlayers(worker, snapshots) {
-    logger(
-      'info',
-      'Cluster',
-      `Restoring ${snapshots.length} players to worker ${worker.id}`
-    )
-
-    for (const snapshot of snapshots) {
-      try {
-        const playerKey = `${snapshot.guildId}:${snapshot.userId}`
-        this.assignGuildToWorker(playerKey, worker)
-
-        await this.execute(worker, 'restorePlayer', {
-          snapshot
-        })
-
-        if (global.nodelink?.statsManager) {
-          global.nodelink.statsManager.incrementPlayerRestoration(worker.id)
-        }
-
-        logger('debug', 'Cluster', `Restored player for ${playerKey}`)
-      } catch (error) {
-        logger(
-          'error',
-          'Cluster',
-          `Failed to restore player for guild ${snapshot.guildId} (bot: ${snapshot.userId}): ${error.message}`
-        )
-      }
-    }
-
-    logger('info', 'Cluster', `Restoration complete for worker ${worker.id}`)
-  }
-
   getWorkerMetrics() {
     const workerMetrics = {}
     const now = Date.now()
@@ -677,10 +630,6 @@ export default class WorkerManager {
     if (this.statsUpdateTimer) {
       clearTimeout(this.statsUpdateTimer)
       this._flushStatsUpdates()
-    }
-
-    if (this.backupManager) {
-      this.backupManager.destroy()
     }
 
     this.pendingRequests.clear()

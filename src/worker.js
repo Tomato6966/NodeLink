@@ -430,34 +430,6 @@ setInterval(() => {
         )
       }
     }
-
-    if (player.track && !player._isRestoring) {
-      try {
-        const playerKey = `${player.session.id}:${player.guildId}`
-        process.send({
-          type: 'playerSnapshot',
-          payload: {
-            playerKey,
-            playerState: {
-              sessionId: player.session.id,
-              userId: player.session.userId,
-              track: player.track,
-              position: player._realPosition(),
-              isPaused: player.isPaused,
-              volume: player.volumePercent,
-              filters: player.filters,
-              voice: player.voice
-            }
-          }
-        })
-      } catch (e) {
-        logger(
-          'error',
-          'Worker-IPC',
-          `Failed to send playerSnapshot for guild ${player.guildId}: ${e.message}`
-        )
-      }
-    }
   }
 
   localFrameStats.deficit += Math.max(
