@@ -100,6 +100,10 @@ export default {
     http: {
       enabled: true
     },
+    vimeo: {
+      // Note: not 100% of the songs are currently working (but most should.), because i need to code a different extractor for every year (2010, 2011, etc. not all are done)
+      enabled: true,
+    },
     flowery: {
       enabled: true,
       voice: 'Salli',
