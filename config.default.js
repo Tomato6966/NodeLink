@@ -245,7 +245,12 @@ export default {
       maxRequests: 20,
       timeWindowMs: 5000 // 5 seconds
     },
-    ignorePaths: []
+    ignorePaths: [],
+    ignore: {
+      userIds: [],
+      guildIds: [],
+      ips: []
+    }
   },
   dosProtection: {
     enabled: true,
@@ -256,6 +261,11 @@ export default {
     mitigation: {
       delayMs: 500,
       blockDurationMs: 300000 // 5 minutes
+    },
+    ignore: {
+      userIds: [],
+      guildIds: [],
+      ips: []
     }
   },
   metrics: {

@@ -56,6 +56,12 @@ export default class RateLimitManager {
       ? parsedUrl.pathname.split('/')[5]
       : null
 
+    if (this.config.ignore) {
+      if (this.config.ignore.ips?.includes(remoteAddress)) return true
+      if (userId && this.config.ignore.userIds?.includes(userId)) return true
+      if (guildId && this.config.ignore.guildIds?.includes(guildId)) return true
+    }
+
     if (
       !this._checkAndIncrement(
         'global',
