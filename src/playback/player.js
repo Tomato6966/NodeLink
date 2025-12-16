@@ -100,8 +100,15 @@ export class Player {
 
   async _initAudioMixer() {
     const { AudioMixer } = await import('./AudioMixer.js')
-    this.audioMixer = new AudioMixer(this.nodelink.options?.mix ?? { enabled: true, defaultVolume: 0.8, maxLayersMix: 5, autoCleanup: true })
-    
+    this.audioMixer = new AudioMixer(
+      this.nodelink.options?.mix ?? {
+        enabled: true,
+        defaultVolume: 0.8,
+        maxLayersMix: 5,
+        autoCleanup: true
+      }
+    )
+
     this.audioMixer.on('mixStarted', (data) => {
       this.emitEvent(GatewayEvents.MIX_STARTED, {
         mixId: data.id,
@@ -109,16 +116,20 @@ export class Player {
         volume: data.volume
       })
     })
-    
+
     this.audioMixer.on('mixEnded', (data) => {
       this.emitEvent(GatewayEvents.MIX_ENDED, {
         mixId: data.id,
         reason: data.reason
       })
     })
-    
+
     this.audioMixer.on('mixError', (data) => {
-      logger('error', 'Player', `Mix error for ${data.id}: ${data.error.message}`)
+      logger(
+        'error',
+        'Player',
+        `Mix error for ${data.id}: ${data.error.message}`
+      )
     })
   }
 
@@ -284,7 +295,7 @@ export class Player {
             'Player',
             `Voice connection reset for guild ${this.guildId}. Attempting to manually reconnect.`
           )
-          this.updateVoice(this.voice)
+          this.updateVoice(this.voice, true)
         }
 
         severity = 'suspicious'
@@ -363,7 +374,7 @@ export class Player {
       track: trackToEmit,
       reason: reason
     })
-    
+
     if (this.audioMixer && this.audioMixer.autoCleanup) {
       this.audioMixer.clearLayers('MAIN_ENDED')
     }
@@ -568,7 +579,10 @@ export class Player {
   async _startPlayback(startTime = 0) {
     if (!this.track) return false
 
-    const trackInfo = { ...this.track.info, audioTrackId: this.track.audioTrackId }
+    const trackInfo = {
+      ...this.track.info,
+      audioTrackId: this.track.audioTrackId
+    }
     const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
     logger('debug', 'Player', `Got track URL for guild ${this.guildId}`, {
@@ -771,10 +785,11 @@ export class Player {
             'Still no stream info URL available for seek.'
           )
           if (this.track) {
-            const trackInfo = { ...this.track.info, audioTrackId: this.track.audioTrackId }
-            const urlData = await this.nodelink.sources.getTrackUrl(
-              trackInfo
-            )
+            const trackInfo = {
+              ...this.track.info,
+              audioTrackId: this.track.audioTrackId
+            }
+            const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
             this.streamInfo = { ...urlData, trackInfo: this.track.info }
             logger(
               'debug',
@@ -900,7 +915,10 @@ export class Player {
     this.position = position
     this.track.endTime = endTime
 
-    const trackInfo = { ...this.track.info, audioTrackId: this.track.audioTrackId }
+    const trackInfo = {
+      ...this.track.info,
+      audioTrackId: this.track.audioTrackId
+    }
     const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
 
@@ -1076,7 +1094,7 @@ export class Player {
     return true
   }
 
-  updateVoice(voicePayload = {}) {
+  updateVoice(voicePayload = {}, force = false) {
     if (this.destroying) return
 
     const { sessionId, token, endpoint } = voicePayload
@@ -1096,7 +1114,7 @@ export class Player {
     }
 
     if (this.voice.sessionId && this.voice.token && this.voice.endpoint) {
-      if (!changed) {
+      if (!changed && !force) {
         logger(
           'debug',
           'Player',
@@ -1188,19 +1206,23 @@ export class Player {
       throw new Error('AudioMixer not initialized')
     }
 
-    const mixConfig = this.nodelink?.options?.mix ?? { 
-      enabled: true, 
-      defaultVolume: 0.8, 
-      maxLayersMix: 5 
+    const mixConfig = this.nodelink?.options?.mix ?? {
+      enabled: true,
+      defaultVolume: 0.8,
+      maxLayersMix: 5
     }
 
     if (this.audioMixer.mixLayers.size >= mixConfig.maxLayersMix) {
-      throw new Error(`Maximum number of mix layers (${mixConfig.maxLayersMix}) reached`)
+      throw new Error(
+        `Maximum number of mix layers (${mixConfig.maxLayersMix}) reached`
+      )
     }
 
     const mixVolume = volume ?? mixConfig.defaultVolume
 
-    const { createAudioResource: createResource } = await import('./streamProcessor.js')
+    const { createAudioResource: createResource } = await import(
+      './streamProcessor.js'
+    )
 
     const urlData = await this.nodelink.sources.getTrackUrl(trackPayload.info)
     if (!urlData || !urlData.url) {
