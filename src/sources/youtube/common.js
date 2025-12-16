@@ -692,6 +692,45 @@ function extractAudioFormats(streamingData) {
   return Array.from(qualityMap.values()).sort((a, b) => b.bitrate - a.bitrate)
 }
 
+function extractAudioTracks(streamingData) {
+  if (!streamingData) return []
+
+  const allFormats = [
+    ...(streamingData.formats || []),
+    ...(streamingData.adaptiveFormats || [])
+  ]
+
+  const tracksMap = new Map()
+
+  for (const format of allFormats) {
+    if (format.audioTrack) {
+      const id = format.audioTrack.id
+      if (!tracksMap.has(id)) {
+        tracksMap.set(id, {
+          id: format.audioTrack.id,
+          name: format.audioTrack.displayName,
+          isDefault: !!format.audioTrack.audioIsDefault,
+          isAutoDubbed: !!format.audioTrack.isAutoDubbed
+        })
+      }
+    }
+  }
+
+  return Array.from(tracksMap.values())
+}
+
+function extractCaptions(captionsData) {
+  if (!captionsData?.playerCaptionsTracklistRenderer?.captionTracks) return []
+
+  return captionsData.playerCaptionsTracklistRenderer.captionTracks.map((c) => ({
+    languageCode: c.languageCode,
+    name: c.name?.simpleText,
+    isTranslatable: c.isTranslatable,
+    baseUrl: c.baseUrl,
+    kind: c.kind
+  }))
+}
+
 function parseLengthAndStream(lengthText, lengthSeconds, isLive) {
   if (isLive) {
     return { lengthMs: -1, isStream: true }
@@ -894,11 +933,21 @@ export async function buildTrack(
     return null
   }
 
+  const audioFormats = fullApiResponse?.streamingData
+    ? extractAudioFormats(fullApiResponse.streamingData)
+    : []
+
+  const audioTracks = fullApiResponse?.streamingData
+    ? extractAudioTracks(fullApiResponse.streamingData)
+    : []
+
   const basicTrack = {
     encoded: encodeTrack(trackInfo),
     info: trackInfo,
     pluginInfo: {
-      captions: fullApiResponse?.captions
+      captions: extractCaptions(fullApiResponse?.captions),
+      audioFormats,
+      audioTracks
     }
   }
 
@@ -1143,6 +1192,10 @@ export async function buildHoloTrack(
     ? extractAudioFormats(fullApiResponse.streamingData)
     : []
 
+  const audioTracks = fullApiResponse?.streamingData
+    ? extractAudioTracks(fullApiResponse.streamingData)
+    : []
+
   const pluginInfo = {
     type: 'holo',
     accessibility: accessibilityLabel,
@@ -1183,7 +1236,8 @@ export async function buildHoloTrack(
     },
     videoQualities,
     audioFormats,
-    captions: fullApiResponse?.captions
+    audioTracks,
+    captions: extractCaptions(fullApiResponse?.captions)
   }
 
   return {
@@ -1688,15 +1742,60 @@ export class BaseClient {
       ...(streamingData.formats || [])
     ]
 
-    const formats = allFormats.map((f) => ({
+    let formats = allFormats.map((f) => ({
       itag: f.itag,
       mimeType: f.mimeType,
       qualityLabel: f.qualityLabel,
       bitrate: f.bitrate,
       audioQuality: f.audioQuality,
       url: f.url,
-      signatureCipher: f.signatureCipher
+      signatureCipher: f.signatureCipher,
+      audioTrack: f.audioTrack
     }))
+
+    if (decodedTrack.audioTrackId) {
+      const requestedFormats = formats.filter(
+        (f) => f.audioTrack && f.audioTrack.id === decodedTrack.audioTrackId
+      )
+
+      if (requestedFormats.length > 0) {
+        logger(
+          'debug',
+          `youtube-${this.name}`,
+          `Found requested audio track: ${decodedTrack.audioTrackId}`
+        )
+        formats = requestedFormats
+      } else {
+        const hasAudioTracks = formats.some((f) => f.audioTrack)
+        if (hasAudioTracks) {
+          logger(
+            'warn',
+            `youtube-${this.name}`,
+            `Requested audio track ${decodedTrack.audioTrackId} not found in client ${this.name}.`
+          )
+          return {
+            exception: {
+              message: 'Requested audio track not available in this client.',
+              severity: 'common',
+              cause: 'AudioTrackNotFound'
+            }
+          }
+        }
+      }
+    } else {
+      const defaultFormats = formats.filter(
+        (f) => f.audioTrack && f.audioTrack.audioIsDefault
+      )
+
+      if (defaultFormats.length > 0) {
+        logger(
+          'debug',
+          `youtube-${this.name}`,
+          `Using default audio track.`
+        )
+        formats = defaultFormats
+      }
+    }
 
     const _attemptCipherResolution = async (formatToResolve, playerScript, context) => {
       let currentStreamUrl = formatToResolve.url
@@ -1768,7 +1867,7 @@ export class BaseClient {
 
     logger('debug', `youtube-${this.name}`, `Initial target itags (from config/quality priority): ${targetItags.join(', ')}`)
 
-    const opusAudioCandidates = allFormats
+    const opusAudioCandidates = formats
       .filter((format) => targetItags.includes(format.itag) && format.mimeType?.startsWith('audio/'))
       .sort((a, b) => targetItags.indexOf(a.itag) - targetItags.indexOf(b.itag))
 
@@ -1784,7 +1883,7 @@ export class BaseClient {
 
     if (!resolvedFormat) {
       logger('debug', `youtube-${this.name}`, `Opus audio-only failed. Attempting fallback to itag 18.`)
-      const itag18Format = allFormats.find(format => format.itag === 18)
+      const itag18Format = formats.find(format => format.itag === 18)
 
       if (itag18Format) {
         resolvedFormat = await _attemptCipherResolution(itag18Format, playerScript, context)

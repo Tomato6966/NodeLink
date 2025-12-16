@@ -254,7 +254,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               }
               trackToPlay = {
                 encoded: trackPayload.encoded,
-                info: decodedTrack.info
+                info: decodedTrack.info,
+                audioTrackId: trackPayload.language || trackPayload.audioTrackId || null
               }
             }
           } else if (trackPayload.identifier) {
@@ -285,7 +286,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             if (loadResult.loadType === 'track') {
               trackToPlay = {
                 encoded: loadResult.data.encoded,
-                info: loadResult.data.info
+                info: loadResult.data.info,
+                audioTrackId: trackPayload.language || trackPayload.audioTrackId || null
               }
             } else {
               const message =

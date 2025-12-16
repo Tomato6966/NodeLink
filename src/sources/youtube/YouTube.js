@@ -1064,6 +1064,19 @@ export default class YouTubeSource {
       }
     }
 
+    if (decodedTrack.audioTrackId) {
+      logger(
+        'warn',
+        'YouTube',
+        `Requested audio track "${decodedTrack.audioTrackId}" not found on any client. Falling back to default audio.`
+      )
+      
+      const fallbackTrack = { ...decodedTrack }
+      delete fallbackTrack.audioTrackId
+      
+      return this.getTrackUrl(fallbackTrack, itag)
+    }
+
     logger(
       'error',
       'YouTube',

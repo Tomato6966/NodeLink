@@ -27,16 +27,14 @@ export default class YouTubeLyrics {
       return { loadType: 'empty', data: {} }
     }
 
-    const captionTracks =
-      resolvedTrack.data.pluginInfo.captions.playerCaptionsTracklistRenderer
-        .captionTracks
-    if (!captionTracks || captionTracks.length === 0) {
+    const captionTracks = resolvedTrack.data.pluginInfo.captions
+    if (!Array.isArray(captionTracks) || captionTracks.length === 0) {
       return { loadType: 'empty', data: {} }
     }
 
     const langs = captionTracks.map((c) => ({
       code: c.languageCode,
-      name: c.name.simpleText,
+      name: c.name,
       isTranslatable: c.isTranslatable
     }))
 
@@ -56,9 +54,7 @@ export default class YouTubeLyrics {
             ...defaultTrack,
             languageCode: language,
             baseUrl: `${defaultTrack.baseUrl}&tlang=${language}`,
-            name: {
-              simpleText: `${defaultTrack.name.simpleText} (Translated to ${language})`
-            }
+            name: `${defaultTrack.name} (Translated to ${language})`
           }
         }
       }
@@ -71,20 +67,33 @@ export default class YouTubeLyrics {
         captionTracks[0]
     }
 
+    let url = trackLang.baseUrl
+    if (url.includes('fmt=')) {
+      url = url.replace(/fmt=[^&]+/, 'fmt=json3')
+    } else {
+      url += '&fmt=json3'
+    }
+
     const {
       body: lyrics,
       error,
       statusCode
-    } = await makeRequest(
-      trackLang.baseUrl.replace('&fmt=srv3', '&fmt=json3'),
-      { method: 'GET' }
-    )
+    } = await makeRequest(url, { method: 'GET' })
 
     if (error || statusCode !== 200) {
       logger(
         'error',
         'Lyrics',
-        `Failed to fetch lyrics content from ${trackLang.baseUrl}: ${error?.message || statusCode}`
+        `Failed to fetch lyrics content from ${url}: ${error?.message || statusCode}`
+      )
+      return { loadType: 'empty', data: {} }
+    }
+
+    if (!lyrics || !lyrics.events) {
+      logger(
+        'warn',
+        'Lyrics',
+        `Invalid lyrics format received for ${trackInfo.title}`
       )
       return { loadType: 'empty', data: {} }
     }
@@ -106,7 +115,7 @@ export default class YouTubeLyrics {
     return {
       loadType: 'lyrics',
       data: {
-        name: trackLang.name.simpleText,
+        name: trackLang.name,
         synced: true,
         lang: trackLang.languageCode,
         lines,

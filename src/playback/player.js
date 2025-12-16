@@ -568,7 +568,8 @@ export class Player {
   async _startPlayback(startTime = 0) {
     if (!this.track) return false
 
-    const urlData = await this.nodelink.sources.getTrackUrl(this.track.info)
+    const trackInfo = { ...this.track.info, audioTrackId: this.track.audioTrackId }
+    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
     logger('debug', 'Player', `Got track URL for guild ${this.guildId}`, {
       urlData
@@ -652,6 +653,7 @@ export class Player {
     encoded,
     info,
     userData,
+    audioTrackId,
     noReplace = false,
     startTime,
     endTime = 0
@@ -691,7 +693,7 @@ export class Player {
           this._emitTrackEnd(EndReasons.REPLACED)
         }
 
-        this.track = { encoded, info, endTime, userData }
+        this.track = { encoded, info, endTime, userData, audioTrackId }
 
         if (!this.voice.endpoint || !this.voice.token) {
           logger(
@@ -769,8 +771,9 @@ export class Player {
             'Still no stream info URL available for seek.'
           )
           if (this.track) {
+            const trackInfo = { ...this.track.info, audioTrackId: this.track.audioTrackId }
             const urlData = await this.nodelink.sources.getTrackUrl(
-              this.track.info
+              trackInfo
             )
             this.streamInfo = { ...urlData, trackInfo: this.track.info }
             logger(
@@ -897,7 +900,8 @@ export class Player {
     this.position = position
     this.track.endTime = endTime
 
-    const urlData = await this.nodelink.sources.getTrackUrl(this.track.info)
+    const trackInfo = { ...this.track.info, audioTrackId: this.track.audioTrackId }
+    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
 
     if (urlData.exception) {
