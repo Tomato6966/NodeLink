@@ -97,7 +97,7 @@ export default class TidalSource {
 
           const tracks = tracksData.items.map((item) => this._parseTrack(item))
           return {
-            loadType: 'album',
+            loadType: 'playlist',
             data: { info: { name: albumData.title, selectedTrack: 0 }, tracks }
           }
         }
