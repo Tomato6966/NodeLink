@@ -45,6 +45,8 @@ export default class SourcesManager {
       if (await instance.setup()) {
         this.sources.set(name, instance)
 
+        this.sources.set('ytmusic', instance)
+
         if (Array.isArray(instance.searchTerms)) {
           for (const term of instance.searchTerms) {
             this.searchTermMap.set(term, name)
