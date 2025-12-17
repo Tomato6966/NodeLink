@@ -1,6 +1,22 @@
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import fs from 'node:fs/promises'
+import path from 'node:path'
 
 const API_BASE = 'https://api.tidal.com/v1/'
+const CACHE_VALIDITY_DAYS = 7
+const TIDAL_ASSET_URL = 'https://tidal.com/assets/index-CJ0DsMmf.js'
+
+const _functions = {
+  extractSecondClientId(text) {
+    const re = /clientId\s*[:=]\s*"([^"]+)"/g
+    let match,
+      count = 0
+    while ((match = re.exec(text))) {
+      if (++count === 2) return match[1]
+    }
+    return null
+  }
+}
 
 export default class TidalSource {
   constructor(nodelink) {
@@ -16,14 +32,86 @@ export default class TidalSource {
     this.playlistLoadLimit = this.config?.playlistLoadLimit ?? 2
     this.playlistPageLoadConcurrency =
       this.config?.playlistPageLoadConcurrency ?? 5
+    this.tokenCachePath = path.join(process.cwd(), '.cache', 'tidal_token.json')
   }
 
   async setup() {
-    if (!this.token) {
-      logger('warn', 'Tidal', 'No token provided. Disabling source.')
-      return false
+    if (this.token && this.token !== 'token_here') return true
+
+    const cachedToken = await this._loadTokenFromCache().catch(() => null)
+    if (cachedToken) {
+      this.token = cachedToken
+      logger('info', 'Tidal', 'Loaded valid token from cache.')
+      return true
     }
+
+    try {
+      const res = await fetch(TIDAL_ASSET_URL)
+      if (!res.ok) throw new Error(`Status ${res.status}`)
+
+      const token = _functions.extractSecondClientId(await res.text())
+
+      if (token) {
+        this.token = token
+        logger('info', 'Tidal', 'Fetched new token.')
+        await this._saveTokenToCache(token).catch((err) =>
+          logger('warn', 'Tidal', `Cache save failed: ${err.message}`)
+        )
+      } else {
+        logger('warn', 'Tidal', 'No clientId found in remote asset')
+      }
+    } catch (err) {
+      logger('warn', 'Tidal', `Token fetch failed: ${err.message}`)
+    }
+
     return true
+  }
+
+  async _loadTokenFromCache() {
+    try {
+      await fs.mkdir(path.dirname(this.tokenCachePath), { recursive: true })
+      const data = await fs.readFile(this.tokenCachePath, 'utf-8')
+      const { token, timestamp } = JSON.parse(data)
+
+      if (!token || !timestamp) return null
+
+      const cacheAge = Date.now() - timestamp
+      const maxAge = CACHE_VALIDITY_DAYS * 24 * 60 * 60 * 1000
+
+      if (cacheAge > maxAge) {
+        logger('info', 'Tidal', 'Cached token has expired.')
+        return null
+      }
+
+      return token
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        logger('warn', 'Tidal', `Could not read token cache: ${error.message}`)
+      }
+      return null
+    }
+  }
+
+  async _saveTokenToCache(token) {
+    try {
+      await fs.mkdir(path.dirname(this.tokenCachePath), { recursive: true })
+      const dataToCache = {
+        token: token,
+        timestamp: Date.now()
+      }
+      await fs.writeFile(
+        this.tokenCachePath,
+        JSON.stringify(dataToCache),
+        'utf-8'
+      )
+      logger('info', 'Tidal', 'Saved new token to cache file.')
+    } catch (error) {
+      logger(
+        'error',
+        'Tidal',
+        `Failed to save token to cache: ${error.message}`
+      )
+    }
   }
 
   async _getJson(endpoint, params = {}) {

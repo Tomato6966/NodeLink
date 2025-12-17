@@ -176,7 +176,7 @@ export default {
     },
     tidal: {
       enabled: true,
-      token: '', //get from tidal web player devtools; using login google account
+      token: 'token_here', //manually | or "token_here" to get a token automatically, get from tidal web player devtools; using login google account
       countryCode: 'US',
       playlistLoadLimit: 2, // 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
       playlistPageLoadConcurrency: 5 // How many pages to load simultaneously
