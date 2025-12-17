@@ -105,7 +105,7 @@ However, some clients may not work properly, since NodeLink changes certain beha
 | [Magmastream](https://github.com/Blackfort-Hosting/magmastream)     | TypeScript   | unknown       | No                 | v1                     |
 | [Lavacord](https://github.com/lavacord/Lavacord)                    | TypeScript   | unknown       | No                 | v1 and v2              |
 | [Shoukaku](https://github.com/Deivu/Shoukaku)                       | TypeScript   | unknown       | No                 | v1 and v2              |
-| [Lavalink-Client](https://github.com/tomato6966/Lavalink-Client)    | TypeScript   | unknown       | No                 | v1                     |
+| [Lavalink-Client](https://github.com/tomato6966/Lavalink-Client)    | TypeScript   | Yes           | No                 | v1 and v3              |
 | [Rainlink](https://github.com/RainyXeon/Rainlink)                   | TypeScript   | unknown       | No                 | v1 and v2              |
 | [Poru](https://github.com/parasop/Poru)                             | TypeScript   | unknown       | No                 | v1 and v2              |
 | [Blue.ts](https://github.com/ftrapture/blue.ts)                     | TypeScript   | unknown       | No                 | v1 and v2              |
