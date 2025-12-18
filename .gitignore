@@ -2,6 +2,8 @@
 
 !.github
 !.github/**
+!plugins/**
+!plugins
 !docs
 !docs/**
 !src
@@ -20,4 +22,3 @@
 !commitlint.config.mjs
 !.gitmessage
 !docker-compose.yml
-!plugins/**
