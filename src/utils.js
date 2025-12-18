@@ -227,6 +227,36 @@ function getVersion(type = 'string') {
   }
 }
 
+function modifyPayload(nodelink, data) {
+  if (!data || typeof data !== 'object') return data
+  const modifiers = nodelink.extensions?.trackModifiers
+  if (!modifiers || modifiers.length === 0) return data
+
+  if (Array.isArray(data)) {
+    return data.map((item) => modifyPayload(nodelink, item))
+  }
+
+  const modifiedData = { ...data }
+
+  if (modifiedData.info && modifiedData.encoded !== undefined) {
+    for (const modifier of modifiers) {
+      try {
+        modifier(modifiedData)
+      } catch (e) {
+        logger('error', 'PluginManager', `Track modifier error: ${e.message}`)
+      }
+    }
+  }
+
+  for (const key in modifiedData) {
+    if (typeof modifiedData[key] === 'object' && key !== 'info') {
+      modifiedData[key] = modifyPayload(nodelink, modifiedData[key])
+    }
+  }
+
+  return modifiedData
+}
+
 function sendResponse(req, res, data, status, trace = false) {
   const headers = {}
 
@@ -236,9 +266,11 @@ function sendResponse(req, res, data, status, trace = false) {
     return
   }
 
-  let finalData = data
-  if (data.trace && !trace) {
-    const { trace: _, ...rest } = data
+  const nodelink = global.nodelink
+  let finalData = nodelink ? modifyPayload(nodelink, data) : data
+
+  if (finalData.trace && !trace) {
+    const { trace: _, ...rest } = finalData
     finalData = rest
   }
 

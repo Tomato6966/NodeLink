@@ -280,5 +280,12 @@ export default {
     defaultVolume: 0.8,
     maxLayersMix: 5,
     autoCleanup: true
-  }
+  },
+  plugins: [
+    {
+      name: 'nodelink-sample-plugin',
+      source: 'local'
+    }
+  ],
+  pluginConfig: {}
 }
