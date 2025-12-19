@@ -5,6 +5,7 @@ let lastCpuTime = Date.now()
 
 import ConnectionManager from './managers/connectionManager.js'
 import LyricsManager from './managers/lyricsManager.js'
+import PluginManager from './managers/pluginManager.js'
 import RoutePlannerManager from './managers/routePlannerManager.js'
 import SourceManager from './managers/sourceManager.js'
 import StatsManager from './managers/statsManager.js'
@@ -32,11 +33,44 @@ nodelink.sources = new SourceManager(nodelink)
 nodelink.lyrics = new LyricsManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(nodelink)
 nodelink.connectionManager = new ConnectionManager(nodelink)
+nodelink.pluginManager = new PluginManager(nodelink)
+
+nodelink.extensions = {
+  workerInterceptors: [],
+  audioInterceptors: []
+}
+
+nodelink.registerWorkerInterceptor = (fn) => {
+  nodelink.extensions.workerInterceptors.push(fn)
+  logger('info', 'Worker', 'Registered worker command interceptor')
+}
+
+nodelink.registerSource = (name, source) => {
+  if (!nodelink.sources) {
+    logger('warn', 'Worker', 'Cannot register source (sources manager not ready).')
+    return
+  }
+  nodelink.sources.sources.set(name, source)
+  logger('info', 'Worker', `Registered custom source: ${name}`)
+}
+
+nodelink.registerFilter = (name, filter) => {
+  if (!nodelink.extensions.filters) nodelink.extensions.filters = new Map()
+  nodelink.extensions.filters.set(name, filter)
+  logger('info', 'Worker', `Registered custom filter: ${name}`)
+}
+
+nodelink.registerAudioInterceptor = (interceptor) => {
+  if (!nodelink.extensions.audioInterceptors) nodelink.extensions.audioInterceptors = []
+  nodelink.extensions.audioInterceptors.push(interceptor)
+  logger('info', 'Worker', 'Registered custom audio interceptor')
+}
 
 async function initialize() {
   await nodelink.sources.loadFolder()
   await nodelink.lyrics.loadFolder()
   await nodelink.statsManager.initialize()
+  await nodelink.pluginManager.load('worker')
   logger(
     'info',
     'Worker',
@@ -77,6 +111,25 @@ async function processQueue() {
   if (commandQueue.length === 0) return
 
   const { type, requestId, payload } = commandQueue.shift()
+
+  // Execute Worker Interceptors
+  const interceptors = nodelink.extensions.workerInterceptors
+  if (interceptors && interceptors.length > 0) {
+    for (const interceptor of interceptors) {
+      try {
+        const shouldBlock = await interceptor(type, payload)
+        if (shouldBlock === true) {
+          if (process.connected && requestId) {
+             process.send({ type: 'commandResult', requestId, payload: { intercepted: true } })
+          }
+          setImmediate(processQueue)
+          return
+        }
+      } catch (e) {
+        logger('error', 'Worker', `Interceptor error: ${e.message}`)
+      }
+    }
+  }
 
   try {
     let result

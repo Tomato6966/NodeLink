@@ -1394,8 +1394,27 @@ class StreamAudioResource extends BaseAudioResource {
       this.pipes.push(mixer)
     }
 
-    streams.push(filters, opusEncoder)
-    this.pipes.push(filters, opusEncoder)
+    streams.push(filters)
+    this.pipes.push(filters)
+
+    // Inject Audio Interceptors (Low-level stream manipulation)
+    if (nodelink.extensions?.audioInterceptors) {
+      for (const interceptorFactory of nodelink.extensions.audioInterceptors) {
+        try {
+          const interceptorStream = interceptorFactory()
+          if (interceptorStream && typeof interceptorStream.pipe === 'function') {
+            streams.push(interceptorStream)
+            this.pipes.push(interceptorStream)
+          }
+        } catch (e) {
+          // Log error but don't break pipeline
+          console.error(`Audio interceptor error: ${e.message}`)
+        }
+      }
+    }
+
+    streams.push(opusEncoder)
+    this.pipes.push(opusEncoder)
 
     pipeline(streams, (err) => {
       if (err && !this._destroyed) {

@@ -8,6 +8,23 @@ export default class PlayerManager {
     this.isCluster = !!nodelink.workerManager
   }
 
+  async _runInterceptors(action, guildId, ...args) {
+    const interceptors = this.nodelink.extensions?.playerInterceptors
+    if (!interceptors || interceptors.length === 0) return null
+
+    for (const interceptor of interceptors) {
+      try {
+        const result = await interceptor(action, guildId, args)
+        if (result !== null && result !== undefined && result !== false) {
+          return { handled: true, result }
+        }
+      } catch (e) {
+        logger('error', 'PlayerManager', `Interceptor error for ${action}: ${e.message}`)
+      }
+    }
+    return null
+  }
+
   async create(guildId, voice) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${this.sessionId}:${guildId}`
@@ -107,6 +124,9 @@ export default class PlayerManager {
   }
 
   async play(guildId, trackPayload) {
+    const interception = await this._runInterceptors('play', guildId, trackPayload)
+    if (interception?.handled) return interception.result
+
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${this.sessionId}:${guildId}`
 
@@ -135,6 +155,9 @@ export default class PlayerManager {
   }
 
   async stop(guildId) {
+    const interception = await this._runInterceptors('stop', guildId)
+    if (interception?.handled) return interception.result
+
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${this.sessionId}:${guildId}`
 
@@ -163,6 +186,9 @@ export default class PlayerManager {
   }
 
   async pause(guildId, shouldPause) {
+    const interception = await this._runInterceptors('pause', guildId, shouldPause)
+    if (interception?.handled) return interception.result
+
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${this.sessionId}:${guildId}`
 
@@ -191,6 +217,9 @@ export default class PlayerManager {
   }
 
   async seek(guildId, position, endTime) {
+    const interception = await this._runInterceptors('seek', guildId, position, endTime)
+    if (interception?.handled) return interception.result
+
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${this.sessionId}:${guildId}`
 
@@ -219,6 +248,9 @@ export default class PlayerManager {
   }
 
   async volume(guildId, level) {
+    const interception = await this._runInterceptors('volume', guildId, level)
+    if (interception?.handled) return interception.result
+
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${this.sessionId}:${guildId}`
 
@@ -247,6 +279,9 @@ export default class PlayerManager {
   }
 
   async setFilters(guildId, filtersPayload) {
+    const interception = await this._runInterceptors('setFilters', guildId, filtersPayload)
+    if (interception?.handled) return interception.result
+
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${this.sessionId}:${guildId}`
 
@@ -275,6 +310,9 @@ export default class PlayerManager {
   }
 
   async updateVoice(guildId, voicePayload) {
+    const interception = await this._runInterceptors('updateVoice', guildId, voicePayload)
+    if (interception?.handled) return interception.result
+
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${this.sessionId}:${guildId}`
 

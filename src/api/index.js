@@ -62,6 +62,15 @@ const routesPromise = loadRoutes()
 async function requestHandler(nodelink, req, res) {
   const startTime = Date.now()
   const parsedUrl = new URL(req.url, `http://${req.headers.host}`)
+
+  const middlewares = nodelink.extensions?.middlewares
+  if (middlewares && Array.isArray(middlewares)) {
+    for (const middleware of middlewares) {
+      const result = await middleware(nodelink, req, res, parsedUrl)
+      if (result === true) return // Middleware handled the response
+    }
+  }
+
   nodelink.statsManager.incrementApiRequest(parsedUrl.pathname)
   const trace = parsedUrl.searchParams.get('trace') === 'true'
   const remoteAddress = req.socket.remoteAddress
@@ -257,6 +266,30 @@ async function requestHandler(nodelink, req, res) {
       return
     staticRoute.handler(nodelink, req, res, sendResponse, parsedUrl)
     return
+  }
+
+  const customRoutes = nodelink.extensions?.routes
+  if (customRoutes && Array.isArray(customRoutes)) {
+    const customRoute = customRoutes.find(
+      (r) => r.path === parsedUrl.pathname
+    )
+
+    if (customRoute) {
+      if (
+        !verifyMethod(
+          parsedUrl,
+          req,
+          res,
+          customRoute.method ? [customRoute.method] : ['GET'],
+          clientAddress,
+          trace
+        )
+      )
+        return
+
+      customRoute.handler(nodelink, req, res, sendResponse, parsedUrl)
+      return
+    }
   }
 
   for (const [regex, route] of dynamicRoutes) {

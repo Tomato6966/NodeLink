@@ -30,6 +30,7 @@ import { GatewayEvents } from './constants.js'
 import DosProtectionManager from './managers/dosProtectionManager.js'
 import PlayerManager from './managers/playerManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
+import PluginManager from './managers/pluginManager.js'
 
 let config
 
@@ -119,6 +120,7 @@ class NodelinkServer {
     if (!options || Object.keys(options).length === 0)
       throw new Error('Configuration file not found or empty')
     this.options = options
+    this.logger = logger
     this.server = null
     this.socket = null
     this.sessions = new sessionManager(this, PlayerManagerClass)
@@ -134,12 +136,25 @@ class NodelinkServer {
     this.statsManager = new statsManager(this)
     this.rateLimitManager = new RateLimitManager(this)
     this.dosProtectionManager = new DosProtectionManager(this)
+    this.pluginManager = new PluginManager(this)
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     this.statistics = {
       players: 0,
       playingPlayers: 0
     }
+    
+    this.extensions = {
+      sources: new Map(),
+      filters: new Map(),
+      routes: [],
+      middlewares: [],
+      trackModifiers: [],
+      wsInterceptors: [],
+      audioInterceptors: [],
+      playerInterceptors: []
+    }
+    
     this._globalUpdater = null
     this.supportedSourcesCache = null
 
@@ -193,6 +208,30 @@ class NodelinkServer {
     this.socket.on(
       '/v4/websocket',
       (socket, request, clientInfo, oldSessionId) => {
+        const originalOn = socket.on.bind(socket)
+        socket.on = (event, listener) => {
+          if (event === 'message') {
+            return originalOn(event, async (data) => {
+              const interceptors = this.extensions?.wsInterceptors
+              if (interceptors && Array.isArray(interceptors)) {
+                let parsedData
+                try {
+                  parsedData = JSON.parse(data.toString())
+                } catch {
+                  parsedData = data
+                }
+
+                for (const interceptor of interceptors) {
+                  const handled = await interceptor(this, socket, parsedData, clientInfo)
+                  if (handled === true) return
+                }
+              }
+              listener(data)
+            })
+          }
+          return originalOn(event, listener)
+        }
+
         logger(
           'debug',
           'Resume',
@@ -779,6 +818,11 @@ class NodelinkServer {
     this._validateConfig()
 
     await this.statsManager.initialize()
+    await this.pluginManager.load('master')
+    
+    if (!startOptions.isClusterPrimary) {
+      await this.pluginManager.load('worker')
+    }
 
     if (this.options.sources.youtube?.getOAuthToken) {
       logger(
@@ -874,6 +918,51 @@ class NodelinkServer {
       const sessionCount = this.sessions.activeSessions?.size || 0
       this.statsManager.setWebsocketConnections(sessionCount)
     }, updateInterval)
+  }
+
+  registerSource(name, source) {
+    if (!this.sources) {
+      logger('warn', 'Server', 'Cannot register source in this context (sources manager not available).')
+      return
+    }
+    this.sources.sources.set(name, source)
+    logger('info', 'Server', `Registered custom source: ${name}`)
+  }
+
+  registerFilter(name, filter) {
+    this.extensions.filters.set(name, filter)
+    logger('info', 'Server', `Registered custom filter: ${name}`)
+  }
+
+  registerRoute(method, path, handler) {
+    this.extensions.routes.push({ method, path, handler })
+    logger('info', 'Server', `Registered custom route: ${method} ${path}`)
+  }
+
+  registerMiddleware(fn) {
+    this.extensions.middlewares.push(fn)
+    logger('info', 'Server', 'Registered custom REST interceptor (middleware)')
+  }
+
+  registerTrackModifier(fn) {
+    this.extensions.trackModifiers.push(fn)
+    logger('info', 'Server', 'Registered custom track info modifier')
+  }
+
+  registerWebSocketInterceptor(fn) {
+    this.extensions.wsInterceptors.push(fn)
+    logger('info', 'Server', 'Registered custom WebSocket interceptor')
+  }
+
+  registerAudioInterceptor(interceptor) {
+    if (!this.extensions.audioInterceptors) this.extensions.audioInterceptors = []
+    this.extensions.audioInterceptors.push(interceptor)
+    logger('info', 'Server', 'Registered custom audio interceptor')
+  }
+
+  registerPlayerInterceptor(interceptor) {
+    this.extensions.playerInterceptors.push(interceptor)
+    logger('info', 'Server', 'Registered custom player interceptor')
   }
 }
 

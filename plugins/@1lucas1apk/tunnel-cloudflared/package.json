@@ -1,0 +1,12 @@
+{
+  "name": "@1lucas1apk/tunnel-cloudflared",
+  "version": "1.0.0",
+  "description": "Cloudflare Tunnel integration for NodeLink",
+  "type": "module",
+  "main": "index.js",
+  "author": "1lucas1apk",
+  "license": "MIT",
+  "dependencies": {
+    "cloudflared": "^0.7.1"
+  }
+}
