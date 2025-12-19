@@ -417,7 +417,7 @@ function getStats(nodelink) {
   let frameStats = null
   if (players > 0) {
     frameStats = { sent: 0, nulled: 0, deficit: 0, expected: 0 }
-    if (nodelink.workerManager) { 
+    if (nodelink.workerManager) {
       for (const workerStats of nodelink.workerManager.workerStats.values()) {
         if (workerStats.frameStats) {
           frameStats.sent += workerStats.frameStats.sent || 0
@@ -426,7 +426,7 @@ function getStats(nodelink) {
         }
       }
       frameStats.deficit = Math.max(0, frameStats.expected - frameStats.sent)
-    } else { 
+    } else {
       for (const session of nodelink.sessions.values()) {
         if (!session.players) continue
         for (const player of session.players.players.values()) {
@@ -538,7 +538,7 @@ function decodeTrack(encoded) {
       author: read.utf(),
       length: Number(read.long()),
       identifier: read.utf(),
-      isSeekable: true,
+      isSeekable: !!read.byte(),
       isStream: !!read.byte(),
       uri: version >= 2 && read.byte() ? read.utf() : null,
       artworkUrl: version === 3 && read.byte() ? read.utf() : null,
@@ -592,6 +592,7 @@ function encodeTrack(track) {
   write('utf', track.author)
   write('long', track.length)
   write('utf', track.identifier)
+  write('byte', track.isSeekable ? 1 : 0)
   write('byte', track.isStream ? 1 : 0)
 
   if (version >= 2) {

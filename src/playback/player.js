@@ -744,7 +744,7 @@ export class Player {
 
   async seek(position, endTime) {
     if (this.destroying || !this.track) return false
-    if (!this.track.info.isSeekable && this.track.info.isStream) return false
+    if (!this.track.info.isSeekable && !this.track.info.isStream) return false
 
     const seekPosition = position ?? this._realPosition()
 
