@@ -172,16 +172,16 @@ class NodelinkServer {
 
   _validateConfig() {
     validateProperty(
-      this.options,
-      (options) =>
-        options.server.port && typeof options.server.port === 'number',
-      'Port must be a number'
+      this.options.server.port,
+      'server.port',
+      'number (1–65535)',
+      (value) => typeof value === 'number'
     )
     validateProperty(
-      this.options,
-      (options) =>
-        options.server.host && typeof options.server.host === 'string',
-      'Host must be a string'
+      this.options.server.host,
+      'server.host',
+      'string',
+      (value) => typeof value === 'string'
     )
   }
 
