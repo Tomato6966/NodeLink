@@ -189,15 +189,184 @@ class NodelinkServer {
     validateProperty(
       this.options.server.port,
       'server.port',
-      'number (1–65535)',
-      (value) => typeof value === 'number'
+      'integer between 1 and 65535',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 1 &&
+        value <= 65535
     )
+
     validateProperty(
       this.options.server.host,
       'server.host',
       'string',
       (value) => typeof value === 'string'
     )
+
+    validateProperty(
+      this.options.playerUpdateInterval,
+      'playerUpdateInterval',
+      'integer between 250 and 60000 (milliseconds)',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 250 &&
+        value <= 60000
+    )
+
+    validateProperty(
+      this.options.maxSearchResults,
+      'maxSearchResults',
+      'integer between 1 and 100',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 1 &&
+        value <= 100
+    )
+
+    validateProperty(
+      this.options.maxAlbumPlaylistLength,
+      'maxAlbumPlaylistLength',
+      'integer between 1 and 500',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 1 &&
+        value <= 500
+    )
+
+    validateProperty(
+      this.options.trackStuckThresholdMs,
+      'trackStuckThresholdMs',
+      'integer >= 1000 (milliseconds)',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 1000
+    )
+
+    validateProperty(
+      this.options.zombieThresholdMs,
+      'zombieThresholdMs',
+      `integer > trackStuckThresholdMs (${this.options.trackStuckThresholdMs})`,
+      (value) =>
+        Number.isInteger(value) &&
+        value > this.options.trackStuckThresholdMs
+    )
+
+    validateProperty(
+      this.options.cluster.workers,
+      'cluster.workers',
+      'integer >= 0',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 0
+    )
+
+    validateProperty(
+      this.options.cluster.minWorkers,
+      'cluster.minWorkers',
+      this.options.cluster.workers === 0
+        ? 'integer >= 0 (workers auto-scaled)'
+        : `integer between 0 and ${this.options.cluster.workers}`,
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 0 &&
+        (this.options.cluster.workers === 0 ||
+          value <= this.options.cluster.workers)
+    )
+    
+    validateProperty(
+      this.options.defaultSearchSource,
+      'defaultSearchSource',
+      'key of an enabled source in config.sources',
+      (v) =>
+        typeof v === 'string' &&
+        Boolean(this.options.sources?.[v]?.enabled)
+    )
+
+    validateProperty(
+      this.options.audio.quality,
+      'audio.quality',
+      "one of ['high', 'medium', 'low', 'lowest']",
+      (v) => ['high', 'medium', 'low', 'lowest'].includes(v)
+    )
+    
+    validateProperty(
+      this.options.audio.resamplingQuality,
+      'audio.resamplingQuality',
+      "one of ['best', 'medium', 'fastest', 'zero', 'linear']",
+      (v) => ['best', 'medium', 'fastest', 'zero', 'linear'].includes(v)
+    )
+    
+    validateProperty(
+      this.options.routePlanner?.strategy,
+      'routePlanner.strategy',
+      "one of ['RotateOnBan', 'RoundRobin', 'LoadBalance']",
+      (v) =>
+        typeof v === 'string' &&
+        ['RotateOnBan', 'RoundRobin', 'LoadBalance'].includes(v)
+    )
+
+    validateProperty(
+      this.options.routePlanner?.bannedIpCooldown,
+      'routePlanner.bannedIpCooldown',
+      'integer > 0 (milliseconds)',
+      (v) => Number.isInteger(v) && v > 0
+    )
+
+
+    // Order matters here — this is intentional.
+    const rateLimitSections = [
+      'global',
+      'perIp',
+      'perUserId',
+      'perGuildId'
+    ]
+
+    if (this.options.rateLimit?.enabled !== false) { 
+      for (let i = 0; i < rateLimitSections.length; i++) {
+        const section = rateLimitSections[i]
+        const config = this.options.rateLimit?.[section]
+        
+        // Defensive: skip missing sections
+        if (!config) continue
+        
+        // 1️⃣ Validate local properties
+        validateProperty(
+          config.maxRequests,
+          `rateLimit.${section}.maxRequests`,
+          'integer > 0',
+          (value) =>
+            Number.isInteger(value) &&
+          value > 0
+        )
+
+        validateProperty(
+          config.timeWindowMs,
+          `rateLimit.${section}.timeWindowMs`,
+          'integer > 0 (milliseconds)',
+          (value) =>
+            Number.isInteger(value) &&
+          value > 0
+        )
+
+        // 2️⃣ Validate hierarchy (skip first: global has no parent)
+        if (i === 0) continue
+        
+        const parentSection = rateLimitSections[i - 1]
+        const parentConfig = this.options.rateLimit?.[parentSection]
+        
+        if (!parentConfig) continue
+        
+        validateProperty(
+          config.maxRequests,
+          `rateLimit.${section}.maxRequests`,
+          `integer <= rateLimit.${parentSection}.maxRequests (${parentConfig.maxRequests})`,
+          (value) =>
+            Number.isInteger(value) &&
+          value > 0 &&
+          value <= parentConfig.maxRequests
+        )
+      }
+    }
   }
 
   _setupSocketEvents() {
