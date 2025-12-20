@@ -313,7 +313,6 @@ class NodelinkServer {
     )
 
 
-    // Order matters here — this is intentional.
     const rateLimitSections = [
       'global',
       'perIp',
@@ -326,10 +325,8 @@ class NodelinkServer {
         const section = rateLimitSections[i]
         const config = this.options.rateLimit?.[section]
         
-        // Defensive: skip missing sections
         if (!config) continue
         
-        // 1️⃣ Validate local properties
         validateProperty(
           config.maxRequests,
           `rateLimit.${section}.maxRequests`,
@@ -348,7 +345,6 @@ class NodelinkServer {
           value > 0
         )
 
-        // 2️⃣ Validate hierarchy (skip first: global has no parent)
         if (i === 0) continue
         
         const parentSection = rateLimitSections[i - 1]
