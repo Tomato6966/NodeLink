@@ -1,6 +1,8 @@
 import cluster from 'node:cluster'
 import { EventEmitter } from 'node:events'
 import http from 'node:http'
+import path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import WebSocketServer from '@performanc/pwsl-server'
 
 import requestHandler from './api/index.js'
@@ -34,12 +36,21 @@ import PluginManager from './managers/pluginManager.js'
 
 let config
 
+const isSEA = process.embedder === 'nodejs'
+const executableDir = path.dirname(process.execPath)
+
 try {
-  config = (await import('../config.js')).default
+  const configPath = isSEA
+    ? pathToFileURL(path.join(executableDir, 'config.js')).href
+    : '../config.js'
+  config = (await import(configPath)).default
 } catch (e) {
-  if (e.code === 'ERR_MODULE_NOT_FOUND') {
+  if (e.code === 'ERR_MODULE_NOT_FOUND' || e.code === 'ENOENT') {
     try {
-      config = (await import('../config.default.js')).default
+      const defaultConfigPath = isSEA
+        ? pathToFileURL(path.join(executableDir, 'config.default.js')).href
+        : '../config.default.js'
+      config = (await import(defaultConfigPath)).default
       console.log(
         '[WARN] Config: config.js not found, using config.default.js. It is recommended to create a config.js file for your own configuration.'
       )
@@ -115,6 +126,13 @@ class BunSocketWrapper extends EventEmitter {
   }
 }
 
+let registry = null
+if (process.embedder === 'nodejs') {
+  try {
+    registry = await import('./registry.js')
+  } catch (e) {}
+}
+
 class NodelinkServer {
   constructor(options, PlayerManagerClass, isClusterPrimary = false) {
     if (!options || Object.keys(options).length === 0)
@@ -137,6 +155,7 @@ class NodelinkServer {
     this.rateLimitManager = new RateLimitManager(this)
     this.dosProtectionManager = new DosProtectionManager(this)
     this.pluginManager = new PluginManager(this)
+    this.registry = registry
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     this.statistics = {

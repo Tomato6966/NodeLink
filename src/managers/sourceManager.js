@@ -3,6 +3,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { logger } from '../utils.js'
 
+let sourceRegistry
+try {
+  const mod = await import('../registry.js')
+  sourceRegistry = mod.sourceRegistry
+} catch {}
+
 export default class SourcesManager {
   constructor(nodelink) {
     this.nodelink = nodelink
@@ -16,112 +22,157 @@ export default class SourcesManager {
     const __dirname = path.dirname(__filename)
     const sourcesDir = path.join(__dirname, '../sources')
 
-    try {
-      await fs.access(sourcesDir)
-    } catch {
-      throw new Error(`Sources directory not found: ${sourcesDir}`)
-    }
-
-    const files = await fs.readdir(sourcesDir)
-    const jsFiles = files.filter((f) => f.endsWith('.js'))
-    const toLoad = jsFiles.filter((f) => {
-      const name = path.basename(f, '.js')
-      return (
-        name !== 'youtube' && !!this.nodelink.options.sources[name]?.enabled
-      )
-    })
-
     this.sources.clear()
     this.searchTermMap.clear()
     this.patternMap = []
 
-    if (this.nodelink.options.sources.youtube?.enabled) {
-      const name = 'youtube'
-      const filePath = path.join(sourcesDir, 'youtube', 'YouTube.js')
-      const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
-      const Mod = (await import(fileUrl)).default
+    if (sourceRegistry && Object.keys(sourceRegistry).length > 0) {
+      for (const [name, mod] of Object.entries(sourceRegistry)) {
+        const isYouTube = name === 'youtube' || name.includes('YouTube.js')
+        const enabled = isYouTube
+          ? this.nodelink.options.sources.youtube?.enabled
+          : !!this.nodelink.options.sources[name]?.enabled
 
-      const instance = new Mod(this.nodelink)
-      if (await instance.setup()) {
-        this.sources.set(name, instance)
+        if (!enabled) continue
 
-        this.sources.set('ytmusic', instance)
+        const Mod = mod.default || mod
+        const instance = new Mod(this.nodelink)
 
-        if (Array.isArray(instance.searchTerms)) {
-          for (const term of instance.searchTerms) {
-            this.searchTermMap.set(term, name)
-          }
-        }
+        if (await instance.setup()) {
+          const sourceKey = isYouTube ? 'youtube' : name
+          this.sources.set(sourceKey, instance)
 
-        if (Array.isArray(instance.patterns)) {
-          for (const regex of instance.patterns) {
-            if (regex instanceof RegExp) {
-              this.patternMap.push({
-                regex,
-                sourceName: name,
-                priority: instance.priority || 0
-              })
+          if (isYouTube) this.sources.set('ytmusic', instance)
+
+          if (Array.isArray(instance.searchTerms)) {
+            for (const term of instance.searchTerms) {
+              this.searchTermMap.set(term, sourceKey)
             }
           }
+
+          if (Array.isArray(instance.patterns)) {
+            for (const regex of instance.patterns) {
+              if (regex instanceof RegExp) {
+                this.patternMap.push({
+                  regex,
+                  sourceName: sourceKey,
+                  priority: instance.priority || 0
+                })
+              }
+            }
+          }
+          logger(
+            'info',
+            'Sources',
+            `Loaded source: ${sourceKey}`
+          )
         }
-        logger(
-          'info',
-          'Sources',
-          `Loaded source: ${name} ${instance.searchTerms?.length ? `(terms: ${instance.searchTerms.join(', ')})` : ''}`
-        )
-      } else {
-        logger(
-          'error',
-          'Sources',
-          `Failed setup source: ${name}; source not available for use`
-        )
       }
+      this.patternMap.sort((a, b) => b.priority - a.priority)
+      return
     }
 
-    await Promise.all(
-      toLoad.map(async (file) => {
-        const name = path.basename(file, '.js')
-        const filePath = path.join(sourcesDir, file)
+    try {
+      await fs.access(sourcesDir)
+      const files = await fs.readdir(sourcesDir)
+      const jsFiles = files.filter((f) => f.endsWith('.js'))
+      const toLoad = jsFiles.filter((f) => {
+        const name = path.basename(f, '.js')
+        return (
+          name !== 'youtube' && !!this.nodelink.options.sources[name]?.enabled
+        )
+      })
+
+      if (this.nodelink.options.sources.youtube?.enabled) {
+        const name = 'youtube'
+        const filePath = path.join(sourcesDir, 'youtube', 'YouTube.js')
         const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
         const Mod = (await import(fileUrl)).default
 
         const instance = new Mod(this.nodelink)
         if (await instance.setup()) {
           this.sources.set(name, instance)
+
+          this.sources.set('ytmusic', instance)
+
+          if (Array.isArray(instance.searchTerms)) {
+            for (const term of instance.searchTerms) {
+              this.searchTermMap.set(term, name)
+            }
+          }
+
+          if (Array.isArray(instance.patterns)) {
+            for (const regex of instance.patterns) {
+              if (regex instanceof RegExp) {
+                this.patternMap.push({
+                  regex,
+                  sourceName: name,
+                  priority: instance.priority || 0
+                })
+              }
+            }
+          }
+          logger(
+            'info',
+            'Sources',
+            `Loaded source: ${name} ${instance.searchTerms?.length ? `(terms: ${instance.searchTerms.join(', ')})` : ''}`
+          )
         } else {
           logger(
             'error',
             'Sources',
             `Failed setup source: ${name}; source not available for use`
           )
-          return
         }
+      }
 
-        if (Array.isArray(instance.searchTerms)) {
-          for (const term of instance.searchTerms) {
-            this.searchTermMap.set(term, name)
+      await Promise.all(
+        toLoad.map(async (file) => {
+          const name = path.basename(file, '.js')
+          const filePath = path.join(sourcesDir, file)
+          const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
+          const Mod = (await import(fileUrl)).default
+
+          const instance = new Mod(this.nodelink)
+          if (await instance.setup()) {
+            this.sources.set(name, instance)
+          } else {
+            logger(
+              'error',
+              'Sources',
+              `Failed setup source: ${name}; source not available for use`
+            )
+            return
           }
-        }
 
-        if (Array.isArray(instance.patterns)) {
-          for (const regex of instance.patterns) {
-            if (regex instanceof RegExp) {
-              this.patternMap.push({
-                regex,
-                sourceName: name,
-                priority: instance.priority || 0
-              })
+          if (Array.isArray(instance.searchTerms)) {
+            for (const term of instance.searchTerms) {
+              this.searchTermMap.set(term, name)
             }
           }
-        }
-        logger(
-          'info',
-          'Sources',
-          `Loaded source: ${name} ${instance.searchTerms?.length ? `(terms: ${instance.searchTerms.join(', ')})` : ''}`
-        )
-      })
-    )
-    this.patternMap.sort((a, b) => b.priority - a.priority) // Ordenar por prioridade
+
+          if (Array.isArray(instance.patterns)) {
+            for (const regex of instance.patterns) {
+              if (regex instanceof RegExp) {
+                this.patternMap.push({
+                  regex,
+                  sourceName: name,
+                  priority: instance.priority || 0
+                })
+              }
+            }
+          }
+          logger(
+            'info',
+            'Sources',
+            `Loaded source: ${name} ${instance.searchTerms?.length ? `(terms: ${instance.searchTerms.join(', ')})` : ''}`
+          )
+        })
+      )
+    } catch (e) {
+      logger('error', 'Sources', `Sources directory not found or error loading sources: ${sourcesDir} - ${e.message}`)
+    }
+    this.patternMap.sort((a, b) => b.priority - a.priority)
   }
 
   async _instrumentedSourceCall(sourceName, method, ...args) {
@@ -152,7 +203,7 @@ export default class SourcesManager {
     if (!sourceName) {
       throw new Error(`Source not found for term: ${sourceTerm}`)
     }
-    logger('debug', 'Sources', `Searching on ${sourceName} for: "${query}"`)
+    logger('debug', 'Sources', `Searching on ${sourceName} for: "${query}" `)
     return this._instrumentedSourceCall(sourceName, 'search', query, sourceTerm)
   }
 
