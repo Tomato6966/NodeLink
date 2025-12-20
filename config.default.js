@@ -282,10 +282,10 @@ export default {
     autoCleanup: true
   },
   plugins: [
-    {
+/*  {
       name: 'nodelink-sample-plugin',
       source: 'local'
-    }
+    } */
   ],
   pluginConfig: {}
 }
