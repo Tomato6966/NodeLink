@@ -105,7 +105,7 @@ However, some clients may not work properly, since NodeLink changes certain beha
 | [Moonlink.js](https://github.com/1Lucas1apk/moonlink.js)            | TypeScript   | Yes           | No                 | v1, v2, v3             |
 | [Magmastream](https://github.com/Blackfort-Hosting/magmastream)     | TypeScript   | unknown       | No                 | v1                     |
 | [Lavacord](https://github.com/lavacord/Lavacord)                    | TypeScript   | unknown       | No                 | v1 and v2              |
-| [Shoukaku](https://github.com/Deivu/Shoukaku)                       | TypeScript   | unknown       | No                 | v1 and v2              |
+| [Shoukaku](https://github.com/Deivu/Shoukaku)                       | TypeScript   | Yes           | No                 | v1, v2, v3             |
 | [Lavalink-Client](https://github.com/tomato6966/Lavalink-Client)    | TypeScript   | Yes           | No                 | v1 and v3              |
 | [Rainlink](https://github.com/RainyXeon/Rainlink)                   | TypeScript   | unknown       | No                 | v1 and v2              |
 | [Poru](https://github.com/parasop/Poru)                             | TypeScript   | unknown       | No                 | v1 and v2              |
