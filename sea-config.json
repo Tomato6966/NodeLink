@@ -1,6 +1,5 @@
 {
-  "main": "scripts/wrapper.cjs",
+  "main": "dist/runner.js",
   "output": "dist/app.blob",
-  "disableExperimentalSEAWarning": true,
-  "useCodeCache": true
+  "disableExperimentalSEAWarning": true
 }

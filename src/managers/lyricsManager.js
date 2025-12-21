@@ -23,23 +23,25 @@ export default class LyricsManager {
     this.lyricsSources.clear()
 
     if (lyricRegistry && Object.keys(lyricRegistry).length > 0) {
-      for (const [name, mod] of Object.entries(lyricRegistry)) {
-        if (!this.nodelink.options.lyrics?.[name]?.enabled) continue
+      await Promise.all(
+        Object.entries(lyricRegistry).map(async ([name, mod]) => {
+          if (!this.nodelink.options.lyrics?.[name]?.enabled) return
 
-        const Mod = mod.default || mod
-        const instance = new Mod(this.nodelink)
+          const Mod = mod.default || mod
+          const instance = new Mod(this.nodelink)
 
-        if (await instance.setup()) {
-          this.lyricsSources.set(name, instance)
-          logger('info', 'Lyrics', `Loaded lyrics source: ${name}`)
-        } else {
-          logger(
-            'error',
-            'Lyrics',
-            `Failed setup for lyrics source: ${name}; source not available.`
-          )
-        }
-      }
+          if (await instance.setup()) {
+            this.lyricsSources.set(name, instance)
+            logger('info', 'Lyrics', `Loaded lyrics source: ${name}`)
+          } else {
+            logger(
+              'error',
+              'Lyrics',
+              `Failed setup for lyrics source: ${name}; source not available.`
+            )
+          }
+        })
+      )
       return
     }
 

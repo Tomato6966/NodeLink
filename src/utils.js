@@ -332,6 +332,10 @@ function sendResponse(req, res, data, status, trace = false) {
 }
 
 function getGitInfo() {
+  if (typeof __BUILD_GIT_INFO__ !== 'undefined') {
+    return __BUILD_GIT_INFO__
+  }
+
   const isBun = typeof Bun !== 'undefined' && !!process.versions.bun
   // bun is too weird
   if (isBun) {

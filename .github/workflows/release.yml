@@ -18,10 +18,12 @@ jobs:
             output_name: nodelink-win-x64.exe
             node_arch: x64
             
-          # Windows x86 (32-bit)
+          # Windows x86 (32-bit) - Cross-build via download to avoid runner arch conflicts
           - os: windows-latest
             output_name: nodelink-win-x86.exe
-            node_arch: x86
+            node_dl_url: https://nodejs.org/dist/v22.12.0/node-v22.12.0-win-x86.zip
+            node_dl_path: node-v22.12.0-win-x86/node.exe
+            is_cross: true
 
           # Linux x64 (Standard)
           - os: ubuntu-latest
@@ -40,8 +42,8 @@ jobs:
             output_name: nodelink-macos-arm64
             node_arch: arm64
 
-          # macOS x64 (Intel)
-          - os: macos-13
+          # macOS x64 (Intel) - Updated to macos-15 to avoid deprecation
+          - os: macos-15
             output_name: nodelink-macos-x64
             node_arch: x64
 
@@ -55,8 +57,8 @@ jobs:
         with:
           node-version: 22
 
-      # For standard builds (Windows x86/x64, macOS, Linux x64), we can use setup-node to get the target binary
-      # But for Linux ARM64 on x64 host, we must download it manually.
+      # For standard builds (Windows x64, macOS, Linux x64), we can use setup-node
+      # For cross-builds (Linux ARM64, Windows x86), we download manually.
       
       - name: Setup Target Node.js (Standard)
         if: matrix.is_cross != true
@@ -65,22 +67,31 @@ jobs:
           node-version: 22
           architecture: ${{ matrix.node_arch }}
 
-      - name: Download Target Node.js (Cross-Build)
-        if: matrix.is_cross == true
+      - name: Download Target Node.js (Cross-Build - Linux)
+        if: matrix.is_cross == true && runner.os == 'Linux'
         run: |
           wget ${{ matrix.node_dl_url }}
           tar -xzf $(basename ${{ matrix.node_dl_url }})
         shell: bash
 
+      - name: Download Target Node.js (Cross-Build - Windows)
+        if: matrix.is_cross == true && runner.os == 'Windows'
+        run: |
+          curl -L -o node_x86.zip ${{ matrix.node_dl_url }}
+          unzip node_x86.zip
+        shell: bash
+
       - name: Install Dependencies
-        run: npm ci
+        run: npm install
 
       - name: Install Build Tools
         run: npm install --no-save esbuild postject rcedit
 
       - name: Set Target Binary Path (Standard Windows)
         if: runner.os == 'Windows' && matrix.is_cross != true
-        run: echo "TARGET_NODE_EXE=$(where node)" >> $GITHUB_ENV
+        run: |
+          NODE_PATH=$(where node | head -n 1)
+          echo "TARGET_NODE_EXE=$(cygpath -m "$NODE_PATH")" >> $GITHUB_ENV
         shell: bash
 
       - name: Set Target Binary Path (Standard Unix)
@@ -88,9 +99,14 @@ jobs:
         run: echo "TARGET_NODE_EXE=$(which node)" >> $GITHUB_ENV
         shell: bash
 
-      - name: Set Target Binary Path (Cross-Build)
-        if: matrix.is_cross == true
+      - name: Set Target Binary Path (Cross-Build - Linux)
+        if: matrix.is_cross == true && runner.os == 'Linux'
         run: echo "TARGET_NODE_EXE=$(pwd)/${{ matrix.node_dl_path }}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Set Target Binary Path (Cross-Build - Windows)
+        if: matrix.is_cross == true && runner.os == 'Windows'
+        run: echo "TARGET_NODE_EXE=$(pwd -W)/${{ matrix.node_dl_path }}" >> $GITHUB_ENV
         shell: bash
 
       - name: Build Executable

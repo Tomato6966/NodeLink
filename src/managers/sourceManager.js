@@ -27,47 +27,45 @@ export default class SourcesManager {
     this.patternMap = []
 
     if (sourceRegistry && Object.keys(sourceRegistry).length > 0) {
-      for (const [name, mod] of Object.entries(sourceRegistry)) {
-        const isYouTube = name === 'youtube' || name.includes('YouTube.js')
-        const enabled = isYouTube
-          ? this.nodelink.options.sources.youtube?.enabled
-          : !!this.nodelink.options.sources[name]?.enabled
+      await Promise.all(
+        Object.entries(sourceRegistry).map(async ([name, mod]) => {
+          const isYouTube = name === 'youtube' || name.includes('YouTube.js')
+          const enabled = isYouTube
+            ? this.nodelink.options.sources.youtube?.enabled
+            : !!this.nodelink.options.sources[name]?.enabled
 
-        if (!enabled) continue
+          if (!enabled) return
 
-        const Mod = mod.default || mod
-        const instance = new Mod(this.nodelink)
+          const Mod = mod.default || mod
+          const instance = new Mod(this.nodelink)
 
-        if (await instance.setup()) {
-          const sourceKey = isYouTube ? 'youtube' : name
-          this.sources.set(sourceKey, instance)
+          if (await instance.setup()) {
+            const sourceKey = isYouTube ? 'youtube' : name
+            this.sources.set(sourceKey, instance)
 
-          if (isYouTube) this.sources.set('ytmusic', instance)
+            if (isYouTube) this.sources.set('ytmusic', instance)
 
-          if (Array.isArray(instance.searchTerms)) {
-            for (const term of instance.searchTerms) {
-              this.searchTermMap.set(term, sourceKey)
-            }
-          }
-
-          if (Array.isArray(instance.patterns)) {
-            for (const regex of instance.patterns) {
-              if (regex instanceof RegExp) {
-                this.patternMap.push({
-                  regex,
-                  sourceName: sourceKey,
-                  priority: instance.priority || 0
-                })
+            if (Array.isArray(instance.searchTerms)) {
+              for (const term of instance.searchTerms) {
+                this.searchTermMap.set(term, sourceKey)
               }
             }
+
+            if (Array.isArray(instance.patterns)) {
+              for (const regex of instance.patterns) {
+                if (regex instanceof RegExp) {
+                  this.patternMap.push({
+                    regex,
+                    sourceName: sourceKey,
+                    priority: instance.priority || 0
+                  })
+                }
+              }
+            }
+            logger('info', 'Sources', `Loaded source: ${sourceKey}`)
           }
-          logger(
-            'info',
-            'Sources',
-            `Loaded source: ${sourceKey}`
-          )
-        }
-      }
+        })
+      )
       this.patternMap.sort((a, b) => b.priority - a.priority)
       return
     }
