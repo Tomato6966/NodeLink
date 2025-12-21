@@ -1,15 +1,44 @@
-import {
-  encodeTrack,
-  generateRandomLetters,
-  logger,
-  makeRequest
-} from '../../utils.js'
+import { encodeTrack, logger, makeRequest } from '../../utils.js'
 
 export const YOUTUBE_CONSTANTS = {
   VIDEO: 0,
   PLAYLIST: 1,
   SHORTS: 2,
   UNKNOWN: -1
+}
+
+const FALLBACK_TITLE = 'Unknown Title'
+const FALLBACK_AUTHOR = 'Unknown Artist'
+const FALLBACK_CHANNEL = 'Unknown Channel'
+
+const URL_PATTERNS = {
+  video: /^https?:\/\/(?:music\.)?(?:www\.)?youtube\.com\/watch\?v=[\w-]+/,
+  musicVideo: /^https?:\/\/music\.youtube\.com\/watch\?v=[\w-]+/,
+  playlist:
+    /^https?:\/\/(?:music\.)?(?:www\.)?youtube\.com\/playlist\?list=[\w-]+/,
+  shortUrl: /^https?:\/\/youtu\.be\/[\w-]+/,
+  shorts: /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+/,
+  listParam: /[?&]list=/,
+  videoId: /(?:v=|shorts\/|youtu\.be\/)([^&?]+)/,
+  playlistId: /[?&]list=([\w-]+)/,
+  videoIdParam: /[?&]v=([\w-]+)/
+}
+
+const TIME_UNIT_MULTIPLIERS = {
+  year: 365.25 * 24 * 60 * 60 * 1000,
+  month: 30.44 * 24 * 60 * 60 * 1000,
+  week: 7 * 24 * 60 * 60 * 1000,
+  day: 24 * 60 * 60 * 1000,
+  hour: 60 * 60 * 1000,
+  minute: 60 * 1000,
+  second: 1000
+}
+
+const TIME_UNIT_REGEX = /(\d+)\s*(year|month|week|day|hour|minute|second)/gi
+
+function safeString(value, fallback = '') {
+  if (value === null || value === undefined) return fallback
+  return String(value)
 }
 
 function formatDuration(ms) {
@@ -28,6 +57,7 @@ function formatDuration(ms) {
 }
 
 function formatNumber(num) {
+  if (!num || isNaN(num)) return '0'
   if (num >= 1000000000) return `${(num / 1000000000).toFixed(1)}B`
   if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
   if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
@@ -38,118 +68,211 @@ function parsePublishedAt(publishedText) {
   if (!publishedText) return null
 
   const date = new Date(publishedText)
+
   if (!isNaN(date.getTime())) {
-    const timestamp = date.getTime()
-    const now = Date.now()
-    const diffMs = now - timestamp
-
-    const years = Math.floor(diffMs / (365.25 * 24 * 60 * 60 * 1000))
-    const months = Math.floor(
-      (diffMs % (365.25 * 24 * 60 * 60 * 1000)) / (30.44 * 24 * 60 * 60 * 1000)
-    )
-    const weeks = Math.floor(
-      (diffMs % (30.44 * 24 * 60 * 60 * 1000)) / (7 * 24 * 60 * 60 * 1000)
-    )
-    const days = Math.floor(
-      (diffMs % (7 * 24 * 60 * 60 * 1000)) / (24 * 60 * 60 * 1000)
-    )
-    const hours = Math.floor(
-      (diffMs % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000)
-    )
-    const minutes = Math.floor((diffMs % (60 * 60 * 1000)) / (60 * 1000))
-    const seconds = Math.floor((diffMs % (60 * 1000)) / 1000)
-
-    const parts = []
-    if (years > 0) parts.push(`${years} year${years > 1 ? 's' : ''}`)
-    if (months > 0) parts.push(`${months} month${months > 1 ? 's' : ''}`)
-    if (weeks > 0) parts.push(`${weeks} week${weeks > 1 ? 's' : ''}`)
-    if (days > 0) parts.push(`${days} day${days > 1 ? 's' : ''}`)
-    if (hours > 0) parts.push(`${hours} hour${hours > 1 ? 's' : ''}`)
-    if (minutes > 0) parts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`)
-    if (seconds > 0) parts.push(`${seconds} second${seconds > 1 ? 's' : ''}`)
-
-    const readable = parts.length > 0 ? parts.join(' ') + ' ago' : 'just now'
-    const compact = `${years}y ${months}mo ${weeks}w ${days}d ${hours}h ${minutes}m ${seconds}s`
-
-    return {
-      original: publishedText,
-      timestamp: Math.floor(timestamp),
-      date: date.toISOString(),
-      readable,
-      compact
-    }
+    return _buildPublishedAtFromTimestamp(date.getTime(), publishedText)
   }
 
   const text = publishedText.toLowerCase()
+  const units = {
+    years: 0,
+    months: 0,
+    weeks: 0,
+    days: 0,
+    hours: 0,
+    minutes: 0,
+    seconds: 0
+  }
 
-  const yearMatch = text.match(/(\d+)\s*year/)
-  const monthMatch = text.match(/(\d+)\s*month/)
-  const weekMatch = text.match(/(\d+)\s*week/)
-  const dayMatch = text.match(/(\d+)\s*day/)
-  const hourMatch = text.match(/(\d+)\s*hour/)
-  const minuteMatch = text.match(/(\d+)\s*minute/)
-  const secondMatch = text.match(/(\d+)\s*second/)
+  let match
+  const regex = new RegExp(TIME_UNIT_REGEX.source, TIME_UNIT_REGEX.flags)
 
-  const years = yearMatch ? Number.parseInt(yearMatch[1], 10) : 0
-  const months = monthMatch ? Number.parseInt(monthMatch[1], 10) : 0
-  const weeks = weekMatch ? Number.parseInt(weekMatch[1], 10) : 0
-  const days = dayMatch ? Number.parseInt(dayMatch[1], 10) : 0
-  const hours = hourMatch ? Number.parseInt(hourMatch[1], 10) : 0
-  const minutes = minuteMatch ? Number.parseInt(minuteMatch[1], 10) : 0
-  const seconds = secondMatch ? Number.parseInt(secondMatch[1], 10) : 0
+  while ((match = regex.exec(text)) !== null) {
+    const value = parseInt(match[1], 10)
+    const unit = match[2].toLowerCase()
 
-  const now = Date.now()
+    if (unit.startsWith('year')) units.years = value
+    else if (unit.startsWith('month')) units.months = value
+    else if (unit.startsWith('week')) units.weeks = value
+    else if (unit.startsWith('day')) units.days = value
+    else if (unit.startsWith('hour')) units.hours = value
+    else if (unit.startsWith('minute')) units.minutes = value
+    else if (unit.startsWith('second')) units.seconds = value
+  }
+
   const msAgo =
-    years * 365.25 * 24 * 60 * 60 * 1000 +
-    months * 30.44 * 24 * 60 * 60 * 1000 +
-    weeks * 7 * 24 * 60 * 60 * 1000 +
-    days * 24 * 60 * 60 * 1000 +
-    hours * 60 * 60 * 1000 +
-    minutes * 60 * 1000 +
-    seconds * 1000
-  const timestamp = now - msAgo
+    units.years * TIME_UNIT_MULTIPLIERS.year +
+    units.months * TIME_UNIT_MULTIPLIERS.month +
+    units.weeks * TIME_UNIT_MULTIPLIERS.week +
+    units.days * TIME_UNIT_MULTIPLIERS.day +
+    units.hours * TIME_UNIT_MULTIPLIERS.hour +
+    units.minutes * TIME_UNIT_MULTIPLIERS.minute +
+    units.seconds * TIME_UNIT_MULTIPLIERS.second
 
-  const parts = []
-  if (years > 0) parts.push(`${years} year${years > 1 ? 's' : ''}`)
-  if (months > 0) parts.push(`${months} month${months > 1 ? 's' : ''}`)
-  if (weeks > 0) parts.push(`${weeks} week${weeks > 1 ? 's' : ''}`)
-  if (days > 0) parts.push(`${days} day${days > 1 ? 's' : ''}`)
-  if (hours > 0) parts.push(`${hours} hour${hours > 1 ? 's' : ''}`)
-  if (minutes > 0) parts.push(`${minutes} minute${minutes > 1 ? 's' : ''}`)
-  if (seconds > 0) parts.push(`${seconds} second${seconds > 1 ? 's' : ''}`)
-
-  const readable = parts.length > 0 ? parts.join(' ') + ' ago' : 'just now'
-
-  const compact = `${years}y ${months}mo ${weeks}w ${days}d ${hours}h ${minutes}m ${seconds}s`
+  const timestamp = Date.now() - msAgo
 
   return {
     original: publishedText,
     timestamp: Math.floor(timestamp),
     date: new Date(timestamp).toISOString(),
-    readable,
-    compact,
-    ago: {
-      years,
-      months,
-      weeks,
-      days,
-      hours,
-      minutes,
-      seconds
-    }
+    readable: _buildReadableTime(units),
+    compact: `${units.years}y ${units.months}mo ${units.weeks}w ${units.days}d ${units.hours}h ${units.minutes}m ${units.seconds}s`,
+    ago: units
   }
+}
+
+function getItemValue(obj, paths, defaultValue = null) {
+  if (!obj) return defaultValue
+  for (const path of paths) {
+    const value = path.split('.').reduce((o, k) => o?.[k], obj)
+    if (value !== undefined && value !== null) return value
+  }
+  return defaultValue
+}
+
+function getRunsText(runsArray) {
+  if (Array.isArray(runsArray) && runsArray.length > 0) {
+    return runsArray.map((run) => run.text || '').join('')
+  }
+  return null
+}
+
+function extractMetadataFromResponse(fullApiResponse) {
+  const metadata = { title: null, author: null }
+
+  const vd = fullApiResponse?.videoDetails
+  if (vd) {
+    if (vd.title && vd.title !== 'undefined') metadata.title = vd.title
+    if (vd.author && vd.author !== 'undefined') metadata.author = vd.author
+  }
+  if (metadata.title && metadata.author) return metadata
+
+  const mf = fullApiResponse?.microformat?.playerMicroformatRenderer
+  if (mf) {
+    if (mf.title && !metadata.title) metadata.title = mf.title
+    if (mf.ownerChannelName && !metadata.author)
+      metadata.author = mf.ownerChannelName
+  }
+
+  return metadata
+}
+
+async function fetchOEmbedMetadata(videoId, makeRequest) {
+  try {
+    const { body, statusCode } = await makeRequest(
+      `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`,
+      {
+        method: 'GET',
+        timeout: 5000
+      }
+    )
+
+    if (statusCode === 200 && body) {
+      return {
+        title: body.title || null,
+        author: body.author_name || null,
+        thumbnail_url: body.thumbnail_url || null
+      }
+    }
+  } catch (e) {
+    logger(
+      'debug',
+      'fetchOEmbedMetadata',
+      `Failed to fetch oEmbed data: ${e.message}`
+    )
+  }
+  return null
+}
+
+function extractTitle(
+  renderer,
+  fullApiResponse,
+  videoId,
+  makeRequestFn = null
+) {
+  const metadata = extractMetadataFromResponse(fullApiResponse)
+  if (metadata.title) {
+    return metadata.title
+  }
+
+  if (typeof renderer?.title === 'string' && renderer.title !== 'undefined') {
+    return renderer.title
+  }
+
+  const title =
+    getRunsText(renderer?.title?.runs) ||
+    getItemValue(fullApiResponse, [
+      'videoDetails.endscreen.endscreenRenderer.elements.1.endscreenElementRenderer.title.simpleText'
+    ]) ||
+    getItemValue(renderer, ['title.simpleText'])
+
+  if (title && title !== 'undefined') {
+    return title
+  }
+
+  if (videoId && makeRequestFn) {
+    return null
+  }
+
+  return FALLBACK_TITLE
+}
+
+function extractAuthor(
+  renderer,
+  fullApiResponse,
+  videoId,
+  makeRequestFn = null
+) {
+  const metadata = extractMetadataFromResponse(fullApiResponse)
+  if (metadata.author) {
+    return metadata.author
+  }
+
+  if (renderer?.author && renderer.author !== 'undefined') {
+    return renderer.author
+  }
+
+  const author =
+    getRunsText(
+      getItemValue(renderer, [
+        'longBylineText.runs',
+        'shortBylineText.runs',
+        'ownerText.runs'
+      ])
+    ) || getItemValue(fullApiResponse, ['videoDetails.author'])
+
+  if (author && author !== 'undefined') {
+    return author
+  }
+
+  if (videoId && makeRequestFn) {
+    return null
+  }
+
+  return FALLBACK_CHANNEL
+}
+
+function extractThumbnail(renderer, videoId) {
+  const thumbnails =
+    renderer?.thumbnail?.thumbnails ||
+    renderer?.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails
+
+  if (Array.isArray(thumbnails) && thumbnails.length > 0) {
+    const url = thumbnails[thumbnails.length - 1]?.url
+    return url?.split('?')[0] || null
+  }
+
+  if (videoId) {
+    return `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+  }
+
+  return null
 }
 
 async function fetchChannelInfo(channelId, makeRequest, context) {
   if (!channelId) return null
 
   try {
-    logger(
-      'debug',
-      'fetchChannelInfo',
-      `Fetching info for channel: ${channelId}`
-    )
-
     const { body: channelResponse, statusCode } = await makeRequest(
       'https://www.youtube.com/youtubei/v1/browse',
       {
@@ -161,7 +284,10 @@ async function fetchChannelInfo(channelId, makeRequest, context) {
           context: {
             client: {
               clientName: 'WEB',
-              clientVersion: '2.20241106.01.00',
+              clientVersion: '2.20251030.01.00',
+              platform: 'DESKTOP',
+              userAgent:
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36,gzip(gfe)',
               hl: context?.client?.hl || 'en',
               gl: context?.client?.gl || 'US'
             }
@@ -340,11 +466,6 @@ async function fetchChannelInfo(channelId, makeRequest, context) {
       }
     }
 
-    logger(
-      'debug',
-      'fetchChannelInfo',
-      `Channel info: icon=${channelInfo.icon ? 'yes' : 'no'}, subscribers=${channelInfo.subscribers}, verified=${channelInfo.verified}`
-    )
     return channelInfo
   } catch (e) {
     logger(
@@ -386,7 +507,7 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
           }
         }
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   if (
@@ -403,7 +524,7 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
       if (response.finalUrl && response.finalUrl.includes('music.apple.com')) {
         resolved.appleMusic = response.finalUrl
       }
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return resolved
@@ -571,6 +692,278 @@ function extractAudioFormats(streamingData) {
   return Array.from(qualityMap.values()).sort((a, b) => b.bitrate - a.bitrate)
 }
 
+function extractAudioTracks(streamingData) {
+  if (!streamingData) return []
+
+  const allFormats = [
+    ...(streamingData.formats || []),
+    ...(streamingData.adaptiveFormats || [])
+  ]
+
+  const tracksMap = new Map()
+
+  for (const format of allFormats) {
+    if (format.audioTrack) {
+      const id = format.audioTrack.id
+      if (!tracksMap.has(id)) {
+        tracksMap.set(id, {
+          id: format.audioTrack.id,
+          name: format.audioTrack.displayName,
+          isDefault: !!format.audioTrack.audioIsDefault,
+          isAutoDubbed: !!format.audioTrack.isAutoDubbed
+        })
+      }
+    }
+  }
+
+  return Array.from(tracksMap.values())
+}
+
+function extractCaptions(captionsData) {
+  if (!captionsData?.playerCaptionsTracklistRenderer?.captionTracks) return []
+
+  return captionsData.playerCaptionsTracklistRenderer.captionTracks.map((c) => ({
+    languageCode: c.languageCode,
+    name: c.name?.simpleText,
+    isTranslatable: c.isTranslatable,
+    baseUrl: c.baseUrl,
+    kind: c.kind
+  }))
+}
+
+function parseLengthAndStream(lengthText, lengthSeconds, isLive) {
+  if (isLive) {
+    return { lengthMs: -1, isStream: true }
+  }
+
+  let lengthMs = 0
+  let isStream = true
+
+  if (lengthText && /[:\d]+/.test(lengthText)) {
+    const parts = lengthText.split(':').map(Number)
+    lengthMs = parts.reduce((acc, val) => acc * 60 + val, 0) * 1000
+    isStream = !Number.isFinite(lengthMs) || lengthMs <= 0
+  } else if (lengthSeconds) {
+    lengthMs = Number.parseInt(lengthSeconds, 10) * 1000
+    isStream = false
+  }
+  return { lengthMs, isStream }
+}
+
+function getRendererFromItemData(itemData, itemType) {
+  if (!itemData) return null
+
+  if (itemType === 'ytmusic') {
+    return getItemValue(itemData, [
+      'musicResponsiveListItemRenderer',
+      'playlistPanelVideoRenderer',
+      'musicTwoColumnItemRenderer'
+    ])
+  }
+
+  return (
+    getItemValue(itemData, [
+      'videoRenderer',
+      'compactVideoRenderer',
+      'playlistPanelVideoRenderer',
+      'gridVideoRenderer'
+    ]) || (itemData.videoId ? itemData : null)
+  )
+}
+
+export async function buildTrack(
+  itemData,
+  itemType,
+  sourceNameOverride = null,
+  fullApiResponse = null,
+  enableHolo = false,
+  config = {}
+) {
+  if (!itemData) {
+    logger('warn', 'buildTrack', 'itemData is null or undefined')
+    return null
+  }
+
+  const renderer = getRendererFromItemData(itemData, itemType)
+
+  const videoId =
+    getItemValue(renderer, [
+      'playlistItemData.videoId',
+      'navigationEndpoint.watchEndpoint.videoId',
+      'videoId'
+    ]) ||
+    itemData.videoId ||
+    renderer?.videoId
+
+  if (!videoId) {
+    logger('warn', 'buildTrack', 'Could not extract videoId from item data')
+    return null
+  }
+
+  let title = FALLBACK_TITLE
+  let author = FALLBACK_AUTHOR
+  let lengthMs = 0
+  let isStream = true
+  let artworkUrl = null
+  let uri = ''
+
+  if (itemType === 'ytmusic') {
+    title = safeString(
+      getRunsText(getItemValue(renderer, ['title.runs'])),
+      FALLBACK_TITLE
+    )
+
+    const subtitleRuns = getItemValue(renderer, ['subtitle.runs'])
+    if (Array.isArray(subtitleRuns) && subtitleRuns.length > 0) {
+      author = safeString(subtitleRuns[0]?.text, FALLBACK_AUTHOR)
+    }
+
+    let lengthText = null
+    if (Array.isArray(subtitleRuns)) {
+      const lengthRun = subtitleRuns.find(
+        (run) => run.text && /^\d{1,2}:\d{2}(:\d{2})?$/.test(run.text)
+      )
+      lengthText = lengthRun?.text
+    }
+
+    const parsed = parseLengthAndStream(
+      lengthText,
+      itemData.lengthSeconds,
+      itemData.isLive
+    )
+    lengthMs = parsed.lengthMs
+    isStream = parsed.isStream
+
+    artworkUrl = extractThumbnail(renderer, videoId)
+    uri = `https://music.youtube.com/watch?v=${videoId}`
+  } else {
+    const extractedTitle = extractTitle(
+      renderer,
+      fullApiResponse,
+      videoId,
+      makeRequest
+    )
+    const extractedAuthor = extractAuthor(
+      renderer,
+      fullApiResponse,
+      videoId,
+      makeRequest
+    )
+
+    if (extractedTitle === null || extractedAuthor === null) {
+      try {
+        const oEmbedData = await fetchOEmbedMetadata(videoId, makeRequest)
+        if (oEmbedData) {
+          title = safeString(oEmbedData.title, FALLBACK_TITLE)
+          author = safeString(oEmbedData.author, FALLBACK_AUTHOR)
+          logger(
+            'debug',
+            'buildTrack',
+            `Got metadata from oEmbed: title="${title}", author="${author}"`
+          )
+
+          if (oEmbedData.thumbnail_url && !artworkUrl) {
+            artworkUrl = oEmbedData.thumbnail_url
+          }
+        } else {
+          title = FALLBACK_TITLE
+          author = FALLBACK_AUTHOR
+        }
+      } catch (e) {
+        logger(
+          'warn',
+          'buildTrack',
+          `Failed to fetch oEmbed metadata: ${e.message}`
+        )
+        title = FALLBACK_TITLE
+        author = FALLBACK_AUTHOR
+      }
+    } else {
+      title = safeString(extractedTitle, FALLBACK_TITLE)
+      author = safeString(extractedAuthor, FALLBACK_AUTHOR)
+    }
+
+    const lengthText =
+      getItemValue(renderer, ['lengthText.simpleText']) ||
+      getRunsText(renderer?.lengthText?.runs)
+
+    const parsed = parseLengthAndStream(
+      lengthText,
+      renderer?.lengthSeconds,
+      renderer?.isLive
+    )
+    lengthMs = parsed.lengthMs
+    isStream = parsed.isStream
+
+    artworkUrl = artworkUrl || extractThumbnail(renderer, videoId)
+    uri = `https://www.youtube.com/watch?v=${videoId}`
+  }
+
+  let sourceName = sourceNameOverride
+  if (!sourceName) {
+    if (uri.includes('music.youtube.com')) {
+      sourceName = 'ytmusic'
+    } else {
+      sourceName = 'youtube'
+    }
+  }
+
+  const trackInfo = {
+    identifier: videoId,
+    isSeekable: !isStream,
+    author,
+    length: lengthMs,
+    isStream,
+    position: 0,
+    title,
+    uri,
+    artworkUrl,
+    isrc: null,
+    sourceName
+  }
+
+  trackInfo.title = safeString(trackInfo.title, FALLBACK_TITLE)
+  trackInfo.author = safeString(trackInfo.author, FALLBACK_AUTHOR)
+  trackInfo.identifier = safeString(trackInfo.identifier, '')
+  trackInfo.uri = safeString(trackInfo.uri, '')
+  trackInfo.sourceName = safeString(trackInfo.sourceName, 'youtube')
+
+  if (!trackInfo.identifier) {
+    logger('warn', 'buildTrack', 'Track identifier is empty after processing')
+    return null
+  }
+
+  const audioFormats = fullApiResponse?.streamingData
+    ? extractAudioFormats(fullApiResponse.streamingData)
+    : []
+
+  const audioTracks = fullApiResponse?.streamingData
+    ? extractAudioTracks(fullApiResponse.streamingData)
+    : []
+
+  const basicTrack = {
+    encoded: encodeTrack(trackInfo),
+    info: trackInfo,
+    pluginInfo: {
+      captions: extractCaptions(fullApiResponse?.captions),
+      audioFormats,
+      audioTracks
+    }
+  }
+
+  if (enableHolo) {
+    return await buildHoloTrack(
+      trackInfo,
+      itemData,
+      itemType,
+      fullApiResponse,
+      config
+    )
+  }
+
+  return basicTrack
+}
+
 export async function buildHoloTrack(
   trackInfo,
   itemData,
@@ -585,43 +978,14 @@ export async function buildHoloTrack(
       ? 'https://music.youtube.com'
       : 'https://www.youtube.com'
 
-  const getItemValue = (obj, paths, defaultValue = null) => {
-    for (const path of paths) {
-      const value = path.split('.').reduce((o, k) => o?.[k], obj)
-      if (value !== undefined && value !== null) return value
-    }
-    return defaultValue
-  }
-
-  const getRunsText = (runsArray, defaultValue = null) => {
-    if (Array.isArray(runsArray) && runsArray.length > 0) {
-      return runsArray.map((run) => run.text).join('')
-    }
-    return defaultValue
-  }
-
-  let renderer = null
-  if (itemType === 'ytmusic') {
-    renderer = getItemValue(itemData, [
-      'musicResponsiveListItemRenderer',
-      'playlistPanelVideoRenderer',
-      'musicTwoColumnItemRenderer'
-    ])
-  } else {
-    renderer =
-      getItemValue(itemData, [
-        'videoRenderer',
-        'compactVideoRenderer',
-        'playlistPanelVideoRenderer',
-        'gridVideoRenderer'
-      ]) || (itemData.videoId ? itemData : null)
-  }
+  const renderer = getRendererFromItemData(itemData, itemType)
 
   const channelData = {
     name: trackInfo.author,
     id: null,
     url: null,
     icon: null,
+    banner: null,
     subscribers: null,
     verified: false,
     description: null,
@@ -629,6 +993,7 @@ export async function buildHoloTrack(
     featuredVideo: null,
     links: []
   }
+
   let thumbnails = {}
   let viewCount = null
   let badges = []
@@ -827,6 +1192,10 @@ export async function buildHoloTrack(
     ? extractAudioFormats(fullApiResponse.streamingData)
     : []
 
+  const audioTracks = fullApiResponse?.streamingData
+    ? extractAudioTracks(fullApiResponse.streamingData)
+    : []
+
   const pluginInfo = {
     type: 'holo',
     accessibility: accessibilityLabel,
@@ -867,7 +1236,8 @@ export async function buildHoloTrack(
     },
     videoQualities,
     audioFormats,
-    captions: fullApiResponse?.captions
+    audioTracks,
+    captions: extractCaptions(fullApiResponse?.captions)
   }
 
   return {
@@ -878,239 +1248,64 @@ export async function buildHoloTrack(
 }
 
 export function checkURLType(url, type) {
-  const source = type === 'ytmusic' ? 'music' : 'www'
-  const videoRegex = new RegExp(
-    `^https?://${source === 'music' ? 'music\\.' : '(?:www\\.)?'}youtube.com/watch\\?v=[\\w-]+`
-  )
-  const playlistRegex = new RegExp(
-    `^https?://${source === 'music' ? 'music\\.' : '(?:www\\.)?'}youtube.com/playlist\\?list=[\\w-]+`
-  )
-  const shortUrlRegex = /^https?:\/\/youtu\.be\/[\w-]+/
-  const shortsRegex = /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+/
+  const isMusicSource = type === 'ytmusic'
 
-  if (
-    playlistRegex.test(url) ||
-    (videoRegex.test(url) && url.includes('&list='))
-  ) {
+  if (URL_PATTERNS.listParam.test(url)) {
     return YOUTUBE_CONSTANTS.PLAYLIST
   }
-  if (videoRegex.test(url)) {
-    return YOUTUBE_CONSTANTS.VIDEO
-  }
-  if (type !== 'ytmusic') {
-    if (shortsRegex.test(url)) {
-        return YOUTUBE_CONSTANTS.SHORTS;
+
+  if (isMusicSource) {
+    if (URL_PATTERNS.musicVideo.test(url)) {
+      return YOUTUBE_CONSTANTS.VIDEO
     }
-    if (shortUrlRegex.test(url)) {
-        return YOUTUBE_CONSTANTS.VIDEO;
+  } else {
+    if (URL_PATTERNS.video.test(url)) {
+      return YOUTUBE_CONSTANTS.VIDEO
+    }
+    if (URL_PATTERNS.shorts.test(url)) {
+      return YOUTUBE_CONSTANTS.SHORTS
+    }
+    if (URL_PATTERNS.shortUrl.test(url)) {
+      return YOUTUBE_CONSTANTS.VIDEO
     }
   }
+
   return YOUTUBE_CONSTANTS.UNKNOWN
 }
 
-function parseLengthAndStream(lengthText, lengthSeconds, isLive) {
-  if (isLive) {
-    return { lengthMs: -1, isStream: true }
-  }
+export async function fetchEncryptedHostFlags(videoId) {
+  try {
+    const embedUrl = `https://www.youtube.com/embed/${videoId}`
 
-  let lengthMs = 0
-  let isStream = true
+    const { body, statusCode, error } = await makeRequest(embedUrl, {
+      method: 'GET',
+      headers: {
+        'Referer': 'https://www.google.com',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      }
+    })
 
-  if (lengthText && /[:\d]+/.test(lengthText)) {
-    const parts = lengthText.split(':').map(Number)
-    lengthMs = parts.reduce((acc, val) => acc * 60 + val, 0) * 1000
-    isStream = !Number.isFinite(lengthMs)
-  } else if (lengthSeconds) {
-    lengthMs = Number.parseInt(lengthSeconds, 10) * 1000
-    isStream = !!isLive
-  }
-  return { lengthMs, isStream }
-}
-
-export async function buildTrack(
-  itemData,
-  itemType,
-  sourceNameOverride = null,
-  fullApiResponse = null,
-  enableHolo = false,
-  config = {}
-) {
-  let videoId
-  let title
-  let author
-  let lengthMs = 0
-  let isStream = true
-  let artworkUrl
-  let uri
-
-  const getItemValue = (obj, paths, defaultValue = null) => {
-    for (const path of paths) {
-      const value = path.split('.').reduce((o, k) => o?.[k], obj)
-      if (value !== undefined && value !== null) return value
+    if (error || statusCode !== 200 || !body) {
+      logger('warn', 'fetchEncryptedHostFlags',
+        `Failed to fetch embed page: ${statusCode} - ${error?.message}`)
+      return null
     }
-    return defaultValue
-  }
+    const match = body.match(/"encryptedHostFlags":"([^"]+)"/)
 
-  const getRunsText = (runsArray, defaultValue = 'Unknown') => {
-    if (Array.isArray(runsArray) && runsArray.length > 0) {
-      return runsArray.map((run) => run.text).join('')
-    }
-    return defaultValue
-  }
-
-  let renderer = null
-  if (itemType === 'ytmusic') {
-    renderer = getItemValue(itemData, [
-      'musicResponsiveListItemRenderer',
-      'playlistPanelVideoRenderer',
-      'musicTwoColumnItemRenderer'
-    ])
-  } else {
-    renderer =
-      getItemValue(itemData, [
-        'videoRenderer',
-        'compactVideoRenderer',
-        'playlistPanelVideoRenderer',
-        'gridVideoRenderer'
-      ]) || (itemData.videoId ? itemData : null)
-  }
-
-  if (!renderer && !itemData.videoId) return null
-
-  videoId = getItemValue(
-    renderer,
-    [
-      'playlistItemData.videoId',
-      'navigationEndpoint.watchEndpoint.videoId',
-      'videoId'
-    ],
-    itemData.videoId || renderer?.videoId
-  )
-
-  if (!videoId) return null;
-
-  if (itemType === 'ytmusic') {
-    title = getRunsText(getItemValue(renderer, ['title.runs']), 'Unknown Title')
-    
-    let authorText = 'Unknown Artist';
-    const subtitleRuns = getItemValue(renderer, ['subtitle.runs']);
-    if (Array.isArray(subtitleRuns) && subtitleRuns.length > 0) {
-        authorText = subtitleRuns[0]?.text || authorText;
-    }
-    author = authorText;
-
-    let lengthText = null;
-    if (Array.isArray(subtitleRuns)) {
-        lengthText = subtitleRuns.find(run => run.text && /^\d{1,2}:\d{2}$/.test(run.text || ''))?.text;
-    }
-    const { lengthMs: parsedLengthMs, isStream: parsedIsStream } =
-      parseLengthAndStream(
-        lengthText,
-        itemData.lengthSeconds, 
-        itemData.isLive
-      )
-    lengthMs = parsedLengthMs
-    isStream = parsedIsStream
-
-    const thumbnails = getItemValue(renderer, ['thumbnail.musicThumbnailRenderer.thumbnail.thumbnails']);
-    if (Array.isArray(thumbnails) && thumbnails.length > 0) {
-        artworkUrl = thumbnails[thumbnails.length - 1]?.url; 
-    } else {
-        artworkUrl = itemData.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.pop()?.url || itemData.thumbnail?.thumbnails?.pop()?.url;
+    if (match && match[1]) {
+      logger('debug', 'fetchEncryptedHostFlags',
+        `Successfully extracted encryptedHostFlags for ${videoId}`)
+      return match[1]
     }
 
-    uri = `https://music.youtube.com/watch?v=${videoId}`
-  } else {
-    title =
-      typeof renderer.title === 'string'
-        ? renderer.title
-        : getRunsText(
-            renderer.title?.runs,
-            getItemValue(fullApiResponse, [
-              'videoDetails.endscreen.endscreenRenderer.elements.1.endscreenElementRenderer.title.simpleText'
-            ]),
-            getItemValue(renderer, ['title.simpleText'], 'Unknown Title')
-          )
-    author =
-      renderer.author ||
-      getRunsText(
-        getItemValue(renderer, [
-          'longBylineText.runs',
-          'shortBylineText.runs',
-          'ownerText.runs'
-        ]),
-        getItemValue(fullApiResponse, [
-          'videoDetails.endscreen.endscreenRenderer.elements.0.endscreenElementRenderer.title.simpleText'
-        ]),
-        'Unknown Channel'
-      )
-    const { lengthMs: parsedLengthMs, isStream: parsedIsStream } =
-      parseLengthAndStream(
-        getItemValue(
-          renderer,
-          ['lengthText.simpleText'],
-          getRunsText(renderer.lengthText?.runs)
-        ),
-        renderer.lengthSeconds,
-        renderer.isLive
-      )
-    lengthMs = parsedLengthMs
-    isStream = parsedIsStream
-    artworkUrl = renderer.thumbnail?.thumbnails?.pop()?.url
-    uri = `https://www.youtube.com/watch?v=${videoId}`
+    logger('debug', 'fetchEncryptedHostFlags',
+      'encryptedHostFlags not found in embed page')
+    return null
+  } catch (e) {
+    logger('error', 'fetchEncryptedHostFlags',
+      `Error fetching encryptedHostFlags: ${e.message}`)
+    return null
   }
-
-  const trackInfo = {
-    identifier: videoId,
-    isSeekable: !isStream,
-    author,
-    length: lengthMs,
-    isStream,
-    position: 0,
-    title,
-    uri,
-    artworkUrl: artworkUrl || null,
-    isrc: null,
-    sourceName:
-      sourceNameOverride || (itemType === 'ytmusic' ? 'ytmusic' : 'youtube')
-  }
-
-  if (trackInfo.uri?.includes('music.youtube.com')) {
-    trackInfo.sourceName = 'ytmusic'
-  } else if (trackInfo.uri?.includes('youtube.com') || trackInfo.uri?.includes('youtu.be')) {
-    trackInfo.sourceName = 'youtube'
-  }
-
-  if (trackInfo.sourceName === 'ytmusic' && renderer) {
-    const musicThumbnails = getItemValue(renderer, ['thumbnail.musicThumbnailRenderer.thumbnail.thumbnails']);
-    if (Array.isArray(musicThumbnails) && musicThumbnails.length > 0) {
-        trackInfo.artworkUrl = musicThumbnails[musicThumbnails.length - 1]?.url;
-    }
-  }
-  if (!trackInfo.artworkUrl) {
-    trackInfo.artworkUrl = artworkUrl;
-  }
-  trackInfo.artworkUrl = trackInfo.artworkUrl?.split('?')[0] || trackInfo.artworkUrl;
-
-  const basicTrack = {
-    encoded: encodeTrack(trackInfo),
-    info: trackInfo,
-    pluginInfo: {
-      captions: fullApiResponse?.captions
-    }
-  }
-
-  if (enableHolo) {
-    return await buildHoloTrack(
-      trackInfo,
-      itemData,
-      itemType,
-      fullApiResponse,
-      config
-    )
-  }
-
-  return basicTrack
 }
 
 export class BaseClient {
@@ -1163,6 +1358,17 @@ export class BaseClient {
       requestBody.params = playerParams
     }
 
+    if (this.isEmbedded()) {
+      const encryptedHostFlags = await fetchEncryptedHostFlags(videoId)
+      if (encryptedHostFlags) {
+        requestBody.playbackContext = requestBody.playbackContext || {}
+        requestBody.playbackContext.contentPlaybackContext =
+          requestBody.playbackContext.contentPlaybackContext || {}
+        requestBody.playbackContext.contentPlaybackContext.encryptedHostFlags =
+          encryptedHostFlags
+      }
+    }
+
     if (this.requirePlayerScript() && cipherManager) {
       try {
         const playerScript = await cipherManager.getCachedPlayerScript()
@@ -1170,20 +1376,18 @@ export class BaseClient {
           const signatureTimestamp = await cipherManager.getTimestamp(
             playerScript.url
           )
-          requestBody.playbackContext = {
-            contentPlaybackContext: {
-              signatureTimestamp: signatureTimestamp
-            }
-          }
+          requestBody.playbackContext = requestBody.playbackContext || {}
+          requestBody.playbackContext.contentPlaybackContext =
+            requestBody.playbackContext.contentPlaybackContext || {}
+          requestBody.playbackContext.contentPlaybackContext.signatureTimestamp =
+            signatureTimestamp
         }
       } catch (e) {
-        logger(
-          'warn',
-          `youtube-${this.name}`,
-          `Failed to get signature timestamp for player request: ${e.message}`
-        )
+        logger('warn', `youtube-${this.name}`,
+          `Failed to get signature timestamp: ${e.message}`)
       }
     }
+
     const response = await makeRequest(
       `${apiEndpoint}/youtubei/v1/player?prettyPrint=false`,
       {
@@ -1191,9 +1395,7 @@ export class BaseClient {
         headers: {
           'User-Agent': this.getClient(context).client.userAgent,
           ...(this.getClient(context).client.visitorData
-            ? {
-                'X-Goog-Visitor-Id': this.getClient(context).client.visitorData
-              }
+            ? { 'X-Goog-Visitor-Id': this.getClient(context).client.visitorData }
             : {}),
           ...(this.isEmbedded() ? { Referer: 'https://www.youtube.com' } : {}),
           ...headers
@@ -1202,15 +1404,26 @@ export class BaseClient {
         disableBodyCompression: true
       }
     )
+
     if (response.statusCode !== 200) {
-      const message = `Failed to get player data for stream. Status: ${response.statusCode}`
+      const message = `Failed to get player data. Status: ${response.statusCode}`
       logger('error', `youtube-${this.name}`, message)
       return { exception: { message, severity: 'common', cause: 'Upstream' } }
     }
+
     return response
   }
 
   async _handlePlayerResponse(playerResponse, sourceName, videoId, context) {
+    if (!playerResponse || typeof playerResponse !== 'object') {
+      logger(
+        'error',
+        `youtube-${this.name}`,
+        `Null or invalid player response for ${videoId}`
+      )
+      return { loadType: 'empty', data: {} }
+    }
+
     if (playerResponse.error) {
       logger(
         'error',
@@ -1241,8 +1454,25 @@ export class BaseClient {
       }
     }
 
+    const videoDetails = playerResponse.videoDetails
+    if (!videoDetails || !videoDetails.videoId) {
+      logger(
+        'error',
+        `youtube-${this.name}`,
+        `Missing videoDetails for ${videoId}`
+      )
+      return {
+        loadType: 'error',
+        data: {
+          message: 'No video details in response.',
+          severity: 'fault',
+          cause: 'NoVideoDetails'
+        }
+      }
+    }
+
     const track = await buildTrack(
-      playerResponse.videoDetails,
+      videoDetails,
       sourceName,
       null,
       playerResponse,
@@ -1252,16 +1482,23 @@ export class BaseClient {
         fetchChannelInfo: this.config.fetchChannelInfo
       }
     )
+
     if (!track) {
+      logger(
+        'error',
+        `youtube-${this.name}`,
+        `Failed to build track for ${videoId}`
+      )
       return {
         loadType: 'error',
         data: {
           message: 'Failed to process video data.',
           severity: 'fault',
-          cause: 'Internal'
+          cause: 'TrackBuildFailed'
         }
       }
     }
+
     return { loadType: 'track', data: track }
   }
 
@@ -1286,32 +1523,27 @@ export class BaseClient {
       }
     }
 
-    const contentsRoot = playlistResponse.contents.singleColumnWatchNextResults || 
-                         playlistResponse.contents.singleColumnMusicWatchNextResultsRenderer
-    
+    const contentsRoot =
+      playlistResponse.contents.singleColumnWatchNextResults ||
+      playlistResponse.contents.singleColumnMusicWatchNextResultsRenderer
+
     let playlistContent = null
-    
+
     if (contentsRoot?.playlist?.playlist?.contents) {
       playlistContent = contentsRoot.playlist.playlist.contents
-    } else if (contentsRoot?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.musicQueueRenderer) {
-      const musicQueue = contentsRoot.tabbedRenderer.watchNextTabbedResultsRenderer.tabs[0].tabRenderer.content.musicQueueRenderer
-      playlistContent = musicQueue.content?.playlistPanelRenderer?.contents || musicQueue.contents
+    } else if (
+      contentsRoot?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]
+        ?.tabRenderer?.content?.musicQueueRenderer
+    ) {
+      const musicQueue =
+        contentsRoot.tabbedRenderer.watchNextTabbedResultsRenderer.tabs[0]
+          .tabRenderer.content.musicQueueRenderer
+      playlistContent =
+        musicQueue.content?.playlistPanelRenderer?.contents ||
+        musicQueue.contents
     }
 
     if (!playlistContent || playlistContent.length === 0) {
-      logger(
-        'debug',
-        `youtube-${this.name}`,
-        `Playlist structure keys: ${Object.keys(playlistResponse.contents || {}).join(', ')}`
-      )
-      if (contentsRoot?.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.musicQueueRenderer) {
-        const musicQueue = contentsRoot.tabbedRenderer.watchNextTabbedResultsRenderer.tabs[0].tabRenderer.content.musicQueueRenderer
-        logger(
-          'debug',
-          `youtube-${this.name}`,
-          `musicQueueRenderer keys: ${Object.keys(musicQueue).join(', ')}`
-        )
-      }
       logger(
         'info',
         `youtube-${this.name}`,
@@ -1382,18 +1614,30 @@ export class BaseClient {
     context
   ) {
     if (browseResponse?.error) {
-      const errMsg = browseResponse?.error?.message || 'Failed to browse playlist.'
-      logger('error', `youtube-${this.name}`, `Error browsing playlist ${playlistId}: ${errMsg}`)
+      const errMsg =
+        browseResponse?.error?.message || 'Failed to browse playlist.'
+      logger(
+        'error',
+        `youtube-${this.name}`,
+        `Error browsing playlist ${playlistId}: ${errMsg}`
+      )
       return {
         loadType: 'error',
         data: { message: errMsg, severity: 'common', cause: 'Upstream' }
       }
     }
 
-    const shelf = browseResponse.contents?.singleColumnBrowseResultsRenderer?.tabs?.[0]?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]?.musicPlaylistShelfRenderer
-    
+    const shelf =
+      browseResponse.contents?.singleColumnBrowseResultsRenderer?.tabs?.[0]
+        ?.tabRenderer?.content?.sectionListRenderer?.contents?.[0]
+        ?.musicPlaylistShelfRenderer
+
     if (!shelf || !shelf.contents || shelf.contents.length === 0) {
-      logger('info', `youtube-${this.name}`, `Browse playlist ${playlistId} is empty or inaccessible.`)
+      logger(
+        'info',
+        `youtube-${this.name}`,
+        `Browse playlist ${playlistId} is empty or inaccessible.`
+      )
       return { loadType: 'empty', data: {} }
     }
 
@@ -1418,18 +1662,29 @@ export class BaseClient {
           tracks.push(track)
         }
       } catch (err) {
-        logger('warn', `youtube-${this.name}`, `Failed to build track: ${err.message}`)
+        logger(
+          'warn',
+          `youtube-${this.name}`,
+          `Failed to build track: ${err.message}`
+        )
       }
     }
 
     if (tracks.length === 0) {
-      logger('info', `youtube-${this.name}`, `No valid tracks parsed from browse playlist ${playlistId}.`)
+      logger(
+        'info',
+        `youtube-${this.name}`,
+        `No valid tracks parsed from browse playlist ${playlistId}.`
+      )
       return { loadType: 'empty', data: {} }
     }
 
-    const playlistTitle = browseResponse.header?.musicDetailHeaderRenderer?.title?.runs?.[0]?.text || 
-                         browseResponse.header?.musicEditablePlaylistDetailHeaderRenderer?.header?.musicDetailHeaderRenderer?.title?.runs?.[0]?.text ||
-                         'Unknown Playlist'
+    const playlistTitle =
+      browseResponse.header?.musicDetailHeaderRenderer?.title?.runs?.[0]
+        ?.text ||
+      browseResponse.header?.musicEditablePlaylistDetailHeaderRenderer?.header
+        ?.musicDetailHeaderRenderer?.title?.runs?.[0]?.text ||
+      'Unknown Playlist'
 
     return {
       loadType: 'playlist',
@@ -1469,16 +1724,8 @@ export class BaseClient {
     let targetItags = []
 
     if (itag) {
-      logger('debug', `youtube-${this.name}`, `Using requested itag: ${itag}`)
-
       targetItags = [Number(itag)]
     } else if (targetItag) {
-      logger(
-        'debug',
-        `youtube-${this.name}`,
-        `Using target itag: ${targetItag}`
-      )
-
       targetItags = [Number(targetItag)]
     } else {
       const qualityPriority = this._getQualityPriority()
@@ -1495,126 +1742,175 @@ export class BaseClient {
       ...(streamingData.formats || [])
     ]
 
-    const formats = allFormats.map((f) => ({
+    let formats = allFormats.map((f) => ({
       itag: f.itag,
       mimeType: f.mimeType,
       qualityLabel: f.qualityLabel,
       bitrate: f.bitrate,
-      audioQuality: f.audioQuality
+      audioQuality: f.audioQuality,
+      url: f.url,
+      signatureCipher: f.signatureCipher,
+      audioTrack: f.audioTrack
     }))
 
-    const filteredFormats = allFormats
-      .filter((format) => targetItags.includes(format.itag))
-      .sort((a, b) => targetItags.indexOf(a.itag) - targetItags.indexOf(b.itag))
+    if (decodedTrack.audioTrackId) {
+      const requestedFormats = formats.filter(
+        (f) => f.audioTrack && f.audioTrack.id === decodedTrack.audioTrackId
+      )
 
-    if (filteredFormats.length === 0) {
-      if (streamingData.hlsManifestUrl) {
+      if (requestedFormats.length > 0) {
         logger(
           'debug',
           `youtube-${this.name}`,
-          `No suitable audio stream found for the configured quality. Falling back to HLS.`
+          `Found requested audio track: ${decodedTrack.audioTrackId}`
         )
+        formats = requestedFormats
       } else {
-        logger(
-          'debug',
-          `youtube-${this.name}`,
-          `No suitable audio stream found for the configured quality. Available itags: ${allFormats.map((f) => f.itag).join(', ')}`
-        )
-        return {
-          exception: {
-            message:
-              'No suitable audio stream found for the configured quality.',
-            severity: 'common',
-            cause: 'Upstream'
-          }
-        }
-      }
-    }
-
-    let resolvedFormat = null
-
-    if (this.requirePlayerScript()) {
-      const playerScript = await cipherManager.getCachedPlayerScript()
-      if (!playerScript) {
-        logger(
-          'error',
-          `youtube-${this.name}`,
-          'Failed to obtain player script for deciphering. Cannot extract stream data.'
-        )
-        return {
-          exception: {
-            message: 'Failed to obtain player script for deciphering.',
-            severity: 'fault',
-            cause: 'Internal'
-          }
-        }
-      }
-      for (const format of filteredFormats) {
-        let currentStreamUrl = format.url
-        let currentEncryptedSignature
-        let currentNParam
-        let currentSignatureKey
-
-        if (format.signatureCipher) {
-          const cipher = new URLSearchParams(format.signatureCipher)
-          currentStreamUrl = cipher.get('url')
-          currentEncryptedSignature = cipher.get('s')
-          currentSignatureKey = cipher.get('sp') || 'sig'
-          currentNParam = cipher.get('n')
-        }
-
-        if (currentStreamUrl) {
-          try {
-            const decipheredUrl = await cipherManager.resolveUrl(
-              currentStreamUrl,
-              currentEncryptedSignature,
-              currentNParam,
-              currentSignatureKey,
-              playerScript,
-              context
-            )
-            format.url = decipheredUrl
-            resolvedFormat = format
-            logger(
-              'debug',
-              `youtube-${this.name}`,
-              `Successfully resolved URL for itag ${format.itag}.`
-            )
-            break
-          } catch (e) {
-            logger(
-              'warn',
-              `youtube-${this.name}`,
-              `Failed to resolve format URL for itag ${format.itag}: ${e.message}`
-            )
+        const hasAudioTracks = formats.some((f) => f.audioTrack)
+        if (hasAudioTracks) {
+          logger(
+            'warn',
+            `youtube-${this.name}`,
+            `Requested audio track ${decodedTrack.audioTrackId} not found in client ${this.name}.`
+          )
+          return {
+            exception: {
+              message: 'Requested audio track not available in this client.',
+              severity: 'common',
+              cause: 'AudioTrackNotFound'
+            }
           }
         }
       }
     } else {
-      resolvedFormat = filteredFormats[0]
+      const defaultFormats = formats.filter(
+        (f) => f.audioTrack && f.audioTrack.audioIsDefault
+      )
+
+      if (defaultFormats.length > 0) {
+        logger(
+          'debug',
+          `youtube-${this.name}`,
+          `Using default audio track.`
+        )
+        formats = defaultFormats
+      }
+    }
+
+    const _attemptCipherResolution = async (formatToResolve, playerScript, context) => {
+      let currentStreamUrl = formatToResolve.url
+      let currentEncryptedSignature
+      let currentNParam
+      let currentSignatureKey
+
+      if (formatToResolve.signatureCipher) {
+        const cipher = new URLSearchParams(formatToResolve.signatureCipher)
+        currentStreamUrl = cipher.get('url')
+        currentEncryptedSignature = cipher.get('s')
+        currentSignatureKey = cipher.get('sp') || 'sig'
+        currentNParam = cipher.get('n')
+      }
+
+      if (!playerScript) {
+        if (currentEncryptedSignature) {
+          return null
+        }
+        if (currentStreamUrl) {
+          formatToResolve.url = currentStreamUrl
+          return formatToResolve
+        }
+        return null
+      }
+
+      if (currentStreamUrl) {
+        try {
+          const decipheredUrl = await cipherManager.resolveUrl(
+            currentStreamUrl,
+            currentEncryptedSignature,
+            currentNParam,
+            currentSignatureKey,
+            playerScript,
+            context
+          )
+          formatToResolve.url = decipheredUrl
+          return formatToResolve
+        } catch (e) {
+          logger(
+            'warn',
+            `youtube-${this.name}`,
+            `Failed to resolve format URL for itag ${formatToResolve.itag}: ${e.message}`
+          )
+        }
+      }
+      return null
+    }
+
+    let resolvedFormat = null
+    const playerScript = this.requirePlayerScript()
+      ? await cipherManager.getCachedPlayerScript()
+      : null
+
+    if (this.requirePlayerScript() && !playerScript) {
+      logger(
+        'error',
+        `youtube-${this.name}`,
+        'Failed to obtain player script for deciphering. Cannot extract stream data.'
+      )
+      return {
+        exception: {
+          message: 'Failed to obtain player script for deciphering.',
+          severity: 'fault',
+          cause: 'Internal',
+        },
+      }
+    }
+
+    logger('debug', `youtube-${this.name}`, `Initial target itags (from config/quality priority): ${targetItags.join(', ')}`)
+
+    const opusAudioCandidates = formats
+      .filter((format) => targetItags.includes(format.itag) && format.mimeType?.startsWith('audio/'))
+      .sort((a, b) => targetItags.indexOf(a.itag) - targetItags.indexOf(b.itag))
+
+    logger('debug', `youtube-${this.name}`, `Opus audio-only candidates: ${opusAudioCandidates.map(f => f.itag).join(', ')}`)
+
+    for (const format of opusAudioCandidates) {
+      resolvedFormat = await _attemptCipherResolution(format, playerScript, context)
+      if (resolvedFormat) {
+        logger('debug', `youtube-${this.name}`, `Resolved format: itag ${resolvedFormat.itag}, mimeType ${resolvedFormat.mimeType}`)
+        break
+      }
     }
 
     if (!resolvedFormat) {
-      if (streamingData.hlsManifestUrl) {
-        logger(
-          'debug',
-          `youtube-${this.name}`,
-          'Could not resolve a working URL from the filtered formats. Falling back to HLS.'
-        )
-      } else {
-        logger(
-          'debug',
-          `youtube-${this.name}`,
-          'Could not resolve a working URL from the filtered formats.'
-        )
-        return {
-          exception: {
-            message: 'Could not resolve a working URL.',
-            severity: 'fault',
-            cause: 'Cipher'
-          }
+      logger('debug', `youtube-${this.name}`, `Opus audio-only failed. Attempting fallback to itag 18.`)
+      const itag18Format = formats.find(format => format.itag === 18)
+
+      if (itag18Format) {
+        resolvedFormat = await _attemptCipherResolution(itag18Format, playerScript, context)
+        if (resolvedFormat) {
+          logger('debug', `youtube-${this.name}`, `Resolved format from itag 18 fallback: itag ${resolvedFormat.itag}, mimeType ${resolvedFormat.mimeType}`)
+        } else {
+          logger('debug', `youtube-${this.name}`, `Itag 18 found but could not be resolved.`)
         }
+      } else {
+        logger('debug', `youtube-${this.name}`, `Itag 18 not found in available formats.`)
       }
+    }
+
+    if (!resolvedFormat && !streamingData.hlsManifestUrl) {
+      logger('debug', `youtube-${this.name}`, 'No suitable stream found after all fallbacks, and no HLS manifest URL.')
+      return {
+        exception: {
+          message: 'No suitable audio stream found after all fallbacks.',
+          severity: 'common',
+          cause: 'Upstream',
+        },
+        formats,
+      }
+    } else if (!resolvedFormat && streamingData.hlsManifestUrl) {
+      logger('debug', `youtube-${this.name}`, 'No suitable stream found after all fallbacks, but HLS manifest URL is available. Proceeding with HLS.')
+    } else {
+      logger('debug', `youtube-${this.name}`, `Final resolved format: itag ${resolvedFormat?.itag}, mimeType ${resolvedFormat?.mimeType}`)
     }
 
     const directUrl =
@@ -1623,24 +1919,17 @@ export class BaseClient {
         : undefined
 
     if (!directUrl && !streamingData.hlsManifestUrl) {
-      logger(
-        'debug',
-
-        `youtube-${this.name}`,
-
-        `No suitable audio stream found. Available streamingData: ${JSON.stringify(streamingData)}`
-      )
-
+      logger('debug', `youtube-${this.name}`, 'No direct URL resolved and no HLS manifest. Returning error.')
       return {
         exception: {
           message: 'No suitable audio stream found.',
 
           severity: 'common',
 
-          cause: 'Upstream'
+          cause: 'Upstream',
         },
 
-        formats
+        formats,
       }
     }
 
@@ -1681,16 +1970,16 @@ export class BaseClient {
 
       hlsUrl: streamingData.hlsManifestUrl || null,
 
-      formats
+      formats,
     }
   }
 
   _getQualityPriority() {
     return {
-      high: [251, 141],
+      high: [251, 250, 140],
       medium: [250, 140],
-      low: [249],
-      lowest: [249]
+      low: [249, 250, 140],
+      lowest: [249, 139]
     }
   }
 
@@ -1819,12 +2108,6 @@ export class BaseClient {
 
   async getTrackUrl(decodedTrack, context, cipherManager) {
     const sourceName = decodedTrack.sourceName || 'youtube'
-    const apiEndpoint = this.getApiEndpoint()
-    logger(
-      'debug',
-      `youtube-${this.name}`,
-      `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`
-    )
 
     const headers = this.oauth ? await this.getAuthHeaders() : {}
     const { body: playerResponse, statusCode } = await this._makePlayerRequest(

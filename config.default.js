@@ -100,6 +100,10 @@ export default {
     http: {
       enabled: true
     },
+    vimeo: {
+      // Note: not 100% of the songs are currently working (but most should.), because i need to code a different extractor for every year (2010, 2011, etc. not all are done)
+      enabled: true,
+    },
     flowery: {
       enabled: true,
       voice: 'Salli',
@@ -131,7 +135,7 @@ export default {
         resolve: ['AndroidVR', 'TV', 'TVEmbedded', 'IOS', 'Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
         settings: {
           TV: {
-            refreshToken: ''
+            refreshToken: [""] // You can use a string "token" or an array ["token1", "token2"] for rotation/fallback
           }
         }
       },
@@ -172,7 +176,7 @@ export default {
     },
     tidal: {
       enabled: true,
-      token: '', //get from tidal web player devtools; using login google account
+      token: 'token_here', //manually | or "token_here" to get a token automatically, get from tidal web player devtools; using login google account
       countryCode: 'US',
       playlistLoadLimit: 2, // 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
       playlistPageLoadConcurrency: 5 // How many pages to load simultaneously
@@ -241,7 +245,12 @@ export default {
       maxRequests: 20,
       timeWindowMs: 5000 // 5 seconds
     },
-    ignorePaths: []
+    ignorePaths: [],
+    ignore: {
+      userIds: [],
+      guildIds: [],
+      ips: []
+    }
   },
   dosProtection: {
     enabled: true,
@@ -252,6 +261,11 @@ export default {
     mitigation: {
       delayMs: 500,
       blockDurationMs: 300000 // 5 minutes
+    },
+    ignore: {
+      userIds: [],
+      guildIds: [],
+      ips: []
     }
   },
   metrics: {
@@ -266,5 +280,12 @@ export default {
     defaultVolume: 0.8,
     maxLayersMix: 5,
     autoCleanup: true
-  }
+  },
+  plugins: [
+/*  {
+      name: 'nodelink-sample-plugin',
+      source: 'local'
+    } */
+  ],
+  pluginConfig: {}
 }

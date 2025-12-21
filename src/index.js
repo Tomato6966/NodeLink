@@ -1,6 +1,8 @@
 import cluster from 'node:cluster'
 import { EventEmitter } from 'node:events'
 import http from 'node:http'
+import path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import WebSocketServer from '@performanc/pwsl-server'
 
 import requestHandler from './api/index.js'
@@ -30,15 +32,25 @@ import { GatewayEvents } from './constants.js'
 import DosProtectionManager from './managers/dosProtectionManager.js'
 import PlayerManager from './managers/playerManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
+import PluginManager from './managers/pluginManager.js'
 
 let config
 
+const isSEA = process.embedder === 'nodejs'
+const executableDir = path.dirname(process.execPath)
+
 try {
-  config = (await import('../config.js')).default
+  const configPath = isSEA
+    ? pathToFileURL(path.join(executableDir, 'config.js')).href
+    : '../config.js'
+  config = (await import(configPath)).default
 } catch (e) {
-  if (e.code === 'ERR_MODULE_NOT_FOUND') {
+  if (e.code === 'ERR_MODULE_NOT_FOUND' || e.code === 'ENOENT') {
     try {
-      config = (await import('../config.default.js')).default
+      const defaultConfigPath = isSEA
+        ? pathToFileURL(path.join(executableDir, 'config.default.js')).href
+        : '../config.default.js'
+      config = (await import(defaultConfigPath)).default
       console.log(
         '[WARN] Config: config.js not found, using config.default.js. It is recommended to create a config.js file for your own configuration.'
       )
@@ -114,11 +126,19 @@ class BunSocketWrapper extends EventEmitter {
   }
 }
 
+let registry = null
+if (process.embedder === 'nodejs') {
+  try {
+    registry = await import('./registry.js')
+  } catch (e) {}
+}
+
 class NodelinkServer {
   constructor(options, PlayerManagerClass, isClusterPrimary = false) {
     if (!options || Object.keys(options).length === 0)
       throw new Error('Configuration file not found or empty')
     this.options = options
+    this.logger = logger
     this.server = null
     this.socket = null
     this.sessions = new sessionManager(this, PlayerManagerClass)
@@ -134,12 +154,26 @@ class NodelinkServer {
     this.statsManager = new statsManager(this)
     this.rateLimitManager = new RateLimitManager(this)
     this.dosProtectionManager = new DosProtectionManager(this)
+    this.pluginManager = new PluginManager(this)
+    this.registry = registry
     this.version = getVersion()
     this.gitInfo = getGitInfo()
     this.statistics = {
       players: 0,
       playingPlayers: 0
     }
+    
+    this.extensions = {
+      sources: new Map(),
+      filters: new Map(),
+      routes: [],
+      middlewares: [],
+      trackModifiers: [],
+      wsInterceptors: [],
+      audioInterceptors: [],
+      playerInterceptors: []
+    }
+    
     this._globalUpdater = null
     this.supportedSourcesCache = null
 
@@ -172,17 +206,182 @@ class NodelinkServer {
 
   _validateConfig() {
     validateProperty(
-      this.options,
-      (options) =>
-        options.server.port && typeof options.server.port === 'number',
-      'Port must be a number'
+      this.options.server.port,
+      'server.port',
+      'integer between 1 and 65535',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 1 &&
+        value <= 65535
     )
+
     validateProperty(
-      this.options,
-      (options) =>
-        options.server.host && typeof options.server.host === 'string',
-      'Host must be a string'
+      this.options.server.host,
+      'server.host',
+      'string',
+      (value) => typeof value === 'string'
     )
+
+    validateProperty(
+      this.options.playerUpdateInterval,
+      'playerUpdateInterval',
+      'integer between 250 and 60000 (milliseconds)',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 250 &&
+        value <= 60000
+    )
+
+    validateProperty(
+      this.options.maxSearchResults,
+      'maxSearchResults',
+      'integer between 1 and 100',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 1 &&
+        value <= 100
+    )
+
+    validateProperty(
+      this.options.maxAlbumPlaylistLength,
+      'maxAlbumPlaylistLength',
+      'integer between 1 and 500',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 1 &&
+        value <= 500
+    )
+
+    validateProperty(
+      this.options.trackStuckThresholdMs,
+      'trackStuckThresholdMs',
+      'integer >= 1000 (milliseconds)',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 1000
+    )
+
+    validateProperty(
+      this.options.zombieThresholdMs,
+      'zombieThresholdMs',
+      `integer > trackStuckThresholdMs (${this.options.trackStuckThresholdMs})`,
+      (value) =>
+        Number.isInteger(value) &&
+        value > this.options.trackStuckThresholdMs
+    )
+
+    validateProperty(
+      this.options.cluster.workers,
+      'cluster.workers',
+      'integer >= 0',
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 0
+    )
+
+    validateProperty(
+      this.options.cluster.minWorkers,
+      'cluster.minWorkers',
+      this.options.cluster.workers === 0
+        ? 'integer >= 0 (workers auto-scaled)'
+        : `integer between 0 and ${this.options.cluster.workers}`,
+      (value) =>
+        Number.isInteger(value) &&
+        value >= 0 &&
+        (this.options.cluster.workers === 0 ||
+          value <= this.options.cluster.workers)
+    )
+    
+    validateProperty(
+      this.options.defaultSearchSource,
+      'defaultSearchSource',
+      'key of an enabled source in config.sources',
+      (v) =>
+        typeof v === 'string' &&
+        Boolean(this.options.sources?.[v]?.enabled)
+    )
+
+    validateProperty(
+      this.options.audio.quality,
+      'audio.quality',
+      "one of ['high', 'medium', 'low', 'lowest']",
+      (v) => ['high', 'medium', 'low', 'lowest'].includes(v)
+    )
+    
+    validateProperty(
+      this.options.audio.resamplingQuality,
+      'audio.resamplingQuality',
+      "one of ['best', 'medium', 'fastest', 'zero', 'linear']",
+      (v) => ['best', 'medium', 'fastest', 'zero', 'linear'].includes(v)
+    )
+    
+    validateProperty(
+      this.options.routePlanner?.strategy,
+      'routePlanner.strategy',
+      "one of ['RotateOnBan', 'RoundRobin', 'LoadBalance']",
+      (v) =>
+        typeof v === 'string' &&
+        ['RotateOnBan', 'RoundRobin', 'LoadBalance'].includes(v)
+    )
+
+    validateProperty(
+      this.options.routePlanner?.bannedIpCooldown,
+      'routePlanner.bannedIpCooldown',
+      'integer > 0 (milliseconds)',
+      (v) => Number.isInteger(v) && v > 0
+    )
+
+
+    const rateLimitSections = [
+      'global',
+      'perIp',
+      'perUserId',
+      'perGuildId'
+    ]
+
+    if (this.options.rateLimit?.enabled !== false) { 
+      for (let i = 0; i < rateLimitSections.length; i++) {
+        const section = rateLimitSections[i]
+        const config = this.options.rateLimit?.[section]
+        
+        if (!config) continue
+        
+        validateProperty(
+          config.maxRequests,
+          `rateLimit.${section}.maxRequests`,
+          'integer > 0',
+          (value) =>
+            Number.isInteger(value) &&
+          value > 0
+        )
+
+        validateProperty(
+          config.timeWindowMs,
+          `rateLimit.${section}.timeWindowMs`,
+          'integer > 0 (milliseconds)',
+          (value) =>
+            Number.isInteger(value) &&
+          value > 0
+        )
+
+        if (i === 0) continue
+        
+        const parentSection = rateLimitSections[i - 1]
+        const parentConfig = this.options.rateLimit?.[parentSection]
+        
+        if (!parentConfig) continue
+        
+        validateProperty(
+          config.maxRequests,
+          `rateLimit.${section}.maxRequests`,
+          `integer <= rateLimit.${parentSection}.maxRequests (${parentConfig.maxRequests})`,
+          (value) =>
+            Number.isInteger(value) &&
+          value > 0 &&
+          value <= parentConfig.maxRequests
+        )
+      }
+    }
   }
 
   _setupSocketEvents() {
@@ -193,6 +392,30 @@ class NodelinkServer {
     this.socket.on(
       '/v4/websocket',
       (socket, request, clientInfo, oldSessionId) => {
+        const originalOn = socket.on.bind(socket)
+        socket.on = (event, listener) => {
+          if (event === 'message') {
+            return originalOn(event, async (data) => {
+              const interceptors = this.extensions?.wsInterceptors
+              if (interceptors && Array.isArray(interceptors)) {
+                let parsedData
+                try {
+                  parsedData = JSON.parse(data.toString())
+                } catch {
+                  parsedData = data
+                }
+
+                for (const interceptor of interceptors) {
+                  const handled = await interceptor(this, socket, parsedData, clientInfo)
+                  if (handled === true) return
+                }
+              }
+              listener(data)
+            })
+          }
+          return originalOn(event, listener)
+        }
+
         logger(
           'debug',
           'Resume',
@@ -205,7 +428,7 @@ class NodelinkServer {
             logger(
               'info',
               'Server',
-              `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m resumed session with ID: ${oldSessionId}`
+              `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''} resumed session with ID: ${oldSessionId}`
             )
             this.statsManager.incrementSessionResume(clientInfo.name, true)
             socket.send(
@@ -255,7 +478,7 @@ class NodelinkServer {
             logger(
               'info',
               'Server',
-              `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m disconnected with code ${code} and reason: ${
+              `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''} disconnected with code ${code} and reason: ${
                 reason || 'without reason'
               }`
             )
@@ -329,7 +552,7 @@ class NodelinkServer {
               'Server',
               `Unauthorized connection attempt from ${clientAddress} - Invalid Password`
             )
-            return new Response(null, {
+            return new Response('Invalid password provided.', {
               status: 401,
               statusText: 'Unauthorized'
             })
@@ -341,7 +564,7 @@ class NodelinkServer {
               'Server',
               `Missing client-name from ${clientAddress}`
             )
-            return new Response(null, {
+            return new Response('Invalid or missing Client-Name header.', {
               status: 400,
               statusText: 'Bad Request'
             })
@@ -349,7 +572,7 @@ class NodelinkServer {
 
           if (!userId || !verifyDiscordID(userId)) {
             logger('warn', 'Server', `Invalid user ID from ${clientAddress}`)
-            return new Response(null, {
+            return new Response('Invalid or missing User-Id header.', {
               status: 400,
               statusText: 'Bad Request'
             })
@@ -447,7 +670,7 @@ class NodelinkServer {
           logger(
             'info',
             'Server',
-            `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m connected from [External] (${ws.data.remoteAddress}) | \x1b[33mURL:\x1b[0m ${ws.data.url}`
+            `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''} connected from [External] (${ws.data.remoteAddress}) | \x1b[33mURL:\x1b[0m ${ws.data.url}`
           )
 
           self.socket.emit(
@@ -495,6 +718,11 @@ class NodelinkServer {
         /^::ffff:127\.0\.0\.1/.test(remoteAddress)
       const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort})`
 
+      const rejectUpgrade = (status, statusText, body) => {
+        socket.write(`HTTP/1.1 ${status} ${statusText}\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`)
+        socket.destroy()
+      }
+
       const originalHeaders = request.headers
       const headers = {}
       for (const key in originalHeaders) {
@@ -513,8 +741,7 @@ class NodelinkServer {
           'Server',
           `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
         )
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
-        return socket.destroy()
+        return rejectUpgrade(401, 'Unauthorized', 'Invalid password provided.')
       }
       const clientInfo = parseClient(headers['client-name'])
       if (!clientInfo) {
@@ -523,8 +750,7 @@ class NodelinkServer {
           'Server',
           `Unauthorized connection attempt from ${clientAddress} - Invalid client-name provided`
         )
-        socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
-        return socket.destroy()
+        return rejectUpgrade(400, 'Bad Request', 'Invalid or missing Client-Name header.')
       }
 
       let sessionId = headers['session-id']
@@ -549,8 +775,7 @@ class NodelinkServer {
             'Server',
             `Unauthorized connection attempt from ${clientAddress} - Missing user ID`
           )
-          socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
-          return socket.destroy()
+          return rejectUpgrade(400, 'Bad Request', 'User-Id header is missing.')
         }
         if (!verifyDiscordID(headers['user-id'])) {
           logger(
@@ -558,15 +783,14 @@ class NodelinkServer {
             'Server',
             `Unauthorized connection attempt from ${clientAddress} - Invalid user ID provided`
           )
-          socket.write('HTTP/1.1 400 Bad Request\r\n\r\n')
-          return socket.destroy()
+          return rejectUpgrade(400, 'Bad Request', 'Invalid User-Id header.')
         }
         request.headers = headers
 
         logger(
           'info',
           'Server',
-          `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
+          `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''} connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
         )
 
         this.socket.handleUpgrade(request, socket, head, {}, (ws) =>
@@ -578,8 +802,7 @@ class NodelinkServer {
           'Server',
           `Unauthorized connection attempt from ${clientAddress} - Invalid path provided`
         )
-        socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
-        return socket.destroy()
+        return rejectUpgrade(404, 'Not Found', 'Invalid path for WebSocket upgrade.')
       }
     })
   }
@@ -779,6 +1002,11 @@ class NodelinkServer {
     this._validateConfig()
 
     await this.statsManager.initialize()
+    await this.pluginManager.load('master')
+    
+    if (!startOptions.isClusterPrimary) {
+      await this.pluginManager.load('worker')
+    }
 
     if (this.options.sources.youtube?.getOAuthToken) {
       logger(
@@ -864,9 +1092,61 @@ class NodelinkServer {
       const workerMetrics = this.workerManager ? this.workerManager.getWorkerMetrics() : null
       this.statsManager.updateStatsMetrics(stats, workerMetrics)
 
+      const statsPayload = JSON.stringify({ op: 'stats', ...stats })
+      for (const session of this.sessions.values()) {
+        if (session.socket) {
+          session.socket.send(statsPayload)
+        }
+      }
+
       const sessionCount = this.sessions.activeSessions?.size || 0
       this.statsManager.setWebsocketConnections(sessionCount)
     }, updateInterval)
+  }
+
+  registerSource(name, source) {
+    if (!this.sources) {
+      logger('warn', 'Server', 'Cannot register source in this context (sources manager not available).')
+      return
+    }
+    this.sources.sources.set(name, source)
+    logger('info', 'Server', `Registered custom source: ${name}`)
+  }
+
+  registerFilter(name, filter) {
+    this.extensions.filters.set(name, filter)
+    logger('info', 'Server', `Registered custom filter: ${name}`)
+  }
+
+  registerRoute(method, path, handler) {
+    this.extensions.routes.push({ method, path, handler })
+    logger('info', 'Server', `Registered custom route: ${method} ${path}`)
+  }
+
+  registerMiddleware(fn) {
+    this.extensions.middlewares.push(fn)
+    logger('info', 'Server', 'Registered custom REST interceptor (middleware)')
+  }
+
+  registerTrackModifier(fn) {
+    this.extensions.trackModifiers.push(fn)
+    logger('info', 'Server', 'Registered custom track info modifier')
+  }
+
+  registerWebSocketInterceptor(fn) {
+    this.extensions.wsInterceptors.push(fn)
+    logger('info', 'Server', 'Registered custom WebSocket interceptor')
+  }
+
+  registerAudioInterceptor(interceptor) {
+    if (!this.extensions.audioInterceptors) this.extensions.audioInterceptors = []
+    this.extensions.audioInterceptors.push(interceptor)
+    logger('info', 'Server', 'Registered custom audio interceptor')
+  }
+
+  registerPlayerInterceptor(interceptor) {
+    this.extensions.playerInterceptors.push(interceptor)
+    logger('info', 'Server', 'Registered custom player interceptor')
   }
 }
 

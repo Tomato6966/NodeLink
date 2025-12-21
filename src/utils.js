@@ -199,9 +199,24 @@ function logger(level, ...args) {
 
 const verifyDiscordID = (id) => DISCORD_ID_REGEX.test(String(id))
 
-function validateProperty(property, validator, errorMessage) {
-  if (!validator(property)) {
-    throw new Error(errorMessage)
+function validateProperty(value, path, expected, validator) {
+  if (value === undefined || value === null) {
+    throw new Error(
+      `Configuration error:\n` +
+      `- Property: ${path}\n` +
+      `- Problem: missing required value\n` +
+      `- Expected: ${expected}\n\n` +
+      `Please define ${path} in your config.js file.`
+    )
+  }
+
+  if (!validator(value)) {
+    throw new Error(
+      `Configuration error:\n` +
+      `- Property: ${path}\n` +
+      `- Received: ${JSON.stringify(value)} (${typeof value})\n` +
+      `- Expected: ${expected}`
+    )
   }
 }
 
@@ -227,6 +242,36 @@ function getVersion(type = 'string') {
   }
 }
 
+function modifyPayload(nodelink, data) {
+  if (!data || typeof data !== 'object') return data
+  const modifiers = nodelink.extensions?.trackModifiers
+  if (!modifiers || modifiers.length === 0) return data
+
+  if (Array.isArray(data)) {
+    return data.map((item) => modifyPayload(nodelink, item))
+  }
+
+  const modifiedData = { ...data }
+
+  if (modifiedData.info && modifiedData.encoded !== undefined) {
+    for (const modifier of modifiers) {
+      try {
+        modifier(modifiedData)
+      } catch (e) {
+        logger('error', 'PluginManager', `Track modifier error: ${e.message}`)
+      }
+    }
+  }
+
+  for (const key in modifiedData) {
+    if (typeof modifiedData[key] === 'object' && key !== 'info') {
+      modifiedData[key] = modifyPayload(nodelink, modifiedData[key])
+    }
+  }
+
+  return modifiedData
+}
+
 function sendResponse(req, res, data, status, trace = false) {
   const headers = {}
 
@@ -236,9 +281,11 @@ function sendResponse(req, res, data, status, trace = false) {
     return
   }
 
-  let finalData = data
-  if (data.trace && !trace) {
-    const { trace: _, ...rest } = data
+  const nodelink = global.nodelink
+  let finalData = nodelink ? modifyPayload(nodelink, data) : data
+
+  if (finalData.trace && !trace) {
+    const { trace: _, ...rest } = finalData
     finalData = rest
   }
 
@@ -285,6 +332,10 @@ function sendResponse(req, res, data, status, trace = false) {
 }
 
 function getGitInfo() {
+  if (typeof __BUILD_GIT_INFO__ !== 'undefined') {
+    return __BUILD_GIT_INFO__
+  }
+
   const isBun = typeof Bun !== 'undefined' && !!process.versions.bun
   // bun is too weird
   if (isBun) {
@@ -370,7 +421,7 @@ function getStats(nodelink) {
   let frameStats = null
   if (players > 0) {
     frameStats = { sent: 0, nulled: 0, deficit: 0, expected: 0 }
-    if (nodelink.workerManager) { 
+    if (nodelink.workerManager) {
       for (const workerStats of nodelink.workerManager.workerStats.values()) {
         if (workerStats.frameStats) {
           frameStats.sent += workerStats.frameStats.sent || 0
@@ -379,7 +430,7 @@ function getStats(nodelink) {
         }
       }
       frameStats.deficit = Math.max(0, frameStats.expected - frameStats.sent)
-    } else { 
+    } else {
       for (const session of nodelink.sessions.values()) {
         if (!session.players) continue
         for (const player of session.players.players.values()) {
@@ -491,7 +542,7 @@ function decodeTrack(encoded) {
       author: read.utf(),
       length: Number(read.long()),
       identifier: read.utf(),
-      isSeekable: true,
+      isSeekable: !!read.byte(),
       isStream: !!read.byte(),
       uri: version >= 2 && read.byte() ? read.utf() : null,
       artworkUrl: version === 3 && read.byte() ? read.utf() : null,
@@ -545,6 +596,7 @@ function encodeTrack(track) {
   write('utf', track.author)
   write('long', track.length)
   write('utf', track.identifier)
+  write('byte', track.isSeekable ? 1 : 0)
   write('byte', track.isStream ? 1 : 0)
 
   if (version >= 2) {
@@ -598,6 +650,12 @@ function parseClient(agent) {
 const httpAgent = new http.Agent({ keepAlive: true })
 const httpsAgent = new https.Agent({ keepAlive: true })
 const http2FailedHosts = new Set()
+
+setInterval(() => {
+  if (http2FailedHosts.size > 0) {
+    http2FailedHosts.clear()
+  }
+}, 6 * 60 * 60 * 1000).unref()
 
 async function _internalHttp1Request(urlString, options = {}) {
   const {

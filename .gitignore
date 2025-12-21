@@ -2,6 +2,8 @@
 
 !.github
 !.github/**
+!plugins/**
+!plugins
 !docs
 !docs/**
 !src
@@ -20,4 +22,6 @@
 !commitlint.config.mjs
 !.gitmessage
 !docker-compose.yml
-!ytmusic_videodata_1765292622656.json
+!scripts
+!scripts/**
+!sea-config.json

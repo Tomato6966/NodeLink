@@ -1,4 +1,4 @@
-import { PassThrough } from 'node:stream'
+import { PassThrough, pipeline } from 'node:stream'
 
 import {
   encodeTrack,
@@ -416,25 +416,16 @@ export default class SoundCloudSource {
 
       if (res.error) {
         stream.destroy(new Error(`Stream load failed: ${res.error.message}`))
-
         return
       }
 
-      const onError = (err) => {
-        logger('error', 'Sources', `Progressive error: ${err.message}`)
-        if (!stream.destroyed) stream.destroy(err)
-      }
-
-      const onEnd = () => stream.emit('finishBuffering')
-
-      res.stream.on('error', onError)
-      res.stream.on('end', onEnd)
-      res.stream.on('data', (chunk) => stream.write(chunk))
-
-      stream.on('close', () => {
-        res.stream.removeListener('error', onError)
-        res.stream.removeListener('end', onEnd)
-        if (!res.stream.destroyed) res.stream.destroy()
+      pipeline(res.stream, stream, (err) => {
+        if (err) {
+          logger('error', 'Sources', `Progressive pipeline error: ${err.message}`)
+          if (!stream.destroyed) stream.destroy(err)
+        } else {
+          stream.emit('finishBuffering')
+        }
       })
     } catch (err) {
       this._logError('Progressive stream failed', err)

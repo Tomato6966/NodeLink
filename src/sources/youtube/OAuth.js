@@ -22,13 +22,14 @@ export default class OAuth {
       }
     }
 
-    this.refreshToken = foundToken
+    this.refreshToken = foundToken ? (Array.isArray(foundToken) ? foundToken : [foundToken]) : []
+    this.currentTokenIndex = 0
     this.accessToken = null
     this.tokenExpiry = 0
   }
 
   async getAccessToken() {
-    if (!this.refreshToken) {
+    if (!this.refreshToken.length) {
       logger(
         'debug',
         'YouTube-OAuth',
@@ -43,36 +44,53 @@ export default class OAuth {
 
     logger('info', 'YouTube-OAuth', 'Refreshing access token...')
 
-    const { body, error, statusCode } = await makeRequest(
-      'https://www.youtube.com/o/oauth2/token',
-      {
-        method: 'POST',
-        body: {
-          client_id: CLIENT_ID,
-          client_secret: CLIENT_SECRET,
-          refresh_token: this.refreshToken,
-          grant_type: 'refresh_token'
-        }
-      }
-    )
+    const maxTokenAttempts = this.refreshToken.length
+    let tokensTried = 0
 
-    if (error || statusCode !== 200 || !body.access_token) {
-      logger(
-        'error',
-        'YouTube-OAuth',
-        `Failed to refresh access token: ${error?.message || body.error_description || 'Invalid response'}`
-      )
-      this.accessToken = null
-      this.tokenExpiry = 0
-      return null
+    while (tokensTried < maxTokenAttempts) {
+      const currentToken = this.refreshToken[this.currentTokenIndex]
+      let attempts = 0
+      
+      while (attempts < 3) {
+        attempts++
+        try {
+          const { body, error, statusCode } = await makeRequest(
+            'https://www.youtube.com/o/oauth2/token',
+            {
+              method: 'POST',
+              body: {
+                client_id: CLIENT_ID,
+                client_secret: CLIENT_SECRET,
+                refresh_token: currentToken,
+                grant_type: 'refresh_token'
+              }
+            }
+          )
+
+          if (!error && statusCode === 200 && body.access_token) {
+            this.accessToken = body.access_token
+            this.tokenExpiry = Date.now() + body.expires_in * 1000 - 30000
+            logger('info', 'YouTube-OAuth', `Successfully refreshed access token using token index ${this.currentTokenIndex}.`)
+            return this.accessToken
+          }
+
+          logger('warn', 'YouTube-OAuth', `Token refresh failed (Attempt ${attempts}/3, Token Index ${this.currentTokenIndex}): ${error?.message || body?.error_description || statusCode}`)
+        } catch (e) {
+          logger('warn', 'YouTube-OAuth', `Token refresh exception (Attempt ${attempts}/3, Token Index ${this.currentTokenIndex}): ${e.message}`)
+        }
+        
+        await new Promise(r => setTimeout(r, 2000))
+      }
+
+      logger('warn', 'YouTube-OAuth', `Failed to refresh access token with token index ${this.currentTokenIndex}. Trying next token if available.`)
+      this.currentTokenIndex = (this.currentTokenIndex + 1) % this.refreshToken.length
+      tokensTried++
     }
 
-    this.accessToken = body.access_token
-    this.tokenExpiry = Date.now() + body.expires_in * 1000 - 30000
-
-    logger('info', 'YouTube-OAuth', 'Successfully refreshed access token.')
-
-    return this.accessToken
+    logger('error', 'YouTube-OAuth', 'All refresh tokens failed.')
+    this.accessToken = null
+    this.tokenExpiry = 0
+    return null
   }
 
   async getAuthHeaders() {

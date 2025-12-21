@@ -27,7 +27,14 @@ async function handler(nodelink, req, res, sendResponse) {
         ? Array.from(nodelink.sources.sources.keys())
         : [],
     filters,
-    plugins: []
+    plugins: nodelink.pluginManager
+      ? Array.from(nodelink.pluginManager.loadedPlugins.values()).map((p) => ({
+          name: p.name,
+          version: p.meta?.version || '0.0.0',
+          author: p.meta?.author || null,
+          path: p.path || null
+        }))
+      : []
   }
   sendResponse(req, res, response, 200)
 }

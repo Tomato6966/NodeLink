@@ -1,8 +1,8 @@
 {
   "name": "nodelink",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "scripts": {
-    "prebuild": "node scripts/prebuild.js",
+    "build": "node scripts/build.js",
     "start": "node --dns-result-order=ipv4first --openssl-legacy-provider src/index.js",
     "start:bun": "bun run --dns-result-order=ipv4first src/index.js",
     "prepare": "husky"
@@ -15,15 +15,15 @@
     "@ecliptia/seekable-stream": "github:1Lucas1apk/seekable-stream",
     "@performanc/pwsl-server": "github:performanc/internals#PWSL-server",
     "@performanc/voice": "github:PerformanC/voice",
-    "@toddynnn/symphonia-decoder": "1.0.3",
+    "@toddynnn/symphonia-decoder": "1.0.6",
     "mp4box": "^2.3.0",
     "myzod": "^1.12.1",
     "toddy-mediaplex": "^2.0.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.3.8",
-    "@commitlint/cli": "20.1.0",
-    "@commitlint/config-conventional": "20.0.0",
+    "@biomejs/biome": "^2.3.10",
+    "@commitlint/cli": "20.2.0",
+    "@commitlint/config-conventional": "20.2.0",
     "dotenv": "^17.2.3",
     "husky": "9.1.7"
   },

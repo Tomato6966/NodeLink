@@ -41,6 +41,12 @@ export class FiltersManager extends Transform {
       spatial: new Spatial()
     }
 
+    if (this.nodelink.extensions?.filters) {
+      for (const [name, filter] of this.nodelink.extensions.filters) {
+        this.availableFilters[name] = filter
+      }
+    }
+
     this.update(options)
   }
 

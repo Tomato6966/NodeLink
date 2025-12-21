@@ -1,5 +1,5 @@
 import { Buffer } from 'node:buffer'
-import { PassThrough, Readable, Transform } from 'node:stream'
+import { PassThrough, Readable, Transform, pipeline } from 'node:stream'
 
 import LibSampleRate from '@alexanderolsen/libsamplerate-js'
 import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js'
@@ -44,8 +44,8 @@ const DOWNMIX_COEFFICIENTS = Object.freeze({
 })
 
 const SAMPLE_RATES = Object.freeze([
-  96000, 88200, 64000, 48000, 44100, 32000,
-  24000, 22050, 16000, 12000, 11025, 8000, 7350
+  96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025,
+  8000, 7350
 ])
 
 const EMPTY_BUFFER = Buffer.alloc(0)
@@ -79,14 +79,21 @@ const _floatToInt16Buffer = (floatArray) => {
   return Buffer.from(output.buffer)
 }
 
-const _createAdtsHeader = (sampleLength, profile, samplingIndex, channelCount) => {
+const _createAdtsHeader = (
+  sampleLength,
+  profile,
+  samplingIndex,
+  channelCount
+) => {
   const frameLength = sampleLength + 7
   const profileIndex = profile - 1
 
   return Buffer.from([
     0xff,
     0xf1,
-    ((profileIndex & 0x03) << 6) | ((samplingIndex & 0x0f) << 2) | ((channelCount & 0x04) >> 2),
+    ((profileIndex & 0x03) << 6) |
+      ((samplingIndex & 0x0f) << 2) |
+      ((channelCount & 0x04) >> 2),
     ((channelCount & 0x03) << 6) | ((frameLength & 0x1800) >> 11),
     (frameLength & 0x7f8) >> 3,
     ((frameLength & 0x7) << 5) | 0x1f,
@@ -144,8 +151,7 @@ const _isFmp4Format = (type) =>
   type.indexOf('mpegurl') !== -1
 
 const _isMpegtsFormat = (type) =>
-  type.indexOf('mpegts') !== -1 ||
-  type.indexOf('video/mp2t') !== -1
+  type.indexOf('mpegts') !== -1 || type.indexOf('video/mp2t') !== -1
 
 const _isMp4Format = (type) =>
   type.indexOf('mp4') !== -1 ||
@@ -153,8 +159,7 @@ const _isMp4Format = (type) =>
   type.indexOf('m4v') !== -1 ||
   type.indexOf('mov') !== -1
 
-const _isWebmFormat = (type) =>
-  type.indexOf('webm') !== -1
+const _isWebmFormat = (type) => type.indexOf('webm') !== -1
 
 class BaseAudioResource {
   constructor() {
@@ -196,7 +201,9 @@ class BaseAudioResource {
   setVolume(volume) {
     if (!this.pipes) return
 
-    const volumeTransformer = this.pipes.find((p) => p instanceof VolumeTransformer)
+    const volumeTransformer = this.pipes.find(
+      (p) => p instanceof VolumeTransformer
+    )
 
     if (volumeTransformer) {
       volumeTransformer.setVolume(volume)
@@ -217,11 +224,21 @@ class BaseAudioResource {
     }
   }
 
-  emit(event, ...args) { this.stream?.emit(event, ...args) }
-  on(event, listener) { this.stream?.on(event, listener) }
-  off(event, listener) { this.stream?.off(event, listener) }
-  once(event, listener) { this.stream?.once(event, listener) }
-  removeListener(event, listener) { this.stream?.removeListener(event, listener) }
+  emit(event, ...args) {
+    this.stream?.emit(event, ...args)
+  }
+  on(event, listener) {
+    this.stream?.on(event, listener)
+  }
+  off(event, listener) {
+    this.stream?.off(event, listener)
+  }
+  once(event, listener) {
+    this.stream?.once(event, listener)
+  }
+  removeListener(event, listener) {
+    this.stream?.removeListener(event, listener)
+  }
 
   removeAllListeners() {
     if (!this.stream?.eventNames) return
@@ -231,8 +248,12 @@ class BaseAudioResource {
     }
   }
 
-  read() { return this.stream?.read() }
-  resume() { this.stream?.resume() }
+  read() {
+    return this.stream?.read()
+  }
+  resume() {
+    this.stream?.resume()
+  }
 }
 
 class SymphoniaDecoderStream extends Transform {
@@ -283,10 +304,7 @@ class SymphoniaDecoderStream extends Transform {
   }
 
   _transform(chunk, encoding, callback) {
-    if (this._aborted || !this.decoder) {
-      callback()
-      return
-    }
+    if (this._aborted || !this.decoder) return callback()
 
     this.decoder.push(chunk)
     this._scheduleDecode()
@@ -300,28 +318,37 @@ class SymphoniaDecoderStream extends Transform {
   }
 
   _scheduleDecode() {
-    if (this._loopScheduled || this._isDecoding || !this._isDecoderValid()) return
+    if (
+      this._loopScheduled ||
+      this._isDecoding ||
+      !this._isDecoderValid() ||
+      this.readableFlowing === false ||
+      this.readableLength >= this.readableHighWaterMark
+    )
+      return
 
     this._loopScheduled = true
 
     this._timeoutId = setTimeout(() => {
       this._timeoutId = null
       this._loopScheduled = false
-      if (this._isDecoderValid()) {
-        this._decodeLoop()
-      }
+      if (this._isDecoderValid()) this._decodeLoop()
     }, AUDIO_CONSTANTS.decodeIntervalMs)
   }
 
   async _decodeLoop() {
     if (!this._isDecoderValid() || this.readableFlowing === false) return
-
     this._isDecoding = true
 
     try {
       let hasMoreData = true
 
-      while (hasMoreData && this._isDecoderValid() && this.readableFlowing !== false) {
+      while (
+        hasMoreData &&
+        this._isDecoderValid() &&
+        this.readableFlowing !== false &&
+        this.readableLength < this.readableHighWaterMark
+      ) {
         hasMoreData = await this._processAudio()
 
         if (hasMoreData && this._isDecoderValid()) {
@@ -340,13 +367,19 @@ class SymphoniaDecoderStream extends Transform {
     }
 
     const bufferedBytes = this.decoder?.bufferedBytes ?? 0
-    if (bufferedBytes > 0 && this._isDecoderValid()) {
+    if (
+      bufferedBytes > 0 &&
+      this._isDecoderValid() &&
+      this.readableFlowing !== false &&
+      this.readableLength < this.readableHighWaterMark
+    ) {
       this._scheduleDecode()
     }
   }
 
   async _processAudio() {
     if (!this._isDecoderValid()) return false
+    if (this.readableLength >= this.readableHighWaterMark) return true
 
     if (!this.decoder.isProbed) {
       try {
@@ -359,17 +392,20 @@ class SymphoniaDecoderStream extends Transform {
     let decodeCount = 0
     let hasOutput = false
 
-    while (decodeCount < AUDIO_CONSTANTS.maxDecodesPerTick && this._isDecoderValid()) {
-      const bufferedBytes = this.decoder?.bufferedBytes ?? 0
+    while (
+      decodeCount < AUDIO_CONSTANTS.maxDecodesPerTick &&
+      this._isDecoderValid() &&
+      this.readableLength < this.readableHighWaterMark
+    ) {
       const result = this.decoder?.decode()
-
       if (!result) break
 
       const { samples, sampleRate, channels } = result
 
-      const output = sampleRate !== AUDIO_CONFIG.sampleRate
-        ? await this._resample(samples, channels, sampleRate)
-        : samples
+      const output =
+        sampleRate !== AUDIO_CONFIG.sampleRate
+          ? await this._resample(samples, channels, sampleRate)
+          : samples
 
       if (this._aborted) break
 
@@ -377,10 +413,13 @@ class SymphoniaDecoderStream extends Transform {
       hasOutput = true
       decodeCount++
 
-      if (this.resumeInput && bufferedBytes < BUFFER_THRESHOLDS.minCompressed) {
-        const callback = this.resumeInput
-        this.resumeInput = null
-        callback()
+      if (this.resumeInput) {
+        const afterBytes = this.decoder?.bufferedBytes ?? 0
+        if (afterBytes < BUFFER_THRESHOLDS.minCompressed) {
+          const cb = this.resumeInput
+          this.resumeInput = null
+          cb()
+        }
       }
 
       if (!canPush) break
@@ -390,7 +429,7 @@ class SymphoniaDecoderStream extends Transform {
     return hasOutput || remainingBytes > 0
   }
 
-  async _resample(pcmInt16, channels, inputRate) {
+  async _resample(pcmInt16Buf, channels, inputRate) {
     if (this._aborted) return EMPTY_BUFFER
 
     if (!this.resampler) {
@@ -402,13 +441,16 @@ class SymphoniaDecoderStream extends Transform {
       )
     }
 
-    const float32 = new Float32Array(
-      pcmInt16.buffer,
-      pcmInt16.byteOffset,
-      pcmInt16.length / 2
+    const i16 = new Int16Array(
+      pcmInt16Buf.buffer,
+      pcmInt16Buf.byteOffset,
+      pcmInt16Buf.byteLength / 2
     )
 
-    return _floatToInt16Buffer(this.resampler.full(float32))
+    const f32 = new Float32Array(i16.length)
+    for (let i = 0; i < i16.length; i++) f32[i] = i16[i] / 32768
+
+    return _floatToInt16Buffer(this.resampler.full(f32))
   }
 
   _flush(callback) {
@@ -424,9 +466,10 @@ class SymphoniaDecoderStream extends Transform {
     try {
       this.decoder.closeInput()
 
-      let result
       let count = 0
-      while ((result = this.decoder?.decode()) !== null && result && count < 10) {
+      while (count < 1000) {
+        const result = this.decoder?.decode()
+        if (!result) break
         this.push(result.samples)
         count++
       }
@@ -501,16 +544,18 @@ class MPEGTSToAACStream extends Transform {
     }
 
     try {
-      const data = this.buffer.length > 0
-        ? Buffer.concat([this.buffer, chunk])
-        : chunk
+      const data =
+        this.buffer.length > 0 ? Buffer.concat([this.buffer, chunk]) : chunk
 
       this.buffer = EMPTY_BUFFER
 
       const dataLength = data.length
       let position = 0
 
-      while (position <= dataLength - MPEGTS_CONFIG.packetSize && !this._aborted) {
+      while (
+        position <= dataLength - MPEGTS_CONFIG.packetSize &&
+        !this._aborted
+      ) {
         if (data[position] !== MPEGTS_CONFIG.syncByte) {
           const syncIndex = data.indexOf(MPEGTS_CONFIG.syncByte, position + 1)
           if (syncIndex === -1) {
@@ -521,7 +566,10 @@ class MPEGTSToAACStream extends Transform {
           continue
         }
 
-        const packet = data.subarray(position, position + MPEGTS_CONFIG.packetSize)
+        const packet = data.subarray(
+          position,
+          position + MPEGTS_CONFIG.packetSize
+        )
 
         const payloadUnitStartIndicator = !!(packet[1] & 0x40)
         const pid = ((packet[1] & 0x1f) << 8) + packet[2]
@@ -569,16 +617,20 @@ class MPEGTSToAACStream extends Transform {
   _processPMT(packet, offset) {
     offset += packet[offset] + 1
 
-    const sectionLength = ((packet[offset + 1] & 0x0f) << 8) | packet[offset + 2]
+    const sectionLength =
+      ((packet[offset + 1] & 0x0f) << 8) | packet[offset + 2]
     const tableEnd = offset + 3 + sectionLength - 4
-    const programInfoLength = ((packet[offset + 10] & 0x0f) << 8) | packet[offset + 11]
+    const programInfoLength =
+      ((packet[offset + 10] & 0x0f) << 8) | packet[offset + 11]
 
     offset += 12 + programInfoLength
 
     while (offset < tableEnd && offset < MPEGTS_CONFIG.packetSize) {
       const streamType = packet[offset]
-      const elementaryPid = ((packet[offset + 1] & 0x1f) << 8) | packet[offset + 2]
-      const esInfoLength = ((packet[offset + 3] & 0x0f) << 8) | packet[offset + 4]
+      const elementaryPid =
+        ((packet[offset + 1] & 0x1f) << 8) | packet[offset + 2]
+      const esInfoLength =
+        ((packet[offset + 3] & 0x0f) << 8) | packet[offset + 4]
 
       if (streamType === MPEGTS_CONFIG.aacStreamType && !this.aacPidFound) {
         this.aacPid = elementaryPid
@@ -909,11 +961,16 @@ class MP4ToAACStream extends Transform {
         }
 
         this.audioConfig = this._getAudioConfig(audioTrack)
-        this.mp4boxFile.setExtractionOptions(audioTrack.id, null, { nbSamples: 1 })
+        this.mp4boxFile.setExtractionOptions(audioTrack.id, null, {
+          nbSamples: 1
+        })
         this.mp4boxFile.start()
         this.isReady = true
       } catch (err) {
-        this.emit('error', new Error(`MP4 initialization error: ${err.message}`))
+        this.emit(
+          'error',
+          new Error(`MP4 initialization error: ${err.message}`)
+        )
       }
     }
 
@@ -930,7 +987,10 @@ class MP4ToAACStream extends Transform {
         }
       } catch (err) {
         if (!this._aborted) {
-          this.emit('error', new Error(`MP4Box sample processing error: ${err.message}`))
+          this.emit(
+            'error',
+            new Error(`MP4Box sample processing error: ${err.message}`)
+          )
         }
       }
     }
@@ -945,11 +1005,19 @@ class MP4ToAACStream extends Transform {
   _emitSampleWithADTS(sample) {
     const { profile, samplingIndex, channelCount } = this.audioConfig
 
-    const sampleData = sample.data instanceof ArrayBuffer
-      ? Buffer.from(sample.data)
-      : Buffer.from(sample.data.buffer || sample.data)
+    const sampleData =
+      sample.data instanceof ArrayBuffer
+        ? Buffer.from(sample.data)
+        : Buffer.from(sample.data.buffer || sample.data)
 
-    this.push(_createAdtsHeader(sampleData.byteLength, profile, samplingIndex, channelCount))
+    this.push(
+      _createAdtsHeader(
+        sampleData.byteLength,
+        profile,
+        samplingIndex,
+        channelCount
+      )
+    )
     this.push(sampleData)
   }
 
@@ -969,7 +1037,9 @@ class MP4ToAACStream extends Transform {
         const objectType = Number.parseInt(codecParts[2], 10)
 
         if (objectType === 5) {
-          const coreSamplingIndex = SAMPLE_RATES.indexOf(track.audio.sample_rate / 2)
+          const coreSamplingIndex = SAMPLE_RATES.indexOf(
+            track.audio.sample_rate / 2
+          )
           if (coreSamplingIndex !== -1) {
             samplingIndex = coreSamplingIndex
           }
@@ -993,9 +1063,13 @@ class MP4ToAACStream extends Transform {
     }
 
     try {
-      const arrayBuffer = chunk instanceof ArrayBuffer
-        ? chunk
-        : chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength)
+      const arrayBuffer =
+        chunk instanceof ArrayBuffer
+          ? chunk
+          : chunk.buffer.slice(
+              chunk.byteOffset,
+              chunk.byteOffset + chunk.byteLength
+            )
 
       arrayBuffer.fileStart = this.offset
       this.offset += arrayBuffer.byteLength
@@ -1240,7 +1314,11 @@ class MixerTransform extends Transform {
   }
 
   _transform(mainChunk, encoding, callback) {
-    if (!this.audioMixer || !this.audioMixer.enabled || !this.audioMixer.hasActiveLayers()) {
+    if (
+      !this.audioMixer ||
+      !this.audioMixer.enabled ||
+      !this.audioMixer.hasActiveLayers()
+    ) {
       return callback(null, mainChunk)
     }
 
@@ -1255,12 +1333,21 @@ class MixerTransform extends Transform {
 }
 
 class StreamAudioResource extends BaseAudioResource {
-  constructor(stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false) {
+  constructor(
+    stream,
+    type,
+    nodelink,
+    initialFilters = {},
+    volume = 1.0,
+    audioMixer = null,
+    returnPCM = false
+  ) {
     super()
 
     this._validateInputStream(stream)
 
-    const resamplingQuality = nodelink.options.audio.resamplingQuality || 'fastest'
+    const resamplingQuality =
+      nodelink.options.audio.resamplingQuality || 'fastest'
     const normalizedType = normalizeFormat(type)
 
     this.pipes = [stream]
@@ -1275,9 +1362,15 @@ class StreamAudioResource extends BaseAudioResource {
     if (returnPCM) {
       this._createPCMOutputPipeline(pcmStream, volume)
     } else {
-      this._createOutputPipeline(pcmStream, nodelink, initialFilters, volume, audioMixer)
+      this._createOutputPipeline(
+        pcmStream,
+        nodelink,
+        initialFilters,
+        volume,
+        audioMixer
+      )
     }
-    
+
     this._setupEventHandlers(stream)
   }
 
@@ -1309,31 +1402,44 @@ class StreamAudioResource extends BaseAudioResource {
   _createAACPipeline(stream, type, resamplingQuality) {
     const lowerType = type.toLowerCase()
     let aacStream = stream
+    const streams = [stream]
 
     if (_isFmp4Format(lowerType)) {
       const demuxer = new FMP4ToAACStream()
-      aacStream = stream.pipe(demuxer)
-      this.pipes.push(demuxer)
+      streams.push(demuxer)
     } else if (_isMpegtsFormat(lowerType)) {
       const demuxer = new MPEGTSToAACStream()
-      aacStream = stream.pipe(demuxer)
-      this.pipes.push(demuxer)
+      streams.push(demuxer)
     } else if (_isMp4Format(lowerType)) {
       const demuxer = new MP4ToAACStream()
-      aacStream = stream.pipe(demuxer)
-      this.pipes.push(demuxer)
+      streams.push(demuxer)
     }
 
     const decoder = new AACDecoderStream({ resamplingQuality })
-    this.pipes.push(decoder)
+    streams.push(decoder)
 
-    return aacStream.pipe(decoder)
+    this.pipes.push(...streams.slice(1))
+
+    pipeline(streams, (err) => {
+      if (err && !this._destroyed) {
+        this.stream?.emit('error', err)
+      }
+    })
+
+    return decoder
   }
 
   _createSymphoniaPipeline(stream, resamplingQuality) {
     const decoder = new SymphoniaDecoderStream({ resamplingQuality })
     this.pipes.push(decoder)
-    return stream.pipe(decoder)
+
+    pipeline(stream, decoder, (err) => {
+      if (err && !this._destroyed) {
+        this.stream?.emit('error', err)
+      }
+    })
+
+    return decoder
   }
 
   _createOpusPipeline(stream, type) {
@@ -1343,17 +1449,33 @@ class StreamAudioResource extends BaseAudioResource {
       frameSize: AUDIO_CONFIG.frameSize
     })
 
+    const streams = [stream]
+
     if (_isWebmFormat(type.toLowerCase())) {
       const demuxer = new WebmOpusDemuxer()
-      this.pipes.push(demuxer, decoder)
-      return stream.pipe(demuxer).pipe(decoder)
+      streams.push(demuxer)
+      this.pipes.push(demuxer)
     }
 
+    streams.push(decoder)
     this.pipes.push(decoder)
-    return stream.pipe(decoder)
+
+    pipeline(streams, (err) => {
+      if (err && !this._destroyed) {
+        this.stream?.emit('error', err)
+      }
+    })
+
+    return decoder
   }
 
-  _createOutputPipeline(pcmStream, nodelink, initialFilters, volume, audioMixer = null) {
+  _createOutputPipeline(
+    pcmStream,
+    nodelink,
+    initialFilters,
+    volume,
+    audioMixer = null
+  ) {
     const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
     const filters = new FiltersManager(nodelink, initialFilters)
     const opusEncoder = new OpusEncoder({
@@ -1362,26 +1484,61 @@ class StreamAudioResource extends BaseAudioResource {
       frameSize: AUDIO_CONFIG.frameSize
     })
 
-    let pipeline = pcmStream.pipe(volumeTransformer)
+    const streams = [pcmStream, volumeTransformer]
+    this.pipes.push(volumeTransformer)
 
     if (audioMixer && (nodelink.options?.mix?.enabled ?? true)) {
       const mixer = new MixerTransform(audioMixer)
-      pipeline = pipeline.pipe(mixer)
+      streams.push(mixer)
       this.pipes.push(mixer)
     }
 
-    pipeline.pipe(filters).pipe(opusEncoder)
+    streams.push(filters)
+    this.pipes.push(filters)
 
-    this.pipes.push(volumeTransformer, filters, opusEncoder)
+    // Inject Audio Interceptors (Low-level stream manipulation)
+    if (nodelink.extensions?.audioInterceptors) {
+      for (const interceptorFactory of nodelink.extensions.audioInterceptors) {
+        try {
+          const interceptorStream = interceptorFactory()
+          if (
+            interceptorStream &&
+            typeof interceptorStream.pipe === 'function'
+          ) {
+            streams.push(interceptorStream)
+            this.pipes.push(interceptorStream)
+          }
+        } catch (e) {
+          // Log error but don't break pipeline
+          console.error(`Audio interceptor error: ${e.message}`)
+        }
+      }
+    }
+
+    streams.push(opusEncoder)
+    this.pipes.push(opusEncoder)
+
+    pipeline(streams, (err) => {
+      if (err && !this._destroyed) {
+        opusEncoder.emit('error', err)
+      }
+    })
+
     this.stream = opusEncoder
   }
 
   _createPCMOutputPipeline(pcmStream, volume) {
     if (volume !== 1.0) {
       const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
-      const outputStream = pcmStream.pipe(volumeTransformer)
       this.pipes.push(volumeTransformer)
-      this.stream = outputStream
+
+      pipeline(pcmStream, volumeTransformer, (err) => {
+        if (err && !this._destroyed) {
+          this.stream?.emit('error', err)
+        }
+      })
+
+      this.stream = volumeTransformer
     } else {
       this.stream = pcmStream
     }
@@ -1421,14 +1578,30 @@ class StreamAudioResource extends BaseAudioResource {
 
     return new Error(
       `Unsupported audio format: '${type}'.\n` +
-      'Supported formats:\n' +
-      supportedFormats.map((f) => `  • ${f}`).join('\n')
+        'Supported formats:\n' +
+        supportedFormats.map((f) => `  • ${f}`).join('\n')
     )
   }
 }
 
-export const createAudioResource = (stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false) =>
-  new StreamAudioResource(stream, type, nodelink, initialFilters, volume, audioMixer, returnPCM)
+export const createAudioResource = (
+  stream,
+  type,
+  nodelink,
+  initialFilters = {},
+  volume = 1.0,
+  audioMixer = null,
+  returnPCM = false
+) =>
+  new StreamAudioResource(
+    stream,
+    type,
+    nodelink,
+    initialFilters,
+    volume,
+    audioMixer,
+    returnPCM
+  )
 
 export const createSeekeableAudioResource = async (
   url,
@@ -1443,14 +1616,17 @@ export const createSeekeableAudioResource = async (
   try {
     const { stream, meta } = await seekableStream(url, seekTime, endTime, {})
 
-    const passthroughStream = new PassThrough({ highWaterMark: AUDIO_CONFIG.highWaterMark })
+    const passthroughStream = new PassThrough({
+      highWaterMark: AUDIO_CONFIG.highWaterMark
+    })
 
-    stream.on('data', (chunk) => passthroughStream.write(chunk))
-    stream.on('end', () => {
-      passthroughStream.end()
+    passthroughStream.once('finish', () => {
       passthroughStream.emit('finishBuffering')
     })
-    stream.on('error', (err) => passthroughStream.emit('error', err))
+
+    pipeline(stream, passthroughStream, (err) => {
+      if (err) passthroughStream.emit('error', err)
+    })
 
     const format = meta.codec?.container || player.streamInfo.format
 
@@ -1469,29 +1645,77 @@ export const createSeekeableAudioResource = async (
 }
 
 export const createPCMStream = (stream, type, nodelink, volume = 1.0) => {
-  const resamplingQuality = nodelink.options.audio.resamplingQuality || 'fastest'
+  const resamplingQuality =
+    nodelink.options.audio.resamplingQuality || 'fastest'
   const normalizedType = normalizeFormat(type)
-  
-  const resource = new StreamAudioResource.__proto__.constructor.call({
-    pipes: [stream],
-    _createDecoderPipeline: StreamAudioResource.prototype._createDecoderPipeline,
-    _createSymphoniaPipeline: StreamAudioResource.prototype._createSymphoniaPipeline,
-    _createOpusPipeline: StreamAudioResource.prototype._createOpusPipeline,
-    _createAACPipeline: StreamAudioResource.prototype._createAACPipeline
-  })
-  
-  const pcmStream = resource._createDecoderPipeline.call(
-    { pipes: [] },
-    stream,
-    type,
-    normalizedType,
-    resamplingQuality
-  )
-  
+
+  let pcmStream
+
+  switch (normalizedType) {
+    case SupportedFormats.AAC: {
+      const lowerType = type.toLowerCase()
+      const streams = [stream]
+
+      if (_isFmp4Format(lowerType)) streams.push(new FMP4ToAACStream())
+      else if (_isMpegtsFormat(lowerType)) streams.push(new MPEGTSToAACStream())
+      else if (_isMp4Format(lowerType)) streams.push(new MP4ToAACStream())
+
+      const decoder = new AACDecoderStream({ resamplingQuality })
+      streams.push(decoder)
+
+      pipeline(streams, (err) => {
+        if (err) decoder.emit('error', err)
+      })
+
+      pcmStream = decoder
+      break
+    }
+
+    case SupportedFormats.MPEG:
+    case SupportedFormats.FLAC:
+    case SupportedFormats.OGG_VORBIS:
+    case SupportedFormats.WAV: {
+      const decoder = new SymphoniaDecoderStream({ resamplingQuality })
+      pipeline(stream, decoder, (err) => {
+        if (err) decoder.emit('error', err)
+      })
+      pcmStream = decoder
+      break
+    }
+
+    case SupportedFormats.OPUS: {
+      const decoder = new OpusDecoder({
+        rate: AUDIO_CONFIG.sampleRate,
+        channels: AUDIO_CONFIG.channels,
+        frameSize: AUDIO_CONFIG.frameSize
+      })
+
+      if (_isWebmFormat(type.toLowerCase())) {
+        const demuxer = new WebmOpusDemuxer()
+        pipeline(stream, demuxer, decoder, (err) => {
+          if (err) decoder.emit('error', err)
+        })
+      } else {
+        pipeline(stream, decoder, (err) => {
+          if (err) decoder.emit('error', err)
+        })
+      }
+
+      pcmStream = decoder
+      break
+    }
+
+    default:
+      throw new Error(`Unsupported audio format: '${type}'`)
+  }
+
   if (volume !== 1.0) {
     const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
-    return pcmStream.pipe(volumeTransformer)
+    pipeline(pcmStream, volumeTransformer, (err) => {
+      if (err) volumeTransformer.emit('error', err)
+    })
+    return volumeTransformer
   }
-  
+
   return pcmStream
 }

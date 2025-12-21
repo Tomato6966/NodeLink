@@ -9,11 +9,43 @@ export default class FlowerySource {
     this.searchTerms = ['ftts', 'flowery']
     this.patterns = [/^ftts:\/\//]
     this.priority = 50
+    this.voiceMap = new Map() // Stores voiceName -> voiceId mapping
+    this.defaultVoiceId = null // Stores the ID of the default voice
   }
 
   async setup() {
     logger('info', 'Sources', 'Loaded Flowery TTS source.')
+    await this._fetchVoices()
     return true
+  }
+
+  async _fetchVoices() {
+    try {
+      const voicesEndpoint = 'https://api.flowery.pw/v1/tts/voices'
+      const { body, error, statusCode } = await makeRequest(voicesEndpoint, { method: 'GET' })
+
+      if (error || statusCode !== 200 || !body || !Array.isArray(body.voices)) {
+        logger('error', 'Flowery', `Failed to fetch voices from ${voicesEndpoint}: ${error?.message || `Status ${statusCode}`}`)
+        return
+      }
+
+      this.voiceMap.clear()
+      for (const voice of body.voices) {
+        this.voiceMap.set(voice.name.toLowerCase(), voice.id)
+      }
+
+      if (body.default?.id) {
+        this.defaultVoiceId = body.default.id
+        logger('info', 'Flowery', `Default voice set to: ${body.default.name} (${body.default.id})`)
+      } else if (body.voices.length > 0) {
+        this.defaultVoiceId = body.voices[0].id
+        logger('info', 'Flowery', `Using first available voice as default: ${body.voices[0].name} (${body.voices[0].id})`)
+      }
+
+      logger('debug', 'Flowery', `Fetched ${this.voiceMap.size} voices.`)
+    } catch (e) {
+      logger('error', 'Flowery', `Exception fetching voices: ${e.message}`)
+    }
   }
 
   async search(query) {
@@ -88,16 +120,23 @@ export default class FlowerySource {
     const config = this.config
     const enforceConfig = config.enforceConfig || false
 
-    let voice = config.voice || 'Salli'
+    let voiceName = config.voice || 'Salli'
     let translate = config.translate || false
     let silence = config.silence || 0
     let speed = config.speed || 1.0
 
     if (!enforceConfig) {
-      if (overrides.voice) voice = overrides.voice
+      if (overrides.voice) voiceName = overrides.voice
       if (overrides.translate !== undefined) translate = overrides.translate
       if (overrides.silence !== undefined) silence = overrides.silence
       if (overrides.speed !== undefined) speed = overrides.speed
+    }
+    
+    let voiceId = this.voiceMap.get(voiceName.toLowerCase()) || this.defaultVoiceId
+
+    if (!voiceId) {
+      logger('warn', 'Flowery', `Voice "${voiceName}" not found and no default voice available. Using a fallback empty voice ID.`)
+      voiceId = 'default' // Fallback to a generic 'default' if no ID is found
     }
 
     let audioFormat = 'mp3'
@@ -113,7 +152,7 @@ export default class FlowerySource {
 
     const baseUrl = 'https://api.flowery.pw/v1/tts'
     const queryParams = new URLSearchParams({
-      voice,
+      voice: voiceId,
       text,
       translate: String(translate),
       silence: String(silence),

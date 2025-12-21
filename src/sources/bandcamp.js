@@ -145,7 +145,7 @@ export default class BandCampSource {
           .filter((track) => track !== null)
 
         return {
-          loadType: 'album',
+          loadType: 'playlist',
           data: {
             info: {
               name: tralbumData.current.title,

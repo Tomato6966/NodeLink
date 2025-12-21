@@ -447,8 +447,13 @@ export default class StatsManager {
 
   incrementApiRequest(endpoint) {
     const sanitized = this._sanitizeEndpoint(endpoint)
-    this.stats.api.requests[sanitized] =
-      (this.stats.api.requests[sanitized] || 0) + 1
+    
+    if (Object.keys(this.stats.api.requests).length > 500 && !this.stats.api.requests[sanitized]) {
+      this.stats.api.requests['others'] = (this.stats.api.requests['others'] || 0) + 1
+    } else {
+      this.stats.api.requests[sanitized] = (this.stats.api.requests[sanitized] || 0) + 1
+    }
+
     if (this.promApiRequests) {
       this.promApiRequests.inc({ endpoint: sanitized })
     }
@@ -456,7 +461,13 @@ export default class StatsManager {
 
   incrementApiError(endpoint) {
     const sanitized = this._sanitizeEndpoint(endpoint)
-    this.stats.api.errors[sanitized] = (this.stats.api.errors[sanitized] || 0) + 1
+    
+    if (Object.keys(this.stats.api.errors).length > 500 && !this.stats.api.errors[sanitized]) {
+      this.stats.api.errors['others'] = (this.stats.api.errors['others'] || 0) + 1
+    } else {
+      this.stats.api.errors[sanitized] = (this.stats.api.errors[sanitized] || 0) + 1
+    }
+
     if (this.promApiErrors) {
       this.promApiErrors.inc({ endpoint: sanitized })
     }
