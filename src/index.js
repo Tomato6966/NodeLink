@@ -431,6 +431,31 @@ class NodelinkServer {
               `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''} resumed session with ID: ${oldSessionId}`
             )
             this.statsManager.incrementSessionResume(clientInfo.name, true)
+
+            socket.on('close', (code, reason) => {
+              if (!this.sessions.has(oldSessionId)) return
+
+              const session = this.sessions.get(oldSessionId)
+              if (!session) return
+
+              logger(
+                'info',
+                'Server',
+                `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m disconnected with code ${code} and reason: ${
+                  reason || 'without reason'
+                }`
+              )
+
+              if (session.resuming) {
+                this.sessions.pause(oldSessionId)
+              } else {
+                this.sessions.shutdown(oldSessionId)
+              }
+
+              const sessionCount = this.sessions.activeSessions?.size || 0
+              this.statsManager.setWebsocketConnections(sessionCount)
+            })
+
             socket.send(
               JSON.stringify({
                 op: 'ready',
@@ -462,6 +487,9 @@ class NodelinkServer {
                 playerInfo._sendUpdate()
               }
             }
+
+            const sessionCount = this.sessions.activeSessions?.size || 0
+            this.statsManager.setWebsocketConnections(sessionCount)
           }
         } else {
           const sessionId = this.sessions.create(request, socket, clientInfo)
