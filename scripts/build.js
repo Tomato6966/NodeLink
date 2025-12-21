@@ -70,6 +70,22 @@ if (fs.existsSync(symphoniaSrc)) {
       fs.rmSync(path.join(symphoniaDest, file))
     }
   }
+
+  const toddyDir = path.join(rootDir, 'node_modules', '@toddynnn')
+  if (fs.existsSync(toddyDir)) {
+    const packages = fs.readdirSync(toddyDir)
+    for (const pkg of packages) {
+      if (pkg.startsWith('symphonia-decoder-')) {
+        const pkgDir = path.join(toddyDir, pkg)
+        if (fs.statSync(pkgDir).isDirectory()) {
+          const binaries = fs.readdirSync(pkgDir).filter(f => f.endsWith('.node'))
+          for (const binary of binaries) {
+            fs.copyFileSync(path.join(pkgDir, binary), path.join(symphoniaDest, binary))
+          }
+        }
+      }
+    }
+  }
 }
 
 console.log('Preparing SEA runner (Self-Extracting Portable Logic)...')
@@ -170,7 +186,9 @@ try {
     if (!fs.existsSync(dirPath)) {
       fs.mkdirSync(dirPath, { recursive: true });
     }
-    fs.writeFileSync(filePath, Buffer.from(contentBase64, 'base64'));
+    if (!fs.existsSync(filePath)) {
+      fs.writeFileSync(filePath, Buffer.from(contentBase64, 'base64'));
+    }
   }
 
   import(pathToFileURL(mainPath).href).catch(err => {
