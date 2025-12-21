@@ -1,0 +1,130 @@
+name: Build Binaries
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build ${{ matrix.output_name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows x64 (Standard)
+          - os: windows-latest
+            output_name: nodelink-win-x64.exe
+            node_arch: x64
+            
+          # Windows x86 (32-bit) - Cross-build via download to avoid runner arch conflicts
+          - os: windows-latest
+            output_name: nodelink-win-x86.exe
+            node_dl_url: https://nodejs.org/dist/v22.12.0/node-v22.12.0-win-x86.zip
+            node_dl_path: node-v22.12.0-win-x86/node.exe
+            is_cross: true
+
+          # Linux x64 (Standard)
+          - os: ubuntu-latest
+            output_name: nodelink-linux-x64
+            node_arch: x64
+
+          # Linux ARM64 (Cross-build via download)
+          - os: ubuntu-latest
+            output_name: nodelink-linux-arm64
+            node_dl_url: https://nodejs.org/dist/v22.12.0/node-v22.12.0-linux-arm64.tar.gz
+            node_dl_path: node-v22.12.0-linux-arm64/bin/node
+            is_cross: true
+
+          # macOS ARM64 (Apple Silicon)
+          - os: macos-latest
+            output_name: nodelink-macos-arm64
+            node_arch: arm64
+
+          # macOS x64 (Intel) - Updated to macos-15 to avoid deprecation
+          - os: macos-15
+            output_name: nodelink-macos-x64
+            node_arch: x64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Setup default Node for running the build script itself
+      - name: Setup Host Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # For standard builds (Windows x64, macOS, Linux x64), we can use setup-node
+      # For cross-builds (Linux ARM64, Windows x86), we download manually.
+      
+      - name: Setup Target Node.js (Standard)
+        if: matrix.is_cross != true
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: ${{ matrix.node_arch }}
+
+      - name: Download Target Node.js (Cross-Build - Linux)
+        if: matrix.is_cross == true && runner.os == 'Linux'
+        run: |
+          wget ${{ matrix.node_dl_url }}
+          tar -xzf $(basename ${{ matrix.node_dl_url }})
+        shell: bash
+
+      - name: Download Target Node.js (Cross-Build - Windows)
+        if: matrix.is_cross == true && runner.os == 'Windows'
+        run: |
+          curl -L -o node_x86.zip ${{ matrix.node_dl_url }}
+          unzip node_x86.zip
+        shell: bash
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Install Build Tools
+        run: npm install --no-save esbuild postject rcedit
+
+      - name: Set Target Binary Path (Standard Windows)
+        if: runner.os == 'Windows' && matrix.is_cross != true
+        run: |
+          NODE_PATH=$(where node | head -n 1)
+          echo "TARGET_NODE_EXE=$(cygpath -m "$NODE_PATH")" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Set Target Binary Path (Standard Unix)
+        if: runner.os != 'Windows' && matrix.is_cross != true
+        run: echo "TARGET_NODE_EXE=$(which node)" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Set Target Binary Path (Cross-Build - Linux)
+        if: matrix.is_cross == true && runner.os == 'Linux'
+        run: echo "TARGET_NODE_EXE=$(pwd)/${{ matrix.node_dl_path }}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Set Target Binary Path (Cross-Build - Windows)
+        if: matrix.is_cross == true && runner.os == 'Windows'
+        run: echo "TARGET_NODE_EXE=$(pwd -W)/${{ matrix.node_dl_path }}" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Build Executable
+        run: node scripts/build.js
+
+      - name: Rename Output
+        run: |
+          if [ -f dist/nodelink.exe ]; then
+            mv dist/nodelink.exe dist/${{ matrix.output_name }}
+          elif [ -f dist/nodelink ]; then
+            mv dist/nodelink dist/${{ matrix.output_name }}
+          else
+            echo "Binary not found!" && exit 1
+          fi
+        shell: bash
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output_name }}
+          path: dist/${{ matrix.output_name }}

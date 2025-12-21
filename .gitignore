@@ -22,3 +22,6 @@
 !commitlint.config.mjs
 !.gitmessage
 !docker-compose.yml
+!scripts
+!scripts/**
+!sea-config.json

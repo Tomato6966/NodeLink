@@ -34,6 +34,14 @@ nodelink.lyrics = new LyricsManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(nodelink)
 nodelink.connectionManager = new ConnectionManager(nodelink)
 nodelink.pluginManager = new PluginManager(nodelink)
+nodelink.registry = null
+if (process.embedder === 'nodejs') {
+  try {
+    nodelink.registry = await import('./registry.js')
+  } catch (e) {
+    logger('error', 'Worker', `Failed to load registry: ${e.message}`)
+  }
+}
 
 nodelink.extensions = {
   workerInterceptors: [],

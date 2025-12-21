@@ -9,46 +9,70 @@ import {
   sendErrorResponse
 } from '../utils.js'
 
+let apiRegistry
+try {
+  const mod = await import('../registry.js')
+  apiRegistry = mod.apiRegistry
+} catch {}
+
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
 async function loadRoutes() {
-  const routeFiles = await fs.readdir(__dirname)
   const staticRoutes = new Map()
   const dynamicRoutes = []
+  let routeModules = []
 
-  for (const file of routeFiles) {
-    if (file !== 'index.js' && file.endsWith('.js')) {
-      const routeName = file.replace('.js', '').toLowerCase()
-      let pathname
+  if (apiRegistry) {
+    routeModules = Object.entries(apiRegistry).map(
+      ([file, mod]) => ({
+        file,
+        module: mod.default || mod
+      })
+    )
+  }
 
-      if (routeName === 'version') {
-        pathname = '/version'
-      } else if (routeName.includes('.')) {
-        const parts = routeName.split('.')
-        const basePattern = parts
-          .map((part) => (part === 'id' ? '(?:id|[A-Za-z0-9]+)' : part))
-          .join('/')
-        pathname = new RegExp(
-          `^/${PATH_VERSION}/${basePattern}(?:/[A-Za-z0-9]+)?/?$`
-        )
-      } else {
-        pathname = `/${PATH_VERSION}/${routeName}`
+  if (routeModules.length === 0) {
+    try {
+      const routeFiles = await fs.readdir(__dirname)
+      for (const file of routeFiles) {
+        if (file !== 'index.js' && file.endsWith('.js')) {
+          const filePath = join(__dirname, file)
+          const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
+          const routeModule = await import(fileUrl)
+          routeModules.push({ file, module: routeModule.default })
+        }
       }
+    } catch {}
+  }
 
-      const filePath = join(__dirname, file)
-      const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
-      const routeModule = await import(fileUrl)
-      const routeData = {
-        handler: routeModule.default.handler,
-        methods: routeModule.default.methods || ['GET']
-      }
+  for (const { file, module } of routeModules) {
+    const routeName = file.replace('.js', '').toLowerCase()
+    let pathname
 
-      if (pathname instanceof RegExp) {
-        dynamicRoutes.push([pathname, routeData])
-      } else {
-        staticRoutes.set(pathname, routeData)
-      }
+    if (routeName === 'version') {
+      pathname = '/version'
+    } else if (routeName.includes('.')) {
+      const parts = routeName.split('.')
+      const basePattern = parts
+        .map((part) => (part === 'id' ? '(?:id|[A-Za-z0-9]+)' : part))
+        .join('/')
+      pathname = new RegExp(
+        `^/${PATH_VERSION}/${basePattern}(?:/[A-Za-z0-9]+)?/?$`
+      )
+    } else {
+      pathname = `/${PATH_VERSION}/${routeName}`
+    }
+
+    const routeData = {
+      handler: module.handler,
+      methods: module.methods || ['GET']
+    }
+
+    if (pathname instanceof RegExp) {
+      dynamicRoutes.push([pathname, routeData])
+    } else {
+      staticRoutes.set(pathname, routeData)
     }
   }
 
@@ -67,7 +91,7 @@ async function requestHandler(nodelink, req, res) {
   if (middlewares && Array.isArray(middlewares)) {
     for (const middleware of middlewares) {
       const result = await middleware(nodelink, req, res, parsedUrl)
-      if (result === true) return // Middleware handled the response
+      if (result === true) return 
     }
   }
 
@@ -89,7 +113,6 @@ async function requestHandler(nodelink, req, res) {
     originalEnd.apply(res, args)
   }
 
-  // Handle metrics endpoint separately
   const isMetricsEndpoint = parsedUrl.pathname === `/${PATH_VERSION}/metrics`
   if (isMetricsEndpoint) {
     const metricsConfig = nodelink.options.metrics || {}
@@ -104,12 +127,10 @@ async function requestHandler(nodelink, req, res) {
       return
     }
 
-    // Metrics authorization check
     const authConfig = metricsConfig.authorization || {}
     let authType = authConfig.type;
     if(!['Bearer', 'Basic'].includes(authType)) {
       logger('warn',`Config: metrics authorization.type SHOULD BE one of 'Bearer', 'Basic'.... Defaulting to 'Bearer'!`);
-      // Because prom doesn't support any Other Auth(except Bearer & Basic) or Custom Authorization Like the one Server uses by default.
       authType = 'Bearer';
     }
     
@@ -131,8 +152,6 @@ async function requestHandler(nodelink, req, res) {
       res.end('Unauthorized')
       return
     }
-
-    // Metrics endpoint is authorized, continue to handler
   }
 
   const dosCheck = nodelink.dosProtectionManager.check(req)
@@ -183,7 +202,6 @@ async function requestHandler(nodelink, req, res) {
     return
   }
 
-  // Skip general authorization check for metrics endpoint (already checked above)
   if (!isMetricsEndpoint) {
     if (
       !req.headers ||

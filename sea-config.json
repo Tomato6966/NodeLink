@@ -1,0 +1,5 @@
+{
+  "main": "dist/runner.js",
+  "output": "dist/app.blob",
+  "disableExperimentalSEAWarning": true
+}
