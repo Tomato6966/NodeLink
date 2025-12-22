@@ -1036,30 +1036,6 @@ class NodelinkServer {
       await this.pluginManager.load('worker')
     }
 
-    if (this.options.sources.youtube?.getOAuthToken) {
-      logger(
-        'info',
-        'OAuth',
-        'Starting YouTube OAuth token acquisition process...'
-      )
-      try {
-        await OAuth.acquireRefreshToken()
-        logger(
-          'info',
-          'OAuth',
-          'YouTube OAuth token acquisition completed. Please update your config.js with the refresh token and set sources.youtube.getOAuthToken to false.'
-        )
-        process.exit(0)
-      } catch (error) {
-        logger(
-          'error',
-          'OAuth',
-          `YouTube OAuth token acquisition failed: ${error.message}`
-        )
-        process.exit(1)
-      }
-    }
-
     if (!startOptions.isClusterPrimary) {
       await this.sources.loadFolder()
 
@@ -1181,6 +1157,20 @@ class NodelinkServer {
 import WorkerManager from './managers/workerManager.js'
 
 if (clusterEnabled && cluster.isPrimary) {
+  if (config.sources?.youtube?.getOAuthToken) {
+    const mockNodelink = { options: config }
+    const validator = new OAuth(mockNodelink)
+    await validator.validateCurrentTokens()
+
+    try {
+      await OAuth.acquireRefreshToken()
+      process.exit(0)
+    } catch (error) {
+      logger('error', 'OAuth', `YouTube OAuth token acquisition failed: ${error.message}`)
+      process.exit(1)
+    }
+  }
+
   const workerManager = new WorkerManager(config)
 
   const serverInstancePromise = (async () => {
