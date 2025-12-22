@@ -64,6 +64,62 @@ function formatNumber(num) {
   return String(num)
 }
 
+function _buildReadableTime(units) {
+  if (units.years > 0)
+    return `${units.years} year${units.years > 1 ? 's' : ''} ago`
+  if (units.months > 0)
+    return `${units.months} month${units.months > 1 ? 's' : ''} ago`
+  if (units.weeks > 0)
+    return `${units.weeks} week${units.weeks > 1 ? 's' : ''} ago`
+  if (units.days > 0) return `${units.days} day${units.days > 1 ? 's' : ''} ago`
+  if (units.hours > 0)
+    return `${units.hours} hour${units.hours > 1 ? 's' : ''} ago`
+  if (units.minutes > 0)
+    return `${units.minutes} minute${units.minutes > 1 ? 's' : ''} ago`
+  if (units.seconds > 0)
+    return `${units.seconds} second${units.seconds > 1 ? 's' : ''} ago`
+  return 'just now'
+}
+
+function _buildPublishedAtFromTimestamp(timestamp, originalText) {
+  const diff = Date.now() - timestamp
+  const diffAbs = Math.abs(diff)
+  const resultUnits = {
+    years: 0,
+    months: 0,
+    weeks: 0,
+    days: 0,
+    hours: 0,
+    minutes: 0,
+    seconds: 0
+  }
+
+  if (diffAbs >= TIME_UNIT_MULTIPLIERS.year) {
+    resultUnits.years = Math.floor(diffAbs / TIME_UNIT_MULTIPLIERS.year)
+  } else if (diffAbs >= TIME_UNIT_MULTIPLIERS.month) {
+    resultUnits.months = Math.floor(diffAbs / TIME_UNIT_MULTIPLIERS.month)
+  } else if (diffAbs >= TIME_UNIT_MULTIPLIERS.week) {
+    resultUnits.weeks = Math.floor(diffAbs / TIME_UNIT_MULTIPLIERS.week)
+  } else if (diffAbs >= TIME_UNIT_MULTIPLIERS.day) {
+    resultUnits.days = Math.floor(diffAbs / TIME_UNIT_MULTIPLIERS.day)
+  } else if (diffAbs >= TIME_UNIT_MULTIPLIERS.hour) {
+    resultUnits.hours = Math.floor(diffAbs / TIME_UNIT_MULTIPLIERS.hour)
+  } else if (diffAbs >= TIME_UNIT_MULTIPLIERS.minute) {
+    resultUnits.minutes = Math.floor(diffAbs / TIME_UNIT_MULTIPLIERS.minute)
+  } else {
+    resultUnits.seconds = Math.floor(diffAbs / TIME_UNIT_MULTIPLIERS.second)
+  }
+
+  return {
+    original: originalText,
+    timestamp: Math.floor(timestamp),
+    date: new Date(timestamp).toISOString(),
+    readable: _buildReadableTime(resultUnits),
+    compact: `${resultUnits.years}y ${resultUnits.months}mo ${resultUnits.weeks}w ${resultUnits.days}d ${resultUnits.hours}h ${resultUnits.minutes}m ${resultUnits.seconds}s`,
+    ago: resultUnits
+  }
+}
+
 function parsePublishedAt(publishedText) {
   if (!publishedText) return null
 
@@ -507,7 +563,7 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
           }
         }
       }
-    } catch (e) { }
+    } catch (e) {}
   }
 
   if (
@@ -524,7 +580,7 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
       if (response.finalUrl && response.finalUrl.includes('music.apple.com')) {
         resolved.appleMusic = response.finalUrl
       }
-    } catch (e) { }
+    } catch (e) {}
   }
 
   return resolved
@@ -722,13 +778,15 @@ function extractAudioTracks(streamingData) {
 function extractCaptions(captionsData) {
   if (!captionsData?.playerCaptionsTracklistRenderer?.captionTracks) return []
 
-  return captionsData.playerCaptionsTracklistRenderer.captionTracks.map((c) => ({
-    languageCode: c.languageCode,
-    name: c.name?.simpleText,
-    isTranslatable: c.isTranslatable,
-    baseUrl: c.baseUrl,
-    kind: c.kind
-  }))
+  return captionsData.playerCaptionsTracklistRenderer.captionTracks.map(
+    (c) => ({
+      languageCode: c.languageCode,
+      name: c.name?.simpleText,
+      isTranslatable: c.isTranslatable,
+      baseUrl: c.baseUrl,
+      kind: c.kind
+    })
+  )
 }
 
 function parseLengthAndStream(lengthText, lengthSeconds, isLive) {
@@ -1280,30 +1338,43 @@ export async function fetchEncryptedHostFlags(videoId) {
     const { body, statusCode, error } = await makeRequest(embedUrl, {
       method: 'GET',
       headers: {
-        'Referer': 'https://www.google.com',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        Referer: 'https://www.google.com',
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
     })
 
     if (error || statusCode !== 200 || !body) {
-      logger('warn', 'fetchEncryptedHostFlags',
-        `Failed to fetch embed page: ${statusCode} - ${error?.message}`)
+      logger(
+        'warn',
+        'fetchEncryptedHostFlags',
+        `Failed to fetch embed page: ${statusCode} - ${error?.message}`
+      )
       return null
     }
     const match = body.match(/"encryptedHostFlags":"([^"]+)"/)
 
     if (match && match[1]) {
-      logger('debug', 'fetchEncryptedHostFlags',
-        `Successfully extracted encryptedHostFlags for ${videoId}`)
+      logger(
+        'debug',
+        'fetchEncryptedHostFlags',
+        `Successfully extracted encryptedHostFlags for ${videoId}`
+      )
       return match[1]
     }
 
-    logger('debug', 'fetchEncryptedHostFlags',
-      'encryptedHostFlags not found in embed page')
+    logger(
+      'debug',
+      'fetchEncryptedHostFlags',
+      'encryptedHostFlags not found in embed page'
+    )
     return null
   } catch (e) {
-    logger('error', 'fetchEncryptedHostFlags',
-      `Error fetching encryptedHostFlags: ${e.message}`)
+    logger(
+      'error',
+      'fetchEncryptedHostFlags',
+      `Error fetching encryptedHostFlags: ${e.message}`
+    )
     return null
   }
 }
@@ -1383,8 +1454,11 @@ export class BaseClient {
             signatureTimestamp
         }
       } catch (e) {
-        logger('warn', `youtube-${this.name}`,
-          `Failed to get signature timestamp: ${e.message}`)
+        logger(
+          'warn',
+          `youtube-${this.name}`,
+          `Failed to get signature timestamp: ${e.message}`
+        )
       }
     }
 
@@ -1395,7 +1469,9 @@ export class BaseClient {
         headers: {
           'User-Agent': this.getClient(context).client.userAgent,
           ...(this.getClient(context).client.visitorData
-            ? { 'X-Goog-Visitor-Id': this.getClient(context).client.visitorData }
+            ? {
+                'X-Goog-Visitor-Id': this.getClient(context).client.visitorData
+              }
             : {}),
           ...(this.isEmbedded() ? { Referer: 'https://www.youtube.com' } : {}),
           ...headers
@@ -1788,16 +1864,16 @@ export class BaseClient {
       )
 
       if (defaultFormats.length > 0) {
-        logger(
-          'debug',
-          `youtube-${this.name}`,
-          `Using default audio track.`
-        )
+        logger('debug', `youtube-${this.name}`, `Using default audio track.`)
         formats = defaultFormats
       }
     }
 
-    const _attemptCipherResolution = async (formatToResolve, playerScript, context) => {
+    const _attemptCipherResolution = async (
+      formatToResolve,
+      playerScript,
+      context
+    ) => {
       let currentStreamUrl = formatToResolve.url
       let currentEncryptedSignature
       let currentNParam
@@ -1860,57 +1936,109 @@ export class BaseClient {
         exception: {
           message: 'Failed to obtain player script for deciphering.',
           severity: 'fault',
-          cause: 'Internal',
-        },
+          cause: 'Internal'
+        }
       }
     }
 
-    logger('debug', `youtube-${this.name}`, `Initial target itags (from config/quality priority): ${targetItags.join(', ')}`)
+    logger(
+      'debug',
+      `youtube-${this.name}`,
+      `Initial target itags (from config/quality priority): ${targetItags.join(', ')}`
+    )
 
     const opusAudioCandidates = formats
-      .filter((format) => targetItags.includes(format.itag) && format.mimeType?.startsWith('audio/'))
+      .filter(
+        (format) =>
+          targetItags.includes(format.itag) &&
+          format.mimeType?.startsWith('audio/')
+      )
       .sort((a, b) => targetItags.indexOf(a.itag) - targetItags.indexOf(b.itag))
 
-    logger('debug', `youtube-${this.name}`, `Opus audio-only candidates: ${opusAudioCandidates.map(f => f.itag).join(', ')}`)
+    logger(
+      'debug',
+      `youtube-${this.name}`,
+      `Opus audio-only candidates: ${opusAudioCandidates.map((f) => f.itag).join(', ')}`
+    )
 
     for (const format of opusAudioCandidates) {
-      resolvedFormat = await _attemptCipherResolution(format, playerScript, context)
+      resolvedFormat = await _attemptCipherResolution(
+        format,
+        playerScript,
+        context
+      )
       if (resolvedFormat) {
-        logger('debug', `youtube-${this.name}`, `Resolved format: itag ${resolvedFormat.itag}, mimeType ${resolvedFormat.mimeType}`)
+        logger(
+          'debug',
+          `youtube-${this.name}`,
+          `Resolved format: itag ${resolvedFormat.itag}, mimeType ${resolvedFormat.mimeType}`
+        )
         break
       }
     }
 
     if (!resolvedFormat) {
-      logger('debug', `youtube-${this.name}`, `Opus audio-only failed. Attempting fallback to itag 18.`)
-      const itag18Format = formats.find(format => format.itag === 18)
+      logger(
+        'debug',
+        `youtube-${this.name}`,
+        `Opus audio-only failed. Attempting fallback to itag 18.`
+      )
+      const itag18Format = formats.find((format) => format.itag === 18)
 
       if (itag18Format) {
-        resolvedFormat = await _attemptCipherResolution(itag18Format, playerScript, context)
+        resolvedFormat = await _attemptCipherResolution(
+          itag18Format,
+          playerScript,
+          context
+        )
         if (resolvedFormat) {
-          logger('debug', `youtube-${this.name}`, `Resolved format from itag 18 fallback: itag ${resolvedFormat.itag}, mimeType ${resolvedFormat.mimeType}`)
+          logger(
+            'debug',
+            `youtube-${this.name}`,
+            `Resolved format from itag 18 fallback: itag ${resolvedFormat.itag}, mimeType ${resolvedFormat.mimeType}`
+          )
         } else {
-          logger('debug', `youtube-${this.name}`, `Itag 18 found but could not be resolved.`)
+          logger(
+            'debug',
+            `youtube-${this.name}`,
+            `Itag 18 found but could not be resolved.`
+          )
         }
       } else {
-        logger('debug', `youtube-${this.name}`, `Itag 18 not found in available formats.`)
+        logger(
+          'debug',
+          `youtube-${this.name}`,
+          `Itag 18 not found in available formats.`
+        )
       }
     }
 
     if (!resolvedFormat && !streamingData.hlsManifestUrl) {
-      logger('debug', `youtube-${this.name}`, 'No suitable stream found after all fallbacks, and no HLS manifest URL.')
+      logger(
+        'debug',
+        `youtube-${this.name}`,
+        'No suitable stream found after all fallbacks, and no HLS manifest URL.'
+      )
       return {
         exception: {
           message: 'No suitable audio stream found after all fallbacks.',
           severity: 'common',
-          cause: 'Upstream',
+          cause: 'Upstream'
         },
-        formats,
+        formats
       }
     } else if (!resolvedFormat && streamingData.hlsManifestUrl) {
-      logger('debug', `youtube-${this.name}`, 'No suitable stream found after all fallbacks, but HLS manifest URL is available. Proceeding with HLS.')
+      logger(
+        'debug',
+        `youtube-${this.name}`,
+        'No suitable stream found after all fallbacks, but HLS manifest URL is available. Proceeding with HLS.'
+      )
     } else {
-      logger('debug', `youtube-${this.name}`, `Final resolved format: itag ${resolvedFormat?.itag}, mimeType ${resolvedFormat?.mimeType}`)
+      logger(
+        'debug',
+        `youtube-${this.name}`,
+        `Final resolved format: itag ${resolvedFormat?.itag}, mimeType ${resolvedFormat?.mimeType}`
+      )
     }
 
     const directUrl =
@@ -1919,17 +2047,21 @@ export class BaseClient {
         : undefined
 
     if (!directUrl && !streamingData.hlsManifestUrl) {
-      logger('debug', `youtube-${this.name}`, 'No direct URL resolved and no HLS manifest. Returning error.')
+      logger(
+        'debug',
+        `youtube-${this.name}`,
+        'No direct URL resolved and no HLS manifest. Returning error.'
+      )
       return {
         exception: {
           message: 'No suitable audio stream found.',
 
           severity: 'common',
 
-          cause: 'Upstream',
+          cause: 'Upstream'
         },
 
-        formats,
+        formats
       }
     }
 
@@ -1970,7 +2102,7 @@ export class BaseClient {
 
       hlsUrl: streamingData.hlsManifestUrl || null,
 
-      formats,
+      formats
     }
   }
 
