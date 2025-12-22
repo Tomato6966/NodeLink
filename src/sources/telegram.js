@@ -6,13 +6,17 @@ export default class TelegramSource {
     this.patterns = [
       /https?:\/\/(?:t\.me|telegram\.me|telegram\.dog)\/([^/]+)\/(\d+)/
     ]
-    this.searchTerms = ['tgsearch']
+    this.searchTerms = []
     this.priority = 80
   }
 
   async setup() {
     logger('info', 'Sources', 'Loaded Telegram source.')
     return true
+  }
+
+  async search(_query) {
+    return { loadType: 'empty', data: {} }
   }
 
   async resolve(url) {
