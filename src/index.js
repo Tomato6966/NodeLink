@@ -205,6 +205,22 @@ class NodelinkServer {
   }
 
   _validateConfig() {
+    const validateNonNegativeInt = (value, path) =>
+      validateProperty(
+        value,
+        path,
+        'integer >= 0',
+        (v) => Number.isInteger(v) && v >= 0
+      )
+
+    const validatePositiveInt = (value, path) =>
+      validateProperty(
+        value,
+        path,
+        'integer > 0',
+        (v) => Number.isInteger(v) && v > 0
+      )
+
     validateProperty(
       this.options.server.port,
       'server.port',
@@ -270,13 +286,9 @@ class NodelinkServer {
         value > this.options.trackStuckThresholdMs
     )
 
-    validateProperty(
+    validateNonNegativeInt(
       this.options.cluster.workers,
-      'cluster.workers',
-      'integer >= 0',
-      (value) =>
-        Number.isInteger(value) &&
-        value >= 0
+      'cluster.workers'
     )
 
     validateProperty(
@@ -324,13 +336,12 @@ class NodelinkServer {
         ['RotateOnBan', 'RoundRobin', 'LoadBalance'].includes(v)
     )
 
-    validateProperty(
-      this.options.routePlanner?.bannedIpCooldown,
-      'routePlanner.bannedIpCooldown',
-      'integer > 0 (milliseconds)',
-      (v) => Number.isInteger(v) && v > 0
-    )
-
+    if (this.options.routePlanner?.bannedIpCooldown !== undefined) {
+      validatePositiveInt(
+        this.options.routePlanner.bannedIpCooldown,
+        'routePlanner.bannedIpCooldown'
+      )
+    }
 
     const rateLimitSections = [
       'global',
@@ -346,22 +357,14 @@ class NodelinkServer {
         
         if (!config) continue
         
-        validateProperty(
+        validatePositiveInt(
           config.maxRequests,
-          `rateLimit.${section}.maxRequests`,
-          'integer > 0',
-          (value) =>
-            Number.isInteger(value) &&
-          value > 0
+          `rateLimit.${section}.maxRequests`
         )
 
-        validateProperty(
+        validatePositiveInt(
           config.timeWindowMs,
-          `rateLimit.${section}.timeWindowMs`,
-          'integer > 0 (milliseconds)',
-          (value) =>
-            Number.isInteger(value) &&
-          value > 0
+          `rateLimit.${section}.timeWindowMs`
         )
 
         if (i === 0) continue
@@ -377,10 +380,109 @@ class NodelinkServer {
           `integer <= rateLimit.${parentSection}.maxRequests (${parentConfig.maxRequests})`,
           (value) =>
             Number.isInteger(value) &&
-          value > 0 &&
-          value <= parentConfig.maxRequests
+            value > 0 &&
+            value <= parentConfig.maxRequests
         )
       }
+    }
+
+    const spotify = this.options.sources?.spotify 
+    const applemusic = this.options.sources?.applemusic 
+    const tidal = this.options.sources?.tidal 
+    const jiosaavn = this.options.sources?.jiosaavn
+
+    if (spotify?.enabled) {
+      validateNonNegativeInt(
+        spotify.playlistLoadLimit,
+        'sources.spotify.playlistLoadLimit'
+      )
+
+      validateNonNegativeInt(
+        spotify.albumLoadLimit,
+        'sources.spotify.albumLoadLimit'
+      )
+
+      validatePositiveInt(
+        spotify.playlistPageLoadConcurrency,
+        'sources.spotify.playlistPageLoadConcurrency'
+      )
+
+      validatePositiveInt(
+        spotify.albumPageLoadConcurrency,
+        'sources.spotify.albumPageLoadConcurrency'
+      )
+
+      const credsComplete =
+        Boolean(spotify.clientId) === Boolean(spotify.clientSecret)
+
+      validateProperty(
+        credsComplete,
+        'sources.spotify.credentials',
+        'clientId and clientSecret must be set together',
+        (v) => v === true
+      )
+    }
+    
+    if (applemusic?.enabled) {
+      validateNonNegativeInt(
+        applemusic.playlistLoadLimit,
+        'sources.applemusic.playlistLoadLimit'
+      )
+
+      validateNonNegativeInt(
+        applemusic.albumLoadLimit,
+        'sources.applemusic.albumLoadLimit'
+      )
+
+      validatePositiveInt(
+        applemusic.playlistPageLoadConcurrency,
+        'sources.applemusic.playlistPageLoadConcurrency'
+      )
+
+      validatePositiveInt(
+        applemusic.albumPageLoadConcurrency,
+        'sources.applemusic.albumPageLoadConcurrency'
+      )
+    }
+
+    if (tidal?.enabled) {
+      validateNonNegativeInt(
+        tidal.playlistLoadLimit,
+        'sources.tidal.playlistLoadLimit'
+      )
+
+      validatePositiveInt(
+        tidal.playlistPageLoadConcurrency,
+        'sources.tidal.playlistPageLoadConcurrency'
+      )
+
+      if (tidal.token !== undefined) {
+        validateProperty(
+          tidal.token,
+          'sources.tidal.token',
+          'string (non-whitespace if provided)',
+          (v) => typeof v === 'string' && (v === '' || v.trim().length > 0)
+        )
+      }
+    }
+
+    if (jiosaavn?.enabled) {
+      validateNonNegativeInt(
+        jiosaavn.playlistLoadLimit,
+        'sources.jiosaavn.playlistLoadLimit'
+      )
+
+      validateNonNegativeInt(
+        jiosaavn.artistLoadLimit,
+        'sources.jiosaavn.artistLoadLimit'
+      )
+
+      validateProperty(
+        jiosaavn.playlistLoadLimit,
+        'sources.jiosaavn.playlistLoadLimit',
+        `integer >= artistLoadLimit (${jiosaavn.artistLoadLimit})`,
+        (v) => v >= jiosaavn.artistLoadLimit
+      )
     }
   }
 
