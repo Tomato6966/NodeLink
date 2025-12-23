@@ -87,6 +87,9 @@ export default {
       userToken: '', // (optional) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> response -> access_token
       userCookie: '' // (required without userToken) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> request -> cookie (copy full cookie header)
     },
+    amazonmusic: {
+      enabled: true
+    },
     deezer: {
       // arl: '',
       // decryptionKey: '',
