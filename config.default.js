@@ -90,6 +90,9 @@ export default {
     amazonmusic: {
       enabled: true
     },
+    pinterest: {
+      enabled: true
+    },
     deezer: {
       // arl: '',
       // decryptionKey: '',
@@ -120,6 +123,9 @@ export default {
       sessdata: '' // Optional, improves access to some videos (premium and 4k+)
     },
     genius: {
+      enabled: true
+    },
+    pinterest: {
       enabled: true
     },
     flowery: {
