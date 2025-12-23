@@ -8,6 +8,7 @@ import * as MP4Box from 'mp4box'
 
 import { normalizeFormat, SupportedFormats } from '../constants.js'
 import WebmOpusDemuxer from './demuxers/WebmOpus.js'
+import FlvDemuxer from './demuxers/Flv.js'
 import { FiltersManager } from './filtersManager.js'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from './opus/Opus.js'
 import { VolumeTransformer } from './VolumeTransformer.js'
@@ -160,6 +161,8 @@ const _isMp4Format = (type) =>
   type.indexOf('mov') !== -1
 
 const _isWebmFormat = (type) => type.indexOf('webm') !== -1
+
+const _isFlvFormat = (type) => type.indexOf('flv') !== -1
 
 class BaseAudioResource {
   constructor() {
@@ -1307,6 +1310,71 @@ class FMP4ToAACStream extends Transform {
   }
 }
 
+class FLVToAACStream extends Transform {
+  constructor(options) {
+    super(options)
+    this.demuxer = new FlvDemuxer()
+    this.audioConfig = null
+    this._aborted = false
+
+    this.demuxer.on('data', (audioTag) => {
+      if (this._aborted) return
+      this._processAudioTag(audioTag)
+    })
+
+    this.demuxer.on('error', (err) => {
+      if (!this._aborted) this.emit('error', err)
+    })
+  }
+
+  abort() {
+    this._aborted = true
+    this.demuxer.destroy()
+  }
+
+  _processAudioTag(tag) {
+    const header = tag[0]
+    const format = (header & 0xf0) >> 4
+
+    if (format === 10) {
+      const aacPacketType = tag[1]
+      if (aacPacketType === 0) {
+        this.audioConfig = this._parseAudioSpecificConfig(tag.subarray(2))
+      } else if (aacPacketType === 1 && this.audioConfig) {
+        const adtsHeader = _createAdtsHeader(
+          tag.length - 2,
+          this.audioConfig.profile,
+          this.audioConfig.samplingIndex,
+          this.audioConfig.channelCount
+        )
+        this.push(Buffer.concat([adtsHeader, tag.subarray(2)]))
+      }
+    } else if (format === 2) {
+      this.push(tag.subarray(1))
+    }
+  }
+
+  _parseAudioSpecificConfig(data) {
+    const objectType = (data[0] & 0xf8) >> 3
+    const samplingIndex = ((data[0] & 0x07) << 1) | ((data[1] & 0x80) >> 7)
+    const channelConfig = (data[1] & 0x78) >> 3
+
+    return {
+      profile: objectType,
+      samplingIndex,
+      channelCount: channelConfig
+    }
+  }
+
+  _transform(chunk, encoding, callback) {
+    this.demuxer.write(chunk, encoding, callback)
+  }
+
+  _flush(callback) {
+    this.demuxer.end(callback)
+  }
+}
+
 class MixerTransform extends Transform {
   constructor(audioMixer) {
     super()
@@ -1385,6 +1453,9 @@ class StreamAudioResource extends BaseAudioResource {
       case SupportedFormats.AAC:
         return this._createAACPipeline(stream, type, resamplingQuality)
 
+      case SupportedFormats.FLV:
+        return this._createFLVPipeline(stream, type, resamplingQuality)
+
       case SupportedFormats.MPEG:
       case SupportedFormats.FLAC:
       case SupportedFormats.OGG_VORBIS:
@@ -1397,6 +1468,21 @@ class StreamAudioResource extends BaseAudioResource {
       default:
         throw this._createUnsupportedFormatError(type)
     }
+  }
+
+  _createFLVPipeline(stream, type, resamplingQuality) {
+    const demuxer = new FLVToAACStream()
+    const decoder = new AACDecoderStream({ resamplingQuality })
+
+    this.pipes.push(demuxer, decoder)
+
+    pipeline(stream, demuxer, decoder, (err) => {
+      if (err && !this._destroyed) {
+        this.stream?.emit('error', err)
+      }
+    })
+
+    return decoder
   }
 
   _createAACPipeline(stream, type, resamplingQuality) {
@@ -1573,7 +1659,8 @@ class StreamAudioResource extends BaseAudioResource {
       'FLAC (audio/flac)',
       'OGG Vorbis (audio/ogg, audio/vorbis)',
       'WAV (audio/wav)',
-      'Opus (webm/opus, ogg/opus)'
+      'Opus (webm/opus, ogg/opus)',
+      'FLV (video/x-flv, flv)'
     ]
 
     return new Error(
@@ -1664,6 +1751,18 @@ export const createPCMStream = (stream, type, nodelink, volume = 1.0) => {
       streams.push(decoder)
 
       pipeline(streams, (err) => {
+        if (err) decoder.emit('error', err)
+      })
+
+      pcmStream = decoder
+      break
+    }
+
+    case SupportedFormats.FLV: {
+      const demuxer = new FLVToAACStream()
+      const decoder = new AACDecoderStream({ resamplingQuality })
+
+      pipeline(stream, demuxer, decoder, (err) => {
         if (err) decoder.emit('error', err)
       })
 

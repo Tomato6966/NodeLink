@@ -107,6 +107,10 @@ export default {
     telegram: {
       enabled: true
     },
+    bilibili: {
+      enabled: true,
+      sessdata: '' // Optional, improves access to some videos (premium and 4k+)
+    },
     flowery: {
       enabled: true,
       voice: 'Salli',
@@ -213,6 +217,9 @@ export default {
       // signatureSecret: ''
     },
     lrclib: {
+      enabled: true
+    },
+    bilibili: {
       enabled: true
     },
     applemusic: {
