@@ -111,6 +111,9 @@ export default {
       enabled: true,
       sessdata: '' // Optional, improves access to some videos (premium and 4k+)
     },
+    genius: {
+      enabled: true
+    },
     flowery: {
       enabled: true,
       voice: 'Salli',
