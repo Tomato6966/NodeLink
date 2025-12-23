@@ -1390,7 +1390,9 @@ export default class YouTubeSource {
           fetching = false
           if (!destroyed) {
             logger('warn', 'YouTube', `Range request error at pos ${position}: ${err.message}`)
-            if (++errors >= MAX_RETRIES) {
+            const isAborted = err.message === 'aborted' || err.code === 'ECONNRESET'
+            if (++errors >= MAX_RETRIES || isAborted) {
+              if (isAborted) logger('warn', 'YouTube', 'Connection aborted, forcing immediate recovery with new URL.')
               recover(err)
             } else {
               const timeout = setTimeout(
@@ -1416,7 +1418,9 @@ export default class YouTubeSource {
         fetching = false
         if (!destroyed) {
           logger('warn', 'YouTube', `Range request exception at pos ${position}: ${err.message}`)
-          if (++errors >= MAX_RETRIES) {
+          const isAborted = err.message === 'aborted' || err.code === 'ECONNRESET'
+          if (++errors >= MAX_RETRIES || isAborted) {
+            if (isAborted) logger('warn', 'YouTube', 'Connection aborted, forcing immediate recovery with new URL.')
             recover(err)
           } else {
             const timeout = setTimeout(
@@ -1433,8 +1437,9 @@ export default class YouTubeSource {
       if (destroyed || cancelSignal.aborted) return
 
       const isForbidden = causeError?.message?.includes('403') || causeError?.statusCode === 403
+      const isAborted = causeError?.message === 'aborted' || causeError?.code === 'ECONNRESET'
 
-      if (!isForbidden && refreshes === 0) {
+      if (!isForbidden && !isAborted && refreshes === 0) {
          logger('debug', 'YouTube', `Retrying same URL for recovery first (cause: ${causeError?.message})...`)
          errors = 0
          fetching = false
