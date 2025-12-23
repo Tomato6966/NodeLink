@@ -163,7 +163,13 @@ export default class TelegramSource {
         throw response.error || new Error('Failed to get stream')
       }
 
-      return { stream: response.stream, type: 'video/mp4' }
+      const stream = new PassThrough()
+      
+      response.stream.on('data', (chunk) => stream.write(chunk))
+      response.stream.on('end', () => stream.emit('finishBuffering'))
+      response.stream.on('error', (err) => stream.destroy(err))
+
+      return { stream: stream, type: 'video/mp4' }
     } catch (err) {
       return { exception: { message: err.message, severity: 'common' } }
     }
