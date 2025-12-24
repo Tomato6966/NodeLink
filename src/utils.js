@@ -671,6 +671,8 @@ async function _internalHttp1Request(urlString, options = {}) {
     _redirectsFollowed = 0
   } = options
 
+  const actualLocalAddress = localAddress || global.nodelink?.routePlanner?.getIP()
+
   if (_redirectsFollowed >= maxRedirects) {
     throw new Error(`Too many redirects (${maxRedirects}) for ${urlString}`)
   }
@@ -717,7 +719,7 @@ async function _internalHttp1Request(urlString, options = {}) {
     port: currentUrl.port || (isHttps ? 443 : 80),
     path: currentUrl.pathname + currentUrl.search,
     headers: reqHeaders,
-    localAddress
+    localAddress: actualLocalAddress
   }
 
   return new Promise((resolve, reject) => {
@@ -734,7 +736,7 @@ async function _internalHttp1Request(urlString, options = {}) {
           method: isGetRedirect ? 'GET' : method,
           body: isGetRedirect ? undefined : body
         }
-        resolve(http1makeRequest(nextUrl, nextOptions))
+        resolve(http1makeRequest(nextUrl, nextOptions, instance))
         return
       }
 
@@ -860,6 +862,7 @@ async function makeRequest(urlString, options, nodelink) {
     _redirectsFollowed = 0
   } = options
 
+  const finalNodeLink = nodelink || global.nodelink
   const logId = crypto.randomBytes(4).toString('hex')
   if (loggingConfig.debug?.network) {
     logger('debug', 'Network', `[${logId}] Request: ${method} ${urlString}`)
@@ -886,15 +889,15 @@ async function makeRequest(urlString, options, nodelink) {
       new Error(`Too many redirects (${maxRedirects}) for ${urlString}`)
     )
   }
-  const localAddress = nodelink?.routePlanner?.getIP()
+  const localAddress = finalNodeLink?.routePlanner?.getIP()
 
   try {
     const url = new URL(urlString)
     if (http2FailedHosts.has(url.host)) {
-      return http1makeRequest(urlString, { ...options, localAddress }, nodelink)
+      return http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
     }
   } catch (e) {
-    return http1makeRequest(urlString, { ...options, localAddress }, nodelink)
+    return http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
   }
 
   return new Promise((resolve, reject) => {
@@ -912,7 +915,7 @@ async function makeRequest(urlString, options, nodelink) {
         http2FailedHosts.add(url.host)
       } catch (e) {}
       resolve(
-        http1makeRequest(urlString, { ...options, localAddress }, nodelink)
+        http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
       )
     }
 
@@ -982,7 +985,7 @@ async function makeRequest(urlString, options, nodelink) {
         const statusCode = headers[':status']
 
         if (statusCode === 429) {
-          nodelink?.routePlanner?.banIP(localAddress)
+          finalNodeLink?.routePlanner?.banIP(localAddress)
         }
 
         if (REDIRECT_STATUS_CODES.includes(statusCode) && headers.location) {
@@ -1017,7 +1020,7 @@ async function makeRequest(urlString, options, nodelink) {
                   ? disableBodyCompression
                   : undefined
               },
-              nodelink
+              finalNodeLink
             )
           )
         }
