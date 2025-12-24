@@ -55,10 +55,12 @@ export class VolumeTransformer extends Transform {
 
     this._setupMultipliers(volumePercent)
 
-    for (let i = 0; i < chunk.length; i += 2) {
-      const sample = chunk.readInt16LE(i)
-      const value = (sample * this.integerMultiplier) / 10000
-      chunk.writeInt16LE(clamp16Bit(value), i)
+    const samples = new Int16Array(chunk.buffer, chunk.byteOffset, chunk.length / 2)
+    const multiplier = this.integerMultiplier
+
+    for (let i = 0; i < samples.length; i++) {
+      const value = (samples[i] * multiplier) / 10000
+      samples[i] = value < -32768 ? -32768 : (value > 32767 ? 32767 : Math.round(value))
     }
 
     this.push(chunk)

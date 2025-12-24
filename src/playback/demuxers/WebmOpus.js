@@ -1,6 +1,8 @@
 import { Transform } from 'node:stream'
+import { RingBuffer } from '../RingBuffer.js'
 
 const TOO_SHORT = Symbol('TOO_SHORT')
+const BUFFER_SIZE = 2 * 1024 * 1024 // 2MB
 
 const TAGS = Object.freeze({
   '1a45dfa3': true,
@@ -36,7 +38,7 @@ const readVint = (buf, start, end) => {
 class WebmBaseDemuxer extends Transform {
   constructor(options = {}) {
     super({ readableObjectMode: true, ...options })
-    this.remainder = null
+    this.ringBuffer = new RingBuffer(BUFFER_SIZE)
     this.total = 0
     this.processed = 0
     this.skipUntil = null
@@ -48,41 +50,46 @@ class WebmBaseDemuxer extends Transform {
   _transform(chunk, _, done) {
     if (!chunk?.length) return done()
 
+    this.ringBuffer.write(chunk)
     this.total += chunk.length
-    if (this.remainder) {
-      chunk = Buffer.concat([this.remainder, chunk])
-      this.remainder = null
-    }
 
-    let offset = 0
-    if (this.skipUntil && this.total > this.skipUntil) {
-      offset = this.skipUntil - this.processed
+    if (this.skipUntil !== null) {
+      const toSkip = Math.min(this.skipUntil - this.processed, this.ringBuffer.length)
+      if (toSkip > 0) {
+        this.ringBuffer.skip(toSkip)
+        this.processed += toSkip
+      }
+      if (this.processed < this.skipUntil) return done()
       this.skipUntil = null
-    } else if (this.skipUntil) {
-      this.processed += chunk.length
-      done()
-      return
     }
 
-    let res
-    while (res !== TOO_SHORT) {
+    while (true) {
+      const currentData = this.ringBuffer.getContiguous(this.ringBuffer.length)
+      if (!currentData) break
+
+      let res
       try {
-        res = this._readTag(chunk, offset)
+        res = this._readTag(currentData, 0)
       } catch (err) {
         done(err)
         return
       }
+
       if (res === TOO_SHORT) break
+      
       if (res._skipUntil) {
         this.skipUntil = res._skipUntil
+        this.ringBuffer.skip(this.ringBuffer.length)
         break
       }
-      if (res.offset) offset = res.offset
-      else break
-    }
 
-    this.processed += offset
-    this.remainder = offset < chunk.length ? chunk.subarray(offset) : null
+      if (res.offset) {
+        this.ringBuffer.skip(res.offset)
+        this.processed += res.offset
+      } else {
+        break
+      }
+    }
 
     if (this.total > 1e9 && !this.skipUntil) {
       this.total = this.processed = 0
@@ -167,7 +174,7 @@ class WebmBaseDemuxer extends Transform {
   }
 
   _cleanup() {
-    this.remainder = null
+    this.ringBuffer.clear()
     this.pendingTrack = {}
     this.currentTrack = null
     this.ebmlFound = false
