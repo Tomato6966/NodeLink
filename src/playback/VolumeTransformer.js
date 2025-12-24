@@ -12,6 +12,7 @@ export class VolumeTransformer extends Transform {
     this.fadeProgress = FADE_FRAMES
 
     this.integerMultiplier = 10000
+    this.lastVolumePercent = null
   }
 
   _setupMultipliers(activeVolumePercent) {
@@ -53,7 +54,10 @@ export class VolumeTransformer extends Transform {
       return callback()
     }
 
-    this._setupMultipliers(volumePercent)
+    if (volumePercent !== this.lastVolumePercent) {
+      this._setupMultipliers(volumePercent)
+      this.lastVolumePercent = volumePercent
+    }
 
     const samples = new Int16Array(chunk.buffer, chunk.byteOffset, chunk.length / 2)
     const multiplier = this.integerMultiplier
