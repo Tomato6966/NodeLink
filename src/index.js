@@ -983,12 +983,47 @@ class NodelinkServer {
       1,
       this.options?.playerUpdateInterval ?? 5000
     )
+    const statsSendInterval = Math.max(
+      1,
+      this.options?.statsUpdateInterval ?? 30000
+    )
+    const metricsInterval = this.options?.metrics?.enabled ? 5000 : statsSendInterval
     const zombieThreshold = this.options?.zombieThresholdMs ?? 60000
 
     this._globalUpdater = setInterval(() => {
+      for (const session of this.sessions.values()) {
+        if (!session.players) continue
+        for (const player of session.players.players.values()) {
+          if (player?.track && !player.isPaused && player.connection) {
+            if (
+              player._lastStreamDataTime > 0 &&
+              Date.now() - player._lastStreamDataTime >= zombieThreshold
+            ) {
+              logger(
+                'warn',
+                'Player',
+                `Player for guild ${player.guildId} detected as zombie (no stream data).`
+              )
+              player.emitEvent(GatewayEvents.TRACK_STUCK, {
+                guildId: player.guildId,
+                track: player.track,
+                reason: 'no_stream_data',
+                thresholdMs: zombieThreshold
+              })
+            }
+            player._sendUpdate()
+          }
+        }
+      }
+    }, updateInterval)
+
+    let lastStatsSendTime = 0
+    this._statsUpdater = setInterval(() => {
+      const now = Date.now()
       let localPlayers = 0
       let localPlayingPlayers = 0
       let voiceConnections = 0
+
       for (const session of this.sessions.values()) {
         if (!session.players) continue
         for (const player of session.players.players.values()) {
@@ -1013,7 +1048,6 @@ class NodelinkServer {
           }
         })
       } else if (!clusterEnabled) {
-        // In single-process mode, update the server's own statistics
         this.statistics.players = localPlayers
         this.statistics.playingPlayers = localPlayingPlayers
       }
@@ -1021,41 +1055,27 @@ class NodelinkServer {
       const stats = getStats(this)
       const workerMetrics = this.workerManager ? this.workerManager.getWorkerMetrics() : null
       this.statsManager.updateStatsMetrics(stats, workerMetrics)
-      const statsPayload = JSON.stringify({ op: 'stats', ...stats })
 
-      for (const session of this.sessions.values()) {
-        if (session.socket) {
-          session.socket.send(statsPayload)
-        }
+      if (now - lastStatsSendTime >= statsSendInterval) {
+        lastStatsSendTime = now
+        const statsPayload = JSON.stringify({ op: 'stats', ...stats })
 
-        for (const player of session.players.players.values()) {
-          if (player?.track && !player.isPaused && player.connection) {
-            if (
-              player._lastStreamDataTime > 0 &&
-              Date.now() - player._lastStreamDataTime >= zombieThreshold
-            ) {
-              logger(
-                'warn',
-                'Player',
-                `Player for guild ${player.guildId} detected as zombie (no stream data).`
-              )
-              player.emitEvent(GatewayEvents.TRACK_STUCK, {
-                guildId: player.guildId,
-                track: player.track,
-                reason: 'no_stream_data',
-                thresholdMs: zombieThreshold
-              })
-            }
-            player._sendUpdate()
+        for (const session of this.sessions.values()) {
+          if (session.socket) {
+            session.socket.send(statsPayload)
           }
         }
       }
-    }, updateInterval)
+    }, metricsInterval)
   }
   _stopGlobalPlayerUpdater() {
     if (this._globalUpdater) {
       clearInterval(this._globalUpdater)
       this._globalUpdater = null
+    }
+    if (this._statsUpdater) {
+      clearInterval(this._statsUpdater)
+      this._statsUpdater = null
     }
   }
 
@@ -1188,26 +1208,33 @@ class NodelinkServer {
 
   _startMasterMetricsUpdater() {
     if (this._globalUpdater) return
-    const updateInterval = Math.max(
+    const statsSendInterval = Math.max(
       1,
-      this.options?.playerUpdateInterval ?? 5000
+      this.options?.statsUpdateInterval ?? 30000
     )
+    const metricsInterval = this.options?.metrics?.enabled ? 5000 : statsSendInterval
+
+    let lastStatsSendTime = 0
 
     this._globalUpdater = setInterval(() => {
+      const now = Date.now()
       const stats = getStats(this)
       const workerMetrics = this.workerManager ? this.workerManager.getWorkerMetrics() : null
       this.statsManager.updateStatsMetrics(stats, workerMetrics)
 
-      const statsPayload = JSON.stringify({ op: 'stats', ...stats })
-      for (const session of this.sessions.values()) {
-        if (session.socket) {
-          session.socket.send(statsPayload)
-        }
-      }
-
       const sessionCount = this.sessions.activeSessions?.size || 0
       this.statsManager.setWebsocketConnections(sessionCount)
-    }, updateInterval)
+
+      if (now - lastStatsSendTime >= statsSendInterval) {
+        lastStatsSendTime = now
+        const statsPayload = JSON.stringify({ op: 'stats', ...stats })
+        for (const session of this.sessions.values()) {
+          if (session.socket) {
+            session.socket.send(statsPayload)
+          }
+        }
+      }
+    }, metricsInterval)
   }
 
   registerSource(name, source) {

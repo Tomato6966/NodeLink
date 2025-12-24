@@ -174,7 +174,7 @@ class WebmBaseDemuxer extends Transform {
   }
 
   _cleanup() {
-    this.ringBuffer.clear()
+    this.ringBuffer.dispose()
     this.pendingTrack = {}
     this.currentTrack = null
     this.ebmlFound = false

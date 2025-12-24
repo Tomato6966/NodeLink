@@ -23,6 +23,7 @@ initLogger(config)
 
 const players = new Map()
 const commandQueue = []
+
 const nodelink = {
   options: config,
   logger
@@ -431,6 +432,8 @@ process.on('message', (msg) => {
 })
 
 const updateInterval = config?.playerUpdateInterval ?? 5000
+const statsInterval = config?.statsUpdateInterval ?? 30000
+const metricsInterval = config?.metrics?.enabled ? 5000 : statsInterval
 const zombieThreshold = config?.zombieThresholdMs ?? 60000
 
 setTimeout(() => {
@@ -446,24 +449,8 @@ setTimeout(() => {
 setInterval(() => {
   if (!process.connected) return
 
-  let localPlayers = 0
-  let localPlayingPlayers = 0
-  const localFrameStats = { sent: 0, nulled: 0, deficit: 0, expected: 0 }
-
   for (const player of players.values()) {
-    localPlayers++
-    if (!player.isPaused && player.track) {
-      localPlayingPlayers++
-    }
-
     if (player?.track && !player.isPaused && player.connection) {
-      if (player.connection.statistics) {
-        localFrameStats.sent += player.connection.statistics.packetsSent || 0
-        localFrameStats.nulled += player.connection.statistics.packetsLost || 0
-        localFrameStats.expected +=
-          player.connection.statistics.packetsExpected || 0
-      }
-
       if (
         player._lastStreamDataTime > 0 &&
         Date.now() - player._lastStreamDataTime >= zombieThreshold
@@ -489,6 +476,30 @@ setInterval(() => {
           `Error during player update for guild ${player.guildId}: ${updateError.message}`,
           updateError
         )
+      }
+    }
+  }
+}, updateInterval)
+
+setInterval(() => {
+  if (!process.connected) return
+
+  let localPlayers = 0
+  let localPlayingPlayers = 0
+  const localFrameStats = { sent: 0, nulled: 0, deficit: 0, expected: 0 }
+
+  for (const player of players.values()) {
+    localPlayers++
+    if (!player.isPaused && player.track) {
+      localPlayingPlayers++
+    }
+
+    if (player?.track && !player.isPaused && player.connection) {
+      if (player.connection.statistics) {
+        localFrameStats.sent += player.connection.statistics.packetsSent || 0
+        localFrameStats.nulled += player.connection.statistics.packetsLost || 0
+        localFrameStats.expected +=
+          player.connection.statistics.packetsExpected || 0
       }
     }
   }
@@ -528,4 +539,4 @@ setInterval(() => {
   } catch (e) {
     logger('error', 'Worker-IPC', `Failed to send workerStats: ${e.message}`)
   }
-}, updateInterval)
+}, metricsInterval)

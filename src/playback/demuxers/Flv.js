@@ -53,6 +53,11 @@ export class FlvDemuxer extends Transform {
 
     callback()
   }
+
+  _destroy(err, cb) {
+    this.ringBuffer.dispose()
+    cb(err)
+  }
 }
 
 export default FlvDemuxer

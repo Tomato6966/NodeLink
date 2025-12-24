@@ -213,7 +213,11 @@ export default class WorkerManager {
     for (const worker of this.workers) {
       if (worker.isConnected()) {
         activeCount++
-        const load = this.workerLoad.get(worker.id) || 0
+        const stats = this.workerStats.get(worker.id)
+        const load = stats ? stats.players : 0
+        
+        this.workerLoad.set(worker.id, load)
+        
         totalPlayers += load
         metrics.push({ worker, load })
       }
@@ -328,12 +332,9 @@ export default class WorkerManager {
     this.workers.push(worker)
     this.workersById.set(worker.id, worker)
     this.workerLoad.set(worker.id, 0)
-    this.workerStats.set(worker.id, {
-      players: 0,
-      playingPlayers: 0,
-      cpu: { nodelinkLoad: 0 },
-      memory: { used: 0, allocated: 0 }
-    })
+    
+    this.workerStats.set(worker.id, { players: 0, playingPlayers: 0 })
+    
     this.workerToGuilds.set(worker.id, new Set())
     this.workerHealth.set(worker.id, Date.now())
     this.workerStartTime.set(worker.id, Date.now())

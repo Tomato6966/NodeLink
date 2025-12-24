@@ -138,6 +138,7 @@ export class AudioMixer extends EventEmitter {
       layer.stream.destroy()
     }
 
+    layer.ringBuffer.dispose()
 
     this.mixLayers.delete(id)
 

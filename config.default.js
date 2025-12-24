@@ -55,6 +55,7 @@ export default {
   maxSearchResults: 10,
   maxAlbumPlaylistLength: 100,
   playerUpdateInterval: 2000,
+  statsUpdateInterval: 30000,
   trackStuckThresholdMs: 10000,
   zombieThresholdMs: 60000,
   enableHoloTracks: false,

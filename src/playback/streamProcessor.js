@@ -657,7 +657,7 @@ class MPEGTSToAACStream extends Transform {
 
   _destroy(err, callback) {
     this._aborted = true
-    this.ringBuffer.clear()
+    this.ringBuffer.dispose()
     this.aacData = []
     super._destroy(err, callback)
   }
@@ -685,6 +685,13 @@ class AACDecoderStream extends Transform {
         this._processPendingChunks()
       })
       .catch((err) => this.emit('error', err))
+  }
+
+  _destroy(err, cb) {
+    this.ringBuffer.dispose()
+    if (this.decoder) this.decoder.free?.()
+    if (this.resampler) this.resampler.destroy?.()
+    super._destroy(err, cb)
   }
 
   _downmixToStereo(interleavedPCM, channels, samplesPerChannel) {

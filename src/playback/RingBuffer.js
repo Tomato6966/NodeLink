@@ -1,11 +1,20 @@
 
+import { bufferPool } from './BufferPool.js'
+
 export class RingBuffer {
   constructor(size) {
-    this.buffer = Buffer.allocUnsafe(size)
+    this.buffer = bufferPool.acquire(size)
     this.size = size
     this.writeOffset = 0
     this.readOffset = 0
     this.length = 0
+  }
+
+  dispose() {
+    if (this.buffer) {
+      bufferPool.release(this.buffer)
+      this.buffer = null
+    }
   }
 
   write(chunk) {
