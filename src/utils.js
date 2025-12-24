@@ -1145,61 +1145,33 @@ function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
         if (lines[i].startsWith('#EXT-X-ENDLIST')) sawEnd = true
       }
 
-      const downloadPromises = []
-
-      const writeChunksToStream = async (chunks) => {
-        for (const chunk of chunks) {
-          if (!stream.write(chunk)) {
-            await new Promise((ok) => stream.once('drain', ok))
-          }
-        }
-      }
-
       for (const segUrl of segs) {
         if (stream.destroyed) break
 
-        const downloadPromise = http1makeRequest(segUrl, {
-          method: 'GET',
-          streamOnly: true
-        })
-          .then((s) => {
-            return new Promise((res, rej) => {
-              const chunks = []
-              s.stream.on('data', (chunk) => chunks.push(chunk))
-              s.stream.on('end', () => res(chunks))
-              s.stream.on('error', rej)
+        try {
+          const s = await http1makeRequest(segUrl, {
+            method: 'GET',
+            streamOnly: true
+          })
+
+          if (!s.stream) continue
+
+          await new Promise((res, rej) => {
+            s.stream.pipe(stream, { end: false })
+            s.stream.on('end', res)
+            s.stream.on('error', rej)
+            stream.on('error', () => {
+              s.stream.destroy()
+              rej(new Error('Destination stream destroyed'))
             })
           })
-          .catch((err) => {
-            if (!stream.destroyed) {
-              console.error(
-                '[HLS] Error downloading segment',
-                err.code || err.message
-              )
-              stream.destroy(err)
-            }
-            return Promise.reject(err)
-          })
-
-        downloadPromises.push(downloadPromise)
-
-        if (downloadPromises.length >= HLS_SEGMENT_DOWNLOAD_CONCURRENCY_LIMIT) {
-          if (stream.destroyed) break
-          try {
-            const chunks = await downloadPromises.shift()
-            await writeChunksToStream(chunks)
-          } catch (e) {
-            break
+        } catch (err) {
+          if (!stream.destroyed) {
+            console.error(
+              '[HLS] Error downloading segment',
+              err.code || err.message
+            )
           }
-        }
-      }
-
-      while (downloadPromises.length > 0) {
-        if (stream.destroyed) break
-        try {
-          const chunks = await downloadPromises.shift()
-          await writeChunksToStream(chunks)
-        } catch (e) {
           break
         }
       }

@@ -93,6 +93,9 @@ export default {
     pinterest: {
       enabled: true
     },
+    mixcloud: {
+      enabled: true
+    },
     deezer: {
       // arl: '',
       // decryptionKey: '',
