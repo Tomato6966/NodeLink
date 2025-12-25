@@ -1,4 +1,3 @@
-
 import { bufferPool } from './BufferPool.js'
 
 export class RingBuffer {
@@ -39,58 +38,58 @@ export class RingBuffer {
   }
 
   read(n) {
-    if (this.length === 0 || n <= 0) return null
-    const bytesToRead = Math.min(n, this.length)
-    const out = Buffer.allocUnsafe(bytesToRead)
+    const bytesToReadNum = Math.min(Math.max(0, n), this.length)
+    if (bytesToReadNum === 0) return null
+    const out = Buffer.allocUnsafe(bytesToReadNum)
 
     const availableAtEnd = this.size - this.readOffset
-    if (bytesToRead <= availableAtEnd) {
-      this.buffer.copy(out, 0, this.readOffset, this.readOffset + bytesToRead)
+    if (bytesToReadNum <= availableAtEnd) {
+      this.buffer.copy(out, 0, this.readOffset, this.readOffset + bytesToReadNum)
     } else {
       this.buffer.copy(out, 0, this.readOffset, this.size)
-      this.buffer.copy(out, availableAtEnd, 0, bytesToRead - availableAtEnd)
+      this.buffer.copy(out, availableAtEnd, 0, bytesToReadNum - availableAtEnd)
     }
 
-    this.readOffset = (this.readOffset + bytesToRead) % this.size
-    this.length -= bytesToRead
+    this.readOffset = (this.readOffset + bytesToReadNum) % this.size
+    this.length -= bytesToReadNum
     return out
   }
 
   skip(n) {
-    const bytesToSkip = Math.min(n, this.length)
+    const skipAmount = Math.max(0, n)
+    const bytesToSkip = Math.min(skipAmount, this.length)
     this.readOffset = (this.readOffset + bytesToSkip) % this.size
     this.length -= bytesToSkip
     return bytesToSkip
   }
 
-  // Peek allows reading without advancing the read pointer
   peek(n) {
-    if (this.length === 0) return null
-    const bytesToRead = Math.min(n, this.length)
-    const out = Buffer.allocUnsafe(bytesToRead)
+    const bytesToPeekNum = Math.min(Math.max(0, n), this.length)
+    if (bytesToPeekNum === 0) return null
+    const out = Buffer.allocUnsafe(bytesToPeekNum)
 
     const availableAtEnd = this.size - this.readOffset
-    if (bytesToRead <= availableAtEnd) {
-      this.buffer.copy(out, 0, this.readOffset, this.readOffset + bytesToRead)
+    if (bytesToPeekNum <= availableAtEnd) {
+      this.buffer.copy(out, 0, this.readOffset, this.readOffset + bytesToPeekNum)
     } else {
       this.buffer.copy(out, 0, this.readOffset, this.size)
-      this.buffer.copy(out, availableAtEnd, 0, bytesToRead - availableAtEnd)
+      this.buffer.copy(out, availableAtEnd, 0, bytesToPeekNum - availableAtEnd)
     }
     return out
   }
 
   getContiguous(n) {
-    if (this.length === 0 || n <= 0) return null
-    const bytesToPeek = Math.min(n, this.length)
+    const bytesToPeekNum = Math.min(Math.max(0, n), this.length)
+    if (bytesToPeekNum === 0) return null
     const availableAtEnd = this.size - this.readOffset
 
-    if (bytesToPeek <= availableAtEnd) {
-      return this.buffer.subarray(this.readOffset, this.readOffset + bytesToPeek)
+    if (bytesToPeekNum <= availableAtEnd) {
+      return this.buffer.subarray(this.readOffset, this.readOffset + bytesToPeekNum)
     }
 
-    const out = Buffer.allocUnsafe(bytesToPeek)
+    const out = Buffer.allocUnsafe(bytesToPeekNum)
     this.buffer.copy(out, 0, this.readOffset, this.size)
-    this.buffer.copy(out, availableAtEnd, 0, bytesToPeek - availableAtEnd)
+    this.buffer.copy(out, availableAtEnd, 0, bytesToPeekNum - availableAtEnd)
     return out
   }
 

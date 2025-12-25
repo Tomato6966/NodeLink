@@ -736,7 +736,7 @@ async function _internalHttp1Request(urlString, options = {}) {
           method: isGetRedirect ? 'GET' : method,
           body: isGetRedirect ? undefined : body
         }
-        resolve(http1makeRequest(nextUrl, nextOptions, instance))
+        resolve(http1makeRequest(nextUrl, nextOptions))
         return
       }
 
