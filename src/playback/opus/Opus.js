@@ -7,7 +7,8 @@ const require = createRequire(import.meta.url)
 const OPUS_CTL = {
   BITRATE: 4002,
   FEC: 4012,
-  PLP: 4014
+  PLP: 4014,
+  DTX: 4016
 }
 
 const RING_SIZE = 512 * 1024
@@ -51,14 +52,11 @@ const _createInstance = (rate, channels, app) => {
 const _applyCtl = (enc, libName, id, val) => {
   if (!enc) throw new Error('Encoder not ready.')
 
-  if (libName === 'toddy-mediaplex') {
-    if (id === OPUS_CTL.BITRATE) return enc.setBitrate(val)
-    if (id === OPUS_CTL.FEC) return enc.setOption('inband_fec', val)
-    if (id === OPUS_CTL.PLP)
-      return enc.setOption('packet_loss_expectation', val)
+  if (id === OPUS_CTL.BITRATE) {
+    return enc.setBitrate(val)
   }
 
-  const fn = enc.applyEncoderCTL || enc.encoderCTL
+  const fn = enc.applyEncoderCTL || enc.applyEncoderCtl || enc.encoderCTL
   if (typeof fn === 'function') fn.call(enc, id, val)
 }
 
@@ -165,6 +163,9 @@ export class Encoder extends Transform {
     const p = percent <= 1 ? percent * 100 : percent
     const val = p < 0 ? 0 : p > 100 ? 100 : Math.round(p)
     _applyCtl(this.enc, this.lib.name, OPUS_CTL.PLP, val)
+  }
+  setDTX(enabled = true) {
+    _applyCtl(this.enc, this.lib.name, OPUS_CTL.DTX, enabled ? 1 : 0)
   }
 }
 
