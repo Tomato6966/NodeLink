@@ -13,14 +13,16 @@ export default {
     fastCommandTimeout: 4000, // Timeout for player commands like play/pause (4s)
     maxRetries: 2, // Number of retry attempts on timeout or worker failure
     scaling: {
-      // New object to group scaling configurations
+      //scaling configurations
       maxPlayersPerWorker: 20, // Reference capacity for utilization calculation
       targetUtilization: 0.7, // Target utilization for scaling up/down
       scaleUpThreshold: 0.75, // Utilization threshold to scale up
       scaleDownThreshold: 0.3, // Utilization threshold to scale down
       checkIntervalMs: 5000, // Interval to check for scaling needs
       idleWorkerTimeoutMs: 60000, // Time in ms an idle worker should wait before being removed
-      queueLengthScaleUpFactor: 5 // How many commands in queue per active worker trigger scale up
+      queueLengthScaleUpFactor: 5, // How many commands in queue per active worker trigger scale up
+      lagPenaltyLimit: 60, // Event loop lag threshold (ms) to penalize worker cost
+      cpuPenaltyLimit: 0.85 // CPU usage threshold (85% of a core) to force scale up
     }
   },
   logging: {

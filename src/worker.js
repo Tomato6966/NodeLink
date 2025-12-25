@@ -1,7 +1,18 @@
+import { monitorEventLoopDelay } from 'node:perf_hooks'
+import os from 'node:os'
 import { GatewayEvents } from './constants.js'
 
 let lastCpuUsage = process.cpuUsage()
 let lastCpuTime = Date.now()
+
+const hndl = monitorEventLoopDelay({ resolution: 10 })
+hndl.enable()
+
+try {
+  os.setPriority(os.constants.priority.PRIORITY_HIGH)
+} catch (e) {
+  // Ignore errors
+}
 
 import ConnectionManager from './managers/connectionManager.js'
 import LyricsManager from './managers/lyricsManager.js'
@@ -529,6 +540,7 @@ setInterval(() => {
         playingPlayers: localPlayingPlayers,
         commandQueueLength: commandQueue.length,
         cpu: { nodelinkLoad },
+        eventLoopLag: hndl.mean / 1e6,
         memory: {
           used: mem.heapUsed,
           allocated: mem.heapTotal

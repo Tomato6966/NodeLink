@@ -35,12 +35,14 @@ export default class WorkerManager {
     this.fastCommandTimeout = config.cluster?.fastCommandTimeout || 10000
     this.maxRetries = config.cluster?.maxRetries || 2
     this.scalingConfig = {
-      maxPlayersPerWorker: config.cluster.scaling?.maxPlayersPerWorker || 20,
+      maxPlayersPerWorker: config.cluster.scaling?.maxPlayersPerWorker || config.cluster.workers || 20,
       targetUtilization: config.cluster.scaling?.targetUtilization || 0.7,
       scaleUpThreshold: config.cluster.scaling?.scaleUpThreshold || 0.75,
       scaleDownThreshold: config.cluster.scaling?.scaleDownThreshold || 0.3,
       idleWorkerTimeoutMs: config.cluster.scaling?.idleWorkerTimeoutMs || 60000,
-      checkIntervalMs: config.cluster.scaling?.checkIntervalMs || 5000
+      checkIntervalMs: config.cluster.scaling?.checkIntervalMs || 5000,
+      lagPenaltyLimit: config.cluster.scaling?.lagPenaltyLimit || 60,
+      cpuPenaltyLimit: config.cluster.scaling?.cpuPenaltyLimit || 0.85
     }
 
     logger(
@@ -207,62 +209,50 @@ export default class WorkerManager {
 
   _scaleWorkers() {
     let activeCount = 0
-    let totalPlayers = 0
+    let totalCost = 0
     const metrics = []
 
     for (const worker of this.workers) {
       if (worker.isConnected()) {
         activeCount++
-        const stats = this.workerStats.get(worker.id)
-        const load = stats ? stats.players : 0
-        
-        this.workerLoad.set(worker.id, load)
-        
-        totalPlayers += load
-        metrics.push({ worker, load })
+        const cost = this._calculateWorkerCost(worker.id)
+        totalCost += cost
+        metrics.push({ worker, cost })
       }
     }
 
+    const averageCost = activeCount > 0 ? totalCost / activeCount : 0
     const {
+      idleWorkerTimeoutMs,
       maxPlayersPerWorker,
-      scaleUpThreshold,
-      scaleDownThreshold,
-      idleWorkerTimeoutMs
+      scaleUpThreshold
     } = this.scalingConfig
-    const clusterCapacity = activeCount * maxPlayersPerWorker
-    const currentUtilization =
-      clusterCapacity > 0 ? totalPlayers / clusterCapacity : 0
 
     if (
-      currentUtilization > scaleUpThreshold &&
+      averageCost >= (maxPlayersPerWorker * scaleUpThreshold) &&
       activeCount < this.maxWorkers
     ) {
       logger(
         'info',
         'Cluster',
-        `Scaling up: Current utilization ${currentUtilization.toFixed(2)} > ${scaleUpThreshold}. Forking new worker.`
+        `Scaling up: Average cost ${averageCost.toFixed(2)} reached threshold ${(maxPlayersPerWorker * scaleUpThreshold).toFixed(2)} (${(scaleUpThreshold * 100)}%). Forking new worker.`
       )
       this.forkWorker()
       return
     }
 
     if (
-      currentUtilization < scaleDownThreshold &&
+      averageCost < 2 &&
       activeCount > this.minWorkers
     ) {
       const now = Date.now()
 
-      for (const { worker, load } of metrics) {
-        if (load === 0 && activeCount > this.minWorkers) {
+      for (const { worker, cost } of metrics) {
+        if (cost === 0 && activeCount > this.minWorkers) {
           const idleTime = this.idleWorkers.get(worker.id)
 
           if (!idleTime) {
             this.idleWorkers.set(worker.id, now)
-            logger(
-              'debug',
-              'Cluster',
-              `Worker ${worker.id} became idle. Start timeout for removal.`
-            )
           } else if (now - idleTime > idleWorkerTimeoutMs) {
             logger(
               'info',
@@ -273,21 +263,34 @@ export default class WorkerManager {
             activeCount--
             break
           }
-        } else if (load > 0) {
-          if (this.idleWorkers.has(worker.id)) {
-            this.idleWorkers.delete(worker.id)
-            logger('debug', 'Cluster', `Worker ${worker.id} is no longer idle.`)
-          }
-        }
-      }
-    } else {
-      for (const { worker, load } of metrics) {
-        if (load > 0 && this.idleWorkers.has(worker.id)) {
+        } else if (cost > 0) {
           this.idleWorkers.delete(worker.id)
-          logger('debug', 'Cluster', `Worker ${worker.id} is no longer idle.`)
         }
       }
     }
+  }
+
+  _calculateWorkerCost(workerId) {
+    const stats = this.workerStats.get(workerId)
+    if (!stats) return 0
+
+    const playingWeight = 1.0
+    const pausedWeight = 0.01
+    
+    const playingCount = stats.playingPlayers || 0
+    const pausedCount = Math.max(0, (stats.players || 0) - playingCount)
+    
+    let cost = (playingCount * playingWeight) + (pausedCount * pausedWeight)
+
+    if (stats.cpu?.nodelinkLoad > this.scalingConfig.cpuPenaltyLimit) {
+      cost += this.scalingConfig.maxPlayersPerWorker + 5 
+    }
+
+    if (stats.eventLoopLag > this.scalingConfig.lagPenaltyLimit) {
+      cost += (this.scalingConfig.maxPlayersPerWorker / 2)
+    }
+
+    return cost
   }
 
   _updateWorkerFailureHistory(workerId, code, signal) {
@@ -503,15 +506,26 @@ export default class WorkerManager {
     }
 
     let bestWorker = null
-    let minLoad = Number.POSITIVE_INFINITY
+    let minCost = Number.POSITIVE_INFINITY
 
     for (const worker of this.workers) {
       if (worker.isConnected()) {
-        const load = this.workerLoad.get(worker.id) || 0
-        if (load < minLoad) {
-          minLoad = load
+        const cost = this._calculateWorkerCost(worker.id)
+        if (cost < minCost) {
+          minCost = cost
           bestWorker = worker
         }
+      }
+    }
+
+    const threshold = this.scalingConfig.maxPlayersPerWorker
+
+    if (minCost >= threshold && this.workers.length < this.maxWorkers) {
+      logger('debug', 'Cluster', `Best worker is saturated (Cost: ${minCost.toFixed(2)}). Forking new worker.`)
+      const newWorker = this.forkWorker()
+      if (newWorker) {
+        this.assignGuildToWorker(playerKey, newWorker)
+        return newWorker
       }
     }
 
@@ -519,6 +533,17 @@ export default class WorkerManager {
       bestWorker = this.forkWorker()
       if (!bestWorker) {
         throw new Error('No workers available and cannot fork new ones.')
+      }
+    }
+
+    // Warning logs if system is squeezed
+    if (minCost >= threshold) {
+      if (this.workers.length >= this.maxWorkers) {
+        logger('warn', 'Cluster', '\x1b[31m! THIS SERVER IS OPERATING AT CRITICAL CAPACITY !\x1b[0m')
+        logger('warn', 'Cluster', '\x1b[31mIt is EXTREMELY RECOMMENDED that you scale your instance.\x1b[0m')
+        logger('warn', 'Cluster', '\x1b[31mIf this client serves a large volume of users or multiple bots, it is time to implement a server mesh for better performance.\x1b[0m')
+      } else {
+        logger('warn', 'Cluster', `Worker #${bestWorker.id} is operating under heavy load (squeezed) :p`)
       }
     }
 
