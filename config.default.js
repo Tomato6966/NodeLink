@@ -216,7 +216,8 @@ export default {
       enabled: true,
       // Optional, setting this manually can help unblocking countries (since pandora is US only.). May need to be updated periodically.
       // fetching manually: use a vpn connected to US, go on pandora.com, open devtools, Network tab, first request to appear and copy the 2nd csrfToken= value.
-      // csrfToken: ''
+      // csrfToken: '',
+      remoteTokenUrl: 'https://get.1lucas1apk.fun/pandora/gettoken' // URL to a remote provider that returns { success: true, authToken: "...", csrfToken: "...", expires_in_seconds: ... } //https://github.com/1Lucas1apk/gettoken
     },
     nicovideo: {
       enabled: true

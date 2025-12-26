@@ -34,7 +34,7 @@ export default class PandoraSource {
         logger('debug', 'Pandora', 'Setting Pandora auth and CSRF token.')
 
         let csrfTokenValue = this.csrfTokenConfig
-        const remoteUrl = this.config.sources?.pandora?.remoteTokenUrl || "https://get.1lucas1apk.fun/pandora/gettoken"
+        const remoteUrl = this.config.sources?.pandora?.remoteTokenUrl
 
         if (remoteUrl) {
           logger('info', 'Pandora', `Fetching tokens from remote provider: ${remoteUrl}`)
