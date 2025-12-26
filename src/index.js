@@ -133,8 +133,9 @@ if (process.embedder === 'nodejs') {
   } catch (e) {}
 }
 
-class NodelinkServer {
+class NodelinkServer extends EventEmitter {
   constructor(options, PlayerManagerClass, isClusterPrimary = false) {
+    super()
     if (!options || Object.keys(options).length === 0)
       throw new Error('Configuration file not found or empty')
     this.options = options
@@ -1361,10 +1362,11 @@ if (clusterEnabled && cluster.isPrimary) {
 
     let isShuttingDown = false
     const shutdown = async () => {
+      if (nserver.workerManager) nserver.workerManager.isDestroying = true
       if (isShuttingDown) return
       isShuttingDown = true
 
-      if (workerManager) workerManager.isDestroying = true
+      nserver.emit('shutdown')
 
       logger(
         'info',

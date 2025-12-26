@@ -61,7 +61,7 @@ export default class WorkerManager {
     this._startHealthCheck()
 
     cluster.on('exit', (worker, code, signal) => {
-      if (this.isDestroying || signal === 'SIGINT' || signal === 'SIGTERM') {
+      if (this.isDestroying || signal || code === 130 || code === 143) {
         this.removeWorker(worker.id)
         return
       }
@@ -98,6 +98,7 @@ export default class WorkerManager {
   }
 
   _shouldRespawnWorker(workerId, exitCode, affectedGuildsCount) {
+    if (this.isDestroying) return false
     if (this.workers.length < this.minWorkers) return true
     if (affectedGuildsCount > 0) return true
 

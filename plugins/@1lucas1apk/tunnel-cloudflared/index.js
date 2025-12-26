@@ -47,7 +47,7 @@ export default async function(nodelink, config, context) {
     }
   })
 
-  nodelink.rateLimitManager.on?.('destroy', () => {
+  nodelink.on('shutdown', () => {
     if (tunnel && !tunnel.killed) {
       tunnel.kill("SIGKILL")
     }
