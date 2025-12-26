@@ -53,6 +53,11 @@ class BufferPool {
     this.totalBytes += size
   }
 
+  clear() {
+    this.pools.clear()
+    this.totalBytes = 0
+  }
+
   _cleanup() {
     if (this.totalBytes > MAX_POOL_SIZE_BYTES) {
       this.pools.clear()

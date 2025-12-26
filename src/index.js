@@ -194,16 +194,24 @@ class NodelinkServer {
 
   _startHeartbeat() {
     if (this._heartbeatInterval) return
-    
+
     this._heartbeatInterval = setInterval(() => {
       for (const session of this.sessions.activeSessions.values()) {
         if (session.socket && !session.isPaused) {
           try {
             if (typeof session.socket.sendFrame === 'function') {
-              session.socket.sendFrame(Buffer.alloc(0), { len: 0, fin: true, opcode: 0x09 })
+              session.socket.sendFrame(Buffer.alloc(0), {
+                len: 0,
+                fin: true,
+                opcode: 0x09
+              })
             }
           } catch (e) {
-            logger('debug', 'Server', `Failed to send heartbeat to session ${session.id}`)
+            logger(
+              'debug',
+              'Server',
+              `Failed to send heartbeat to session ${session.id}`
+            )
           }
         }
       }
@@ -1112,7 +1120,7 @@ class NodelinkServer {
 
     if (this.socket) {
       try {
-        this.socket.close()
+        this.socket.close?.()
         logger('info', 'WebSocket', 'WebSocket server closed successfully')
       } catch (error) {
         logger(
@@ -1226,7 +1234,7 @@ class NodelinkServer {
     } else {
       this._startGlobalUpdater()
     }
-    
+
     if (!startOptions.isClusterPrimary || clusterEnabled) {
       this._startHeartbeat()
     }
@@ -1351,17 +1359,22 @@ if (clusterEnabled && cluster.isPrimary) {
     await nserver.start({ isClusterPrimary: true })
     global.nodelink = nserver
 
-        const shutdown = async () => {
+    let isShuttingDown = false
+    const shutdown = async () => {
+      if (isShuttingDown) return
+      isShuttingDown = true
 
-          logger('info', 'Server', 'Shutdown signal received. Cleaning up resources...')
+      logger(
+        'info',
+        'Server',
+        'Shutdown signal received. Cleaning up resources...'
+      )
 
-          
+      nserver._stopHeartbeat()
 
-          nserver._stopHeartbeat()
+      workerManager.destroy()
 
-          workerManager.destroy()
-
-          nserver._cleanupWebSocketServer()
+      nserver._cleanupWebSocketServer()
 
       if (nserver.server?.listening) {
         await new Promise((resolve) => nserver.server.close(resolve))
@@ -1372,6 +1385,10 @@ if (clusterEnabled && cluster.isPrimary) {
       nserver.rateLimitManager.destroy()
       nserver.dosProtectionManager.destroy()
       cleanupLogger()
+
+      process.stdout.write('\n  \x1b[32m💚 Thank you for using NodeLink!\x1b[0m\n')
+      process.stdout.write('  \x1b[37mIf you have ideas, suggestions or want to report bugs, join us on Discord:\x1b[0m\n')
+      process.stdout.write('  \x1b[1m\x1b[34m➜\x1b[0m \x1b[36mhttps://discord.gg/fzjksWS65v\x1b[0m\n\n')
 
       process.exit(0)
     }
@@ -1398,15 +1415,20 @@ if (clusterEnabled && cluster.isPrimary) {
       `Single-process server running (PID ${process.pid})`
     )
 
-        const shutdown = async () => {
+    let isShuttingDown = false
+    const shutdown = async () => {
+      if (isShuttingDown) return
+      isShuttingDown = true
 
-          logger('info', 'Server', 'Shutdown signal received. Cleaning up resources...')
+      logger(
+        'info',
+        'Server',
+        'Shutdown signal received. Cleaning up resources...'
+      )
 
-          
+      nserver._stopHeartbeat()
 
-          nserver._stopHeartbeat()
-
-          nserver._cleanupWebSocketServer()
+      nserver._cleanupWebSocketServer()
 
       if (nserver.server?.listening) {
         await new Promise((resolve) => nserver.server.close(resolve))
@@ -1417,6 +1439,10 @@ if (clusterEnabled && cluster.isPrimary) {
       nserver.rateLimitManager.destroy()
       nserver.dosProtectionManager.destroy()
       cleanupLogger()
+
+      process.stdout.write('\n  \x1b[32m💚 Thank you for using NodeLink!\x1b[0m\n')
+      process.stdout.write('  \x1b[37mIf you have ideas, suggestions or want to report bugs, join us on Discord:\x1b[0m\n')
+      process.stdout.write('  \x1b[1m\x1b[34m➜\x1b[0m \x1b[36mhttps://discord.gg/fzjksWS65v\x1b[0m\n\n')
 
       process.exit(0)
     }

@@ -152,6 +152,10 @@ export default class RateLimitManager {
     }
   }
 
+  clear() {
+    this.store.clear()
+  }
+
   destroy() {
     clearInterval(this.cleanupInterval)
     this.store.clear()

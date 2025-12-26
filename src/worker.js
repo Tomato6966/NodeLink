@@ -1,9 +1,24 @@
 import os from 'node:os'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
+import v8 from 'node:v8'
 import { GatewayEvents } from './constants.js'
+import ConnectionManager from './managers/connectionManager.js'
+import LyricsManager from './managers/lyricsManager.js'
+import PluginManager from './managers/pluginManager.js'
+import RateLimitManager from './managers/rateLimitManager.js'
+import RoutePlannerManager from './managers/routePlannerManager.js'
+import SourceManager from './managers/sourceManager.js'
+import StatsManager from './managers/statsManager.js'
+import { bufferPool } from './playback/BufferPool.js'
+import { Player } from './playback/player.js'
+import { cleanupHttpAgents, initLogger, logger } from './utils.js'
 
 let lastCpuUsage = process.cpuUsage()
 let lastCpuTime = Date.now()
+let lastActivityTime = Date.now()
+let isHibernating = false
+let playerUpdateTimer = null
+let statsUpdateTimer = null
 
 const hndl = monitorEventLoopDelay({ resolution: 10 })
 hndl.enable()
@@ -14,21 +29,17 @@ try {
   // Ignore errors
 }
 
-import ConnectionManager from './managers/connectionManager.js'
-import LyricsManager from './managers/lyricsManager.js'
-import PluginManager from './managers/pluginManager.js'
-import RoutePlannerManager from './managers/routePlannerManager.js'
-import SourceManager from './managers/sourceManager.js'
-import StatsManager from './managers/statsManager.js'
-import { Player } from './playback/player.js'
-import { initLogger, logger } from './utils.js'
-
 let config
 try {
   config = (await import('../config.js')).default
 } catch {
   config = (await import('../config.default.js')).default
 }
+
+const HIBERNATION_ENABLED = config.cluster?.hibernation?.enabled !== false
+
+const HIBERNATION_TIMEOUT =
+  config.cluster?.hibernation?.timeoutMs || 20 * 60 * 1000
 
 initLogger(config)
 
@@ -45,6 +56,7 @@ nodelink.sources = new SourceManager(nodelink)
 nodelink.lyrics = new LyricsManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(nodelink)
 nodelink.connectionManager = new ConnectionManager(nodelink)
+nodelink.rateLimitManager = new RateLimitManager(nodelink)
 nodelink.pluginManager = new PluginManager(nodelink)
 nodelink.registry = null
 if (process.embedder === 'nodejs') {
@@ -53,6 +65,195 @@ if (process.embedder === 'nodejs') {
   } catch (e) {
     logger('error', 'Worker', `Failed to load registry: ${e.message}`)
   }
+}
+
+nodelink.extensions = {
+  workerInterceptors: [],
+  audioInterceptors: []
+}
+
+function setEfficiencyMode(enabled) {
+  try {
+    os.setPriority(
+      process.pid,
+      enabled ? os.constants.priority.PRIORITY_LOW : os.constants.priority.PRIORITY_HIGH
+    )
+    if (enabled) {
+      v8.setFlagsFromString('--optimize-for-size')
+    } else {
+      v8.setFlagsFromString('--no-optimize-for-size')
+    }
+  } catch (_e) {}
+}
+
+function startTimers(hibernating = false) {
+  if (playerUpdateTimer) clearInterval(playerUpdateTimer)
+  if (statsUpdateTimer) clearInterval(statsUpdateTimer)
+
+  const updateInterval = hibernating
+    ? 60000
+    : (config?.playerUpdateInterval ?? 5000)
+  const statsInterval = hibernating
+    ? 120000
+    : config?.metrics?.enabled
+      ? 5000
+      : (config?.statsUpdateInterval ?? 30000)
+  const zombieThreshold = config?.zombieThresholdMs ?? 60000
+
+  playerUpdateTimer = setInterval(() => {
+    if (!process.connected) return
+
+    for (const player of players.values()) {
+      if (player?.track && !player.isPaused && player.connection) {
+        if (
+          player._lastStreamDataTime > 0 &&
+          Date.now() - player._lastStreamDataTime >= zombieThreshold
+        ) {
+          logger(
+            'warn',
+            'Player',
+            `Player for guild ${player.guildId} detected as zombie (no stream data).`
+          )
+          player.emitEvent(GatewayEvents.TRACK_STUCK, {
+            guildId: player.guildId,
+            track: player.track,
+            reason: 'no_stream_data',
+            thresholdMs: zombieThreshold
+          })
+        }
+        try {
+          player._sendUpdate()
+        } catch (updateError) {
+          logger(
+            'error',
+            'Worker',
+            `Error during player update for guild ${player.guildId}: ${updateError.message}`,
+            updateError
+          )
+        }
+      }
+    }
+  }, updateInterval)
+
+  statsUpdateTimer = setInterval(() => {
+    if (!process.connected) return
+
+    let localPlayers = 0
+    let localPlayingPlayers = 0
+    const localFrameStats = { sent: 0, nulled: 0, deficit: 0, expected: 0 }
+
+    for (const player of players.values()) {
+      localPlayers++
+      if (!player.isPaused && player.track) {
+        localPlayingPlayers++
+      }
+
+      if (player?.track && !player.isPaused && player.connection) {
+        if (player.connection.statistics) {
+          localFrameStats.sent += player.connection.statistics.packetsSent || 0
+          localFrameStats.nulled +=
+            player.connection.statistics.packetsLost || 0
+          localFrameStats.expected +=
+            player.connection.statistics.packetsExpected || 0
+        }
+      }
+    }
+
+    localFrameStats.deficit += Math.max(
+      0,
+      localFrameStats.expected - localFrameStats.sent
+    )
+
+    if (localPlayers === 0 && HIBERNATION_ENABLED) {
+      if (
+        !isHibernating &&
+        Date.now() - lastActivityTime > HIBERNATION_TIMEOUT
+      ) {
+        logger(
+          'info',
+          'Worker',
+          'Worker entering hibernation mode (Efficiency Mode).'
+        )
+        isHibernating = true
+        bufferPool.clear()
+        cleanupHttpAgents()
+        nodelink.connectionManager.stop()
+        if (nodelink.rateLimitManager) nodelink.rateLimitManager.clear()
+        setEfficiencyMode(true)
+        startTimers(true)
+
+        if (global.gc) {
+          let cycles = 0
+          const aggressiveGC = setInterval(() => {
+            try {
+              global.gc()
+              cycles++
+              if (cycles >= 3) clearInterval(aggressiveGC)
+            } catch (_e) {
+              clearInterval(aggressiveGC)
+            }
+          }, 1000)
+        }
+      }
+    } else {
+      lastActivityTime = Date.now()
+      if (isHibernating) {
+        isHibernating = false
+        setEfficiencyMode(false)
+        nodelink.connectionManager.start()
+        startTimers(false)
+      }
+    }
+
+    try {
+      const now = Date.now()
+      const elapsedMs = now - lastCpuTime
+      const cpuUsage = process.cpuUsage(lastCpuUsage)
+      lastCpuTime = now
+      lastCpuUsage = process.cpuUsage()
+
+      const nodelinkLoad =
+        elapsedMs > 0 ? (cpuUsage.user + cpuUsage.system) / 1000 / elapsedMs : 0
+
+      const mem = process.memoryUsage()
+
+      if (process.connected) {
+        const success = process.send({
+          type: 'workerStats',
+          pid: process.pid,
+          stats: {
+            isHibernating,
+            players: localPlayers,
+            playingPlayers: localPlayingPlayers,
+            commandQueueLength: commandQueue.length,
+            cpu: { nodelinkLoad },
+            eventLoopLag: hndl.mean / 1e6,
+            memory: {
+              used: mem.heapUsed,
+              allocated: mem.heapTotal
+            },
+            frameStats: localFrameStats
+          }
+        })
+
+        if (!success) {
+          logger(
+            'warn',
+            'Worker-IPC',
+            'IPC channel saturated, skipping non-critical workerStats update.'
+          )
+        }
+      }
+    } catch (e) {
+      if (process.connected) {
+        logger(
+          'error',
+          'Worker-IPC',
+          `Failed to send workerStats: ${e.message}`
+        )
+      }
+    }
+  }, statsInterval)
 }
 
 nodelink.extensions = {
@@ -96,6 +297,9 @@ async function initialize() {
   await nodelink.lyrics.loadFolder()
   await nodelink.statsManager.initialize()
   await nodelink.pluginManager.load('worker')
+  
+  lastActivityTime = Date.now()
+  
   logger(
     'info',
     'Worker',
@@ -104,6 +308,7 @@ async function initialize() {
 }
 
 initialize()
+startTimers(false)
 
 process.on('uncaughtException', (err) => {
   const isStreamAbort =
@@ -136,6 +341,15 @@ async function processQueue() {
   if (commandQueue.length === 0) return
 
   const { type, requestId, payload } = commandQueue.shift()
+
+  lastActivityTime = Date.now()
+  if (isHibernating) {
+    logger('info', 'Worker', 'Worker waking up from hibernation.')
+    isHibernating = false
+    setEfficiencyMode(false)
+    nodelink.connectionManager.start()
+    startTimers(false)
+  }
 
   // Execute Worker Interceptors
   const interceptors = nodelink.extensions.workerInterceptors
@@ -470,11 +684,6 @@ process.on('message', (msg) => {
   }
 })
 
-const updateInterval = config?.playerUpdateInterval ?? 5000
-const statsInterval = config?.statsUpdateInterval ?? 30000
-const metricsInterval = config?.metrics?.enabled ? 5000 : statsInterval
-const zombieThreshold = config?.zombieThresholdMs ?? 60000
-
 setTimeout(() => {
   if (process.connected) {
     try {
@@ -484,111 +693,3 @@ setTimeout(() => {
     }
   }
 }, 1000)
-
-setInterval(() => {
-  if (!process.connected) return
-
-  for (const player of players.values()) {
-    if (player?.track && !player.isPaused && player.connection) {
-      if (
-        player._lastStreamDataTime > 0 &&
-        Date.now() - player._lastStreamDataTime >= zombieThreshold
-      ) {
-        logger(
-          'warn',
-          'Player',
-          `Player for guild ${player.guildId} detected as zombie (no stream data).`
-        )
-        player.emitEvent(GatewayEvents.TRACK_STUCK, {
-          guildId: player.guildId,
-          track: player.track,
-          reason: 'no_stream_data',
-          thresholdMs: zombieThreshold
-        })
-      }
-      try {
-        player._sendUpdate()
-      } catch (updateError) {
-        logger(
-          'error',
-          'Worker',
-          `Error during player update for guild ${player.guildId}: ${updateError.message}`,
-          updateError
-        )
-      }
-    }
-  }
-}, updateInterval)
-
-setInterval(() => {
-  if (!process.connected) return
-
-  let localPlayers = 0
-  let localPlayingPlayers = 0
-  const localFrameStats = { sent: 0, nulled: 0, deficit: 0, expected: 0 }
-
-  for (const player of players.values()) {
-    localPlayers++
-    if (!player.isPaused && player.track) {
-      localPlayingPlayers++
-    }
-
-    if (player?.track && !player.isPaused && player.connection) {
-      if (player.connection.statistics) {
-        localFrameStats.sent += player.connection.statistics.packetsSent || 0
-        localFrameStats.nulled += player.connection.statistics.packetsLost || 0
-        localFrameStats.expected +=
-          player.connection.statistics.packetsExpected || 0
-      }
-    }
-  }
-
-  localFrameStats.deficit += Math.max(
-    0,
-    localFrameStats.expected - localFrameStats.sent
-  )
-
-  try {
-    const now = Date.now()
-    const elapsedMs = now - lastCpuTime
-    const cpuUsage = process.cpuUsage(lastCpuUsage)
-    lastCpuTime = now
-    lastCpuUsage = process.cpuUsage()
-
-    const nodelinkLoad =
-      elapsedMs > 0 ? (cpuUsage.user + cpuUsage.system) / 1000 / elapsedMs : 0
-
-    const mem = process.memoryUsage()
-
-    if (process.connected) {
-      const success = process.send({
-        type: 'workerStats',
-        pid: process.pid,
-        stats: {
-          players: localPlayers,
-          playingPlayers: localPlayingPlayers,
-          commandQueueLength: commandQueue.length,
-          cpu: { nodelinkLoad },
-          eventLoopLag: hndl.mean / 1e6,
-          memory: {
-            used: mem.heapUsed,
-            allocated: mem.heapTotal
-          },
-          frameStats: localFrameStats
-        }
-      })
-
-      if (!success) {
-        logger(
-          'warn',
-          'Worker-IPC',
-          'IPC channel saturated, skipping non-critical workerStats update.'
-        )
-      }
-    }
-  } catch (e) {
-    if (process.connected) {
-      logger('error', 'Worker-IPC', `Failed to send workerStats: ${e.message}`)
-    }
-  }
-}, metricsInterval)

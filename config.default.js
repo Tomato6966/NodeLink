@@ -12,6 +12,10 @@ export default {
     commandTimeout: 6000, // Timeout for heavy operations like loadTracks (6s)
     fastCommandTimeout: 4000, // Timeout for player commands like play/pause (4s)
     maxRetries: 2, // Number of retry attempts on timeout or worker failure
+    hibernation: {
+      enabled: true,
+      timeoutMs: 1200000
+    },
     scaling: {
       //scaling configurations
       maxPlayersPerWorker: 20, // Reference capacity for utilization calculation
@@ -91,9 +95,6 @@ export default {
       userCookie: '' // (required without userToken) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> request -> cookie (copy full cookie header)
     },
     amazonmusic: {
-      enabled: true
-    },
-    pinterest: {
       enabled: true
     },
     mixcloud: {

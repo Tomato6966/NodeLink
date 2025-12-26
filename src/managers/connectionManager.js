@@ -170,9 +170,11 @@ export default class ConnectionManager {
 
     const payloadStr = JSON.stringify(payload)
 
-    for (const session of this.nodelink.sessions.values()) {
-      if (session.socket) {
-        session.socket.send(payloadStr)
+    if (this.nodelink.sessions?.values) {
+      for (const session of this.nodelink.sessions.values()) {
+        if (session.socket) {
+          session.socket.send(payloadStr)
+        }
       }
     }
   }

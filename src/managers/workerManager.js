@@ -32,6 +32,7 @@ export default class WorkerManager {
     this.workerReady = new Set()
     this.nextWorkerId = 1
     this.liveYoutubeConfig = { refreshToken: null, visitorData: null }
+    this.isDestroying = false
     this.commandTimeout = config.cluster?.commandTimeout || 45000
     this.fastCommandTimeout = config.cluster?.fastCommandTimeout || 10000
     this.maxRetries = config.cluster?.maxRetries || 2
@@ -60,6 +61,8 @@ export default class WorkerManager {
     this._startHealthCheck()
 
     cluster.on('exit', (worker, code, signal) => {
+      if (this.isDestroying) return
+
       logger(
         'warn',
         'Cluster',
@@ -278,6 +281,8 @@ export default class WorkerManager {
     const pausedCount = Math.max(0, (stats.players || 0) - playingCount)
 
     let cost = playingCount * playingWeight + pausedCount * pausedWeight
+
+    if (stats.isHibernating) return cost
 
     if (stats.cpu?.nodelinkLoad > this.scalingConfig.cpuPenaltyLimit) {
       cost += this.scalingConfig.maxPlayersPerWorker + 5
@@ -687,6 +692,7 @@ export default class WorkerManager {
   }
 
   destroy() {
+    this.isDestroying = true
     this._stopScalingCheck()
     this._stopHealthCheck()
 
