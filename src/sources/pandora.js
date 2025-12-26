@@ -33,41 +33,46 @@ export default class PandoraSource {
 
         logger('debug', 'Pandora', 'Setting Pandora auth and CSRF token.')
 
-        const pandoraRequest = await makeRequest('https://www.pandora.com', {
-          method: 'HEAD'
-        })
+        let csrfTokenValue = this.csrfTokenConfig
+        const remoteUrl = this.config.sources?.pandora?.remoteTokenUrl || "https://get.1lucas1apk.fun/pandora/gettoken"
 
-        if (pandoraRequest.error) {
-          logger('error', 'Pandora', 'Failed to set CSRF token from Pandora.')
-          return false
-        }
-
-        const cookies = pandoraRequest.headers['set-cookie']
-        const csrfCookie = cookies
-          ? this.csrfTokenConfig || cookies.find(cookie => cookie.startsWith('csrftoken='))
-          : null
-
-        if (!csrfCookie) {
-          logger('error', 'Pandora', 'Failed to find CSRF token cookie.')
-          return false
-        }
-
-        if (this.csrfTokenConfig) {
-          const csrfMatch = `csrftoken=${this.csrfTokenConfig};Path=/;Domain=.pandora.com;Secure`
-          if (!csrfMatch) {
-            logger('error', 'Pandora', 'Failed to parse provided CSRF token.')
-            return false
+        if (!csrfTokenValue && remoteUrl) {
+          logger('info', 'Pandora', `Fetching CSRF token from remote provider: ${remoteUrl}`)
+          const { body, error, statusCode } = await makeRequest(remoteUrl, { method: 'GET' })
+          if (!error && statusCode === 200 && body.csrfToken) {
+            csrfTokenValue = body.csrfToken
           }
+        }
+
+        if (csrfTokenValue) {
           this.csrfToken = {
-            raw: csrfMatch,
-            parsed: this.csrfTokenConfig
+            raw: `csrftoken=${csrfTokenValue};Path=/;Domain=.pandora.com;Secure`,
+            parsed: csrfTokenValue
           }
         } else {
+          const pandoraRequest = await makeRequest('https://www.pandora.com', {
+            method: 'HEAD'
+          })
+
+          if (pandoraRequest.error) {
+            logger('error', 'Pandora', 'Failed to set CSRF token from Pandora.')
+            return false
+          }
+
+          const cookies = pandoraRequest.headers['set-cookie']
+          const csrfCookie = cookies ? cookies.find((cookie) => cookie.startsWith('csrftoken=')) : null
+
+          if (!csrfCookie) {
+            logger('error', 'Pandora', 'Failed to find CSRF token cookie.')
+            return false
+          }
+
           const csrfMatch = /csrftoken=([a-f0-9]{16})/.exec(csrfCookie)
           if (!csrfMatch) {
             logger('error', 'Pandora', 'Failed to parse CSRF token.')
             return false
           }
+
           this.csrfToken = {
             raw: csrfCookie.split(';')[0],
             parsed: csrfMatch[1]

@@ -57,6 +57,28 @@ export default class CredentialManager {
     }, 1000)
   }
 
+  async forceSave() {
+    if (this._saveTimeout) {
+      clearTimeout(this._saveTimeout)
+      this._saveTimeout = null
+    }
+
+    try {
+      const plainText = JSON.stringify(Object.fromEntries(this.credentials))
+      const iv = crypto.randomBytes(16)
+      const cipher = crypto.createCipheriv('aes-256-gcm', this.key, iv)
+      
+      const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()])
+      const tag = cipher.getAuthTag()
+      
+      await fs.mkdir('./.cache', { recursive: true })
+      await fs.writeFile(this.filePath, Buffer.concat([iv, tag, encrypted]))
+      logger('debug', 'Credentials', 'Force saved credentials to disk.')
+    } catch (e) {
+      logger('error', 'Credentials', `Failed to force save credentials: ${e.message}`)
+    }
+  }
+
   get(key) {
     const entry = this.credentials.get(key)
     if (!entry) return null

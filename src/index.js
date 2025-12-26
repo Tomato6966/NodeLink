@@ -1383,6 +1383,8 @@ if (clusterEnabled && cluster.isPrimary) {
 
       nserver._stopHeartbeat()
 
+      await nserver.credentialManager.forceSave()
+
       workerManager.destroy()
 
       nserver._cleanupWebSocketServer()
@@ -1433,6 +1435,8 @@ if (clusterEnabled && cluster.isPrimary) {
       )
 
       nserver._stopHeartbeat()
+
+      await nserver.credentialManager.forceSave()
 
       nserver._cleanupWebSocketServer()
 
