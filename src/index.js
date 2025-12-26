@@ -1364,6 +1364,8 @@ if (clusterEnabled && cluster.isPrimary) {
       if (isShuttingDown) return
       isShuttingDown = true
 
+      if (workerManager) workerManager.isDestroying = true
+
       logger(
         'info',
         'Server',

@@ -47,17 +47,9 @@ export default async function(nodelink, config, context) {
     }
   })
 
-  const cleanup = () => {
+  nodelink.rateLimitManager.on?.('destroy', () => {
     if (tunnel && !tunnel.killed) {
-      try {
-        tunnel.kill("SIGKILL")
-      } catch (e) {
-      }
+      tunnel.kill("SIGKILL")
     }
-  }
-
-  process.on("exit", cleanup)
-  process.on("SIGINT", cleanup)
-  process.on("SIGTERM", cleanup)
-  process.on("uncaughtException", cleanup)
+  })
 }

@@ -61,13 +61,11 @@ export default class WorkerManager {
     this._startHealthCheck()
 
     cluster.on('exit', (worker, code, signal) => {
-      if (this.isDestroying || signal === 'SIGINT' || signal === 'SIGTERM') return
+      if (this.isDestroying || signal === 'SIGINT' || signal === 'SIGTERM') {
+        this.removeWorker(worker.id)
+        return
+      }
 
-      logger(
-        'warn',
-        'Cluster',
-        `Worker ${worker.process.pid} exited (code=${code}, signal=${signal})`
-      )
       this._updateWorkerFailureHistory(worker.id, code, signal)
 
       if (global.nodelink?.statsManager) {
