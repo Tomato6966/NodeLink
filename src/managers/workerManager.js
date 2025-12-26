@@ -61,8 +61,11 @@ export default class WorkerManager {
     this._startHealthCheck()
 
     cluster.on('exit', (worker, code, signal) => {
-      if (this.isDestroying || signal || code === 130 || code === 143) {
-        this.removeWorker(worker.id)
+      const isSystemSignal = signal === 'SIGINT' || signal === 'SIGTERM' || code === 130 || code === 143
+      if (this.isDestroying || isSystemSignal) {
+        const index = this.workers.indexOf(worker)
+        if (index !== -1) this.workers.splice(index, 1)
+        this.workersById.delete(worker.id)
         return
       }
 

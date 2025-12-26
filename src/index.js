@@ -1362,11 +1362,15 @@ if (clusterEnabled && cluster.isPrimary) {
 
     let isShuttingDown = false
     const shutdown = async () => {
-      if (nserver.workerManager) nserver.workerManager.isDestroying = true
       if (isShuttingDown) return
       isShuttingDown = true
 
+      if (nserver.workerManager) nserver.workerManager.isDestroying = true
       nserver.emit('shutdown')
+
+      process.stdout.write('\n  \x1b[32m💚 Thank you for using NodeLink!\x1b[0m\n')
+      process.stdout.write('  \x1b[37mIf you have ideas, suggestions or want to report bugs, join us on Discord:\x1b[0m\n')
+      process.stdout.write('  \x1b[1m\x1b[34m➜\x1b[0m \x1b[36mhttps://discord.gg/fzjksWS65v\x1b[0m\n\n')
 
       logger(
         'info',
@@ -1389,10 +1393,6 @@ if (clusterEnabled && cluster.isPrimary) {
       nserver.rateLimitManager.destroy()
       nserver.dosProtectionManager.destroy()
       cleanupLogger()
-
-      process.stdout.write('\n  \x1b[32m💚 Thank you for using NodeLink!\x1b[0m\n')
-      process.stdout.write('  \x1b[37mIf you have ideas, suggestions or want to report bugs, join us on Discord:\x1b[0m\n')
-      process.stdout.write('  \x1b[1m\x1b[34m➜\x1b[0m \x1b[36mhttps://discord.gg/fzjksWS65v\x1b[0m\n\n')
 
       process.exit(0)
     }
