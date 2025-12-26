@@ -36,11 +36,27 @@ export default class PandoraSource {
         let csrfTokenValue = this.csrfTokenConfig
         const remoteUrl = this.config.sources?.pandora?.remoteTokenUrl || "https://get.1lucas1apk.fun/pandora/gettoken"
 
-        if (!csrfTokenValue && remoteUrl) {
-          logger('info', 'Pandora', `Fetching CSRF token from remote provider: ${remoteUrl}`)
-          const { body, error, statusCode } = await makeRequest(remoteUrl, { method: 'GET' })
-          if (!error && statusCode === 200 && body.csrfToken) {
-            csrfTokenValue = body.csrfToken
+        if (remoteUrl) {
+          logger('info', 'Pandora', `Fetching tokens from remote provider: ${remoteUrl}`)
+          try {
+            const { body, error, statusCode } = await makeRequest(remoteUrl, { method: 'GET' })
+            if (!error && statusCode === 200 && body.success && body.authToken && body.csrfToken) {
+              this.authToken = body.authToken
+              this.csrfToken = {
+                raw: `csrftoken=${body.csrfToken};Path=/;Domain=.pandora.com;Secure`,
+                parsed: body.csrfToken
+              }
+
+              const cacheTtlMs = (body.expires_in_seconds || 3600) * 1000
+              this.nodelink.credentialManager.set('pandora_auth_token', this.authToken, cacheTtlMs)
+              this.nodelink.credentialManager.set('pandora_csrf_token', this.csrfToken, cacheTtlMs)
+
+              logger('info', 'Pandora', 'Successfully initialized with remote tokens (bypass active).')
+              return true
+            }
+            logger('warn', 'Pandora', `Remote provider failed (Status: ${statusCode}). Falling back to local login.`)
+          } catch (e) {
+            logger('warn', 'Pandora', `Exception during remote token fetch: ${e.message}. Falling back to local login.`)
           }
         }
 
