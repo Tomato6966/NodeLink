@@ -1393,9 +1393,8 @@ if (clusterEnabled && cluster.isPrimary) {
       process.exit(0)
     }
 
-    process.on('beforeExit', shutdown)
-    process.on('SIGINT', shutdown)
-    process.on('SIGTERM', shutdown)
+    process.once('SIGINT', shutdown)
+    process.once('SIGTERM', shutdown)
 
     return nserver
   })()
@@ -1447,9 +1446,8 @@ if (clusterEnabled && cluster.isPrimary) {
       process.exit(0)
     }
 
-    process.on('beforeExit', shutdown)
-    process.on('SIGINT', shutdown)
-    process.on('SIGTERM', shutdown)
+    process.once('SIGINT', shutdown)
+    process.once('SIGTERM', shutdown)
 
     return nserver
   })()

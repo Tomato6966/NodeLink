@@ -60,6 +60,13 @@ export default class WorkerManager {
     this._startScalingCheck()
     this._startHealthCheck()
 
+    const handleSignal = () => {
+      this.isDestroying = true
+    }
+
+    process.once('SIGINT', handleSignal)
+    process.once('SIGTERM', handleSignal)
+
     cluster.on('exit', (worker, code, signal) => {
       if (this.isDestroying) return
 
