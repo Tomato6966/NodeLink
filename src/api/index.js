@@ -4,9 +4,9 @@ import { fileURLToPath } from 'node:url'
 import { PATH_VERSION } from '../constants.js'
 import {
   logger,
+  sendErrorResponse,
   sendResponse,
-  verifyMethod,
-  sendErrorResponse
+  verifyMethod
 } from '../utils.js'
 
 let apiRegistry
@@ -24,12 +24,10 @@ async function loadRoutes() {
   let routeModules = []
 
   if (apiRegistry) {
-    routeModules = Object.entries(apiRegistry).map(
-      ([file, mod]) => ({
-        file,
-        module: mod.default || mod
-      })
-    )
+    routeModules = Object.entries(apiRegistry).map(([file, mod]) => ({
+      file,
+      module: mod.default || mod
+    }))
   }
 
   if (routeModules.length === 0) {
@@ -91,7 +89,7 @@ async function requestHandler(nodelink, req, res) {
   if (middlewares && Array.isArray(middlewares)) {
     for (const middleware of middlewares) {
       const result = await middleware(nodelink, req, res, parsedUrl)
-      if (result === true) return 
+      if (result === true) return
     }
   }
 
@@ -102,7 +100,7 @@ async function requestHandler(nodelink, req, res) {
   const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${req.socket.remotePort})`
 
   const originalEnd = res.end
-  res.end = function(...args) {
+  res.end = (...args) => {
     const duration = Date.now() - startTime
     nodelink.statsManager.recordHttpRequestDuration(
       parsedUrl.pathname,
@@ -128,19 +126,25 @@ async function requestHandler(nodelink, req, res) {
     }
 
     const authConfig = metricsConfig.authorization || {}
-    let authType = authConfig.type;
-    if(!['Bearer', 'Basic'].includes(authType)) {
-      logger('warn',`Config: metrics authorization.type SHOULD BE one of 'Bearer', 'Basic'.... Defaulting to 'Bearer'!`);
-      authType = 'Bearer';
+    let authType = authConfig.type
+    if (!['Bearer', 'Basic'].includes(authType)) {
+      logger(
+        'warn',
+        `Config: metrics authorization.type SHOULD BE one of 'Bearer', 'Basic'.... Defaulting to 'Bearer'!`
+      )
+      authType = 'Bearer'
     }
-    
-    const metricsPassword = authConfig.password || nodelink.options.server.password
+
+    const metricsPassword =
+      authConfig.password || nodelink.options.server.password
 
     const authHeader = req.headers?.authorization
     const isValidAuth =
-      authHeader === metricsPassword
-      || (authType === 'Bearer' && authHeader === `${authType} ${metricsPassword}`)
-      || (authType === 'Basic' && authHeader === `${authType} ${atob(authHeader.slice(authType.length))}`)
+      authHeader === metricsPassword ||
+      (authType === 'Bearer' &&
+        authHeader === `${authType} ${metricsPassword}`) ||
+      (authType === 'Basic' &&
+        authHeader === `${authType} ${atob(authHeader.slice(authType.length))}`)
 
     if (!isValidAuth) {
       logger(
@@ -180,7 +184,14 @@ async function requestHandler(nodelink, req, res) {
     await new Promise((resolve) => setTimeout(resolve, dosCheck.delay))
   }
 
-  if (!nodelink.rateLimitManager.check(req, parsedUrl)) {
+  const rateLimitCheck = nodelink.rateLimitManager.check(req, parsedUrl)
+  if (rateLimitCheck.limit !== undefined) {
+    res.setHeader('X-RateLimit-Limit', rateLimitCheck.limit)
+    res.setHeader('X-RateLimit-Remaining', rateLimitCheck.remaining)
+    res.setHeader('X-RateLimit-Reset', Math.ceil(rateLimitCheck.reset / 1000))
+  }
+
+  if (!rateLimitCheck.allowed) {
     logger(
       'warn',
       'RateLimit',
@@ -190,6 +201,10 @@ async function requestHandler(nodelink, req, res) {
       parsedUrl.pathname,
       remoteAddress
     )
+
+    const retryAfter = Math.ceil((rateLimitCheck.reset - Date.now()) / 1000)
+    res.setHeader('Retry-After', retryAfter)
+
     sendErrorResponse(
       req,
       res,
@@ -205,8 +220,9 @@ async function requestHandler(nodelink, req, res) {
   if (!isMetricsEndpoint) {
     if (
       !req.headers ||
-      req.headers.authorization !== nodelink.options.server.password &&
-      req.headers.authorization !== `Bearer ${nodelink.options.server.password}`
+      (req.headers.authorization !== nodelink.options.server.password &&
+        req.headers.authorization !==
+          `Bearer ${nodelink.options.server.password}`)
     ) {
       logger(
         'warn',
@@ -288,9 +304,7 @@ async function requestHandler(nodelink, req, res) {
 
   const customRoutes = nodelink.extensions?.routes
   if (customRoutes && Array.isArray(customRoutes)) {
-    const customRoute = customRoutes.find(
-      (r) => r.path === parsedUrl.pathname
-    )
+    const customRoute = customRoutes.find((r) => r.path === parsedUrl.pathname)
 
     if (customRoute) {
       if (

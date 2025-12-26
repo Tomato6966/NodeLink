@@ -26,21 +26,23 @@ async function _manageYoutubeHlsStream(
 ) {
   const segmentQueue = []
   const processedSegments = new Set()
-  const processedOrder = []
+  const MAX_PROCESSED_TRACK = 100
+  const processedOrder = new Array(MAX_PROCESSED_TRACK)
+  let processedIndex = 0
   let cleanedUp = false
   let playlistEnded = false
   const MAX_LIVE_QUEUE_SIZE = 15
-  const MAX_PROCESSED_TRACK = 100
 
   const rememberSegment = (url) => {
     if (processedSegments.has(url)) return false
-    processedSegments.add(url)
-    processedOrder.push(url)
 
-    if (processedOrder.length > MAX_PROCESSED_TRACK) {
-      const old = processedOrder.shift()
-      if (old) processedSegments.delete(old)
-    }
+    const old = processedOrder[processedIndex]
+    if (old) processedSegments.delete(old)
+
+    processedSegments.add(url)
+    processedOrder[processedIndex] = url
+    processedIndex = (processedIndex + 1) % MAX_PROCESSED_TRACK
+
     return true
   }
 
@@ -185,11 +187,16 @@ async function _manageYoutubeHlsStream(
   }
 
   const segmentDownloader = async () => {
+    let nextSegmentPromise = null
+
     while (true) {
-      if (cancelSignal.aborted || (playlistEnded && segmentQueue.length === 0))
+      if (
+        cancelSignal.aborted ||
+        (playlistEnded && segmentQueue.length === 0 && !nextSegmentPromise)
+      )
         break
 
-      if (segmentQueue.length === 0) {
+      if (segmentQueue.length === 0 && !nextSegmentPromise) {
         await new Promise((resolve) => {
           const timeout = setTimeout(resolve, 50)
           if (typeof timeout.unref === 'function') timeout.unref()
@@ -197,21 +204,36 @@ async function _manageYoutubeHlsStream(
         continue
       }
 
-      const segmentUrl = segmentQueue.shift()
-      if (processedSegments.has(segmentUrl)) {
-        processedSegments.delete(segmentUrl)
-      }
-
-      if (cancelSignal.aborted) break
-
       try {
-        const res = await http1makeRequest(segmentUrl, { streamOnly: true })
+        let res
+        if (nextSegmentPromise) {
+          res = await nextSegmentPromise
+          nextSegmentPromise = null
+        } else {
+          const segmentUrl = segmentQueue.shift()
+          if (processedSegments.has(segmentUrl)) {
+            processedSegments.delete(segmentUrl)
+          }
+          res = await http1makeRequest(segmentUrl, { streamOnly: true })
+        }
+
+        if (
+          segmentQueue.length > 0 &&
+          !nextSegmentPromise &&
+          !cancelSignal.aborted
+        ) {
+          const nextUrl = segmentQueue.shift()
+          if (processedSegments.has(nextUrl)) {
+            processedSegments.delete(nextUrl)
+          }
+          nextSegmentPromise = http1makeRequest(nextUrl, { streamOnly: true })
+        }
 
         if (res.error || res.statusCode !== 200) {
           logger(
             'warn',
             'YouTube-HLS-Downloader',
-            `Failed segment ${segmentUrl}: ${res.statusCode}`
+            `Failed segment: ${res.statusCode}`
           )
           if (res.stream) res.stream.destroy()
           continue
@@ -238,7 +260,7 @@ async function _manageYoutubeHlsStream(
           logger(
             'error',
             'YouTube-HLS-Downloader',
-            `Error processing segment ${segmentUrl}: ${e.message}`
+            `Error processing segment: ${e.message}`
           )
         }
       }
@@ -268,7 +290,7 @@ async function _manageYoutubeHlsStream(
     let bestAudioOnlyUrl = null
     let bestBandwidth = 0
     let bestAudioOnlyBandwidth = 0
-    let isLive =
+    const isLive =
       masterPlaylistContent.includes('yt_live_broadcast') ||
       masterPlaylistContent.includes('live/1')
 
@@ -1389,15 +1411,25 @@ export default class YouTubeSource {
           activeRequest = null
           fetching = false
           if (!destroyed) {
-            logger('warn', 'YouTube', `Range request error at pos ${position}: ${err.message}`)
-            const isAborted = err.message === 'aborted' || err.code === 'ECONNRESET'
+            logger(
+              'warn',
+              'YouTube',
+              `Range request error at pos ${position}: ${err.message}`
+            )
+            const isAborted =
+              err.message === 'aborted' || err.code === 'ECONNRESET'
             if (++errors >= MAX_RETRIES || isAborted) {
-              if (isAborted) logger('warn', 'YouTube', 'Connection aborted, forcing immediate recovery with new URL.')
+              if (isAborted)
+                logger(
+                  'warn',
+                  'YouTube',
+                  'Connection aborted, forcing immediate recovery with new URL.'
+                )
               recover(err)
             } else {
               const timeout = setTimeout(
                 fetchNext,
-                Math.min(1000 * Math.pow(2, errors - 1), 5000)
+                Math.min(1000 * 2 ** (errors - 1), 5000)
               )
               if (typeof timeout.unref === 'function') timeout.unref()
             }
@@ -1417,15 +1449,25 @@ export default class YouTubeSource {
         activeRequest = null
         fetching = false
         if (!destroyed) {
-          logger('warn', 'YouTube', `Range request exception at pos ${position}: ${err.message}`)
-          const isAborted = err.message === 'aborted' || err.code === 'ECONNRESET'
+          logger(
+            'warn',
+            'YouTube',
+            `Range request exception at pos ${position}: ${err.message}`
+          )
+          const isAborted =
+            err.message === 'aborted' || err.code === 'ECONNRESET'
           if (++errors >= MAX_RETRIES || isAborted) {
-            if (isAborted) logger('warn', 'YouTube', 'Connection aborted, forcing immediate recovery with new URL.')
+            if (isAborted)
+              logger(
+                'warn',
+                'YouTube',
+                'Connection aborted, forcing immediate recovery with new URL.'
+              )
             recover(err)
           } else {
             const timeout = setTimeout(
               fetchNext,
-              Math.min(1000 * Math.pow(2, errors - 1), 5000)
+              Math.min(1000 * 2 ** (errors - 1), 5000)
             )
             if (typeof timeout.unref === 'function') timeout.unref()
           }
@@ -1436,16 +1478,22 @@ export default class YouTubeSource {
     const recover = async (causeError) => {
       if (destroyed || cancelSignal.aborted) return
 
-      const isForbidden = causeError?.message?.includes('403') || causeError?.statusCode === 403
-      const isAborted = causeError?.message === 'aborted' || causeError?.code === 'ECONNRESET'
+      const isForbidden =
+        causeError?.message?.includes('403') || causeError?.statusCode === 403
+      const isAborted =
+        causeError?.message === 'aborted' || causeError?.code === 'ECONNRESET'
 
       if (!isForbidden && !isAborted && refreshes === 0) {
-         logger('debug', 'YouTube', `Retrying same URL for recovery first (cause: ${causeError?.message})...`)
-         errors = 0
-         fetching = false
-         fetchNext()
-         refreshes++
-         return
+        logger(
+          'debug',
+          'YouTube',
+          `Retrying same URL for recovery first (cause: ${causeError?.message})...`
+        )
+        errors = 0
+        fetching = false
+        fetchNext()
+        refreshes++
+        return
       }
 
       if (++refreshes > MAX_URL_REFRESH) {
@@ -1486,7 +1534,10 @@ export default class YouTubeSource {
           `Recovery failed (attempt ${refreshes}): ${error.message}`
         )
         if (!destroyed && !cancelSignal.aborted) {
-          recoverTimeout = setTimeout(() => recover(causeError), 4000 + refreshes * 1000)
+          recoverTimeout = setTimeout(
+            () => recover(causeError),
+            4000 + refreshes * 1000
+          )
           if (typeof recoverTimeout.unref === 'function') {
             recoverTimeout.unref()
           }

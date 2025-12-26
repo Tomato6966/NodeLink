@@ -1,6 +1,6 @@
 import { Transform } from 'node:stream'
-import { RingBuffer } from '../RingBuffer.js'
 import { logger } from '../../utils.js'
+import { RingBuffer } from '../RingBuffer.js'
 
 const TOO_SHORT = Symbol('TOO_SHORT')
 const INVALID_VINT = Symbol('INVALID_VINT')
@@ -8,7 +8,7 @@ const BUFFER_SIZE = 2 * 1024 * 1024
 
 const TAGS = Object.freeze({
   '1a45dfa3': true,
-  '18538067': true,
+  18538067: true,
   '1f43b675': true,
   '1654ae6b': true,
   '1c53bb6b': false,
@@ -18,9 +18,9 @@ const TAGS = Object.freeze({
   83: false,
   a3: false,
   '63a2': false,
-  'e7': false,
-  'a0': true,
-  'a1': false
+  e7: false,
+  a0: true,
+  a1: false
 })
 
 const OPUS_HEAD = Buffer.from([0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64])
@@ -37,8 +37,9 @@ const readVintLength = (buf, i) => {
 
 const readVint = (buf, start, end) => {
   const len = readVintLength(buf, start)
-  if (len === TOO_SHORT || len === INVALID_VINT || end > buf.length) return TOO_SHORT
-  let mask = (1 << (8 - len)) - 1
+  if (len === TOO_SHORT || len === INVALID_VINT || end > buf.length)
+    return TOO_SHORT
+  const mask = (1 << (8 - len)) - 1
   let value = BigInt(buf[start] & mask)
   for (let i = start + 1; i < end; i++) value = (value << 8n) | BigInt(buf[i])
   return value
@@ -66,10 +67,14 @@ class WebmBaseDemuxer extends Transform {
       const remainingToSkip = this.skipUntil - this.processed
       const bufferLen = BigInt(this.ringBuffer.length)
       const toSkip = remainingToSkip < bufferLen ? remainingToSkip : bufferLen
-      
+
       if (toSkip > 0n) {
-        this.ringBuffer.skip(Number(toSkip))
-        this.processed += toSkip
+        const skipNum =
+          toSkip > BigInt(Number.MAX_SAFE_INTEGER)
+            ? Number.MAX_SAFE_INTEGER
+            : Number(toSkip)
+        this.ringBuffer.skip(skipNum)
+        this.processed += BigInt(skipNum)
       }
       if (this.processed < this.skipUntil) return done()
       this.skipUntil = null
@@ -89,7 +94,7 @@ class WebmBaseDemuxer extends Transform {
       }
 
       if (res === TOO_SHORT) break
-      
+
       if (res._skipUntil) {
         this.skipUntil = res._skipUntil
         this.ringBuffer.skip(this.ringBuffer.length)
@@ -99,8 +104,12 @@ class WebmBaseDemuxer extends Transform {
 
       if (res.offset) {
         const offset = BigInt(res.offset)
-        this.ringBuffer.skip(Number(offset))
-        this.processed += offset
+        const skipNum =
+          offset > BigInt(Number.MAX_SAFE_INTEGER)
+            ? Number.MAX_SAFE_INTEGER
+            : Number(offset)
+        this.ringBuffer.skip(skipNum)
+        this.processed += BigInt(skipNum)
       } else {
         break
       }
@@ -132,16 +141,16 @@ class WebmBaseDemuxer extends Transform {
     const idData = this._readEBMLId(chunk, offset)
     if (idData === TOO_SHORT) return TOO_SHORT
     if (idData === INVALID_VINT) {
-        return { offset: 1 }
+      return { offset: 1 }
     }
 
     const tag = idData.id.toString('hex')
     if (!this.ebmlFound) {
       if (tag === '1a45dfa3' || tag === '1f43b675') {
-          logger('debug', 'WebmDemuxer', `Header found: ${tag}`)
-          this.ebmlFound = true
+        logger('debug', 'WebmDemuxer', `Header found: ${tag}`)
+        this.ebmlFound = true
       } else {
-          return { offset: 1 }
+        return { offset: 1 }
       }
     }
 
@@ -149,30 +158,34 @@ class WebmBaseDemuxer extends Transform {
     const sizeData = this._readTagSize(chunk, currentOffset)
     if (sizeData === TOO_SHORT) return TOO_SHORT
     if (sizeData === INVALID_VINT) {
-        return { offset: 1 }
+      return { offset: 1 }
     }
 
     const { dataLen, vintLen } = sizeData
-    
+
     if (tag !== '18538067' && dataLen > BigInt(MAX_TAG_SIZE)) {
-        const isUnknownSize = dataLen === (2n ** BigInt(7 * vintLen) - 1n)
-        if (!isUnknownSize) {
-             return { offset: 1 }
-        }
+      const isUnknownSize = dataLen === 2n ** BigInt(7 * vintLen) - 1n
+      if (!isUnknownSize) {
+        return { offset: 1 }
+      }
     }
 
     currentOffset = sizeData.offset
 
     if (!(tag in TAGS)) {
-      const isUnknownSize = dataLen === (2n ** BigInt(7 * vintLen) - 1n)
+      const isUnknownSize = dataLen === 2n ** BigInt(7 * vintLen) - 1n
       const numDataLen = Number(dataLen)
-      
+
       if (isUnknownSize) {
-          return { offset: 1 }
+        return { offset: 1 }
       }
 
-      if (chunk.length > currentOffset + numDataLen) return { offset: currentOffset + numDataLen }
-      return { offset: currentOffset, _skipUntil: this.processed + BigInt(currentOffset + numDataLen) }
+      if (chunk.length > currentOffset + numDataLen)
+        return { offset: currentOffset + numDataLen }
+      return {
+        offset: currentOffset,
+        _skipUntil: this.processed + BigInt(currentOffset + numDataLen)
+      }
     }
 
     const hasChildren = TAGS[tag]

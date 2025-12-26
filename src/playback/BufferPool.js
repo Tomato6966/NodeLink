@@ -1,4 +1,3 @@
-
 import { logger } from '../utils.js'
 
 const MAX_POOL_SIZE_BYTES = 50 * 1024 * 1024
@@ -8,26 +7,39 @@ class BufferPool {
   constructor() {
     this.pools = new Map()
     this.totalBytes = 0
-    
+
     this.cleanupInterval = setInterval(() => this._cleanup(), CLEANUP_INTERVAL)
     this.cleanupInterval.unref()
   }
 
+  _getAlignedSize(size) {
+    if (size <= 1024) return 1024
+    let n = size - 1
+    n |= n >> 1
+    n |= n >> 2
+    n |= n >> 4
+    n |= n >> 8
+    n |= n >> 16
+    return n + 1
+  }
+
   acquire(size) {
-    const pool = this.pools.get(size)
+    const alignedSize = this._getAlignedSize(size)
+    const pool = this.pools.get(alignedSize)
     if (pool && pool.length > 0) {
       const buffer = pool.pop()
+      this.totalBytes -= alignedSize
       return buffer
     }
-    return Buffer.allocUnsafe(size)
+    return Buffer.allocUnsafe(alignedSize)
   }
 
   release(buffer) {
     if (!Buffer.isBuffer(buffer)) return
 
     const size = buffer.length
-    
-    if (size < 1024 || size > 10 * 1024 * 1024) return 
+
+    if (size < 1024 || size > 10 * 1024 * 1024) return
 
     if (this.totalBytes + size > MAX_POOL_SIZE_BYTES) {
       return

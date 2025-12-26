@@ -29,13 +29,17 @@ export default class WorkerManager {
     this.workerHealth = new Map()
     this.workerStartTime = new Map()
     this.workerUniqueId = new Map()
+    this.workerReady = new Set()
     this.nextWorkerId = 1
     this.liveYoutubeConfig = { refreshToken: null, visitorData: null }
     this.commandTimeout = config.cluster?.commandTimeout || 45000
     this.fastCommandTimeout = config.cluster?.fastCommandTimeout || 10000
     this.maxRetries = config.cluster?.maxRetries || 2
     this.scalingConfig = {
-      maxPlayersPerWorker: config.cluster.scaling?.maxPlayersPerWorker || config.cluster.workers || 20,
+      maxPlayersPerWorker:
+        config.cluster.scaling?.maxPlayersPerWorker ||
+        config.cluster.workers ||
+        20,
       targetUtilization: config.cluster.scaling?.targetUtilization || 0.7,
       scaleUpThreshold: config.cluster.scaling?.scaleUpThreshold || 0.75,
       scaleDownThreshold: config.cluster.scaling?.scaleDownThreshold || 0.3,
@@ -81,11 +85,7 @@ export default class WorkerManager {
       )
 
       if (shouldRespawn) {
-        logger(
-          'info',
-          'Cluster',
-          'Respawning worker...'
-        )
+        logger('info', 'Cluster', 'Respawning worker...')
         setTimeout(() => {
           this.forkWorker()
           if (global.nodelink?.statsManager) {
@@ -159,22 +159,25 @@ export default class WorkerManager {
             `Retrying command after worker ${workerId} exit (attempt ${request.retryCount + 1})`
           )
 
-          setTimeout(() => {
-            const newWorker = this.getBestWorker()
-            if (newWorker) {
-              this._executeCommand(
-                newWorker,
-                request.type,
-                request.payload,
-                request.resolve,
-                request.reject,
-                request.retryCount + 1,
-                request.isFast
-              )
-            } else {
-              request.reject(new Error('No workers available for retry'))
-            }
-          }, 500 * Math.pow(2, request.retryCount))
+          setTimeout(
+            () => {
+              const newWorker = this.getBestWorker()
+              if (newWorker) {
+                this._executeCommand(
+                  newWorker,
+                  request.type,
+                  request.payload,
+                  request.resolve,
+                  request.reject,
+                  request.retryCount + 1,
+                  request.isFast
+                )
+              } else {
+                request.reject(new Error('No workers available for retry'))
+              }
+            },
+            500 * 2 ** request.retryCount
+          )
         } else {
           request.reject(
             new Error(`Worker ${workerId} exited before completing request`)
@@ -222,29 +225,23 @@ export default class WorkerManager {
     }
 
     const averageCost = activeCount > 0 ? totalCost / activeCount : 0
-    const {
-      idleWorkerTimeoutMs,
-      maxPlayersPerWorker,
-      scaleUpThreshold
-    } = this.scalingConfig
+    const { idleWorkerTimeoutMs, maxPlayersPerWorker, scaleUpThreshold } =
+      this.scalingConfig
 
     if (
-      averageCost >= (maxPlayersPerWorker * scaleUpThreshold) &&
+      averageCost >= maxPlayersPerWorker * scaleUpThreshold &&
       activeCount < this.maxWorkers
     ) {
       logger(
         'info',
         'Cluster',
-        `Scaling up: Average cost ${averageCost.toFixed(2)} reached threshold ${(maxPlayersPerWorker * scaleUpThreshold).toFixed(2)} (${(scaleUpThreshold * 100)}%). Forking new worker.`
+        `Scaling up: Average cost ${averageCost.toFixed(2)} reached threshold ${(maxPlayersPerWorker * scaleUpThreshold).toFixed(2)} (${scaleUpThreshold * 100}%). Forking new worker.`
       )
       this.forkWorker()
       return
     }
 
-    if (
-      averageCost < 2 &&
-      activeCount > this.minWorkers
-    ) {
+    if (averageCost < 2 && activeCount > this.minWorkers) {
       const now = Date.now()
 
       for (const { worker, cost } of metrics) {
@@ -276,18 +273,18 @@ export default class WorkerManager {
 
     const playingWeight = 1.0
     const pausedWeight = 0.01
-    
+
     const playingCount = stats.playingPlayers || 0
     const pausedCount = Math.max(0, (stats.players || 0) - playingCount)
-    
-    let cost = (playingCount * playingWeight) + (pausedCount * pausedWeight)
+
+    let cost = playingCount * playingWeight + pausedCount * pausedWeight
 
     if (stats.cpu?.nodelinkLoad > this.scalingConfig.cpuPenaltyLimit) {
-      cost += this.scalingConfig.maxPlayersPerWorker + 5 
+      cost += this.scalingConfig.maxPlayersPerWorker + 5
     }
 
     if (stats.eventLoopLag > this.scalingConfig.lagPenaltyLimit) {
-      cost += (this.scalingConfig.maxPlayersPerWorker / 2)
+      cost += this.scalingConfig.maxPlayersPerWorker / 2
     }
 
     return cost
@@ -335,9 +332,9 @@ export default class WorkerManager {
     this.workers.push(worker)
     this.workersById.set(worker.id, worker)
     this.workerLoad.set(worker.id, 0)
-    
+
     this.workerStats.set(worker.id, { players: 0, playingPlayers: 0 })
-    
+
     this.workerToGuilds.set(worker.id, new Set())
     this.workerHealth.set(worker.id, Date.now())
     this.workerStartTime.set(worker.id, Date.now())
@@ -371,6 +368,7 @@ export default class WorkerManager {
     if (index !== -1) this.workers.splice(index, 1)
 
     this.workersById.delete(workerId)
+    this.workerReady.delete(workerId)
     this.workerLoad.delete(workerId)
     this.workerStats.delete(workerId)
     this.idleWorkers.delete(workerId)
@@ -448,16 +446,33 @@ export default class WorkerManager {
       this.workerHealth.set(worker.id, Date.now())
     } else if (msg.type === 'ready') {
       this.workerHealth.set(worker.id, Date.now())
+      this.workerReady.add(worker.id)
       logger(
         'info',
         'Cluster',
         `Worker ${worker.id} (PID ${worker.process.pid}) ready`
       )
 
-      if (this.liveYoutubeConfig.refreshToken || this.liveYoutubeConfig.visitorData) {
-        logger('info', 'Cluster', `Syncing live YouTube config to new worker ${worker.id}`)
-        this.execute(worker, 'updateYoutubeConfig', this.liveYoutubeConfig)
-          .catch(err => logger('error', 'Cluster', `Failed to sync config to worker ${worker.id}: ${err.message}`))
+      if (
+        this.liveYoutubeConfig.refreshToken ||
+        this.liveYoutubeConfig.visitorData
+      ) {
+        logger(
+          'info',
+          'Cluster',
+          `Syncing live YouTube config to new worker ${worker.id}`
+        )
+        this.execute(
+          worker,
+          'updateYoutubeConfig',
+          this.liveYoutubeConfig
+        ).catch((err) =>
+          logger(
+            'error',
+            'Cluster',
+            `Failed to sync config to worker ${worker.id}: ${err.message}`
+          )
+        )
       }
     } else if (global.nodelink) {
       global.nodelink.handleIPCMessage(msg)
@@ -465,8 +480,10 @@ export default class WorkerManager {
   }
 
   setLiveYoutubeConfig(config) {
-    if (config.refreshToken) this.liveYoutubeConfig.refreshToken = config.refreshToken
-    if (config.visitorData) this.liveYoutubeConfig.visitorData = config.visitorData
+    if (config.refreshToken)
+      this.liveYoutubeConfig.refreshToken = config.refreshToken
+    if (config.visitorData)
+      this.liveYoutubeConfig.visitorData = config.visitorData
   }
 
   _flushStatsUpdates() {
@@ -521,7 +538,11 @@ export default class WorkerManager {
     const threshold = this.scalingConfig.maxPlayersPerWorker
 
     if (minCost >= threshold && this.workers.length < this.maxWorkers) {
-      logger('debug', 'Cluster', `Best worker is saturated (Cost: ${minCost.toFixed(2)}). Forking new worker.`)
+      logger(
+        'debug',
+        'Cluster',
+        `Best worker is saturated (Cost: ${minCost.toFixed(2)}). Forking new worker.`
+      )
       const newWorker = this.forkWorker()
       if (newWorker) {
         this.assignGuildToWorker(playerKey, newWorker)
@@ -539,11 +560,27 @@ export default class WorkerManager {
     // Warning logs if system is squeezed
     if (minCost >= threshold) {
       if (this.workers.length >= this.maxWorkers) {
-        logger('warn', 'Cluster', '\x1b[31m! THIS SERVER IS OPERATING AT CRITICAL CAPACITY !\x1b[0m')
-        logger('warn', 'Cluster', '\x1b[31mIt is EXTREMELY RECOMMENDED that you scale your instance.\x1b[0m')
-        logger('warn', 'Cluster', '\x1b[31mIf this client serves a large volume of users or multiple bots, it is time to implement a server mesh for better performance.\x1b[0m')
+        logger(
+          'warn',
+          'Cluster',
+          '\x1b[31m! THIS SERVER IS OPERATING AT CRITICAL CAPACITY !\x1b[0m'
+        )
+        logger(
+          'warn',
+          'Cluster',
+          '\x1b[31mIt is EXTREMELY RECOMMENDED that you scale your instance.\x1b[0m'
+        )
+        logger(
+          'warn',
+          'Cluster',
+          '\x1b[31mIf this client serves a large volume of users or multiple bots, it is time to implement a server mesh for better performance.\x1b[0m'
+        )
       } else {
-        logger('warn', 'Cluster', `Worker #${bestWorker.id} is operating under heavy load (squeezed) :p`)
+        logger(
+          'warn',
+          'Cluster',
+          `Worker #${bestWorker.id} is operating under heavy load (squeezed) :p`
+        )
       }
     }
 
@@ -635,7 +672,7 @@ export default class WorkerManager {
       const lastHealthCheck = this.workerHealth.get(workerId) || 0
       const startTime = this.workerStartTime.get(workerId) || now
       const uptimeSeconds = Math.floor((now - startTime) / 1000)
-      const isHealthy = (now - lastHealthCheck) < 30000
+      const isHealthy = now - lastHealthCheck < 30000
 
       workerMetrics[uniqueId] = {
         clusterId: workerId,
@@ -788,6 +825,27 @@ export default class WorkerManager {
         } else {
           reject(new Error('Worker disconnected and max retries reached'))
         }
+        return
+      }
+
+      if (!this.workerReady.has(worker.id)) {
+        logger(
+          'debug',
+          'Cluster',
+          `Waiting for worker ${worker.id} to be ready before sending ${type}`
+        )
+        let attempts = 0
+        const checkReady = setInterval(() => {
+          attempts++
+          if (this.workerReady.has(worker.id) || !worker.isConnected()) {
+            clearInterval(checkReady)
+            if (worker.isConnected()) {
+              worker.send({ type, requestId, payload })
+            }
+          } else if (attempts > 50) {
+            clearInterval(checkReady)
+          }
+        }, 100)
         return
       }
 

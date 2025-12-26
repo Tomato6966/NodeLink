@@ -1,5 +1,5 @@
-import { monitorEventLoopDelay } from 'node:perf_hooks'
 import os from 'node:os'
+import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { GatewayEvents } from './constants.js'
 
 let lastCpuUsage = process.cpuUsage()
@@ -67,7 +67,11 @@ nodelink.registerWorkerInterceptor = (fn) => {
 
 nodelink.registerSource = (name, source) => {
   if (!nodelink.sources) {
-    logger('warn', 'Worker', 'Cannot register source (sources manager not ready).')
+    logger(
+      'warn',
+      'Worker',
+      'Cannot register source (sources manager not ready).'
+    )
     return
   }
   nodelink.sources.sources.set(name, source)
@@ -81,7 +85,8 @@ nodelink.registerFilter = (name, filter) => {
 }
 
 nodelink.registerAudioInterceptor = (interceptor) => {
-  if (!nodelink.extensions.audioInterceptors) nodelink.extensions.audioInterceptors = []
+  if (!nodelink.extensions.audioInterceptors)
+    nodelink.extensions.audioInterceptors = []
   nodelink.extensions.audioInterceptors.push(interceptor)
   logger('info', 'Worker', 'Registered custom audio interceptor')
 }
@@ -140,7 +145,11 @@ async function processQueue() {
         const shouldBlock = await interceptor(type, payload)
         if (shouldBlock === true) {
           if (process.connected && requestId) {
-             process.send({ type: 'commandResult', requestId, payload: { intercepted: true } })
+            process.send({
+              type: 'commandResult',
+              requestId,
+              payload: { intercepted: true }
+            })
           }
           setImmediate(processQueue)
           return
@@ -355,7 +364,10 @@ async function processQueue() {
           const youtube = nodelink.sources.sources.get('youtube')
 
           if (!youtube) {
-            result = { success: false, reason: 'YouTube source not loaded on this worker' }
+            result = {
+              success: false,
+              reason: 'YouTube source not loaded on this worker'
+            }
             break
           }
 
@@ -364,9 +376,17 @@ async function processQueue() {
               youtube.oauth.refreshToken = refreshToken
               youtube.oauth.accessToken = null
               youtube.oauth.tokenExpiry = 0
-              logger('info', 'Worker', 'YouTube OAuth refresh token updated via API.')
+              logger(
+                'info',
+                'Worker',
+                'YouTube OAuth refresh token updated via API.'
+              )
             } else {
-              logger('warn', 'Worker', 'Cannot update refreshToken: youtube.oauth is undefined.')
+              logger(
+                'warn',
+                'Worker',
+                'Cannot update refreshToken: youtube.oauth is undefined.'
+              )
             }
           }
 
@@ -375,13 +395,21 @@ async function processQueue() {
               youtube.ytContext.client.visitorData = visitorData
               logger('info', 'Worker', 'YouTube visitorData updated via API.')
             } else {
-              logger('warn', 'Worker', 'Cannot update visitorData: youtube.ytContext.client is undefined.')
+              logger(
+                'warn',
+                'Worker',
+                'Cannot update visitorData: youtube.ytContext.client is undefined.'
+              )
             }
           }
 
           result = { success: true }
         } catch (err) {
-          logger('error', 'Worker', `Error updating YouTube config: ${err.message}`)
+          logger(
+            'error',
+            'Worker',
+            `Error updating YouTube config: ${err.message}`
+          )
           result = { success: false, error: err.message }
         }
         break
@@ -532,23 +560,35 @@ setInterval(() => {
 
     const mem = process.memoryUsage()
 
-    process.send({
-      type: 'workerStats',
-      pid: process.pid,
-      stats: {
-        players: localPlayers,
-        playingPlayers: localPlayingPlayers,
-        commandQueueLength: commandQueue.length,
-        cpu: { nodelinkLoad },
-        eventLoopLag: hndl.mean / 1e6,
-        memory: {
-          used: mem.heapUsed,
-          allocated: mem.heapTotal
-        },
-        frameStats: localFrameStats
+    if (process.connected) {
+      const success = process.send({
+        type: 'workerStats',
+        pid: process.pid,
+        stats: {
+          players: localPlayers,
+          playingPlayers: localPlayingPlayers,
+          commandQueueLength: commandQueue.length,
+          cpu: { nodelinkLoad },
+          eventLoopLag: hndl.mean / 1e6,
+          memory: {
+            used: mem.heapUsed,
+            allocated: mem.heapTotal
+          },
+          frameStats: localFrameStats
+        }
+      })
+
+      if (!success) {
+        logger(
+          'warn',
+          'Worker-IPC',
+          'IPC channel saturated, skipping non-critical workerStats update.'
+        )
       }
-    })
+    }
   } catch (e) {
-    logger('error', 'Worker-IPC', `Failed to send workerStats: ${e.message}`)
+    if (process.connected) {
+      logger('error', 'Worker-IPC', `Failed to send workerStats: ${e.message}`)
+    }
   }
 }, metricsInterval)

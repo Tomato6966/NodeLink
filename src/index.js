@@ -14,6 +14,7 @@ import sourceManager from './managers/sourceManager.js'
 import statsManager from './managers/statsManager.js'
 import OAuth from './sources/youtube/OAuth.js'
 import {
+  applyEnvOverrides,
   checkForUpdates,
   cleanupHttpAgents,
   cleanupLogger,
@@ -24,15 +25,14 @@ import {
   logger,
   parseClient,
   validateProperty,
-  verifyDiscordID,
-  applyEnvOverrides
+  verifyDiscordID
 } from './utils.js'
 import 'dotenv/config'
 import { GatewayEvents } from './constants.js'
 import DosProtectionManager from './managers/dosProtectionManager.js'
 import PlayerManager from './managers/playerManager.js'
-import RateLimitManager from './managers/rateLimitManager.js'
 import PluginManager from './managers/pluginManager.js'
+import RateLimitManager from './managers/rateLimitManager.js'
 
 let config
 
@@ -66,7 +66,7 @@ try {
 }
 
 // Apply environment variable overrides after config is loaded
-applyEnvOverrides(config);
+applyEnvOverrides(config)
 
 const clusterEnabled =
   process.env.CLUSTER_ENABLED?.toLowerCase() === 'true' ||
@@ -162,7 +162,7 @@ class NodelinkServer {
       players: 0,
       playingPlayers: 0
     }
-    
+
     this.extensions = {
       sources: new Map(),
       filters: new Map(),
@@ -173,9 +173,10 @@ class NodelinkServer {
       audioInterceptors: [],
       playerInterceptors: []
     }
-    
+
     this._globalUpdater = null
     this.supportedSourcesCache = null
+    this._heartbeatInterval = null
 
     if (isBun) {
       this.socket = new EventEmitter()
@@ -189,6 +190,31 @@ class NodelinkServer {
       'Server',
       `git branch: ${this.gitInfo.branch}, commit: ${this.gitInfo.commit}, committed on: ${new Date(this.gitInfo.commitTime).toISOString()}`
     )
+  }
+
+  _startHeartbeat() {
+    if (this._heartbeatInterval) return
+    
+    this._heartbeatInterval = setInterval(() => {
+      for (const session of this.sessions.activeSessions.values()) {
+        if (session.socket && !session.isPaused) {
+          try {
+            if (typeof session.socket.sendFrame === 'function') {
+              session.socket.sendFrame(Buffer.alloc(0), { len: 0, fin: true, opcode: 0x09 })
+            }
+          } catch (e) {
+            logger('debug', 'Server', `Failed to send heartbeat to session ${session.id}`)
+          }
+        }
+      }
+    }, 45000)
+  }
+
+  _stopHeartbeat() {
+    if (this._heartbeatInterval) {
+      clearInterval(this._heartbeatInterval)
+      this._heartbeatInterval = null
+    }
   }
 
   async getSourcesFromWorker() {
@@ -225,10 +251,7 @@ class NodelinkServer {
       this.options.server.port,
       'server.port',
       'integer between 1 and 65535',
-      (value) =>
-        Number.isInteger(value) &&
-        value >= 1 &&
-        value <= 65535
+      (value) => Number.isInteger(value) && value >= 1 && value <= 65535
     )
 
     validateProperty(
@@ -242,39 +265,28 @@ class NodelinkServer {
       this.options.playerUpdateInterval,
       'playerUpdateInterval',
       'integer between 250 and 60000 (milliseconds)',
-      (value) =>
-        Number.isInteger(value) &&
-        value >= 250 &&
-        value <= 60000
+      (value) => Number.isInteger(value) && value >= 250 && value <= 60000
     )
 
     validateProperty(
       this.options.maxSearchResults,
       'maxSearchResults',
       'integer between 1 and 100',
-      (value) =>
-        Number.isInteger(value) &&
-        value >= 1 &&
-        value <= 100
+      (value) => Number.isInteger(value) && value >= 1 && value <= 100
     )
 
     validateProperty(
       this.options.maxAlbumPlaylistLength,
       'maxAlbumPlaylistLength',
       'integer between 1 and 500',
-      (value) =>
-        Number.isInteger(value) &&
-        value >= 1 &&
-        value <= 500
+      (value) => Number.isInteger(value) && value >= 1 && value <= 500
     )
 
     validateProperty(
       this.options.trackStuckThresholdMs,
       'trackStuckThresholdMs',
       'integer >= 1000 (milliseconds)',
-      (value) =>
-        Number.isInteger(value) &&
-        value >= 1000
+      (value) => Number.isInteger(value) && value >= 1000
     )
 
     validateProperty(
@@ -282,14 +294,10 @@ class NodelinkServer {
       'zombieThresholdMs',
       `integer > trackStuckThresholdMs (${this.options.trackStuckThresholdMs})`,
       (value) =>
-        Number.isInteger(value) &&
-        value > this.options.trackStuckThresholdMs
+        Number.isInteger(value) && value > this.options.trackStuckThresholdMs
     )
 
-    validateNonNegativeInt(
-      this.options.cluster.workers,
-      'cluster.workers'
-    )
+    validateNonNegativeInt(this.options.cluster.workers, 'cluster.workers')
 
     validateProperty(
       this.options.cluster.minWorkers,
@@ -303,14 +311,13 @@ class NodelinkServer {
         (this.options.cluster.workers === 0 ||
           value <= this.options.cluster.workers)
     )
-    
+
     validateProperty(
       this.options.defaultSearchSource,
       'defaultSearchSource',
       'key of an enabled source in config.sources',
       (v) =>
-        typeof v === 'string' &&
-        Boolean(this.options.sources?.[v]?.enabled)
+        typeof v === 'string' && Boolean(this.options.sources?.[v]?.enabled)
     )
 
     validateProperty(
@@ -319,14 +326,14 @@ class NodelinkServer {
       "one of ['high', 'medium', 'low', 'lowest']",
       (v) => ['high', 'medium', 'low', 'lowest'].includes(v)
     )
-    
+
     validateProperty(
       this.options.audio.resamplingQuality,
       'audio.resamplingQuality',
       "one of ['best', 'medium', 'fastest', 'zero', 'linear']",
       (v) => ['best', 'medium', 'fastest', 'zero', 'linear'].includes(v)
     )
-    
+
     validateProperty(
       this.options.routePlanner?.strategy,
       'routePlanner.strategy',
@@ -343,20 +350,15 @@ class NodelinkServer {
       )
     }
 
-    const rateLimitSections = [
-      'global',
-      'perIp',
-      'perUserId',
-      'perGuildId'
-    ]
+    const rateLimitSections = ['global', 'perIp', 'perUserId', 'perGuildId']
 
-    if (this.options.rateLimit?.enabled !== false) { 
+    if (this.options.rateLimit?.enabled !== false) {
       for (let i = 0; i < rateLimitSections.length; i++) {
         const section = rateLimitSections[i]
         const config = this.options.rateLimit?.[section]
-        
+
         if (!config) continue
-        
+
         validatePositiveInt(
           config.maxRequests,
           `rateLimit.${section}.maxRequests`
@@ -368,12 +370,12 @@ class NodelinkServer {
         )
 
         if (i === 0) continue
-        
+
         const parentSection = rateLimitSections[i - 1]
         const parentConfig = this.options.rateLimit?.[parentSection]
-        
+
         if (!parentConfig) continue
-        
+
         validateProperty(
           config.maxRequests,
           `rateLimit.${section}.maxRequests`,
@@ -386,9 +388,9 @@ class NodelinkServer {
       }
     }
 
-    const spotify = this.options.sources?.spotify 
-    const applemusic = this.options.sources?.applemusic 
-    const tidal = this.options.sources?.tidal 
+    const spotify = this.options.sources?.spotify
+    const applemusic = this.options.sources?.applemusic
+    const tidal = this.options.sources?.tidal
     const jiosaavn = this.options.sources?.jiosaavn
 
     if (spotify?.enabled) {
@@ -422,7 +424,7 @@ class NodelinkServer {
         (v) => v === true
       )
     }
-    
+
     if (applemusic?.enabled) {
       validateNonNegativeInt(
         applemusic.playlistLoadLimit,
@@ -508,7 +510,12 @@ class NodelinkServer {
                 }
 
                 for (const interceptor of interceptors) {
-                  const handled = await interceptor(this, socket, parsedData, clientInfo)
+                  const handled = await interceptor(
+                    this,
+                    socket,
+                    parsedData,
+                    clientInfo
+                  )
                   if (handled === true) return
                 }
               }
@@ -841,6 +848,9 @@ class NodelinkServer {
       requestHandler(this, req, res)
     )
 
+    this.server.keepAliveTimeout = 65000
+    this.server.headersTimeout = 66000
+
     this.server.on('upgrade', (request, socket, head) => {
       const { remoteAddress, remotePort } = request.socket
       const isInternal =
@@ -849,7 +859,9 @@ class NodelinkServer {
       const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort})`
 
       const rejectUpgrade = (status, statusText, body) => {
-        socket.write(`HTTP/1.1 ${status} ${statusText}\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`)
+        socket.write(
+          `HTTP/1.1 ${status} ${statusText}\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`
+        )
         socket.destroy()
       }
 
@@ -880,7 +892,11 @@ class NodelinkServer {
           'Server',
           `Unauthorized connection attempt from ${clientAddress} - Invalid client-name provided`
         )
-        return rejectUpgrade(400, 'Bad Request', 'Invalid or missing Client-Name header.')
+        return rejectUpgrade(
+          400,
+          'Bad Request',
+          'Invalid or missing Client-Name header.'
+        )
       }
 
       let sessionId = headers['session-id']
@@ -932,7 +948,11 @@ class NodelinkServer {
           'Server',
           `Unauthorized connection attempt from ${clientAddress} - Invalid path provided`
         )
-        return rejectUpgrade(404, 'Not Found', 'Invalid path for WebSocket upgrade.')
+        return rejectUpgrade(
+          404,
+          'Not Found',
+          'Invalid path for WebSocket upgrade.'
+        )
       }
     })
   }
@@ -987,7 +1007,9 @@ class NodelinkServer {
       1,
       this.options?.statsUpdateInterval ?? 30000
     )
-    const metricsInterval = this.options?.metrics?.enabled ? 5000 : statsSendInterval
+    const metricsInterval = this.options?.metrics?.enabled
+      ? 5000
+      : statsSendInterval
     const zombieThreshold = this.options?.zombieThresholdMs ?? 60000
 
     this._globalUpdater = setInterval(() => {
@@ -1053,7 +1075,9 @@ class NodelinkServer {
       }
 
       const stats = getStats(this)
-      const workerMetrics = this.workerManager ? this.workerManager.getWorkerMetrics() : null
+      const workerMetrics = this.workerManager
+        ? this.workerManager.getWorkerMetrics()
+        : null
       this.statsManager.updateStatsMetrics(stats, workerMetrics)
 
       if (now - lastStatsSendTime >= statsSendInterval) {
@@ -1153,7 +1177,7 @@ class NodelinkServer {
 
     await this.statsManager.initialize()
     await this.pluginManager.load('master')
-    
+
     if (!startOptions.isClusterPrimary) {
       await this.pluginManager.load('worker')
     }
@@ -1202,6 +1226,11 @@ class NodelinkServer {
     } else {
       this._startGlobalUpdater()
     }
+    
+    if (!startOptions.isClusterPrimary || clusterEnabled) {
+      this._startHeartbeat()
+    }
+
     this.connectionManager.start()
     return this
   }
@@ -1212,14 +1241,18 @@ class NodelinkServer {
       1,
       this.options?.statsUpdateInterval ?? 30000
     )
-    const metricsInterval = this.options?.metrics?.enabled ? 5000 : statsSendInterval
+    const metricsInterval = this.options?.metrics?.enabled
+      ? 5000
+      : statsSendInterval
 
     let lastStatsSendTime = 0
 
     this._globalUpdater = setInterval(() => {
       const now = Date.now()
       const stats = getStats(this)
-      const workerMetrics = this.workerManager ? this.workerManager.getWorkerMetrics() : null
+      const workerMetrics = this.workerManager
+        ? this.workerManager.getWorkerMetrics()
+        : null
       this.statsManager.updateStatsMetrics(stats, workerMetrics)
 
       const sessionCount = this.sessions.activeSessions?.size || 0
@@ -1239,7 +1272,11 @@ class NodelinkServer {
 
   registerSource(name, source) {
     if (!this.sources) {
-      logger('warn', 'Server', 'Cannot register source in this context (sources manager not available).')
+      logger(
+        'warn',
+        'Server',
+        'Cannot register source in this context (sources manager not available).'
+      )
       return
     }
     this.sources.sources.set(name, source)
@@ -1272,7 +1309,8 @@ class NodelinkServer {
   }
 
   registerAudioInterceptor(interceptor) {
-    if (!this.extensions.audioInterceptors) this.extensions.audioInterceptors = []
+    if (!this.extensions.audioInterceptors)
+      this.extensions.audioInterceptors = []
     this.extensions.audioInterceptors.push(interceptor)
     logger('info', 'Server', 'Registered custom audio interceptor')
   }
@@ -1295,7 +1333,11 @@ if (clusterEnabled && cluster.isPrimary) {
       await OAuth.acquireRefreshToken()
       process.exit(0)
     } catch (error) {
-      logger('error', 'OAuth', `YouTube OAuth token acquisition failed: ${error.message}`)
+      logger(
+        'error',
+        'OAuth',
+        `YouTube OAuth token acquisition failed: ${error.message}`
+      )
       process.exit(1)
     }
   }
@@ -1309,14 +1351,34 @@ if (clusterEnabled && cluster.isPrimary) {
     await nserver.start({ isClusterPrimary: true })
     global.nodelink = nserver
 
-    process.on('beforeExit', () => {
-      workerManager.destroy()
-      nserver._cleanupWebSocketServer()
+        const shutdown = async () => {
+
+          logger('info', 'Server', 'Shutdown signal received. Cleaning up resources...')
+
+          
+
+          nserver._stopHeartbeat()
+
+          workerManager.destroy()
+
+          nserver._cleanupWebSocketServer()
+
+      if (nserver.server?.listening) {
+        await new Promise((resolve) => nserver.server.close(resolve))
+        logger('info', 'Server', 'HTTP server closed.')
+      }
+
       cleanupHttpAgents()
-      cleanupLogger()
       nserver.rateLimitManager.destroy()
       nserver.dosProtectionManager.destroy()
-    })
+      cleanupLogger()
+
+      process.exit(0)
+    }
+
+    process.on('beforeExit', shutdown)
+    process.on('SIGINT', shutdown)
+    process.on('SIGTERM', shutdown)
 
     return nserver
   })()
@@ -1336,13 +1398,32 @@ if (clusterEnabled && cluster.isPrimary) {
       `Single-process server running (PID ${process.pid})`
     )
 
-    process.on('beforeExit', () => {
-      nserver._cleanupWebSocketServer()
+        const shutdown = async () => {
+
+          logger('info', 'Server', 'Shutdown signal received. Cleaning up resources...')
+
+          
+
+          nserver._stopHeartbeat()
+
+          nserver._cleanupWebSocketServer()
+
+      if (nserver.server?.listening) {
+        await new Promise((resolve) => nserver.server.close(resolve))
+        logger('info', 'Server', 'HTTP server closed.')
+      }
+
       cleanupHttpAgents()
-      cleanupLogger()
       nserver.rateLimitManager.destroy()
       nserver.dosProtectionManager.destroy()
-    })
+      cleanupLogger()
+
+      process.exit(0)
+    }
+
+    process.on('beforeExit', shutdown)
+    process.on('SIGINT', shutdown)
+    process.on('SIGTERM', shutdown)
 
     return nserver
   })()

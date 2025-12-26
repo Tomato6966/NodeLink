@@ -3,6 +3,12 @@ import { clamp16Bit } from './filters/dsp/clamp16Bit.js'
 
 const FADE_FRAMES = 50 // 50 frames * 20ms/frame = 1 second fade
 
+const VOLUME_LUT = new Int32Array(151)
+for (let i = 0; i <= 150; i++) {
+  const floatMultiplier = Math.tan(i * 0.0079)
+  VOLUME_LUT[i] = Math.floor(floatMultiplier * 10000)
+}
+
 export class VolumeTransformer extends Transform {
   constructor(options = {}) {
     super({ highWaterMark: 3840, ...options })
@@ -16,9 +22,9 @@ export class VolumeTransformer extends Transform {
   }
 
   _setupMultipliers(activeVolumePercent) {
-    if (activeVolumePercent <= 150) {
-      const floatMultiplier = Math.tan(activeVolumePercent * 0.0079)
-      this.integerMultiplier = Math.floor(floatMultiplier * 10000)
+    const roundedPercent = Math.round(activeVolumePercent)
+    if (roundedPercent <= 150) {
+      this.integerMultiplier = VOLUME_LUT[Math.max(0, roundedPercent)]
     } else {
       this.integerMultiplier = Math.floor((24621 * activeVolumePercent) / 150)
     }
@@ -59,12 +65,17 @@ export class VolumeTransformer extends Transform {
       this.lastVolumePercent = volumePercent
     }
 
-    const samples = new Int16Array(chunk.buffer, chunk.byteOffset, chunk.length / 2)
+    const samples = new Int16Array(
+      chunk.buffer,
+      chunk.byteOffset,
+      chunk.length / 2
+    )
     const multiplier = this.integerMultiplier
 
     for (let i = 0; i < samples.length; i++) {
       const value = (samples[i] * multiplier) / 10000
-      samples[i] = value < -32768 ? -32768 : (value > 32767 ? 32767 : Math.round(value))
+      samples[i] =
+        value < -32768 ? -32768 : value > 32767 ? 32767 : Math.round(value)
     }
 
     this.push(chunk)
