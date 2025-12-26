@@ -7,10 +7,12 @@ import Compressor from './filters/compressor.js'
 import Distortion from './filters/distortion.js'
 import Echo from './filters/echo.js'
 import Equalizer from './filters/equalizer.js'
+import Flanger from './filters/flanger.js'
 import Highpass from './filters/highpass.js'
 import Karaoke from './filters/karaoke.js'
 import Lowpass from './filters/lowpass.js'
 import Phaser from './filters/phaser.js'
+import Reverb from './filters/reverb.js'
 import Rotation from './filters/rotation.js'
 import Timescale from './filters/timescale.js'
 import Tremolo from './filters/tremolo.js'
@@ -38,7 +40,9 @@ export class FiltersManager extends Transform {
       echo: new Echo(),
       phaser: new Phaser(),
       timescale: new Timescale(),
-      spatial: new Spatial()
+      spatial: new Spatial(),
+      reverb: new Reverb(),
+      flanger: new Flanger()
     }
 
     if (this.nodelink.extensions?.filters) {
