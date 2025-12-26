@@ -27,6 +27,13 @@ export default class SoundCloudSource {
   }
 
   async setup() {
+    const cachedId = this.nodelink.credentialManager.get('soundcloud_client_id')
+    if (cachedId) {
+      this.clientId = cachedId
+      logger('info', 'Sources', `Loaded SoundCloud (clientId: ${this.clientId}) from CredentialManager`)
+      return true
+    }
+
     try {
       const mainPage = await makeRequest(SOUNDCLOUD_URL, { method: 'GET' })
 
@@ -61,6 +68,7 @@ export default class SoundCloudSource {
         )
 
         this.clientId = clientId
+        this.nodelink.credentialManager.set('soundcloud_client_id', clientId, 7 * 24 * 60 * 60 * 1000)
         logger('info', 'Sources', `Loaded SoundCloud (clientId: ${this.clientId})`)
 
         return true

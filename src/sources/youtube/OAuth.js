@@ -34,6 +34,13 @@ export default class OAuth {
       return this.accessToken
     }
 
+    const cachedToken = this.nodelink.credentialManager.get('yt_access_token')
+    if (cachedToken) {
+      this.accessToken = cachedToken
+      this.tokenExpiry = Date.now() + 3500000 // Assume ~1h from now
+      return this.accessToken
+    }
+
     const maxTokenAttempts = this.refreshToken.length
     let tokensTried = 0
 
@@ -66,6 +73,7 @@ export default class OAuth {
           if (!error && statusCode === 200 && body.access_token) {
             this.accessToken = body.access_token
             this.tokenExpiry = Date.now() + body.expires_in * 1000 - 30000
+            this.nodelink.credentialManager.set('yt_access_token', this.accessToken, body.expires_in * 1000 - 30000)
             return this.accessToken
           }
         } catch (e) {}

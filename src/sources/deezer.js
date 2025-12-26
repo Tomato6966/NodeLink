@@ -24,6 +24,18 @@ export default class DeezerSource {
   async setup() {
     logger('info', 'Sources', 'Initializing Deezer source...')
 
+    const cachedCsrf = this.nodelink.credentialManager.get('deezer_csrf_token')
+    const cachedLicense = this.nodelink.credentialManager.get('deezer_license_token')
+    const cachedCookie = this.nodelink.credentialManager.get('deezer_cookie')
+
+    if (cachedCsrf && cachedLicense && cachedCookie) {
+      this.csrfToken = cachedCsrf
+      this.licenseToken = cachedLicense
+      this.cookie = cachedCookie
+      logger('info', 'Sources', 'Loaded Deezer credentials from CredentialManager.')
+      return true
+    }
+
     try {
       let initialCookie = ''
       const arl = this.config.sources?.deezer?.arl
@@ -57,6 +69,10 @@ export default class DeezerSource {
 
       this.csrfToken = userDataRes.body.results.checkForm
       this.licenseToken = userDataRes.body.results.USER.OPTIONS.license_token
+
+      this.nodelink.credentialManager.set('deezer_csrf_token', this.csrfToken, 24 * 60 * 60 * 1000)
+      this.nodelink.credentialManager.set('deezer_license_token', this.licenseToken, 24 * 60 * 60 * 1000)
+      this.nodelink.credentialManager.set('deezer_cookie', this.cookie, 24 * 60 * 60 * 1000)
 
       if (!this.csrfToken || !this.licenseToken) {
         throw new Error('CSRF Token or License Token not found in response.')

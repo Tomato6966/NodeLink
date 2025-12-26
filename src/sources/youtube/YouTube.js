@@ -440,6 +440,16 @@ export default class YouTubeSource {
   }
 
   async _fetchVisitorData() {
+    const cachedVisitorData = this.nodelink.credentialManager.get('yt_visitor_data')
+    const cachedPlayerScript = this.nodelink.credentialManager.get('yt_player_script_url')
+
+    if (cachedVisitorData && cachedPlayerScript) {
+      this.ytContext.client.visitorData = cachedVisitorData
+      this.cipherManager.setPlayerScriptUrl(cachedPlayerScript)
+      logger('debug', 'YouTube', 'Context and player script loaded from cache. Skipping network request.')
+      return
+    }
+
     logger('debug', 'YouTube', 'Fetching visitor data...')
     let playerScriptUrl = null
 
@@ -455,6 +465,7 @@ export default class YouTubeSource {
         const visitorMatch = data?.match(/"VISITOR_DATA":"([^"]+)"/)
         if (visitorMatch?.[1]) {
           this.ytContext.client.visitorData = visitorMatch[1]
+          this.nodelink.credentialManager.set('yt_visitor_data', visitorMatch[1], 24 * 60 * 60 * 1000)
           visitorFound = true
         }
 
@@ -464,6 +475,7 @@ export default class YouTubeSource {
             /\/[a-z]{2}_[A-Z]{2}\//,
             '/en_US/'
           )
+          this.nodelink.credentialManager.set('yt_player_script_url', playerScriptUrl, 12 * 60 * 60 * 1000)
           logger('debug', 'YouTube', `Player script URL: ${playerScriptUrl}`)
         }
       }

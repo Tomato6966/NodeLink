@@ -29,6 +29,13 @@ export default class SpotifySource {
   }
 
   async setup() {
+    const cachedToken = this.nodelink.credentialManager.get('spotify_access_token')
+    if (cachedToken) {
+      this.accessToken = cachedToken
+      this.tokenInitialized = true
+      return true
+    }
+
     if (this.tokenInitialized && this._isTokenValid()) return true
 
     try {
@@ -115,6 +122,7 @@ export default class SpotifySource {
 
       this.accessToken = tokenData.access_token
       this.tokenExpiry = Date.now() + tokenData.expires_in * 1000
+      this.nodelink.credentialManager.set('spotify_access_token', this.accessToken, tokenData.expires_in * 1000)
       this.tokenInitialized = true
       return true
     } catch (e) {

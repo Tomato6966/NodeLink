@@ -21,6 +21,16 @@ export default class PandoraSource {
 
     this.setupPromise = (async () => {
       try {
+        const cachedAuth = this.nodelink.credentialManager.get('pandora_auth_token')
+        const cachedCsrf = this.nodelink.credentialManager.get('pandora_csrf_token')
+
+        if (cachedAuth && cachedCsrf) {
+          this.authToken = cachedAuth
+          this.csrfToken = cachedCsrf
+          logger('info', 'Pandora', 'Loaded Pandora credentials from CredentialManager.')
+          return true
+        }
+
         logger('debug', 'Pandora', 'Setting Pandora auth and CSRF token.')
 
         const pandoraRequest = await makeRequest('https://www.pandora.com', {
@@ -83,6 +93,9 @@ export default class PandoraSource {
         }
 
         this.authToken = tokenRequest.body.authToken
+
+        this.nodelink.credentialManager.set('pandora_auth_token', this.authToken, 24 * 60 * 60 * 1000)
+        this.nodelink.credentialManager.set('pandora_csrf_token', this.csrfToken, 24 * 60 * 60 * 1000)
 
         logger('info', 'Pandora', 'Successfully set Pandora auth and CSRF token.')
         return true

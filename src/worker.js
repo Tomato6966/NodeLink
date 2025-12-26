@@ -3,6 +3,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks'
 import v8 from 'node:v8'
 import { GatewayEvents } from './constants.js'
 import ConnectionManager from './managers/connectionManager.js'
+import CredentialManager from './managers/credentialManager.js'
 import LyricsManager from './managers/lyricsManager.js'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
@@ -52,6 +53,7 @@ const nodelink = {
 }
 
 nodelink.statsManager = new StatsManager(nodelink)
+nodelink.credentialManager = new CredentialManager(nodelink)
 nodelink.sources = new SourceManager(nodelink)
 nodelink.lyrics = new LyricsManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(nodelink)
@@ -293,6 +295,7 @@ nodelink.registerAudioInterceptor = (interceptor) => {
 }
 
 async function initialize() {
+  await nodelink.credentialManager.load()
   await nodelink.sources.loadFolder()
   await nodelink.lyrics.loadFolder()
   await nodelink.statsManager.initialize()

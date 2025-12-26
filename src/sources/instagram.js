@@ -25,7 +25,15 @@ export default class InstagramSource {
   }
 
   async setup() {
-    logger('info', 'Sources', 'Fetching Instagram API parameters...')
+    logger('info', 'Sources', 'Checking Instagram API parameters...')
+
+    const cachedConfig = this.nodelink.credentialManager.get('instagram_api_config')
+    if (cachedConfig) {
+      this.apiConfig = { ...this.apiConfig, ...cachedConfig }
+      logger('info', 'Sources', 'Loaded Instagram parameters from CredentialManager.')
+      return true
+    }
+
     try {
       const response = await makeRequest('https://www.instagram.com/', {
         method: 'GET',
@@ -63,6 +71,13 @@ export default class InstagramSource {
       this.apiConfig.igAppId = igAppId
       this.apiConfig.fbLsd = fbLsd
       if (docIdPost) this.apiConfig.docId_post = docIdPost
+
+      this.nodelink.credentialManager.set('instagram_api_config', {
+        csrfToken: this.apiConfig.csrfToken,
+        igAppId: this.apiConfig.igAppId,
+        fbLsd: this.apiConfig.fbLsd,
+        docId_post: this.apiConfig.docId_post
+      }, 24 * 60 * 60 * 1000)
 
       logger('info', 'Sources', 'Loaded Instagram source.')
       return true

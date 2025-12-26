@@ -119,6 +119,16 @@ export default class TwitchSource {
   }
 
   async setup() {
+    const cachedId = this.nodelink.credentialManager.get('twitch_client_id')
+    const cachedDevice = this.nodelink.credentialManager.get('twitch_device_id')
+
+    if (cachedId && cachedDevice) {
+      this.clientId = cachedId
+      this.deviceId = cachedDevice
+      logger('info', 'Sources', 'Loaded Twitch parameters from CredentialManager.')
+      return true
+    }
+
     try {
       const { body, headers, error, statusCode } = await http1makeRequest(
         'https://www.twitch.tv/',
@@ -172,6 +182,12 @@ export default class TwitchSource {
           'Failed to extract device ID from Twitch page.'
         )
       }
+
+      if (this.deviceId) {
+        this.nodelink.credentialManager.set('twitch_device_id', this.deviceId, 7 * 24 * 60 * 60 * 1000)
+      }
+
+      this.nodelink.credentialManager.set('twitch_client_id', this.clientId, 7 * 24 * 60 * 60 * 1000)
 
       logger(
         'info',

@@ -38,10 +38,10 @@ export default class TidalSource {
   async setup() {
     if (this.token && this.token !== 'token_here') return true
 
-    const cachedToken = await this._loadTokenFromCache().catch(() => null)
+    const cachedToken = this.nodelink.credentialManager.get('tidal_token')
     if (cachedToken) {
       this.token = cachedToken
-      logger('info', 'Tidal', 'Loaded valid token from cache.')
+      logger('info', 'Tidal', 'Loaded valid token from CredentialManager.')
       return true
     }
 
@@ -54,9 +54,7 @@ export default class TidalSource {
       if (token) {
         this.token = token
         logger('info', 'Tidal', 'Fetched new token.')
-        await this._saveTokenToCache(token).catch((err) =>
-          logger('warn', 'Tidal', `Cache save failed: ${err.message}`)
-        )
+        this.nodelink.credentialManager.set('tidal_token', token, CACHE_VALIDITY_DAYS * 24 * 60 * 60 * 1000)
       } else {
         logger('warn', 'Tidal', 'No clientId found in remote asset')
       }
@@ -65,53 +63,6 @@ export default class TidalSource {
     }
 
     return true
-  }
-
-  async _loadTokenFromCache() {
-    try {
-      await fs.mkdir(path.dirname(this.tokenCachePath), { recursive: true })
-      const data = await fs.readFile(this.tokenCachePath, 'utf-8')
-      const { token, timestamp } = JSON.parse(data)
-
-      if (!token || !timestamp) return null
-
-      const cacheAge = Date.now() - timestamp
-      const maxAge = CACHE_VALIDITY_DAYS * 24 * 60 * 60 * 1000
-
-      if (cacheAge > maxAge) {
-        logger('info', 'Tidal', 'Cached token has expired.')
-        return null
-      }
-
-      return token
-    } catch (error) {
-      if (error.code !== 'ENOENT') {
-        logger('warn', 'Tidal', `Could not read token cache: ${error.message}`)
-      }
-      return null
-    }
-  }
-
-  async _saveTokenToCache(token) {
-    try {
-      await fs.mkdir(path.dirname(this.tokenCachePath), { recursive: true })
-      const dataToCache = {
-        token: token,
-        timestamp: Date.now()
-      }
-      await fs.writeFile(
-        this.tokenCachePath,
-        JSON.stringify(dataToCache),
-        'utf-8'
-      )
-      logger('info', 'Tidal', 'Saved new token to cache file.')
-    } catch (error) {
-      logger(
-        'error',
-        'Tidal',
-        `Failed to save token to cache: ${error.message}`
-      )
-    }
   }
 
   async _getJson(endpoint, params = {}) {

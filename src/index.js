@@ -7,6 +7,7 @@ import WebSocketServer from '@performanc/pwsl-server'
 
 import requestHandler from './api/index.js'
 import connectionManager from './managers/connectionManager.js'
+import CredentialManager from './managers/credentialManager.js'
 import lyricsManager from './managers/lyricsManager.js'
 import routePlannerManager from './managers/routePlannerManager.js'
 import sessionManager from './managers/sessionManager.js'
@@ -151,6 +152,7 @@ class NodelinkServer extends EventEmitter {
       this.lyrics = null
     }
     this.routePlanner = new routePlannerManager(this)
+    this.credentialManager = new CredentialManager(this)
     this.connectionManager = new connectionManager(this)
     this.statsManager = new statsManager(this)
     this.rateLimitManager = new RateLimitManager(this)
@@ -1184,6 +1186,7 @@ class NodelinkServer extends EventEmitter {
   async start(startOptions = {}) {
     this._validateConfig()
 
+    await this.credentialManager.load()
     await this.statsManager.initialize()
     await this.pluginManager.load('master')
 

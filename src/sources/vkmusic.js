@@ -159,6 +159,14 @@ export default class VKMusicSource {
   }
     
       async setup() {
+        const cachedToken = this.nodelink.credentialManager.get('vk_access_token')
+        if (cachedToken) {
+          this.accessToken = cachedToken
+          this.hasToken = true
+          logger('info', 'VKMusic', 'Loaded access token from CredentialManager.')
+          return true
+        }
+
         if (this.accessToken || this.cookie) {
           try {
             if (!this.accessToken && this.cookie) {
@@ -204,6 +212,7 @@ export default class VKMusicSource {
           this.accessToken = body.data.access_token
           this.tokenExpiry = body.data.expires * 1000
           this.userId = body.data.user_id
+          this.nodelink.credentialManager.set('vk_access_token', this.accessToken, body.data.expires * 1000 - Date.now())
           return this.accessToken
         }
         throw new Error(`Invalid act=web_token response: ${JSON.stringify(body)}`)

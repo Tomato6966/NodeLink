@@ -60,12 +60,12 @@ export default class AppleMusicSource {
         return true
       }
 
-      const cachedToken = await this._loadTokenFromCache()
+      const cachedToken = this.nodelink.credentialManager.get('apple_media_api_token')
       if (cachedToken) {
         this.mediaApiToken = cachedToken
         this._parseToken(this.mediaApiToken)
         if (this._isTokenValid()) {
-          logger('info', 'AppleMusic', 'Loaded valid token from cache.')
+          logger('info', 'AppleMusic', 'Loaded valid token from CredentialManager.')
           this.tokenInitialized = true
           return true
         }
@@ -77,7 +77,7 @@ export default class AppleMusicSource {
         this._parseToken(this.mediaApiToken)
         if (this._isTokenValid()) {
           logger('info', 'AppleMusic', 'Loaded valid token from config file.')
-          await this._saveTokenToCache(this.mediaApiToken)
+          this.nodelink.credentialManager.set('apple_media_api_token', this.mediaApiToken, this.tokenExpiry - Date.now())
           this.tokenInitialized = true
           return true
         }
@@ -95,7 +95,7 @@ export default class AppleMusicSource {
         }
         this.mediaApiToken = newToken
         this._parseToken(this.mediaApiToken)
-        await this._saveTokenToCache(this.mediaApiToken)
+        this.nodelink.credentialManager.set('apple_media_api_token', this.mediaApiToken, this.tokenExpiry - Date.now())
         this.tokenInitialized = true
         return true
       }
@@ -116,57 +116,6 @@ export default class AppleMusicSource {
       return false
     } finally {
       this.settingUp = false
-    }
-  }
-
-  async _loadTokenFromCache() {
-    try {
-      await fs.mkdir(path.dirname(this.tokenCachePath), { recursive: true })
-      const data = await fs.readFile(this.tokenCachePath, 'utf-8')
-      const { token, timestamp } = JSON.parse(data)
-
-      if (!token || !timestamp) return null
-
-      const cacheAge = Date.now() - timestamp
-      const maxAge = CACHE_VALIDITY_DAYS * 24 * 60 * 60 * 1000
-
-      if (cacheAge > maxAge) {
-        logger('info', 'AppleMusic', 'Cached token has expired.')
-        return null
-      }
-
-      return token
-    } catch (error) {
-      if (error.code !== 'ENOENT') {
-        logger(
-          'warn',
-          'AppleMusic',
-          `Could not read token cache: ${error.message}`
-        )
-      }
-      return null
-    }
-  }
-
-  async _saveTokenToCache(token) {
-    try {
-      await fs.mkdir(path.dirname(this.tokenCachePath), { recursive: true })
-      const dataToCache = {
-        token: token,
-        timestamp: Date.now()
-      }
-      await fs.writeFile(
-        this.tokenCachePath,
-        JSON.stringify(dataToCache),
-        'utf-8'
-      )
-      logger('info', 'AppleMusic', 'Saved new token to cache file.')
-    } catch (error) {
-      logger(
-        'error',
-        'AppleMusic',
-        `Failed to save token to cache: ${error.message}`
-      )
     }
   }
 

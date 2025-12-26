@@ -24,6 +24,13 @@ export default class BilibiliLyrics {
       return this.wbiKeys
     }
 
+    const cachedKeys = this.nodelink.credentialManager.get('bilibili_wbi_keys')
+    if (cachedKeys) {
+      this.wbiKeys = cachedKeys
+      this.wbiKeysExpiry = Date.now() + 1000 * 60 * 60
+      return this.wbiKeys
+    }
+
     const { body, error } = await makeRequest('https://api.bilibili.com/x/web-interface/nav', {
       method: 'GET'
     })
@@ -50,6 +57,7 @@ export default class BilibiliLyrics {
     
     this.wbiKeys = mixinKey.slice(0, 32)
     this.wbiKeysExpiry = Date.now() + 1000 * 60 * 60
+    this.nodelink.credentialManager.set('bilibili_wbi_keys', this.wbiKeys, 1000 * 60 * 60)
     
     return this.wbiKeys
   }
