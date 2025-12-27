@@ -7,10 +7,12 @@ import Compressor from './filters/compressor.js'
 import Distortion from './filters/distortion.js'
 import Echo from './filters/echo.js'
 import Equalizer from './filters/equalizer.js'
+import Flanger from './filters/flanger.js'
 import Highpass from './filters/highpass.js'
 import Karaoke from './filters/karaoke.js'
 import Lowpass from './filters/lowpass.js'
 import Phaser from './filters/phaser.js'
+import Reverb from './filters/reverb.js'
 import Rotation from './filters/rotation.js'
 import Timescale from './filters/timescale.js'
 import Tremolo from './filters/tremolo.js'
@@ -40,7 +42,26 @@ export class FiltersManager extends Transform {
     super(options)
     this.nodelink = nodelink
     this.activeFilters = []
-    this.filterInstances = {}
+
+    this.availableFilters = {
+      tremolo: new Tremolo(),
+      vibrato: new Vibrato(),
+      lowpass: new Lowpass(),
+      highpass: new Highpass(),
+      rotation: new Rotation(),
+      karaoke: new Karaoke(),
+      distortion: new Distortion(),
+      channelMix: new ChannelMix(),
+      equalizer: new Equalizer(),
+      chorus: new Chorus(),
+      compressor: new Compressor(),
+      echo: new Echo(),
+      phaser: new Phaser(),
+      timescale: new Timescale(),
+      spatial: new Spatial(),
+      reverb: new Reverb(),
+      flanger: new Flanger()
+    }
 
     if (this.nodelink.extensions?.filters) {
       for (const [name, filter] of this.nodelink.extensions.filters) {
