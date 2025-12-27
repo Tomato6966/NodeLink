@@ -1,4 +1,4 @@
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -248,7 +248,10 @@ export default class TidalSource {
     const query = `${decodedTrack.title} ${decodedTrack.author}`
 
     try {
-      const searchResult = await this.nodelink.sources.searchWithDefault(query)
+      let searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
+      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+        searchResult = await this.nodelink.sources.searchWithDefault(query)
+      }
 
       if (
         searchResult.loadType !== 'search' ||
@@ -262,25 +265,14 @@ export default class TidalSource {
         }
       }
 
-      const tidalDuration = decodedTrack.length
-      let bestMatch = null
-      let minDurationDiff = Infinity
-
-      for (const track of searchResult.data) {
-        const durationDiff = Math.abs(track.info.length - tidalDuration)
-        if (durationDiff < minDurationDiff) {
-          minDurationDiff = durationDiff
-          bestMatch = track
+      const bestMatch = getBestMatch(searchResult.data, decodedTrack)
+      if (!bestMatch) {
+        return {
+          exception: {
+            message: 'No suitable alternative found after filtering.',
+            severity: 'common'
+          }
         }
-      }
-
-      if (!bestMatch || minDurationDiff > 5000) {
-        logger(
-          'warn',
-          'Tidal',
-          `No close match found for "${query}". Closest diff: ${minDurationDiff}ms`
-        )
-        bestMatch = searchResult.data[0]
       }
 
       const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)

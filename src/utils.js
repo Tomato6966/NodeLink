@@ -1340,6 +1340,89 @@ function applyEnvOverrides(config, prefix = 'NODELINK') {
   }
 }
 
+function getBestMatch(list, original, options = {}) {
+  const { durationTolerance = 0.15, allowExplicit = true } = options
+
+  const normalize = (str) => {
+    if (!str) return ''
+    return str
+      .toLowerCase()
+      .replace(/feat\.?/g, '')
+      .replace(/ft\.?/g, '')
+      .replace(/\s*\([^)]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^)]*\)/gi, '')
+      .replace(/\s*\[[^\]]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^\]]*\]/gi, '')
+      .replace(/[^\w\s]/g, '')
+      .trim()
+  }
+
+  const specKeywords = ['remix', 'orchestral', 'live', 'cover', 'acoustic', 'instrumental', 'karaoke', 'radio', 'edit', 'extended', 'slowed', 'reverb']
+  const findSpec = (str) => specKeywords.filter(k => str.toLowerCase().includes(k))
+  
+  const originalTitle = original.title.toLowerCase()
+  const originalSpec = findSpec(originalTitle)
+  const isOriginalExplicit = original.uri?.includes('explicit=true') || originalTitle.includes('explicit')
+  
+  const targetDuration = original.length
+  const allowedDiff = targetDuration * durationTolerance
+  const normOriginalAuthor = normalize(original.author)
+  const originalWords = new Set(normalize(original.title).split(' ').filter((w) => w.length > 1))
+
+  const scored = list
+    .map((item) => {
+      const itemTitle = item.info.title.toLowerCase()
+      const normItemTitle = normalize(itemTitle)
+      const normItemAuthor = normalize(item.info.author)
+      const itemSpec = findSpec(itemTitle)
+      const isItemClean = itemTitle.includes('clean') || itemTitle.includes('radio edit')
+      let score = 0
+
+      const itemWords = normItemTitle.split(' ').filter((w) => w.length > 1)
+      const itemWordsSet = new Set(itemWords)
+      
+      let overlap = 0
+      for (const word of originalWords) {
+        if (itemWordsSet.has(word)) overlap++
+      }
+      score += (overlap / Math.max(originalWords.size, 1)) * 300
+
+      for (const spec of specKeywords) {
+        const inOriginal = originalSpec.includes(spec)
+        const inItem = itemSpec.includes(spec)
+        if (inOriginal && inItem) score += 200
+        if (inOriginal !== inItem) score -= 300
+      }
+
+      if (isOriginalExplicit && !allowExplicit) {
+        if (isItemClean) score += 500
+      }
+
+      if (normItemAuthor.includes(normOriginalAuthor) || normOriginalAuthor.includes(normItemAuthor)) {
+        score += 150
+      } else {
+        const longer = normOriginalAuthor.length > normItemAuthor.length ? normOriginalAuthor : normItemAuthor
+        const shorter = normOriginalAuthor.length > normItemAuthor.length ? normItemAuthor : normOriginalAuthor
+        if (shorter.length > 2 && longer.includes(shorter)) score += 100
+      }
+
+      if (targetDuration > 0) {
+        const diff = Math.abs(item.info.length - targetDuration)
+        if (diff <= allowedDiff) {
+          score += (1 - diff / allowedDiff) * 100
+        } else {
+          score -= 100
+        }
+      }
+
+      if (itemTitle.includes('official audio') || itemTitle.includes('topic')) score += 50
+
+      return { item, score }
+    })
+
+  scored.sort((a, b) => b.score - a.score)
+  
+  return scored[0]?.item || list[0] || null
+}
+
 function cleanupLogger() {
   if (logRotationInterval) {
     clearInterval(logRotationInterval)
@@ -1379,5 +1462,6 @@ export {
   loadHLS,
   checkForUpdates,
   sendErrorResponse,
-  applyEnvOverrides
+  applyEnvOverrides,
+  getBestMatch
 }

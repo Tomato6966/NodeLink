@@ -1,4 +1,4 @@
-import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, makeRequest, getBestMatch } from '../utils.js'
 
 export default class PandoraSource {
   constructor(nodelink) {
@@ -633,11 +633,14 @@ export default class PandoraSource {
     }
   }
 
-  async getTrackUrl(track) {
-    const query = `${track.title} ${track.author}`
+  async getTrackUrl(decodedTrack) {
+    const query = `${decodedTrack.title} ${decodedTrack.author}`
 
     try {
-      const searchResult = await this.nodelink.sources.searchWithDefault(query)
+      let searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
+      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+        searchResult = await this.nodelink.sources.searchWithDefault(query)
+      }
 
       if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
         return {
@@ -648,9 +651,17 @@ export default class PandoraSource {
         }
       }
 
-      const bestMatch = searchResult.data[0]
-      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+      const bestMatch = getBestMatch(searchResult.data, decodedTrack)
+      if (!bestMatch) {
+        return {
+          exception: {
+            message: 'No suitable alternative found after filtering.',
+            severity: 'common'
+          }
+        }
+      }
 
+      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
       return { newTrack: bestMatch, ...streamInfo }
     } catch (e) {
       logger('error', 'Pandora', `Failed to mirror track: ${e.message}`)
