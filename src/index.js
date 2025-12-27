@@ -1123,13 +1123,40 @@ class NodelinkServer extends EventEmitter {
 
     if (this.socket) {
       try {
-        this.socket.close?.()
-        logger('info', 'WebSocket', 'WebSocket server closed successfully')
+        let closedCount = 0
+
+        for (const session of this.sessions.activeSessions.values()) {
+          if (session.socket) {
+            try {
+              session.socket.close(1000, 'Server shutdown')
+              closedCount++
+            } catch (e) {
+              try {
+                session.socket.destroy()
+              } catch (destroyErr) {
+                logger(
+                  'debug',
+                  'WebSocket',
+                  `Failed to close/destroy socket for session ${session.id}`
+                )
+              }
+            }
+          }
+        }
+
+        this.sessions.activeSessions.clear()
+        this.sessions.resumableSessions.clear()
+
+        logger(
+          'info',
+          'WebSocket',
+          `Closed ${closedCount} WebSocket connection(s) successfully`
+        )
       } catch (error) {
         logger(
           'error',
           'WebSocket',
-          `Error closing WebSocket server: ${error.message}`
+          `Error closing WebSocket connections: ${error.message}`
         )
       }
     }
@@ -1371,9 +1398,15 @@ if (clusterEnabled && cluster.isPrimary) {
       if (nserver.workerManager) nserver.workerManager.isDestroying = true
       nserver.emit('shutdown')
 
-      process.stdout.write('\n  \x1b[32m💚 Thank you for using NodeLink!\x1b[0m\n')
-      process.stdout.write('  \x1b[37mIf you have ideas, suggestions or want to report bugs, join us on Discord:\x1b[0m\n')
-      process.stdout.write('  \x1b[1m\x1b[34m➜\x1b[0m \x1b[36mhttps://discord.gg/fzjksWS65v\x1b[0m\n\n')
+      process.stdout.write(
+        '\n  \x1b[32m💚 Thank you for using NodeLink!\x1b[0m\n'
+      )
+      process.stdout.write(
+        '  \x1b[37mIf you have ideas, suggestions or want to report bugs, join us on Discord:\x1b[0m\n'
+      )
+      process.stdout.write(
+        '  \x1b[1m\x1b[34m➜\x1b[0m \x1b[36mhttps://discord.gg/fzjksWS65v\x1b[0m\n\n'
+      )
 
       logger(
         'info',
@@ -1450,9 +1483,15 @@ if (clusterEnabled && cluster.isPrimary) {
       nserver.dosProtectionManager.destroy()
       cleanupLogger()
 
-      process.stdout.write('\n  \x1b[32m💚 Thank you for using NodeLink!\x1b[0m\n')
-      process.stdout.write('  \x1b[37mIf you have ideas, suggestions or want to report bugs, join us on Discord:\x1b[0m\n')
-      process.stdout.write('  \x1b[1m\x1b[34m➜\x1b[0m \x1b[36mhttps://discord.gg/fzjksWS65v\x1b[0m\n\n')
+      process.stdout.write(
+        '\n  \x1b[32m💚 Thank you for using NodeLink!\x1b[0m\n'
+      )
+      process.stdout.write(
+        '  \x1b[37mIf you have ideas, suggestions or want to report bugs, join us on Discord:\x1b[0m\n'
+      )
+      process.stdout.write(
+        '  \x1b[1m\x1b[34m➜\x1b[0m \x1b[36mhttps://discord.gg/fzjksWS65v\x1b[0m\n\n'
+      )
 
       process.exit(0)
     }
