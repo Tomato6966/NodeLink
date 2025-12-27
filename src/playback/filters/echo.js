@@ -53,4 +53,9 @@ export default class Echo {
 
     return chunk
   }
+
+  clear() {
+    this.leftDelay.clear()
+    this.rightDelay.clear()
+  }
 }

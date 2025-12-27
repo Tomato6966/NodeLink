@@ -156,4 +156,19 @@ export default class Reverb {
 
     return output
   }
+
+  clear() {
+    for (const comb of [...this.combFiltersL, ...this.combFiltersR]) {
+      comb.clear()
+    }
+
+    for (const allpass of [...this.allpassFiltersL, ...this.allpassFiltersR]) {
+      allpass.clear()
+    }
+
+    for (const state of [...this.allpassStateL, ...this.allpassStateR]) {
+      state.x1 = 0
+      state.y1 = 0
+    }
+  }
 }

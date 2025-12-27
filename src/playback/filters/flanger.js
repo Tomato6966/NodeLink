@@ -89,4 +89,13 @@ export default class Flanger {
 
     return chunk
   }
+
+  clear() {
+    this.delayLeft.clear()
+    this.delayRight.clear()
+    this.lastLeftOutput = 0
+    this.lastRightOutput = 0
+    this.lfoLeft.phase = 0
+    this.lfoRight.phase = Math.PI / 4
+  }
 }
