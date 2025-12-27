@@ -1,17 +1,14 @@
 import { logger, makeRequest } from '../../utils.js'
 
-const CLIENT_ID =
-  '861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com'
+const CLIENT_ID = '861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com'
 const CLIENT_SECRET = 'SboVhoG9s0rNafixCSGGKXAT'
-const SCOPES =
-  'http://gdata.youtube.com https://www.googleapis.com/auth/youtube'
+const SCOPES = 'http://gdata.youtube.com https://www.googleapis.com/auth/youtube'
 
 export default class OAuth {
   constructor(nodelink) {
     this.nodelink = nodelink
 
-    const clientSettings =
-      this.nodelink.options.sources.youtube.clients.settings
+    const clientSettings = this.nodelink.options.sources.youtube.clients.settings
     let foundToken = null
     if (clientSettings) {
       for (const clientName in clientSettings) {
@@ -29,12 +26,7 @@ export default class OAuth {
   }
 
   async getAccessToken() {
-    if (!this.refreshToken.length) {
-      logger(
-        'debug',
-        'YouTube-OAuth',
-        'No refresh token configured. Skipping authentication.'
-      )
+    if (!this.refreshToken.length || (this.refreshToken.length === 1 && this.refreshToken[0] === '')) {
       return null
     }
 
@@ -42,13 +34,24 @@ export default class OAuth {
       return this.accessToken
     }
 
-    logger('info', 'YouTube-OAuth', 'Refreshing access token...')
+    const cachedToken = this.nodelink.credentialManager.get('yt_access_token')
+    if (cachedToken) {
+      this.accessToken = cachedToken
+      this.tokenExpiry = Date.now() + 3500000 // Assume ~1h from now
+      return this.accessToken
+    }
 
     const maxTokenAttempts = this.refreshToken.length
     let tokensTried = 0
 
     while (tokensTried < maxTokenAttempts) {
       const currentToken = this.refreshToken[this.currentTokenIndex]
+      if (!currentToken) {
+        this.currentTokenIndex = (this.currentTokenIndex + 1) % this.refreshToken.length
+        tokensTried++
+        continue
+      }
+
       let attempts = 0
       
       while (attempts < 3) {
@@ -70,27 +73,39 @@ export default class OAuth {
           if (!error && statusCode === 200 && body.access_token) {
             this.accessToken = body.access_token
             this.tokenExpiry = Date.now() + body.expires_in * 1000 - 30000
-            logger('info', 'YouTube-OAuth', `Successfully refreshed access token using token index ${this.currentTokenIndex}.`)
+            this.nodelink.credentialManager.set('yt_access_token', this.accessToken, body.expires_in * 1000 - 30000)
             return this.accessToken
           }
-
-          logger('warn', 'YouTube-OAuth', `Token refresh failed (Attempt ${attempts}/3, Token Index ${this.currentTokenIndex}): ${error?.message || body?.error_description || statusCode}`)
-        } catch (e) {
-          logger('warn', 'YouTube-OAuth', `Token refresh exception (Attempt ${attempts}/3, Token Index ${this.currentTokenIndex}): ${e.message}`)
-        }
+        } catch (e) {}
         
         await new Promise(r => setTimeout(r, 2000))
       }
 
-      logger('warn', 'YouTube-OAuth', `Failed to refresh access token with token index ${this.currentTokenIndex}. Trying next token if available.`)
       this.currentTokenIndex = (this.currentTokenIndex + 1) % this.refreshToken.length
       tokensTried++
     }
 
-    logger('error', 'YouTube-OAuth', 'All refresh tokens failed.')
     this.accessToken = null
     this.tokenExpiry = 0
     return null
+  }
+
+  async validateCurrentTokens() {
+    if (!this.refreshToken.length || (this.refreshToken.length === 1 && this.refreshToken[0] === '')) {
+      return false
+    }
+
+    const token = await this.getAccessToken()
+    if (token) {
+      logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m')
+      logger('info', 'OAuth', '\x1b[1m\x1b[32mYOUR refreshtoken IS VALID :)\x1b[0m')
+      logger('info', 'OAuth', '\x1b[37mPlease disable the \x1b[33mgetOAuthToken\x1b[37m option if you restarted by accident\x1b[0m')
+      logger('info', 'OAuth', '\x1b[37mand didn\'t change it to \x1b[31mfalse\x1b[37m. If you want to get a second token\x1b[0m')
+      logger('info', 'OAuth', '\x1b[37mfor fallback, follow the same steps and add \x1b[32m, ""\x1b[37m for this new token below.\x1b[0m')
+      logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m')
+      return true
+    }
+    return false
   }
 
   async getAuthHeaders() {
@@ -103,11 +118,6 @@ export default class OAuth {
   }
 
   static async acquireRefreshToken() {
-    logger(
-      'info',
-      'YouTube-OAuth',
-      'Step 1: Requesting device code from Google...'
-    )
     const data = {
       client_id: CLIENT_ID,
       scope: SCOPES
@@ -129,70 +139,49 @@ export default class OAuth {
         )
       }
 
-      logger(
-        'info',
-        'YouTube-OAuth',
-        '=================================================================='
-      )
-      logger(
-        'info',
-        'YouTube-OAuth',
-        '🚨 ALERT: DO NOT USE YOUR MAIN GOOGLE ACCOUNT! USE A SECONDARY OR BURNER ACCOUNT ONLY!'
-      )
-      logger(
-        'info',
-        'YouTube-OAuth',
-        'To authorize, visit the following URL in your browser:'
-      )
-      logger('info', 'YouTube-OAuth', `URL: ${response.verification_url}`)
-      logger(
-        'info',
-        'YouTube-OAuth',
-        `And enter the code: ${response.user_code}`
-      )
-      logger(
-        'info',
-        'YouTube-OAuth',
-        '=================================================================='
-      )
-      logger('info', 'YouTube-OAuth', 'Waiting for authorization...')
+      logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m')
+      logger('info', 'OAuth', '\x1b[1m\x1b[31m🚨 ALERT: DO NOT USE YOUR MAIN GOOGLE ACCOUNT! USE A SECONDARY OR BURNER ACCOUNT ONLY!\x1b[0m')
+      logger('info', 'OAuth', '\x1b[36mTo authorize, visit the following URL in your browser:\x1b[0m')
+      logger('info', 'OAuth', `\x1b[1m\x1b[32mURL: ${response.verification_url}\x1b[0m`)
+      logger('info', 'OAuth', `\x1b[36mAnd enter the code: \x1b[1m\x1b[37m${response.user_code}\x1b[0m`)
+      logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m')
 
       const refreshToken = await OAuth.pollForToken(
         response.device_code,
         response.interval
       )
 
-      logger(
-        'info',
-        'YouTube-OAuth',
-        '=================================================================='
-      )
-      logger('info', 'YouTube-OAuth', 'Authorization granted successfully!')
-      logger(
-        'info',
-        'YouTube-OAuth',
-        '=================================================================='
-      )
-      logger(
-        'info',
-        'YouTube-OAuth',
-        'Refresh Token (use this to obtain new Access Tokens in the future):'
-      )
-      logger('info', 'YouTube-OAuth', refreshToken)
-      logger(
-        'info',
-        'YouTube-OAuth',
-        'Save your Refresh Token in a secure place!'
-      )
-      logger(
-        'info',
-        'YouTube-OAuth',
-        '=================================================================='
-      )
+      logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m')
+      logger('info', 'OAuth', '\x1b[1m\x1b[32mAuthorization granted successfully! :)\x1b[0m')
+      logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m')
+      logger('info', 'OAuth', '\x1b[36mCopy your Refresh Token and paste it in your \x1b[1mconfig.js\x1b[36m:\x1b[0m')
+      logger('info', 'OAuth', `\x1b[1m\x1b[37m${refreshToken}\x1b[0m`)
+      logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m')
+      logger('info', 'OAuth', '\x1b[1m\x1b[31mIMPORTANT:\x1b[0m')
+      logger('info', 'OAuth', '\x1b[37mAfter pasting the token, you \x1b[1mMUST\x1b[37m set \x1b[33mgetOAuthToken\x1b[37m to \x1b[31mfalse\x1b[0m')
+      logger('info', 'OAuth', '\x1b[37motherwise the server will keep trying to obtain a new token on every restart.\x1b[0m')
+      logger('info', 'OAuth', '\x1b[33mExample JSON structure for your config.js:\x1b[0m')
+      
+      const exampleJson = JSON.stringify({
+        sources: {
+          youtube: {
+            getOAuthToken: false,
+            clients: {
+              settings: {
+                TV: {
+                  refreshToken: [refreshToken]
+                }
+              }
+            }
+          }
+        }
+      }, null, 2)
+
+      logger('info', 'OAuth', `\x1b[32m${exampleJson}\x1b[0m`)
+      logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m\n')
 
       return refreshToken
     } catch (error) {
-      logger('error', 'YouTube-OAuth', `Failed in Step 1: ${error.message}`)
       throw error
     }
   }
@@ -207,6 +196,7 @@ export default class OAuth {
 
     return new Promise((resolve, reject) => {
       const poll = async () => {
+        logger('info', 'OAuth', '\x1b[35m>>> AWAITING...\x1b[0m waiting for token :P')
         try {
           const {
             body: response,
@@ -223,43 +213,22 @@ export default class OAuth {
             } else if (response.error === 'slow_down') {
               setTimeout(poll, (interval + 5) * 1000)
             } else if (response.error === 'expired_token') {
-              logger(
-                'error',
-                'YouTube-OAuth',
-                'Authorization code expired. Please run the script again.'
-              )
               reject(new Error('Authorization code expired.'))
             } else if (response.error === 'access_denied') {
-              logger(
-                'error',
-                'YouTube-OAuth',
-                'Access denied. Authorization was cancelled.'
-              )
               reject(new Error('Access denied.'))
             } else {
-              logger(
-                'error',
-                'YouTube-OAuth',
-                `Error during polling: ${response.error_description}`
-              )
-              reject(
-                new Error(`Error during polling: ${response.error_description}`)
-              )
+              reject(new Error(`Error during polling: ${response.error_description}`))
             }
           } else {
+            logger('info', 'OAuth', '>>> TOKEN RECEIVED :)')
             resolve(response.refresh_token)
           }
         } catch (error) {
-          logger(
-            'error',
-            'YouTube-OAuth',
-            `Failed in Step 2 (Polling): ${error.message}`
-          )
           setTimeout(poll, interval * 1000)
         }
       }
 
-      setTimeout(poll, interval * 1000)
+      poll()
     })
   }
 }

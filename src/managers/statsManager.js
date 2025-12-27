@@ -206,6 +206,13 @@ export default class StatsManager {
         registers: [this.promRegister]
       })
 
+      this.promWorkerEventLoopLag = new Gauge({
+        name: 'nodelink_worker_event_loop_lag_ms',
+        help: 'Worker event loop lag in milliseconds',
+        labelNames: ['worker_id', 'worker_pid'],
+        registers: [this.promRegister]
+      })
+
       this.promWorkerCommandQueueLength = new Gauge({
         name: 'nodelink_worker_command_queue_length',
         help: 'Worker command queue length',
@@ -575,6 +582,10 @@ export default class StatsManager {
 
         if (stats.cpu) {
           this.promWorkerCpuLoad.set(labels, stats.cpu.nodelinkLoad || 0)
+        }
+
+        if (stats.eventLoopLag !== undefined && this.promWorkerEventLoopLag) {
+          this.promWorkerEventLoopLag.set(labels, stats.eventLoopLag || 0)
         }
 
         if (stats.commandQueueLength !== undefined) {

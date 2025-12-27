@@ -12,15 +12,21 @@ export default {
     commandTimeout: 6000, // Timeout for heavy operations like loadTracks (6s)
     fastCommandTimeout: 4000, // Timeout for player commands like play/pause (4s)
     maxRetries: 2, // Number of retry attempts on timeout or worker failure
+    hibernation: {
+      enabled: true,
+      timeoutMs: 1200000
+    },
     scaling: {
-      // New object to group scaling configurations
+      //scaling configurations
       maxPlayersPerWorker: 20, // Reference capacity for utilization calculation
       targetUtilization: 0.7, // Target utilization for scaling up/down
       scaleUpThreshold: 0.75, // Utilization threshold to scale up
       scaleDownThreshold: 0.3, // Utilization threshold to scale down
       checkIntervalMs: 5000, // Interval to check for scaling needs
       idleWorkerTimeoutMs: 60000, // Time in ms an idle worker should wait before being removed
-      queueLengthScaleUpFactor: 5 // How many commands in queue per active worker trigger scale up
+      queueLengthScaleUpFactor: 5, // How many commands in queue per active worker trigger scale up
+      lagPenaltyLimit: 60, // Event loop lag threshold (ms) to penalize worker cost
+      cpuPenaltyLimit: 0.85 // CPU usage threshold (85% of a core) to force scale up
     }
   },
   logging: {
@@ -55,6 +61,7 @@ export default {
   maxSearchResults: 10,
   maxAlbumPlaylistLength: 100,
   playerUpdateInterval: 2000,
+  statsUpdateInterval: 30000,
   trackStuckThresholdMs: 10000,
   zombieThresholdMs: 60000,
   enableHoloTracks: false,
@@ -82,6 +89,17 @@ export default {
   defaultSearchSource: 'youtube',
   unifiedSearchSources: ['youtube', 'soundcloud'],
   sources: {
+    vkmusic: {
+      enabled: true,
+      userToken: '', // (optional) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> response -> access_token
+      userCookie: '' // (required without userToken) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> request -> cookie (copy full cookie header)
+    },
+    amazonmusic: {
+      enabled: true
+    },
+    mixcloud: {
+      enabled: true
+    },
     deezer: {
       // arl: '',
       // decryptionKey: '',
@@ -103,6 +121,19 @@ export default {
     vimeo: {
       // Note: not 100% of the songs are currently working (but most should.), because i need to code a different extractor for every year (2010, 2011, etc. not all are done)
       enabled: true,
+    },
+    telegram: {
+      enabled: true
+    },
+    bilibili: {
+      enabled: true,
+      sessdata: '' // Optional, improves access to some videos (premium and 4k+)
+    },
+    genius: {
+      enabled: true
+    },
+    pinterest: {
+      enabled: true
     },
     flowery: {
       enabled: true,
@@ -185,7 +216,8 @@ export default {
       enabled: true,
       // Optional, setting this manually can help unblocking countries (since pandora is US only.). May need to be updated periodically.
       // fetching manually: use a vpn connected to US, go on pandora.com, open devtools, Network tab, first request to appear and copy the 2nd csrfToken= value.
-      // csrfToken: ''
+      // csrfToken: '',
+      remoteTokenUrl: 'https://get.1lucas1apk.fun/pandora/gettoken' // URL to a remote provider that returns { success: true, authToken: "...", csrfToken: "...", expires_in_seconds: ... } //https://github.com/1Lucas1apk/gettoken
     },
     nicovideo: {
       enabled: true
@@ -210,6 +242,9 @@ export default {
       // signatureSecret: ''
     },
     lrclib: {
+      enabled: true
+    },
+    bilibili: {
       enabled: true
     },
     applemusic: {

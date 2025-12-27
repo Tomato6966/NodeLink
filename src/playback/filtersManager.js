@@ -19,6 +19,24 @@ import Tremolo from './filters/tremolo.js'
 import Vibrato from './filters/vibrato.js'
 import Spatial from './filters/spatial.js'
 
+const FILTER_CLASSES = {
+  tremolo: Tremolo,
+  vibrato: Vibrato,
+  lowpass: Lowpass,
+  highpass: Highpass,
+  rotation: Rotation,
+  karaoke: Karaoke,
+  distortion: Distortion,
+  channelMix: ChannelMix,
+  equalizer: Equalizer,
+  chorus: Chorus,
+  compressor: Compressor,
+  echo: Echo,
+  phaser: Phaser,
+  timescale: Timescale,
+  spatial: Spatial
+}
+
 export class FiltersManager extends Transform {
   constructor(nodelink, options = {}) {
     super(options)
@@ -47,7 +65,7 @@ export class FiltersManager extends Transform {
 
     if (this.nodelink.extensions?.filters) {
       for (const [name, filter] of this.nodelink.extensions.filters) {
-        this.availableFilters[name] = filter
+        this.filterInstances[name] = filter
       }
     }
 
@@ -56,15 +74,23 @@ export class FiltersManager extends Transform {
 
   update(filters) {
     this.activeFilters = []
+    const settings = filters.filters || filters
 
-    for (const filterName in this.availableFilters) {
-      const filter = this.availableFilters[filterName]
+    for (const name in settings) {
+      const config = settings[name]
+      if (!config) continue
 
-      if (filters.filters?.[filterName]) {
-        this.activeFilters.push(filter)
+      if (FILTER_CLASSES[name] && !this.filterInstances[name]) {
+        this.filterInstances[name] = new FILTER_CLASSES[name]()
       }
 
-      filter.update(filters.filters || filters)
+      const instance = this.filterInstances[name]
+      if (instance) {
+        this.activeFilters.push(instance)
+        if (typeof instance.update === 'function') {
+          instance.update(settings)
+        }
+      }
     }
 
     this.activeFilters.sort((a, b) => (a.priority || 99) - (b.priority || 99))

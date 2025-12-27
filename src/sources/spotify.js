@@ -1,8 +1,7 @@
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.js'
 
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1'
 const TOKEN_REFRESH_MARGIN = 300000
-const DURATION_TOLERANCE = 0.15
 const BATCH_SIZE_DEFAULT = 5
 
 export default class SpotifySource {
@@ -29,6 +28,13 @@ export default class SpotifySource {
   }
 
   async setup() {
+    const cachedToken = this.nodelink.credentialManager.get('spotify_access_token')
+    if (cachedToken) {
+      this.accessToken = cachedToken
+      this.tokenInitialized = true
+      return true
+    }
+
     if (this.tokenInitialized && this._isTokenValid()) return true
 
     try {
@@ -115,6 +121,7 @@ export default class SpotifySource {
 
       this.accessToken = tokenData.access_token
       this.tokenExpiry = Date.now() + tokenData.expires_in * 1000
+      this.nodelink.credentialManager.set('spotify_access_token', this.accessToken, tokenData.expires_in * 1000)
       this.tokenInitialized = true
       return true
     } catch (e) {
@@ -457,12 +464,13 @@ export default class SpotifySource {
       }
     }
 
-    const spotifyDuration = decodedTrack.length
-
     const query = this._buildSearchQuery(decodedTrack, isExplicit)
 
     try {
-      const searchResult = await this.nodelink.sources.searchWithDefault(query)
+      let searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
+      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+        searchResult = await this.nodelink.sources.searchWithDefault(query)
+      }
 
       if (
         searchResult.loadType !== 'search' ||
@@ -476,13 +484,9 @@ export default class SpotifySource {
         }
       }
 
-      const bestMatch = await this._findBestMatch(
-        searchResult.data,
-        spotifyDuration,
-        decodedTrack,
-        isExplicit,
-        this.allowExplicit
-      )
+      const bestMatch = getBestMatch(searchResult.data, decodedTrack, {
+        allowExplicit: this.allowExplicit
+      })
 
       if (!bestMatch) {
         return {
@@ -507,166 +511,5 @@ export default class SpotifySource {
       searchQuery += this.allowExplicit ? ' lyrical video' : ' clean version'
     }
     return searchQuery
-  }
-
-  async _findBestMatch(
-    list,
-    target,
-    original,
-    isExplicit,
-    allowExplicit,
-    retried = false
-  ) {
-    const allowedDurationDiff = target * DURATION_TOLERANCE
-    const normalizedOriginalTitle = this._normalize(original.title)
-    const normalizedOriginalAuthor = this._normalize(original.author)
-
-    const scoredCandidates = list
-      .filter(
-        (item) => Math.abs(item.info.length - target) <= allowedDurationDiff
-      )
-      .map((item) => {
-        const normalizedItemTitle = this._normalize(item.info.title)
-        const normalizedItemAuthor = this._normalize(item.info.author)
-        let score = 0
-
-        const originalTitleWords = new Set(
-          normalizedOriginalTitle.split(' ').filter((w) => w.length > 0)
-        )
-        const itemTitleWords = new Set(
-          normalizedItemTitle.split(' ').filter((w) => w.length > 0)
-        )
-
-        let titleScore = 0
-        for (const word of originalTitleWords) {
-          if (itemTitleWords.has(word)) {
-            titleScore++
-          }
-        }
-        score += titleScore * 100
-
-        const originalArtists = normalizedOriginalAuthor
-          .split(/,\s*|\s+&\s+/)
-          .map((a) => a.trim())
-          .filter(Boolean)
-        let authorMatchScore = 0
-        for (const artist of originalArtists) {
-          if (normalizedItemAuthor.includes(artist)) {
-            authorMatchScore += 100
-          }
-        }
-        if (authorMatchScore > 0) {
-          score += authorMatchScore
-        } else {
-          const authorSimilarity = this._calculateSimilarity(
-            normalizedOriginalAuthor,
-            normalizedItemAuthor
-          )
-          score += authorSimilarity * 50
-        }
-
-        const titleWords = new Set(normalizedItemTitle.split(' '))
-        const originalTitleWordsSet = new Set(
-          normalizedOriginalTitle.split(' ')
-        )
-        const extraWords = [...titleWords].filter(
-          (word) => !originalTitleWordsSet.has(word)
-        )
-        score -= extraWords.length * 5
-
-        const isCleanOrRadio =
-          normalizedItemTitle.includes('clean') ||
-          normalizedItemTitle.includes('radio')
-
-        if (isExplicit && !allowExplicit) {
-          if (isCleanOrRadio) {
-            score += 500
-          }
-        } else if (!isExplicit) {
-          if (isCleanOrRadio) {
-            score -= 200
-          }
-        } else {
-          if (isCleanOrRadio) {
-            score -= 200
-          }
-        }
-
-        return { item, score }
-      })
-      .filter((c) => c.score >= 0)
-
-    if (scoredCandidates.length === 0 && !retried) {
-      const newSearch = await this.nodelink.sources.searchWithDefault(
-        `${original.title} ${original.author} official video`
-      )
-      if (newSearch.loadType !== 'search' || newSearch.data.length === 0) {
-        return null
-      }
-
-      return await this._findBestMatch(
-        newSearch.data,
-        target,
-        original,
-        isExplicit,
-        allowExplicit,
-        true
-      )
-    }
-
-    if (scoredCandidates.length === 0) {
-      return null
-    }
-
-    scoredCandidates.sort((a, b) => b.score - a.score)
-
-    return scoredCandidates[0].item
-  }
-
-  _normalize(str) {
-    return str
-      .toLowerCase()
-      .replace(/feat\.?/g, '')
-      .replace(/ft\.?/g, '')
-      .replace(/[^\w\s]/g, '')
-      .trim()
-  }
-
-  _calculateSimilarity(str1, str2) {
-    const longer = str1.length > str2.length ? str1 : str2
-    const shorter = str1.length > str2.length ? str2 : str1
-
-    if (longer.length === 0) return 1.0
-
-    const editDistance = this._levenshteinDistance(longer, shorter)
-    return (longer.length - editDistance) / longer.length
-  }
-
-  _levenshteinDistance(str1, str2) {
-    const matrix = []
-
-    for (let i = 0; i <= str2.length; i++) {
-      matrix[i] = [i]
-    }
-
-    for (let j = 0; j <= str1.length; j++) {
-      matrix[0][j] = j
-    }
-
-    for (let i = 1; i <= str2.length; i++) {
-      for (let j = 1; j <= str1.length; j++) {
-        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-          matrix[i][j] = matrix[i - 1][j - 1]
-        } else {
-          matrix[i][j] = Math.min(
-            matrix[i - 1][j - 1] + 1,
-            matrix[i][j - 1] + 1,
-            matrix[i - 1][j] + 1
-          )
-        }
-      }
-    }
-
-    return matrix[str2.length][str1.length]
   }
 }

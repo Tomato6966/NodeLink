@@ -45,6 +45,12 @@ export default class CipherManager {
       return this.getCachedPlayerScript()
     }
 
+    const cachedUrl = this.nodelink.credentialManager.get('yt_player_script_url')
+    if (cachedUrl && !this.explicitPlayerScriptUrl) {
+      this.cachedPlayerScript = new CachedPlayerScript(cachedUrl)
+      return this.cachedPlayerScript
+    }
+
     this.cipherLoadLock = true
     try {
       if (
@@ -106,6 +112,12 @@ export default class CipherManager {
       return this.stsCache.get(playerUrl)
     }
 
+    const cachedSts = this.nodelink.credentialManager.get(`yt_sts_${playerUrl}`)
+    if (cachedSts) {
+      this.stsCache.set(playerUrl, cachedSts)
+      return cachedSts
+    }
+
     if (!this.config.url) {
       const {
         body: scriptContent,
@@ -145,6 +157,7 @@ export default class CipherManager {
       )
 
       this.stsCache.set(playerUrl, sts)
+      this.nodelink.credentialManager.set(`yt_sts_${playerUrl}`, sts, 12 * 60 * 60 * 1000)
       return sts
     }
 

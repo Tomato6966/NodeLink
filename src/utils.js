@@ -671,6 +671,8 @@ async function _internalHttp1Request(urlString, options = {}) {
     _redirectsFollowed = 0
   } = options
 
+  const actualLocalAddress = localAddress || global.nodelink?.routePlanner?.getIP()
+
   if (_redirectsFollowed >= maxRedirects) {
     throw new Error(`Too many redirects (${maxRedirects}) for ${urlString}`)
   }
@@ -717,7 +719,7 @@ async function _internalHttp1Request(urlString, options = {}) {
     port: currentUrl.port || (isHttps ? 443 : 80),
     path: currentUrl.pathname + currentUrl.search,
     headers: reqHeaders,
-    localAddress
+    localAddress: actualLocalAddress
   }
 
   return new Promise((resolve, reject) => {
@@ -860,6 +862,7 @@ async function makeRequest(urlString, options, nodelink) {
     _redirectsFollowed = 0
   } = options
 
+  const finalNodeLink = nodelink || global.nodelink
   const logId = crypto.randomBytes(4).toString('hex')
   if (loggingConfig.debug?.network) {
     logger('debug', 'Network', `[${logId}] Request: ${method} ${urlString}`)
@@ -886,15 +889,15 @@ async function makeRequest(urlString, options, nodelink) {
       new Error(`Too many redirects (${maxRedirects}) for ${urlString}`)
     )
   }
-  const localAddress = nodelink?.routePlanner?.getIP()
+  const localAddress = finalNodeLink?.routePlanner?.getIP()
 
   try {
     const url = new URL(urlString)
     if (http2FailedHosts.has(url.host)) {
-      return http1makeRequest(urlString, { ...options, localAddress }, nodelink)
+      return http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
     }
   } catch (e) {
-    return http1makeRequest(urlString, { ...options, localAddress }, nodelink)
+    return http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
   }
 
   return new Promise((resolve, reject) => {
@@ -912,7 +915,7 @@ async function makeRequest(urlString, options, nodelink) {
         http2FailedHosts.add(url.host)
       } catch (e) {}
       resolve(
-        http1makeRequest(urlString, { ...options, localAddress }, nodelink)
+        http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
       )
     }
 
@@ -982,7 +985,7 @@ async function makeRequest(urlString, options, nodelink) {
         const statusCode = headers[':status']
 
         if (statusCode === 429) {
-          nodelink?.routePlanner?.banIP(localAddress)
+          finalNodeLink?.routePlanner?.banIP(localAddress)
         }
 
         if (REDIRECT_STATUS_CODES.includes(statusCode) && headers.location) {
@@ -1017,7 +1020,7 @@ async function makeRequest(urlString, options, nodelink) {
                   ? disableBodyCompression
                   : undefined
               },
-              nodelink
+              finalNodeLink
             )
           )
         }
@@ -1145,61 +1148,33 @@ function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
         if (lines[i].startsWith('#EXT-X-ENDLIST')) sawEnd = true
       }
 
-      const downloadPromises = []
-
-      const writeChunksToStream = async (chunks) => {
-        for (const chunk of chunks) {
-          if (!stream.write(chunk)) {
-            await new Promise((ok) => stream.once('drain', ok))
-          }
-        }
-      }
-
       for (const segUrl of segs) {
         if (stream.destroyed) break
 
-        const downloadPromise = http1makeRequest(segUrl, {
-          method: 'GET',
-          streamOnly: true
-        })
-          .then((s) => {
-            return new Promise((res, rej) => {
-              const chunks = []
-              s.stream.on('data', (chunk) => chunks.push(chunk))
-              s.stream.on('end', () => res(chunks))
-              s.stream.on('error', rej)
+        try {
+          const s = await http1makeRequest(segUrl, {
+            method: 'GET',
+            streamOnly: true
+          })
+
+          if (!s.stream) continue
+
+          await new Promise((res, rej) => {
+            s.stream.pipe(stream, { end: false })
+            s.stream.on('end', res)
+            s.stream.on('error', rej)
+            stream.on('error', () => {
+              s.stream.destroy()
+              rej(new Error('Destination stream destroyed'))
             })
           })
-          .catch((err) => {
-            if (!stream.destroyed) {
-              console.error(
-                '[HLS] Error downloading segment',
-                err.code || err.message
-              )
-              stream.destroy(err)
-            }
-            return Promise.reject(err)
-          })
-
-        downloadPromises.push(downloadPromise)
-
-        if (downloadPromises.length >= HLS_SEGMENT_DOWNLOAD_CONCURRENCY_LIMIT) {
-          if (stream.destroyed) break
-          try {
-            const chunks = await downloadPromises.shift()
-            await writeChunksToStream(chunks)
-          } catch (e) {
-            break
+        } catch (err) {
+          if (!stream.destroyed) {
+            console.error(
+              '[HLS] Error downloading segment',
+              err.code || err.message
+            )
           }
-        }
-      }
-
-      while (downloadPromises.length > 0) {
-        if (stream.destroyed) break
-        try {
-          const chunks = await downloadPromises.shift()
-          await writeChunksToStream(chunks)
-        } catch (e) {
           break
         }
       }
@@ -1365,6 +1340,89 @@ function applyEnvOverrides(config, prefix = 'NODELINK') {
   }
 }
 
+function getBestMatch(list, original, options = {}) {
+  const { durationTolerance = 0.15, allowExplicit = true } = options
+
+  const normalize = (str) => {
+    if (!str) return ''
+    return str
+      .toLowerCase()
+      .replace(/feat\.?/g, '')
+      .replace(/ft\.?/g, '')
+      .replace(/\s*\([^)]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^)]*\)/gi, '')
+      .replace(/\s*\[[^\]]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^\]]*\]/gi, '')
+      .replace(/[^\w\s]/g, '')
+      .trim()
+  }
+
+  const specKeywords = ['remix', 'orchestral', 'live', 'cover', 'acoustic', 'instrumental', 'karaoke', 'radio', 'edit', 'extended', 'slowed', 'reverb']
+  const findSpec = (str) => specKeywords.filter(k => str.toLowerCase().includes(k))
+  
+  const originalTitle = original.title.toLowerCase()
+  const originalSpec = findSpec(originalTitle)
+  const isOriginalExplicit = original.uri?.includes('explicit=true') || originalTitle.includes('explicit')
+  
+  const targetDuration = original.length
+  const allowedDiff = targetDuration * durationTolerance
+  const normOriginalAuthor = normalize(original.author)
+  const originalWords = new Set(normalize(original.title).split(' ').filter((w) => w.length > 1))
+
+  const scored = list
+    .map((item) => {
+      const itemTitle = item.info.title.toLowerCase()
+      const normItemTitle = normalize(itemTitle)
+      const normItemAuthor = normalize(item.info.author)
+      const itemSpec = findSpec(itemTitle)
+      const isItemClean = itemTitle.includes('clean') || itemTitle.includes('radio edit')
+      let score = 0
+
+      const itemWords = normItemTitle.split(' ').filter((w) => w.length > 1)
+      const itemWordsSet = new Set(itemWords)
+      
+      let overlap = 0
+      for (const word of originalWords) {
+        if (itemWordsSet.has(word)) overlap++
+      }
+      score += (overlap / Math.max(originalWords.size, 1)) * 300
+
+      for (const spec of specKeywords) {
+        const inOriginal = originalSpec.includes(spec)
+        const inItem = itemSpec.includes(spec)
+        if (inOriginal && inItem) score += 200
+        if (inOriginal !== inItem) score -= 300
+      }
+
+      if (isOriginalExplicit && !allowExplicit) {
+        if (isItemClean) score += 500
+      }
+
+      if (normItemAuthor.includes(normOriginalAuthor) || normOriginalAuthor.includes(normItemAuthor)) {
+        score += 150
+      } else {
+        const longer = normOriginalAuthor.length > normItemAuthor.length ? normOriginalAuthor : normItemAuthor
+        const shorter = normOriginalAuthor.length > normItemAuthor.length ? normItemAuthor : normOriginalAuthor
+        if (shorter.length > 2 && longer.includes(shorter)) score += 100
+      }
+
+      if (targetDuration > 0) {
+        const diff = Math.abs(item.info.length - targetDuration)
+        if (diff <= allowedDiff) {
+          score += (1 - diff / allowedDiff) * 100
+        } else {
+          score -= 100
+        }
+      }
+
+      if (itemTitle.includes('official audio') || itemTitle.includes('topic')) score += 50
+
+      return { item, score }
+    })
+
+  scored.sort((a, b) => b.score - a.score)
+  
+  return scored[0]?.item || list[0] || null
+}
+
 function cleanupLogger() {
   if (logRotationInterval) {
     clearInterval(logRotationInterval)
@@ -1404,5 +1462,6 @@ export {
   loadHLS,
   checkForUpdates,
   sendErrorResponse,
-  applyEnvOverrides
+  applyEnvOverrides,
+  getBestMatch
 }

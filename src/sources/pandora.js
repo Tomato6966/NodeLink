@@ -1,4 +1,4 @@
-import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, makeRequest, getBestMatch } from '../utils.js'
 
 export default class PandoraSource {
   constructor(nodelink) {
@@ -21,43 +21,74 @@ export default class PandoraSource {
 
     this.setupPromise = (async () => {
       try {
+        const cachedAuth = this.nodelink.credentialManager.get('pandora_auth_token')
+        const cachedCsrf = this.nodelink.credentialManager.get('pandora_csrf_token')
+
+        if (cachedAuth && cachedCsrf) {
+          this.authToken = cachedAuth
+          this.csrfToken = cachedCsrf
+          logger('info', 'Pandora', 'Loaded Pandora credentials from CredentialManager.')
+          return true
+        }
+
         logger('debug', 'Pandora', 'Setting Pandora auth and CSRF token.')
 
-        const pandoraRequest = await makeRequest('https://www.pandora.com', {
-          method: 'HEAD'
-        })
+        let csrfTokenValue = this.csrfTokenConfig
+        const remoteUrl = this.config.sources?.pandora?.remoteTokenUrl
 
-        if (pandoraRequest.error) {
-          logger('error', 'Pandora', 'Failed to set CSRF token from Pandora.')
-          return false
-        }
+        if (remoteUrl) {
+          logger('info', 'Pandora', `Fetching tokens from remote provider: ${remoteUrl}`)
+          try {
+            const { body, error, statusCode } = await makeRequest(remoteUrl, { method: 'GET' })
+            if (!error && statusCode === 200 && body.success && body.authToken && body.csrfToken) {
+              this.authToken = body.authToken
+              this.csrfToken = {
+                raw: `csrftoken=${body.csrfToken};Path=/;Domain=.pandora.com;Secure`,
+                parsed: body.csrfToken
+              }
 
-        const cookies = pandoraRequest.headers['set-cookie']
-        const csrfCookie = cookies
-          ? this.csrfTokenConfig || cookies.find(cookie => cookie.startsWith('csrftoken='))
-          : null
+              const cacheTtlMs = (body.expires_in_seconds || 3600) * 1000
+              this.nodelink.credentialManager.set('pandora_auth_token', this.authToken, cacheTtlMs)
+              this.nodelink.credentialManager.set('pandora_csrf_token', this.csrfToken, cacheTtlMs)
 
-        if (!csrfCookie) {
-          logger('error', 'Pandora', 'Failed to find CSRF token cookie.')
-          return false
-        }
-
-        if (this.csrfTokenConfig) {
-          const csrfMatch = `csrftoken=${this.csrfTokenConfig};Path=/;Domain=.pandora.com;Secure`
-          if (!csrfMatch) {
-            logger('error', 'Pandora', 'Failed to parse provided CSRF token.')
-            return false
+              logger('info', 'Pandora', 'Successfully initialized with remote tokens (bypass active).')
+              return true
+            }
+            logger('warn', 'Pandora', `Remote provider failed (Status: ${statusCode}). Falling back to local login.`)
+          } catch (e) {
+            logger('warn', 'Pandora', `Exception during remote token fetch: ${e.message}. Falling back to local login.`)
           }
+        }
+
+        if (csrfTokenValue) {
           this.csrfToken = {
-            raw: csrfMatch,
-            parsed: this.csrfTokenConfig
+            raw: `csrftoken=${csrfTokenValue};Path=/;Domain=.pandora.com;Secure`,
+            parsed: csrfTokenValue
           }
         } else {
+          const pandoraRequest = await makeRequest('https://www.pandora.com', {
+            method: 'HEAD'
+          })
+
+          if (pandoraRequest.error) {
+            logger('error', 'Pandora', 'Failed to set CSRF token from Pandora.')
+            return false
+          }
+
+          const cookies = pandoraRequest.headers['set-cookie']
+          const csrfCookie = cookies ? cookies.find((cookie) => cookie.startsWith('csrftoken=')) : null
+
+          if (!csrfCookie) {
+            logger('error', 'Pandora', 'Failed to find CSRF token cookie.')
+            return false
+          }
+
           const csrfMatch = /csrftoken=([a-f0-9]{16})/.exec(csrfCookie)
           if (!csrfMatch) {
             logger('error', 'Pandora', 'Failed to parse CSRF token.')
             return false
           }
+
           this.csrfToken = {
             raw: csrfCookie.split(';')[0],
             parsed: csrfMatch[1]
@@ -83,6 +114,9 @@ export default class PandoraSource {
         }
 
         this.authToken = tokenRequest.body.authToken
+
+        this.nodelink.credentialManager.set('pandora_auth_token', this.authToken, 24 * 60 * 60 * 1000)
+        this.nodelink.credentialManager.set('pandora_csrf_token', this.csrfToken, 24 * 60 * 60 * 1000)
 
         logger('info', 'Pandora', 'Successfully set Pandora auth and CSRF token.')
         return true
@@ -599,11 +633,14 @@ export default class PandoraSource {
     }
   }
 
-  async getTrackUrl(track) {
-    const query = `${track.title} ${track.author}`
+  async getTrackUrl(decodedTrack) {
+    const query = `${decodedTrack.title} ${decodedTrack.author}`
 
     try {
-      const searchResult = await this.nodelink.sources.searchWithDefault(query)
+      let searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
+      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+        searchResult = await this.nodelink.sources.searchWithDefault(query)
+      }
 
       if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
         return {
@@ -614,9 +651,17 @@ export default class PandoraSource {
         }
       }
 
-      const bestMatch = searchResult.data[0]
-      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+      const bestMatch = getBestMatch(searchResult.data, decodedTrack)
+      if (!bestMatch) {
+        return {
+          exception: {
+            message: 'No suitable alternative found after filtering.',
+            severity: 'common'
+          }
+        }
+      }
 
+      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
       return { newTrack: bestMatch, ...streamInfo }
     } catch (e) {
       logger('error', 'Pandora', `Failed to mirror track: ${e.message}`)

@@ -21,6 +21,14 @@ export default class FlowerySource {
 
   async _fetchVoices() {
     try {
+      const cachedVoices = this.nodelink.credentialManager.get('flowery_voices')
+      if (cachedVoices) {
+        this.voiceMap = new Map(Object.entries(cachedVoices.voiceMap))
+        this.defaultVoiceId = cachedVoices.defaultVoiceId
+        logger('debug', 'Flowery', `Loaded ${this.voiceMap.size} voices from CredentialManager.`)
+        return
+      }
+
       const voicesEndpoint = 'https://api.flowery.pw/v1/tts/voices'
       const { body, error, statusCode } = await makeRequest(voicesEndpoint, { method: 'GET' })
 
@@ -41,6 +49,11 @@ export default class FlowerySource {
         this.defaultVoiceId = body.voices[0].id
         logger('info', 'Flowery', `Using first available voice as default: ${body.voices[0].name} (${body.voices[0].id})`)
       }
+
+      this.nodelink.credentialManager.set('flowery_voices', {
+        voiceMap: Object.fromEntries(this.voiceMap),
+        defaultVoiceId: this.defaultVoiceId
+      }, 24 * 60 * 60 * 1000)
 
       logger('debug', 'Flowery', `Fetched ${this.voiceMap.size} voices.`)
     } catch (e) {

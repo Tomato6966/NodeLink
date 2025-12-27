@@ -8,10 +8,12 @@ import * as MP4Box from 'mp4box'
 
 import { normalizeFormat, SupportedFormats } from '../constants.js'
 import WebmOpusDemuxer from './demuxers/WebmOpus.js'
+import FlvDemuxer from './demuxers/Flv.js'
 import { FiltersManager } from './filtersManager.js'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from './opus/Opus.js'
 import { VolumeTransformer } from './VolumeTransformer.js'
 import { SymphoniaDecoder } from '@toddynnn/symphonia-decoder'
+import { RingBuffer } from './RingBuffer.js'
 
 const AUDIO_CONFIG = Object.freeze({
   sampleRate: 48000,
@@ -24,6 +26,8 @@ const BUFFER_THRESHOLDS = Object.freeze({
   maxCompressed: 256 * 1024,
   minCompressed: 128 * 1024
 })
+
+const AAC_BUFFER_SIZE = 2 * 1024 * 1024 // 2MB
 
 const AUDIO_CONSTANTS = Object.freeze({
   pcmFloatFactor: 32767,
@@ -160,6 +164,8 @@ const _isMp4Format = (type) =>
   type.indexOf('mov') !== -1
 
 const _isWebmFormat = (type) => type.indexOf('webm') !== -1
+
+const _isFlvFormat = (type) => type.indexOf('flv') !== -1
 
 class BaseAudioResource {
   constructor() {
@@ -523,18 +529,18 @@ class MPEGTSToAACStream extends Transform {
       highWaterMark: AUDIO_CONFIG.highWaterMark
     })
 
-    this.buffer = EMPTY_BUFFER
+    this.ringBuffer = new RingBuffer(BUFFER_THRESHOLDS.maxCompressed)
     this.patPmtId = null
     this.aacPid = null
-    this.aacData = EMPTY_BUFFER
+    this.aacData = []
     this.aacPidFound = false
     this._aborted = false
   }
 
   abort() {
     this._aborted = true
-    this.buffer = EMPTY_BUFFER
-    this.aacData = EMPTY_BUFFER
+    this.ringBuffer.clear()
+    this.aacData = []
   }
 
   _transform(chunk, encoding, callback) {
@@ -544,32 +550,19 @@ class MPEGTSToAACStream extends Transform {
     }
 
     try {
-      const data =
-        this.buffer.length > 0 ? Buffer.concat([this.buffer, chunk]) : chunk
-
-      this.buffer = EMPTY_BUFFER
-
-      const dataLength = data.length
-      let position = 0
+      this.ringBuffer.write(chunk)
 
       while (
-        position <= dataLength - MPEGTS_CONFIG.packetSize &&
+        this.ringBuffer.length >= MPEGTS_CONFIG.packetSize &&
         !this._aborted
       ) {
-        if (data[position] !== MPEGTS_CONFIG.syncByte) {
-          const syncIndex = data.indexOf(MPEGTS_CONFIG.syncByte, position + 1)
-          if (syncIndex === -1) {
-            position = dataLength
-            break
-          }
-          position = syncIndex
+        const head = this.ringBuffer.peek(1)
+        if (head[0] !== MPEGTS_CONFIG.syncByte) {
+          this.ringBuffer.read(1)
           continue
         }
 
-        const packet = data.subarray(
-          position,
-          position + MPEGTS_CONFIG.packetSize
-        )
+        const packet = this.ringBuffer.read(MPEGTS_CONFIG.packetSize)
 
         const payloadUnitStartIndicator = !!(packet[1] & 0x40)
         const pid = ((packet[1] & 0x1f) << 8) + packet[2]
@@ -579,18 +572,11 @@ class MPEGTSToAACStream extends Transform {
         if (adaptationFieldControl > 1) {
           offset = 5 + packet[4]
           if (offset >= MPEGTS_CONFIG.packetSize) {
-            position += MPEGTS_CONFIG.packetSize
             continue
           }
         }
 
         this._processPacket(packet, pid, payloadUnitStartIndicator, offset)
-
-        position += MPEGTS_CONFIG.packetSize
-      }
-
-      if (position < dataLength && !this._aborted) {
-        this.buffer = data.subarray(position)
       }
 
       callback()
@@ -645,8 +631,8 @@ class MPEGTSToAACStream extends Transform {
   _processAACPacket(packet, pusi, offset) {
     if (pusi) {
       if (this.aacData.length > 0 && !this._aborted) {
-        this.push(this.aacData)
-        this.aacData = EMPTY_BUFFER
+        this.push(Buffer.concat(this.aacData))
+        this.aacData = []
       }
 
       const pesHeaderLength = packet[offset + 8]
@@ -656,23 +642,23 @@ class MPEGTSToAACStream extends Transform {
     }
 
     if (!this._aborted) {
-      this.aacData = Buffer.concat([this.aacData, packet.subarray(offset)])
+      this.aacData.push(packet.subarray(offset))
     }
   }
 
   _flush(callback) {
     if (this.aacData.length > 0 && !this._aborted) {
-      this.push(this.aacData)
+      this.push(Buffer.concat(this.aacData))
     }
-    this.aacData = EMPTY_BUFFER
-    this.buffer = EMPTY_BUFFER
+    this.aacData = []
+    this.ringBuffer.clear()
     callback()
   }
 
   _destroy(err, callback) {
     this._aborted = true
-    this.buffer = EMPTY_BUFFER
-    this.aacData = EMPTY_BUFFER
+    this.ringBuffer.dispose()
+    this.aacData = []
     super._destroy(err, callback)
   }
 }
@@ -688,7 +674,7 @@ class AACDecoderStream extends Transform {
     this.isDecoderReady = false
     this.isConfigured = false
     this.pendingChunks = []
-    this.buffer = Buffer.alloc(0)
+    this.ringBuffer = new RingBuffer(AAC_BUFFER_SIZE)
     this.resamplingQuality = options?.resamplingQuality || 'fastest'
     this.resamplerCreationPromise = null
 
@@ -699,6 +685,13 @@ class AACDecoderStream extends Transform {
         this._processPendingChunks()
       })
       .catch((err) => this.emit('error', err))
+  }
+
+  _destroy(err, cb) {
+    this.ringBuffer.dispose()
+    if (this.decoder) this.decoder.free?.()
+    if (this.resampler) this.resampler.destroy?.()
+    super._destroy(err, cb)
   }
 
   _downmixToStereo(interleavedPCM, channels, samplesPerChannel) {
@@ -790,7 +783,10 @@ class AACDecoderStream extends Transform {
     this.pendingChunks = []
   }
 
-  _findADTSFrame(buffer) {
+  _findADTSFrame() {
+    const buffer = this.ringBuffer.peek(this.ringBuffer.length)
+    if (!buffer) return null
+
     for (let i = 0; i < buffer.length - 7; i++) {
       const syncword = (buffer[i] << 4) | (buffer[i + 1] >> 4)
       if (syncword === 0xfff) {
@@ -823,16 +819,16 @@ class AACDecoderStream extends Transform {
 
   async _decodeChunk(chunk, encoding, callback) {
     try {
-      this.buffer = Buffer.concat([this.buffer, chunk])
+      this.ringBuffer.write(chunk)
 
       if (!this.isConfigured) {
-        const frameInfo = this._findADTSFrame(this.buffer)
+        const frameInfo = this._findADTSFrame()
         if (frameInfo) {
           try {
             await this.decoder.configure(frameInfo.frame, true)
             this.isConfigured = true
           } catch (err) {
-            this.buffer = this.buffer.subarray(frameInfo.end)
+            this.ringBuffer.read(frameInfo.end)
             return callback(err)
           }
         } else {
@@ -840,8 +836,8 @@ class AACDecoderStream extends Transform {
         }
       }
 
-      while (this.buffer.length > 0) {
-        const frameInfo = this._findADTSFrame(this.buffer)
+      while (this.ringBuffer.length > 0) {
+        const frameInfo = this._findADTSFrame()
 
         if (!frameInfo) break
 
@@ -896,7 +892,7 @@ class AACDecoderStream extends Transform {
           // Skip bad frame
         }
 
-        this.buffer = this.buffer.subarray(frameInfo.end)
+        this.ringBuffer.read(frameInfo.end)
       }
 
       callback()
@@ -906,9 +902,9 @@ class AACDecoderStream extends Transform {
   }
 
   _flush(callback) {
-    if (this.buffer.length > 0 && this.isConfigured) {
+    if (this.ringBuffer.length > 0 && this.isConfigured) {
       try {
-        const frameInfo = this._findADTSFrame(this.buffer)
+        const frameInfo = this._findADTSFrame()
         if (frameInfo) {
           const result = this.decoder.decode(frameInfo.frame)
           if (result?.pcm) {
@@ -1307,6 +1303,71 @@ class FMP4ToAACStream extends Transform {
   }
 }
 
+class FLVToAACStream extends Transform {
+  constructor(options) {
+    super(options)
+    this.demuxer = new FlvDemuxer()
+    this.audioConfig = null
+    this._aborted = false
+
+    this.demuxer.on('data', (audioTag) => {
+      if (this._aborted) return
+      this._processAudioTag(audioTag)
+    })
+
+    this.demuxer.on('error', (err) => {
+      if (!this._aborted) this.emit('error', err)
+    })
+  }
+
+  abort() {
+    this._aborted = true
+    this.demuxer.destroy()
+  }
+
+  _processAudioTag(tag) {
+    const header = tag[0]
+    const format = (header & 0xf0) >> 4
+
+    if (format === 10) {
+      const aacPacketType = tag[1]
+      if (aacPacketType === 0) {
+        this.audioConfig = this._parseAudioSpecificConfig(tag.subarray(2))
+      } else if (aacPacketType === 1 && this.audioConfig) {
+        const adtsHeader = _createAdtsHeader(
+          tag.length - 2,
+          this.audioConfig.profile,
+          this.audioConfig.samplingIndex,
+          this.audioConfig.channelCount
+        )
+        this.push(Buffer.concat([adtsHeader, tag.subarray(2)]))
+      }
+    } else if (format === 2) {
+      this.push(tag.subarray(1))
+    }
+  }
+
+  _parseAudioSpecificConfig(data) {
+    const objectType = (data[0] & 0xf8) >> 3
+    const samplingIndex = ((data[0] & 0x07) << 1) | ((data[1] & 0x80) >> 7)
+    const channelConfig = (data[1] & 0x78) >> 3
+
+    return {
+      profile: objectType,
+      samplingIndex,
+      channelCount: channelConfig
+    }
+  }
+
+  _transform(chunk, encoding, callback) {
+    this.demuxer.write(chunk, encoding, callback)
+  }
+
+  _flush(callback) {
+    this.demuxer.end(callback)
+  }
+}
+
 class MixerTransform extends Transform {
   constructor(audioMixer) {
     super()
@@ -1385,6 +1446,9 @@ class StreamAudioResource extends BaseAudioResource {
       case SupportedFormats.AAC:
         return this._createAACPipeline(stream, type, resamplingQuality)
 
+      case SupportedFormats.FLV:
+        return this._createFLVPipeline(stream, type, resamplingQuality)
+
       case SupportedFormats.MPEG:
       case SupportedFormats.FLAC:
       case SupportedFormats.OGG_VORBIS:
@@ -1397,6 +1461,21 @@ class StreamAudioResource extends BaseAudioResource {
       default:
         throw this._createUnsupportedFormatError(type)
     }
+  }
+
+  _createFLVPipeline(stream, type, resamplingQuality) {
+    const demuxer = new FLVToAACStream()
+    const decoder = new AACDecoderStream({ resamplingQuality })
+
+    this.pipes.push(demuxer, decoder)
+
+    pipeline(stream, demuxer, decoder, (err) => {
+      if (err && !this._destroyed) {
+        this.stream?.emit('error', err)
+      }
+    })
+
+    return decoder
   }
 
   _createAACPipeline(stream, type, resamplingQuality) {
@@ -1483,6 +1562,8 @@ class StreamAudioResource extends BaseAudioResource {
       channels: AUDIO_CONFIG.channels,
       frameSize: AUDIO_CONFIG.frameSize
     })
+
+    opusEncoder.setDTX(true)
 
     const streams = [pcmStream, volumeTransformer]
     this.pipes.push(volumeTransformer)
@@ -1573,7 +1654,8 @@ class StreamAudioResource extends BaseAudioResource {
       'FLAC (audio/flac)',
       'OGG Vorbis (audio/ogg, audio/vorbis)',
       'WAV (audio/wav)',
-      'Opus (webm/opus, ogg/opus)'
+      'Opus (webm/opus, ogg/opus)',
+      'FLV (video/x-flv, flv)'
     ]
 
     return new Error(
@@ -1664,6 +1746,18 @@ export const createPCMStream = (stream, type, nodelink, volume = 1.0) => {
       streams.push(decoder)
 
       pipeline(streams, (err) => {
+        if (err) decoder.emit('error', err)
+      })
+
+      pcmStream = decoder
+      break
+    }
+
+    case SupportedFormats.FLV: {
+      const demuxer = new FLVToAACStream()
+      const decoder = new AACDecoderStream({ resamplingQuality })
+
+      pipeline(stream, demuxer, decoder, (err) => {
         if (err) decoder.emit('error', err)
       })
 
