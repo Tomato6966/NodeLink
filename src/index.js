@@ -144,7 +144,7 @@ class NodelinkServer extends EventEmitter {
     this.server = null
     this.socket = null
     this.sessions = new sessionManager(this, PlayerManagerClass)
-    if (!isClusterPrimary) {
+    if (!isClusterPrimary || options.enableLoadStreamEndpoint) {
       this.sources = new sourceManager(this)
       this.lyrics = new lyricsManager(this)
     } else {
@@ -1221,7 +1221,7 @@ class NodelinkServer extends EventEmitter {
       await this.pluginManager.load('worker')
     }
 
-    if (!startOptions.isClusterPrimary) {
+    if (this.sources) {
       await this.sources.loadFolder()
 
       await this.lyrics.loadFolder()

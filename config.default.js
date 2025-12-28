@@ -66,6 +66,7 @@ export default {
   zombieThresholdMs: 60000,
   enableHoloTracks: false,
   enableTrackStreamEndpoint: false,
+  enableLoadStreamEndpoint: false,
   resolveExternalLinks: false,
   fetchChannelInfo: false,
   filters: {
