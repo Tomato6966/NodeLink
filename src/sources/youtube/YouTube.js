@@ -530,7 +530,7 @@ export default class YouTubeSource {
     if (playerScriptUrl) this.cipherManager.setPlayerScriptUrl(playerScriptUrl)
   }
 
-  async search(query, type) {
+  async search(query, type, searchType = 'track') {
     let clientList = this.config.clients.search
 
     if (type === 'ytmsearch') {
@@ -547,9 +547,9 @@ export default class YouTubeSource {
         logger(
           'debug',
           'YouTube',
-          `Attempting search with client: ${clientName}`
+          `Attempting ${searchType} search with client: ${clientName}`
         )
-        const result = await client.search(query, type, this.ytContext)
+        const result = await client.search(query, searchType, this.ytContext)
 
         if (result && result.loadType === 'search') {
           logger(

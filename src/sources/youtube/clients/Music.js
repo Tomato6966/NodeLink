@@ -34,10 +34,15 @@ export default class Music extends BaseClient {
   async search(query, type, context) {
     const sourceName = 'ytmusic'
 
+    let params = 'EgWKAQIIAWoQEAMQBBAJEAoQBRAREBAQFQ%3D%3D' // Default (Tracks)
+    if (type === 'playlist') params = 'EgWKAQIoAWoKEAMQBBAJEAoQBRAB'
+    if (type === 'album') params = 'EgWKAQIYAWoKEAMQBBAJEAoQBRAB'
+    if (type === 'artist') params = 'EgWKAQIYAWoKEAMQBBAJEAoQBRAB'
+
     const requestBody = {
       context: this.getClient(context),
       query: query,
-      params: 'EgWKAQIIAWoQEAMQBBAJEAoQBRAREBAQFQ%3D%3D'
+      params
     }
 
     const {

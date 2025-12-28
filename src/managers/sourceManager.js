@@ -201,8 +201,23 @@ export default class SourcesManager {
     if (!sourceName) {
       throw new Error(`Source not found for term: ${sourceTerm}`)
     }
-    logger('debug', 'Sources', `Searching on ${sourceName} for: "${query}" `)
-    return this._instrumentedSourceCall(sourceName, 'search', query, sourceTerm)
+
+    let searchType = 'track'
+    let searchQuery = query
+
+    if (query.includes(':')) {
+      const parts = query.split(':')
+      const possibleType = parts[0].toLowerCase()
+      const types = ['playlist', 'artist', 'album', 'channel', 'track']
+
+      if (types.includes(possibleType)) {
+        searchType = possibleType
+        searchQuery = parts.slice(1).join(':')
+      }
+    }
+
+    logger('debug', 'Sources', `Searching on ${sourceName} (${searchType}) for: "${searchQuery}"`)
+    return this._instrumentedSourceCall(sourceName, 'search', searchQuery, sourceTerm, searchType)
   }
 
   async searchWithDefault(query) {

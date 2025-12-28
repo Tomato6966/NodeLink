@@ -812,21 +812,44 @@ function getRendererFromItemData(itemData, itemType) {
   if (!itemData) return null
 
   if (itemType === 'ytmusic') {
-    return getItemValue(itemData, [
+    const data = getItemValue(itemData, [
       'musicResponsiveListItemRenderer',
       'playlistPanelVideoRenderer',
       'musicTwoColumnItemRenderer'
     ])
+    return data ? { _type: 'track', ...data } : null
   }
 
-  return (
-    getItemValue(itemData, [
-      'videoRenderer',
-      'compactVideoRenderer',
-      'playlistPanelVideoRenderer',
-      'gridVideoRenderer'
-    ]) || (itemData.videoId ? itemData : null)
-  )
+  const rendererTypes = [
+    { key: 'videoRenderer', type: 'track' },
+    { key: 'compactVideoRenderer', type: 'track' },
+    { key: 'playlistRenderer', type: 'playlist' },
+    { key: 'compactPlaylistRenderer', type: 'playlist' },
+    { key: 'channelRenderer', type: 'channel' },
+    { key: 'playlistPanelVideoRenderer', type: 'track' },
+    { key: 'gridVideoRenderer', type: 'track' }
+  ]
+
+  for (const r of rendererTypes) {
+    if (itemData[r.key]) {
+      return { _type: r.type, ...itemData[r.key] }
+    }
+  }
+
+  if (itemData.elementRenderer) {
+    const model = getItemValue(itemData.elementRenderer, ['newElement.type.componentType.model'])
+    const data = model?.compactChannelModel?.compactChannelData || 
+                 model?.compactPlaylistModel?.compactPlaylistData
+
+    if (data) {
+      return { 
+        _type: model.compactChannelModel ? 'channel' : 'playlist',
+        ...data 
+      }
+    }
+  }
+
+  return itemData.videoId ? { _type: 'track', ...itemData } : null
 }
 
 export async function buildTrack(
@@ -843,6 +866,72 @@ export async function buildTrack(
   }
 
   const renderer = getRendererFromItemData(itemData, itemType)
+
+  if (renderer?._type === 'channel') {
+    const ch = renderer.channelRenderer || renderer
+    const channelId = ch.channelId || getItemValue(ch, ['onTap.innertubeCommand.browseEndpoint.browseId']) || getItemValue(ch, ['endpoint.innertubeCommand.browseEndpoint.browseId'])
+    const title = ch.attributedTitle?.content || (typeof ch.title === 'string' ? ch.title : getRunsText(ch.title?.runs) || ch.title?.simpleText) || getRunsText(ch.displayName?.runs) || FALLBACK_TITLE
+    
+    if (!channelId) return null
+
+    const trackInfo = {
+      identifier: channelId,
+      isSeekable: false,
+      author: title,
+      length: 0,
+      isStream: false,
+      position: 0,
+      title,
+      uri: `https://www.youtube.com/channel/${channelId}`,
+      artworkUrl: extractThumbnail(ch, null),
+      isrc: null,
+      sourceName: sourceNameOverride || 'youtube'
+    }
+
+    return {
+      encoded: encodeTrack(trackInfo),
+      info: trackInfo,
+      pluginInfo: {
+        type: 'channel_result',
+        videoCount: getRunsText(ch.videoCountText?.runs) || ch.videoCount || '0',
+        subscriberCount: getRunsText(ch.subscriberCountText?.runs) || ch.subscriberCount,
+        handle: ch.handle
+      }
+    }
+  }
+
+  if (renderer?._type === 'playlist') {
+    const pl = renderer
+    const playlistId = pl.playlistId
+    const title = pl.attributedTitle?.content || (typeof pl.title === 'string' ? pl.title : getRunsText(pl.title?.runs) || pl.title?.simpleText) || FALLBACK_TITLE
+    const author = (typeof pl.authorName === 'string' ? pl.authorName : getRunsText(pl.longBylineText?.runs) || getRunsText(pl.shortBylineText?.runs)) || FALLBACK_AUTHOR
+    const videoCount = getRunsText(pl.videoCountText?.runs) || pl.videoCount || '0'
+    
+    if (!playlistId) return null
+
+    const trackInfo = {
+      identifier: playlistId,
+      isSeekable: false,
+      author,
+      length: 0,
+      isStream: false,
+      position: 0,
+      title,
+      uri: `https://www.youtube.com/playlist?list=${playlistId}`,
+      artworkUrl: extractThumbnail(pl, null),
+      isrc: null,
+      sourceName: sourceNameOverride || 'youtube'
+    }
+
+    return {
+      encoded: encodeTrack(trackInfo),
+      info: trackInfo,
+      pluginInfo: {
+        type: 'playlist_result',
+        videoCount
+      }
+    }
+  }
 
   const videoId =
     getItemValue(renderer, [
