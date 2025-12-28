@@ -230,13 +230,30 @@ async function _manageYoutubeHlsStream(
         }
 
         if (res.error || res.statusCode !== 200) {
-          logger(
-            'warn',
-            'YouTube-HLS-Downloader',
-            `Failed segment: ${res.statusCode}`
-          )
           if (res.stream) res.stream.destroy()
-          continue
+          
+          let retryCount = 0
+          let success = false
+          while (retryCount < 3 && !cancelSignal.aborted) {
+             retryCount++
+             const retryRes = await http1makeRequest(res.url || segmentQueue[0], { streamOnly: true })
+             if (!retryRes.error && retryRes.statusCode === 200) {
+                res = retryRes
+                success = true
+                break
+             }
+             if (retryRes.stream) retryRes.stream.destroy()
+             await new Promise(r => setTimeout(r, 500 * retryCount))
+          }
+
+          if (!success) {
+             logger(
+               'warn',
+               'YouTube-HLS-Downloader',
+               `Failed segment after retries: ${res.statusCode}`
+             )
+             continue
+          }
         }
 
         if (outputStream.destroyed || cancelSignal.aborted) {

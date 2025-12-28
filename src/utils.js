@@ -794,11 +794,11 @@ async function _internalHttp1Request(urlString, options = {}) {
     })
 
     req.on('error', (err) => reject(err))
-    req.on('timeout', () =>
+    req.on('timeout', () => {
       req.destroy(
         new Error(`Request timed out after ${timeout}ms for ${urlString}`)
       )
-    )
+    })
 
     if (payloadBuffer) {
       req.end(payloadBuffer)

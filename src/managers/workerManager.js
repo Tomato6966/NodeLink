@@ -90,12 +90,15 @@ export default class WorkerManager {
 
       if (shouldRespawn) {
         logger('info', 'Cluster', 'Respawning worker...')
+        const history = this.workerFailureHistory.get(worker.id)
+        const delay = history ? Math.min(history.count * 1000, 30000) : 500
+        
         setTimeout(() => {
           this.forkWorker()
           if (global.nodelink?.statsManager) {
             global.nodelink.statsManager.incrementWorkerRestart(worker.id)
           }
-        }, 500)
+        }, delay)
       }
     })
   }

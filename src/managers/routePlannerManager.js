@@ -6,6 +6,7 @@ export default class RoutePlannerManager {
     this.config = nodelink.options.routePlanner
     this.ipBlocks = []
     this.bannedIps = new Map()
+    this.bannedBlocks = new Map()
     this.lastUsedIndex = -1
 
     if (this.config?.ipBlocks?.length > 0) {
@@ -39,7 +40,7 @@ export default class RoutePlannerManager {
     const ips = []
 
     for (let i = 0; i < numberOfIps; i++) {
-      ips.push(this._intToIp(baseInt + i))
+      ips.push({ ip: this._intToIp(baseInt + i), block: cidr })
     }
     return ips
   }
@@ -84,7 +85,7 @@ export default class RoutePlannerManager {
   _getRoundRobinIp() {
     if (this.ipBlocks.length === 0) return null
     this.lastUsedIndex = (this.lastUsedIndex + 1) % this.ipBlocks.length
-    return this.ipBlocks[this.lastUsedIndex]
+    return this.ipBlocks[this.lastUsedIndex].ip
   }
 
   _getRotateOnBanIp() {
@@ -93,11 +94,14 @@ export default class RoutePlannerManager {
     const now = Date.now()
     for (let i = 0; i < this.ipBlocks.length; i++) {
       this.lastUsedIndex = (this.lastUsedIndex + 1) % this.ipBlocks.length
-      const ip = this.ipBlocks[this.lastUsedIndex]
-      const bannedUntil = this.bannedIps.get(ip)
+      const entry = this.ipBlocks[this.lastUsedIndex]
+      
+      const blockBanned = this.bannedBlocks.get(entry.block)
+      if (blockBanned && now < blockBanned) continue
 
+      const bannedUntil = this.bannedIps.get(entry.ip)
       if (!bannedUntil || now > bannedUntil) {
-        return ip
+        return entry.ip
       }
     }
 
@@ -107,8 +111,11 @@ export default class RoutePlannerManager {
 
   _getRandomIp() {
     const now = Date.now()
-    const availableIps = this.ipBlocks.filter((ip) => {
-      const bannedUntil = this.bannedIps.get(ip)
+    const availableIps = this.ipBlocks.filter((entry) => {
+      const blockBanned = this.bannedBlocks.get(entry.block)
+      if (blockBanned && now < blockBanned) return false
+
+      const bannedUntil = this.bannedIps.get(entry.ip)
       return !bannedUntil || now > bannedUntil
     })
 
@@ -117,14 +124,33 @@ export default class RoutePlannerManager {
       return null
     }
 
-    const ip = availableIps[Math.floor(Math.random() * availableIps.length)]
-    return ip
+    const entry = availableIps[Math.floor(Math.random() * availableIps.length)]
+    return entry.ip
   }
 
   banIP(ip) {
     if (!ip) return
     const cooldown = this.config.bannedIpCooldown || 600000
-    this.bannedIps.set(ip, Date.now() + cooldown)
+    const now = Date.now()
+    this.bannedIps.set(ip, now + cooldown)
+    
+    const entry = this.ipBlocks.find(e => e.ip === ip)
+    if (entry) {
+      const block = entry.block
+      let failedCount = 0
+      for (const e of this.ipBlocks) {
+        if (e.block === block && this.bannedIps.has(e.ip) && this.bannedIps.get(e.ip) > now) {
+          failedCount++
+        }
+      }
+      
+      const blockSize = this.ipBlocks.filter(e => e.block === block).length
+      if (failedCount >= blockSize * 0.5) {
+        this.bannedBlocks.set(block, now + cooldown * 2)
+        logger('warn', 'RoutePlanner', `Banning Block: ${block} for ${cooldown * 2}ms`)
+      }
+    }
+
     logger('warn', 'RoutePlanner', `Banning IP: ${ip} for ${cooldown}ms`)
   }
 

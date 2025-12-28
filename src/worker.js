@@ -58,7 +58,6 @@ nodelink.sources = new SourceManager(nodelink)
 nodelink.lyrics = new LyricsManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(nodelink)
 nodelink.connectionManager = new ConnectionManager(nodelink)
-nodelink.rateLimitManager = new RateLimitManager(nodelink)
 nodelink.pluginManager = new PluginManager(nodelink)
 nodelink.registry = null
 if (process.embedder === 'nodejs') {
@@ -180,7 +179,6 @@ function startTimers(hibernating = false) {
         bufferPool.clear()
         cleanupHttpAgents()
         nodelink.connectionManager.stop()
-        if (nodelink.rateLimitManager) nodelink.rateLimitManager.clear()
         setEfficiencyMode(true)
         startTimers(true)
 
@@ -329,7 +327,7 @@ process.on('uncaughtException', (err) => {
     'Worker–Crash',
     `Uncaught Exception: ${err.stack || err.message}`
   )
-  process.exit(1)
+  process.stderr.write('', () => process.exit(1))
 })
 
 process.on('unhandledRejection', (reason, promise) => {

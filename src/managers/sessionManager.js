@@ -93,6 +93,11 @@ export default class SessionManager {
   async destroy(session) {
     if (!session) return
 
+    if (session.timeoutFuture) {
+      clearTimeout(session.timeoutFuture)
+      session.timeoutFuture = null
+    }
+
     logger(
       'debug',
       'SessionManager',
