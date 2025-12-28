@@ -42,6 +42,7 @@ export class FiltersManager extends Transform {
     super(options)
     this.nodelink = nodelink
     this.activeFilters = []
+    this.filterInstances = {}
 
     this.availableFilters = {
       tremolo: new Tremolo(),

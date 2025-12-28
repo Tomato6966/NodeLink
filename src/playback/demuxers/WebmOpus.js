@@ -48,6 +48,7 @@ const readVint = (buf, start, end) => {
 class WebmBaseDemuxer extends Transform {
   constructor(options = {}) {
     super({ readableObjectMode: true, ...options })
+    this.on('error', (err) => logger('error', 'WebmDemuxer', `Stream error: ${err.message} (${err.code})`))
     this.ringBuffer = new RingBuffer(BUFFER_SIZE)
     this.total = 0n
     this.processed = 0n
@@ -222,7 +223,6 @@ class WebmBaseDemuxer extends Transform {
 
   _destroy(err, cb) {
     this._cleanup()
-    this.removeAllListeners()
     cb?.(err)
   }
 

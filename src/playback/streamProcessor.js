@@ -7,6 +7,7 @@ import { SeekError, seekableStream } from '@ecliptia/seekable-stream'
 import * as MP4Box from 'mp4box'
 
 import { normalizeFormat, SupportedFormats } from '../constants.js'
+import { logger } from '../utils.js'
 import WebmOpusDemuxer from './demuxers/WebmOpus.js'
 import FlvDemuxer from './demuxers/Flv.js'
 import { FiltersManager } from './filtersManager.js'
@@ -1726,42 +1727,28 @@ export const createSeekeableAudioResource = async (
   }
 }
 
-export const createPCMStream = (stream, type, nodelink, volume = 1.0) => {
+export const createPCMStream = (stream, type, nodelink, volume = 1.0, filters = {}) => {
   const resamplingQuality =
     nodelink.options.audio.resamplingQuality || 'fastest'
   const normalizedType = normalizeFormat(type)
 
-  let pcmStream
+  const streams = [stream]
 
   switch (normalizedType) {
     case SupportedFormats.AAC: {
       const lowerType = type.toLowerCase()
-      const streams = [stream]
 
       if (_isFmp4Format(lowerType)) streams.push(new FMP4ToAACStream())
       else if (_isMpegtsFormat(lowerType)) streams.push(new MPEGTSToAACStream())
       else if (_isMp4Format(lowerType)) streams.push(new MP4ToAACStream())
 
-      const decoder = new AACDecoderStream({ resamplingQuality })
-      streams.push(decoder)
-
-      pipeline(streams, (err) => {
-        if (err) decoder.emit('error', err)
-      })
-
-      pcmStream = decoder
+      streams.push(new AACDecoderStream({ resamplingQuality }))
       break
     }
 
     case SupportedFormats.FLV: {
-      const demuxer = new FLVToAACStream()
-      const decoder = new AACDecoderStream({ resamplingQuality })
-
-      pipeline(stream, demuxer, decoder, (err) => {
-        if (err) decoder.emit('error', err)
-      })
-
-      pcmStream = decoder
+      streams.push(new FLVToAACStream())
+      streams.push(new AACDecoderStream({ resamplingQuality }))
       break
     }
 
@@ -1769,33 +1756,21 @@ export const createPCMStream = (stream, type, nodelink, volume = 1.0) => {
     case SupportedFormats.FLAC:
     case SupportedFormats.OGG_VORBIS:
     case SupportedFormats.WAV: {
-      const decoder = new SymphoniaDecoderStream({ resamplingQuality })
-      pipeline(stream, decoder, (err) => {
-        if (err) decoder.emit('error', err)
-      })
-      pcmStream = decoder
+      streams.push(new SymphoniaDecoderStream({ resamplingQuality }))
       break
     }
 
     case SupportedFormats.OPUS: {
-      const decoder = new OpusDecoder({
-        rate: AUDIO_CONFIG.sampleRate,
-        channels: AUDIO_CONFIG.channels,
-        frameSize: AUDIO_CONFIG.frameSize
-      })
-
       if (_isWebmFormat(type.toLowerCase())) {
-        const demuxer = new WebmOpusDemuxer()
-        pipeline(stream, demuxer, decoder, (err) => {
-          if (err) decoder.emit('error', err)
-        })
-      } else {
-        pipeline(stream, decoder, (err) => {
-          if (err) decoder.emit('error', err)
-        })
+        streams.push(new WebmOpusDemuxer())
       }
-
-      pcmStream = decoder
+      streams.push(
+        new OpusDecoder({
+          rate: AUDIO_CONFIG.sampleRate,
+          channels: AUDIO_CONFIG.channels,
+          frameSize: AUDIO_CONFIG.frameSize
+        })
+      )
       break
     }
 
@@ -1803,13 +1778,20 @@ export const createPCMStream = (stream, type, nodelink, volume = 1.0) => {
       throw new Error(`Unsupported audio format: '${type}'`)
   }
 
-  if (volume !== 1.0) {
-    const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
-    pipeline(pcmStream, volumeTransformer, (err) => {
-      if (err) volumeTransformer.emit('error', err)
-    })
-    return volumeTransformer
+  streams.push(new VolumeTransformer({ type: 's16le', volume }))
+  streams.push(new FiltersManager(nodelink, filters))
+
+  for (const s of streams) {
+    if (s !== stream) {
+      s.on('error', (err) => logger('error', 'PCMStream', `Component error (${s.constructor.name}): ${err.message} (${err.code})`))
+    }
   }
 
-  return pcmStream
+  pipeline(streams, (err) => {
+    if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+      logger('error', 'PCMStream', `Internal processing pipeline failed: ${err.message}`)
+    }
+  })
+
+  return streams[streams.length - 1]
 }

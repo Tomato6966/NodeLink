@@ -1,4 +1,5 @@
 import { Transform } from 'node:stream'
+import { logger } from '../../utils.js'
 import { RingBuffer } from '../RingBuffer.js'
 
 const STATE_HEADER = 0
@@ -11,6 +12,7 @@ const BUFFER_SIZE = 2 * 1024 * 1024 // 2MB
 export class FlvDemuxer extends Transform {
   constructor(options = {}) {
     super({ ...options, readableObjectMode: true })
+    this.on('error', (err) => logger('error', 'FlvDemuxer', `Stream error: ${err.message} (${err.code})`))
     this.ringBuffer = new RingBuffer(BUFFER_SIZE)
     this.state = STATE_HEADER
     this.expectedSize = 9
