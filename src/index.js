@@ -102,12 +102,25 @@ class BunSocketWrapper extends EventEmitter {
   constructor(ws) {
     super()
     this.ws = ws
-    this.remoteAddress = ws.remoteAddress
-    this.readyState = ws.readyState
+    this.remoteAddress = ws?.data?.remoteAddress
   }
 
   send(data) {
-    return this.ws.send(data) > 0
+    try {
+      const r = this.ws.send(data)
+      return r !== 0
+    } catch {
+      return false
+    }
+  }
+
+  ping(data) {
+    try {
+      this.ws.ping?.(data)
+      return true
+    } catch {
+      return false
+    }
   }
 
   close(code, reason) {
@@ -143,6 +156,9 @@ class NodelinkServer extends EventEmitter {
     this.logger = logger
     this.server = null
     this.socket = null
+
+    this._usingBunServer = Boolean(isBun && options?.server?.useBunServer)
+
     this.sessions = new sessionManager(this, PlayerManagerClass)
     if (!isClusterPrimary || options.enableLoadStreamEndpoint) {
       this.sources = new sourceManager(this)
@@ -178,10 +194,11 @@ class NodelinkServer extends EventEmitter {
     }
 
     this._globalUpdater = null
+    this._statsUpdater = null
     this.supportedSourcesCache = null
     this._heartbeatInterval = null
 
-    if (isBun) {
+    if (this._usingBunServer) {
       this.socket = new EventEmitter()
     } else {
       this.socket = new WebSocketServer({ noServer: true })
@@ -208,6 +225,8 @@ class NodelinkServer extends EventEmitter {
                 fin: true,
                 opcode: 0x09
               })
+            } else if (typeof session.socket.ping === 'function') {
+              session.socket.ping()
             }
           } catch (e) {
             logger(
@@ -548,7 +567,11 @@ class NodelinkServer extends EventEmitter {
             logger(
               'info',
               'Server',
-              `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''} resumed session with ID: ${oldSessionId}`
+              `\x1b[36m${clientInfo.name}\x1b[0m${
+                clientInfo.version
+                  ? `/\x1b[32mv${clientInfo.version}\x1b[0m`
+                  : ''
+              } resumed session with ID: ${oldSessionId}`
             )
             this.statsManager.incrementSessionResume(clientInfo.name, true)
 
@@ -561,7 +584,9 @@ class NodelinkServer extends EventEmitter {
               logger(
                 'info',
                 'Server',
-                `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version}\x1b[0m disconnected with code ${code} and reason: ${
+                `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${
+                  clientInfo.version
+                }\x1b[0m disconnected with code ${code} and reason: ${
                   reason || 'without reason'
                 }`
               )
@@ -626,7 +651,11 @@ class NodelinkServer extends EventEmitter {
             logger(
               'info',
               'Server',
-              `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''} disconnected with code ${code} and reason: ${
+              `\x1b[36m${clientInfo.name}\x1b[0m${
+                clientInfo.version
+                  ? `/\x1b[32mv${clientInfo.version}\x1b[0m`
+                  : ''
+              } disconnected with code ${code} and reason: ${
                 reason || 'without reason'
               }`
             )
@@ -657,22 +686,13 @@ class NodelinkServer extends EventEmitter {
     const port = this.options.server.port
     const host = this.options.server.host || '0.0.0.0'
     const password = this.options.server.password
-    const useBun = this.options.server.useBunServer || false
+    const self = this
 
-    if (!useBun) {
-      logger(
-        'warn',
-        'Server',
-        'Bun.serve usage is disabled in config, using standard Node.js HTTP server instead.'
-      )
-      return
-    }
     logger(
       'warn',
       'Server',
-      `Running with Bun.serve, remember this is experimental!`
+      'Running with Bun.serve, remember this is experimental!'
     )
-    const self = this
 
     this.server = Bun.serve({
       port,
@@ -681,11 +701,11 @@ class NodelinkServer extends EventEmitter {
 
       async fetch(req, server) {
         const url = new URL(req.url)
-        const path = url.pathname.endsWith('/')
+        const pathname = url.pathname.endsWith('/')
           ? url.pathname.slice(0, -1)
           : url.pathname
 
-        if (path === '/v4/websocket') {
+        if (pathname === '/v4/websocket') {
           const remoteAddress = server.requestIP(req)?.address || 'unknown'
           const clientAddress = `[External] (${remoteAddress})`
 
@@ -727,6 +747,17 @@ class NodelinkServer extends EventEmitter {
           }
 
           const clientInfo = parseClient(clientName)
+          if (!clientInfo) {
+            logger(
+              'warn',
+              'Server',
+              `Invalid client-name from ${clientAddress}`
+            )
+            return new Response('Invalid or missing Client-Name header.', {
+              status: 400,
+              statusText: 'Bad Request'
+            })
+          }
 
           const success = server.upgrade(req, {
             data: {
@@ -738,10 +769,7 @@ class NodelinkServer extends EventEmitter {
             }
           })
 
-          if (success) {
-            return undefined
-          }
-
+          if (success) return undefined
           return new Response('WebSocket upgrade failed', { status: 400 })
         }
 
@@ -803,6 +831,8 @@ class NodelinkServer extends EventEmitter {
       },
 
       websocket: {
+        sendPings: true,
+
         open(ws) {
           const wrapper = new BunSocketWrapper(ws)
           ws.data.wrapper = wrapper
@@ -818,7 +848,9 @@ class NodelinkServer extends EventEmitter {
           logger(
             'info',
             'Server',
-            `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''} connected from [External] (${ws.data.remoteAddress}) | \x1b[33mURL:\x1b[0m ${ws.data.url}`
+            `\x1b[36m${clientInfo.name}\x1b[0m${
+              clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''
+            } connected from [External] (${ws.data.remoteAddress}) | \x1b[33mURL:\x1b[0m ${ws.data.url}`
           )
 
           self.socket.emit(
@@ -830,14 +862,10 @@ class NodelinkServer extends EventEmitter {
           )
         },
         message(ws, message) {
-          if (ws.data.wrapper) {
-            ws.data.wrapper._handleMessage(message)
-          }
+          ws.data.wrapper?._handleMessage(message)
         },
         close(ws, code, reason) {
-          if (ws.data.wrapper) {
-            ws.data.wrapper._handleClose(code, reason)
-          }
+          ws.data.wrapper?._handleClose(code, reason)
         }
       }
     })
@@ -850,7 +878,7 @@ class NodelinkServer extends EventEmitter {
   }
 
   _createServer() {
-    if (isBun) {
+    if (this._usingBunServer) {
       this._createBunServer()
       return
     }
@@ -947,12 +975,32 @@ class NodelinkServer extends EventEmitter {
         logger(
           'info',
           'Server',
-          `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''} connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
+          `\x1b[36m${clientInfo.name}\x1b[0m${
+            clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''
+          } connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
         )
 
-        this.socket.handleUpgrade(request, socket, head, {}, (ws) =>
-          this.socket.emit('/v4/websocket', ws, request, clientInfo, sessionId)
-        )
+        if (isBun && !this._usingBunServer) {
+          this.socket.handleUpgrade(request, socket, head, (ws) => {
+            this.socket.emit(
+              '/v4/websocket',
+              ws,
+              request,
+              clientInfo,
+              sessionId
+            )
+          })
+        } else {
+          this.socket.handleUpgrade(request, socket, head, {}, (ws) =>
+            this.socket.emit(
+              '/v4/websocket',
+              ws,
+              request,
+              clientInfo,
+              sessionId
+            )
+          )
+        }
       } else {
         logger(
           'warn',
@@ -969,7 +1017,7 @@ class NodelinkServer extends EventEmitter {
   }
 
   _listen() {
-    if (isBun) return
+    if (!this.server || typeof this.server.listen !== 'function') return
 
     const port = this.options.server.port
     const host = this.options.server.host || '0.0.0.0'
@@ -1008,6 +1056,7 @@ class NodelinkServer extends EventEmitter {
       )
     })
   }
+
   _startGlobalUpdater() {
     if (this._globalUpdater) return
     const updateInterval = Math.max(
@@ -1103,6 +1152,7 @@ class NodelinkServer extends EventEmitter {
       }
     }, metricsInterval)
   }
+
   _stopGlobalPlayerUpdater() {
     if (this._globalUpdater) {
       clearInterval(this._globalUpdater)
@@ -1114,10 +1164,20 @@ class NodelinkServer extends EventEmitter {
     }
   }
 
-  _cleanupWebSocketServer() {
-    if (isBun && this.server) {
-      this.server.stop()
-      logger('info', 'WebSocket', 'Bun server stopped successfully')
+  async _cleanupWebSocketServer() {
+    if (this._usingBunServer && this.server) {
+      try {
+        logger('info', 'WebSocket', 'Stopping Bun server...')
+        await this.server.stop(true)
+        this.server.unref()
+        logger('info', 'WebSocket', 'Bun server stopped successfully')
+      } catch (e) {
+        logger(
+          'error',
+          'WebSocket',
+          `Error stopping Bun server: ${e?.message ?? e}`
+        )
+      }
       return
     }
 
@@ -1223,12 +1283,10 @@ class NodelinkServer extends EventEmitter {
 
     if (this.sources) {
       await this.sources.loadFolder()
-
       await this.lyrics.loadFolder()
     }
 
     this._setupSocketEvents()
-
     this._createServer()
 
     if (startOptions.isClusterWorker) {
@@ -1257,7 +1315,7 @@ class NodelinkServer extends EventEmitter {
         }
       })
     } else {
-      if (!isBun) this._listen()
+      this._listen()
     }
 
     if (startOptions.isClusterPrimary) {
@@ -1420,7 +1478,7 @@ if (clusterEnabled && cluster.isPrimary) {
 
       workerManager.destroy()
 
-      nserver._cleanupWebSocketServer()
+      await nserver._cleanupWebSocketServer()
 
       if (nserver.server?.listening) {
         await new Promise((resolve) => nserver.server.close(resolve))
@@ -1471,7 +1529,7 @@ if (clusterEnabled && cluster.isPrimary) {
 
       await nserver.credentialManager.forceSave()
 
-      nserver._cleanupWebSocketServer()
+      await nserver._cleanupWebSocketServer()
 
       if (nserver.server?.listening) {
         await new Promise((resolve) => nserver.server.close(resolve))
