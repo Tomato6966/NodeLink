@@ -1230,7 +1230,7 @@ export class Player {
     }
 
     const fetched = await this.nodelink.sources.getTrackStream(
-      trackPayload.info,
+      urlData.newTrack?.info || trackPayload.info,
       urlData.url,
       urlData.protocol,
       urlData.additionalData

@@ -77,7 +77,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     const additionalData = { ...urlResult.additionalData, startTime: position }
 
     const fetched = await nodelink.sources.getTrackStream(
-      decodedTrack.info,
+      urlResult.newTrack?.info || decodedTrack.info,
       urlResult.url,
       urlResult.protocol,
       additionalData
