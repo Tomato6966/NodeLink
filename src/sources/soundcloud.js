@@ -12,16 +12,39 @@ const BASE_URL = 'https://api-v2.soundcloud.com'
 const SOUNDCLOUD_URL = 'https://soundcloud.com'
 const ASSET_PATTERN = /https:\/\/a-v2\.sndcdn\.com\/assets\/[a-zA-Z0-9-]+\.js/g
 const CLIENT_ID_PATTERN = /client_id=([a-zA-Z0-9]{32})/
-const TRACK_PATTERN = /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:sets\/)?[^/\s]+$/
+const TRACK_PATTERN =
+  /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:sets\/)?[^/\s]+$/
+const SEARCH_URL_PATTERN =
+  /^https?:\/\/(?:www\.)?soundcloud\.com\/search(?:\/(sounds|people|albums|sets))?(?:\?|$)/
 const BATCH_SIZE = 50
 const DEFAULT_PRIORITY = 85
+
+const SEARCH_TYPE_MAP = {
+  track: 'tracks',
+  tracks: 'tracks',
+  sounds: 'tracks',
+  sound: 'tracks',
+  user: 'users',
+  users: 'users',
+  people: 'users',
+  artist: 'users',
+  artists: 'users',
+  album: 'albums',
+  albums: 'albums',
+  playlist: 'playlists',
+  playlists: 'playlists',
+  set: 'playlists',
+  sets: 'playlists',
+  all: 'all',
+  everything: 'all'
+}
 
 export default class SoundCloudSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.baseUrl = BASE_URL
     this.searchTerms = ['scsearch']
-    this.patterns = [TRACK_PATTERN]
+    this.patterns = [TRACK_PATTERN, SEARCH_URL_PATTERN]
     this.priority = DEFAULT_PRIORITY
     this.clientId = nodelink.options?.sources?.clientId ?? null
   }
@@ -30,7 +53,11 @@ export default class SoundCloudSource {
     const cachedId = this.nodelink.credentialManager.get('soundcloud_client_id')
     if (cachedId) {
       this.clientId = cachedId
-      logger('info', 'Sources', `Loaded SoundCloud (clientId: ${this.clientId}) from CredentialManager`)
+      logger(
+        'info',
+        'Sources',
+        `Loaded SoundCloud (clientId: ${this.clientId}) from CredentialManager`
+      )
       return true
     }
 
@@ -68,8 +95,16 @@ export default class SoundCloudSource {
         )
 
         this.clientId = clientId
-        this.nodelink.credentialManager.set('soundcloud_client_id', clientId, 7 * 24 * 60 * 60 * 1000)
-        logger('info', 'Sources', `Loaded SoundCloud (clientId: ${this.clientId})`)
+        this.nodelink.credentialManager.set(
+          'soundcloud_client_id',
+          clientId,
+          7 * 24 * 60 * 60 * 1000
+        )
+        logger(
+          'info',
+          'Sources',
+          `Loaded SoundCloud (clientId: ${this.clientId})`
+        )
 
         return true
       } catch {
@@ -88,37 +123,94 @@ export default class SoundCloudSource {
     return this.patterns.some((p) => p.test(url))
   }
 
-  async search(query) {
-    if (!this._isValidString(query)) {
+  _parseSearchIdentifier(rawQuery, providedType = null) {
+    let searchType = 'tracks'
+    let searchQuery = (rawQuery || '').trim()
+
+    const scsearchMatch = searchQuery.match(/^scsearch:?/i)
+    if (scsearchMatch) {
+      searchQuery = searchQuery.substring(scsearchMatch[0].length)
+    }
+
+    const colonIndex = searchQuery.indexOf(':')
+    if (colonIndex > 0 && colonIndex <= 12) {
+      const possibleType = searchQuery.substring(0, colonIndex).toLowerCase()
+      const normalizedType = SEARCH_TYPE_MAP[possibleType]
+
+      if (normalizedType) {
+        searchType = normalizedType
+        searchQuery = searchQuery.substring(colonIndex + 1).trim()
+        return { type: searchType, query: searchQuery }
+      }
+    }
+    if (providedType && typeof providedType === 'string') {
+      let cleanType = providedType.toLowerCase().trim()
+
+      if (cleanType.startsWith('scsearch:')) {
+        cleanType = cleanType.substring(9)
+      } else if (cleanType === 'scsearch') {
+        cleanType = 'tracks'
+      }
+
+      const normalizedType = SEARCH_TYPE_MAP[cleanType]
+      if (normalizedType) {
+        searchType = normalizedType
+      }
+    }
+
+    return { type: searchType, query: searchQuery }
+  }
+
+  async search(query, type = null) {
+    const parsed = this._parseSearchIdentifier(query, type)
+    const searchType = parsed.type
+    const searchQuery = parsed.query
+
+    if (!this._isValidString(searchQuery)) {
       return this._buildError('Invalid query')
     }
 
+    const endpoint = this._getSearchEndpoint(searchType)
+
     try {
       const params = new URLSearchParams({
-        q: query,
+        q: searchQuery,
         client_id: this.clientId,
         limit: String(this.nodelink.options.maxSearchResults),
         offset: '0',
-        linked_partitioning: '1',
-        facet: 'model'
+        linked_partitioning: '1'
       })
 
-      const req = await http1makeRequest(`${BASE_URL}/search?${params}`)
+      if (searchType === 'all') {
+        params.append('facet', 'model')
+      }
+
+      const req = await http1makeRequest(`${BASE_URL}${endpoint}?${params}`)
 
       if (req.error || req.statusCode !== 200) {
-        return this._buildError(req.error?.message ?? `Status: ${req.statusCode}`)
+        return this._buildError(
+          req.error?.message ?? `Status: ${req.statusCode}`
+        )
       }
 
       if (!req.body?.total_results && !req.body?.collection?.length) {
-        logger('debug', 'Sources', `No results for '${query}'`)
+        logger(
+          'debug',
+          'Sources',
+          `No SoundCloud results for '${searchQuery}' (type: ${searchType})`
+        )
 
         return { loadType: 'empty', data: {} }
       }
 
-      const tracks = this._processTracks(req.body.collection)
-      logger('debug', 'Sources', `Found ${tracks.length} tracks for '${query}'`)
+      const data = this._processSearchResults(req.body.collection, searchType)
+      logger(
+        'debug',
+        'Sources',
+        `Found ${data.length} SoundCloud results for '${searchQuery}' (type: ${searchType})`
+      )
 
-      return { loadType: 'search', data: tracks }
+      return { loadType: 'search', data }
     } catch (err) {
       this._logError('Search failed', err)
 
@@ -126,9 +218,212 @@ export default class SoundCloudSource {
     }
   }
 
+  _getSearchEndpoint(type) {
+    switch (type) {
+      case 'tracks':
+        return '/search/tracks'
+      case 'users':
+        return '/search/users'
+      case 'albums':
+        return '/search/albums'
+      case 'playlists':
+        return '/search/playlists'
+      case 'all':
+        return '/search'
+      default:
+        return '/search/tracks'
+    }
+  }
+
+  _processSearchResults(collection, type) {
+    if (!Array.isArray(collection)) return []
+
+    switch (type) {
+      case 'users':
+        return this._processUsers(collection)
+      case 'albums':
+        return this._processAlbums(collection)
+      case 'playlists':
+        return this._processPlaylists(collection)
+      case 'all':
+        return this._processAll(collection)
+      case 'tracks':
+      default:
+        return this._processTracks(collection)
+    }
+  }
+
+  _processUsers(collection) {
+    const max = this.nodelink.options.maxSearchResults
+    const users = []
+
+    for (let i = 0; i < collection.length && users.length < max; i++) {
+      const user = collection[i]
+      if (user?.kind === 'user' || user?.username) {
+        const info = {
+          title: user.username ?? 'Unknown',
+          author: 'SoundCloud',
+          length: 0,
+          identifier: String(user.id ?? ''),
+          isSeekable: false,
+          isStream: false,
+          uri: user.permalink_url ?? '',
+          artworkUrl: user.avatar_url ?? null,
+          sourceName: 'soundcloud',
+          position: 0
+        }
+
+        users.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: {
+            type: 'user',
+            followers: user.followers_count ?? 0,
+            trackCount: user.track_count ?? 0
+          }
+        })
+      }
+    }
+
+    return users
+  }
+
+  _processAlbums(collection) {
+    const max = this.nodelink.options.maxSearchResults
+    const albums = []
+
+    for (let i = 0; i < collection.length && albums.length < max; i++) {
+      const album = collection[i]
+      if (album?.kind === 'playlist' || album?.title) {
+        const info = {
+          title: album.title ?? 'Unknown',
+          author: album.user?.username ?? 'Unknown',
+          length: 0,
+          identifier: String(album.id ?? ''),
+          isSeekable: true,
+          isStream: false,
+          uri: album.permalink_url ?? '',
+          artworkUrl: album.artwork_url ?? null,
+          sourceName: 'soundcloud',
+          position: 0
+        }
+
+        albums.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: {
+            type: 'album',
+            trackCount: album.track_count ?? 0
+          }
+        })
+      }
+    }
+
+    return albums
+  }
+
+  _processPlaylists(collection) {
+    const max = this.nodelink.options.maxSearchResults
+    const playlists = []
+
+    for (let i = 0; i < collection.length && playlists.length < max; i++) {
+      const playlist = collection[i]
+      if (playlist?.kind === 'playlist' || playlist?.title) {
+        const info = {
+          title: playlist.title ?? 'Unknown',
+          author: playlist.user?.username ?? 'Unknown',
+          length: 0,
+          identifier: String(playlist.id ?? ''),
+          isSeekable: true,
+          isStream: false,
+          uri: playlist.permalink_url ?? '',
+          artworkUrl: playlist.artwork_url ?? null,
+          sourceName: 'soundcloud',
+          position: 0
+        }
+
+        playlists.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: {
+            type: 'playlist',
+            trackCount: playlist.track_count ?? 0
+          }
+        })
+      }
+    }
+
+    return playlists
+  }
+
+  _processAll(collection) {
+    const max = this.nodelink.options.maxSearchResults
+    const results = []
+
+    for (let i = 0; i < collection.length && results.length < max; i++) {
+      const item = collection[i]
+
+      if (item?.kind === 'track') {
+        results.push(this._buildTrack(item))
+      } else if (item?.kind === 'user') {
+        const info = {
+          title: item.username ?? 'Unknown',
+          author: 'SoundCloud',
+          length: 0,
+          identifier: String(item.id ?? ''),
+          isSeekable: false,
+          isStream: false,
+          uri: item.permalink_url ?? '',
+          artworkUrl: item.avatar_url ?? null,
+          sourceName: 'soundcloud',
+          position: 0
+        }
+
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: {
+            type: 'user',
+            followers: item.followers_count ?? 0,
+            trackCount: item.track_count ?? 0
+          }
+        })
+      } else if (item?.kind === 'playlist') {
+        const info = {
+          title: item.title ?? 'Unknown',
+          author: item.user?.username ?? 'Unknown',
+          length: 0,
+          identifier: String(item.id ?? ''),
+          isSeekable: true,
+          isStream: false,
+          uri: item.permalink_url ?? '',
+          artworkUrl: item.artwork_url ?? null,
+          sourceName: 'soundcloud',
+          position: 0
+        }
+
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: {
+            type: item.is_album ? 'album' : 'playlist',
+            trackCount: item.track_count ?? 0
+          }
+        })
+      }
+    }
+
+    return results
+  }
+
   async resolve(url) {
     if (!this._isValidString(url)) {
       return this._buildError('Invalid URL')
+    }
+
+    const searchMatch = url.match(SEARCH_URL_PATTERN)
+    if (searchMatch) {
+      return this._resolveSearchUrl(url, searchMatch[1])
     }
 
     try {
@@ -138,7 +433,9 @@ export default class SoundCloudSource {
       if (req.statusCode === 404) return { loadType: 'empty', data: {} }
 
       if (req.error || req.statusCode !== 200) {
-        return this._buildError(req.error?.message ?? `Status: ${req.statusCode}`)
+        return this._buildError(
+          req.error?.message ?? `Status: ${req.statusCode}`
+        )
       }
 
       const { body } = req
@@ -156,6 +453,32 @@ export default class SoundCloudSource {
       return { loadType: 'empty', data: {} }
     } catch (err) {
       this._logError('Resolve failed', err)
+
+      return this._buildError(err.message)
+    }
+  }
+
+  async _resolveSearchUrl(url, searchType) {
+    try {
+      const urlObj = new URL(url)
+      const query = urlObj.searchParams.get('q')
+
+      if (!query) {
+        return { loadType: 'empty', data: {} }
+      }
+
+      const typeMap = {
+        sounds: 'tracks',
+        people: 'users',
+        albums: 'albums',
+        sets: 'playlists'
+      }
+
+      const type = typeMap[searchType] || 'all'
+
+      return await this.search(query, type)
+    } catch (err) {
+      this._logError('Search URL resolve failed', err)
 
       return this._buildError(err.message)
     }
@@ -270,7 +593,9 @@ export default class SoundCloudSource {
       if (req.error || req.statusCode !== 200) {
         this._logError('getTrackUrl failed', req.error)
 
-        return this._buildException(req.error?.message ?? `Status: ${req.statusCode}`)
+        return this._buildException(
+          req.error?.message ?? `Status: ${req.statusCode}`
+        )
       }
 
       if (req.body?.errors?.[0]) {
@@ -328,14 +653,18 @@ export default class SoundCloudSource {
     const hlsAacHigh = transcodings.find(
       (t) =>
         t.format?.protocol === 'hls' &&
-        (t.format?.mime_type?.includes('aac') || t.format?.mime_type?.includes('mp4')) &&
-        (t.quality === 'hq' || t.preset?.includes('160') || t.url.includes('160'))
+        (t.format?.mime_type?.includes('aac') ||
+          t.format?.mime_type?.includes('mp4')) &&
+        (t.quality === 'hq' ||
+          t.preset?.includes('160') ||
+          t.url.includes('160'))
     )
 
     const hlsAacStandard = transcodings.find(
       (t) =>
         t.format?.protocol === 'hls' &&
-        (t.format?.mime_type?.includes('aac') || t.format?.mime_type?.includes('mp4'))
+        (t.format?.mime_type?.includes('aac') ||
+          t.format?.mime_type?.includes('mp4'))
     )
 
     const anyHls = transcodings.find((t) => t.format?.protocol === 'hls')
@@ -368,7 +697,11 @@ export default class SoundCloudSource {
       finalUrl = urlReq.url
     } else if (urlReq.statusCode === 302 || urlReq.statusCode === 301) {
       finalUrl = urlReq.headers?.location
-    } else if (urlReq.body && typeof urlReq.body === 'object' && urlReq.body.url) {
+    } else if (
+      urlReq.body &&
+      typeof urlReq.body === 'object' &&
+      urlReq.body.url
+    ) {
       finalUrl = urlReq.body.url
     } else if (urlReq.statusCode === 200) {
       finalUrl = streamAuthUrl
@@ -429,7 +762,11 @@ export default class SoundCloudSource {
 
       pipeline(res.stream, stream, (err) => {
         if (err) {
-          logger('error', 'Sources', `Progressive pipeline error: ${err.message}`)
+          logger(
+            'error',
+            'Sources',
+            `Progressive pipeline error: ${err.message}`
+          )
           if (!stream.destroyed) stream.destroy(err)
         } else {
           stream.emit('finishBuffering')
