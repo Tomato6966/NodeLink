@@ -17,7 +17,7 @@ export default class AndroidVR extends BaseClient {
         clientName: 'ANDROID_VR',
         clientVersion: '1.71.26',
         userAgent:
-          'com.google.android.apps.youtube.vr.oculus/1.71.26 AppleWebKit/537.36 (KHTML, like Gecko) (Linux; U; Android 15; eureka-user Build/AP4A.250205.002) gzip',
+          'com.google.android.apps.youtube.vr.oculus/1.71.26 (Linux; U; Android 15; eureka-user Build/AP4A.250205.002) gzip',
         deviceMake: 'Google',
         osName: 'Android',
         osVersion: '15',
