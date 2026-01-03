@@ -165,7 +165,7 @@ export class Encoder extends Transform {
     const val = p < 0 ? 0 : p > 100 ? 100 : Math.round(p)
     _applyCtl(this.enc, this.lib.name, OPUS_CTL.PLP, val)
   }
-  setDTX(enabled = true) {
+  setDTX(enabled = false) {
     _applyCtl(this.enc, this.lib.name, OPUS_CTL.DTX, enabled ? 1 : 0)
   }
 }

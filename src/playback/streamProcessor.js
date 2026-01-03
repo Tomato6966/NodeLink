@@ -1564,7 +1564,7 @@ class StreamAudioResource extends BaseAudioResource {
       frameSize: AUDIO_CONFIG.frameSize
     })
 
-    opusEncoder.setDTX(true)
+    opusEncoder.setDTX(false)
 
     const streams = [pcmStream, volumeTransformer]
     this.pipes.push(volumeTransformer)
