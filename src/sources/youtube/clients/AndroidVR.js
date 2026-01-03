@@ -15,12 +15,13 @@ export default class AndroidVR extends BaseClient {
     return {
       client: {
         clientName: 'ANDROID_VR',
-        clientVersion: '1.65.10',
+        clientVersion: '1.71.26',
         userAgent:
-          'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+          'com.google.android.apps.youtube.vr.oculus/1.71.26 (Linux; U; Android 15; eureka-user Build/AP4A.250205.002) gzip',
+        deviceMake: 'Google',
         osName: 'Android',
-        osVersion: '12L',
-        androidSdkVersion: '32',
+        osVersion: '15',
+        androidSdkVersion: '35',
         hl: context.client.hl,
         gl: context.client.gl,
         visitorData: context.client.visitorData

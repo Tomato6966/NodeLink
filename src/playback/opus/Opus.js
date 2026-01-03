@@ -17,6 +17,7 @@ let ACTIVE_LIB = null
 const _getLib = () => {
   if (ACTIVE_LIB) return ACTIVE_LIB
   const libs = [
+    { name: '@toddynnn/voice-opus', pick: (m) => m.OpusEncoder },
     { name: 'toddy-mediaplex', pick: (m) => m.OpusEncoder },
     { name: '@discordjs/opus', pick: (m) => m.OpusEncoder },
     { name: 'opusscript', pick: (m) => m }
