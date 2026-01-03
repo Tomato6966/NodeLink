@@ -15,9 +15,9 @@ export default class Android extends BaseClient {
     return {
       client: {
         clientName: 'ANDROID',
-        clientVersion: '20.38.37',
+        clientVersion: '20.51.39',
         userAgent:
-          'com.google.android.youtube/20.38.37 (Linux; U; Android 14) gzip',
+          'com.google.android.youtube/20.51.39 (Linux; U; Android 14) gzip',
         deviceMake: 'Google',
         deviceModel: 'Pixel 6',
         osName: 'Android',
@@ -111,7 +111,7 @@ export default class Android extends BaseClient {
           const shelf = section.shelfRenderer || section.richShelfRenderer
           contents = shelf?.content?.verticalListRenderer?.items || shelf?.content?.richGridRenderer?.contents
         }
-        
+
         if (Array.isArray(contents)) {
           for (const item of contents) {
             items.push(item.richItemRenderer?.content || item)
@@ -131,7 +131,7 @@ export default class Android extends BaseClient {
       const maxResults = this.config.maxSearchResults || 10
       let count = 0
       const filteredItems = items.filter((item) => {
-        const isValid = item.videoRenderer || item.compactVideoRenderer || 
+        const isValid = item.videoRenderer || item.compactVideoRenderer ||
                         item.playlistRenderer || item.compactPlaylistRenderer ||
                         item.channelRenderer || item.elementRenderer
         if (isValid && count < maxResults) {
