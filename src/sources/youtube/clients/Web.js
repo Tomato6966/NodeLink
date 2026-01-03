@@ -15,10 +15,10 @@ export default class Web extends BaseClient {
     return {
       client: {
         clientName: 'WEB',
-        clientVersion: '2.20251030.01.00',
+        clientVersion: '2.20260101.00.00',
         platform: 'DESKTOP',
         userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36,gzip(gfe)',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36,gzip(gfe)',
         hl: context.client.hl,
         gl: context.client.gl
       },
@@ -335,7 +335,7 @@ export default class Web extends BaseClient {
       if (renderer) {
         const title = renderer.title?.simpleText || renderer.title?.runs?.[0]?.text
         const timeStr = renderer.timeDescription?.simpleText || renderer.timeDescription?.runs?.[0]?.text
-        
+
         let thumbnails = []
         if (renderer.thumbnail && renderer.thumbnail.thumbnails) {
             thumbnails = renderer.thumbnail.thumbnails
