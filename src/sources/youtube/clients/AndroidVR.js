@@ -27,7 +27,7 @@ export default class AndroidVR extends BaseClient {
         visitorData: context.client.visitorData
       },
       user: { lockedSafetyMode: false },
-      request: { useSsl: true },
+      request: { useSsl: true }
     }
   }
 
