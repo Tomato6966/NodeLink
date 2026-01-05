@@ -30,10 +30,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY src/ ./src/
 COPY config.default.js ./config.default.js
 COPY package.json ./package.json
-COPY biome.json ./biome.json
-COPY commitlint.config.mjs ./commitlint.config.mjs
-COPY LICENSE ./LICENSE
-COPY README.md ./README.md
 
 # Expose the port the application listens on (default is 3000 from config.default.js)
 EXPOSE 3000
