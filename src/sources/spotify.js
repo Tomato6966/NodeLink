@@ -494,7 +494,7 @@ export default class SpotifySource {
     return allItems
   }
 
-  async search(query) {
+  async search(query, sourceTerm, searchType = 'track') {
     try {
       const limit = this.config.maxSearchResults || 10
 
@@ -509,21 +509,26 @@ export default class SpotifySource {
           includePreReleases: false
         })
 
-        if (!data?.searchV2?.tracksV2?.items) {
+        if (!data?.searchV2) {
           return { loadType: 'empty', data: {} }
         }
 
-        const tracks = data.searchV2.tracksV2.items
-          .map((item) => this._buildTrackFromInternal(item.item.data))
-          .filter(Boolean)
-
-        return tracks.length === 0
+        const results = this._processInternalSearchResults(data.searchV2, searchType)
+        return results.length === 0
           ? { loadType: 'empty', data: {} }
-          : { loadType: 'search', data: tracks }
+          : { loadType: 'search', data: results }
       }
 
+      const typeMap = {
+        track: 'track',
+        album: 'album',
+        playlist: 'playlist',
+        artist: 'artist'
+      }
+      const spotifyType = typeMap[searchType] || 'track'
+
       const data = await this._apiRequest(
-        `/search?q=${encodeURIComponent(query)}&type=track&limit=${limit}&market=${this.market}`
+        `/search?q=${encodeURIComponent(query)}&type=${spotifyType}&limit=${limit}&market=${this.market}`
       )
 
       if (!data || data.error) {
@@ -535,24 +540,173 @@ export default class SpotifySource {
         }
       }
 
-      if (!data.tracks || data.tracks.items.length === 0) {
-        return { loadType: 'empty', data: {} }
-      }
-
-      const tracks = data.tracks.items
-        .map((item) => this._buildTrack(item))
-        .filter(Boolean)
-
-      if (tracks.length === 0) {
-        return { loadType: 'empty', data: {} }
-      }
-
-      return { loadType: 'search', data: tracks }
+      const results = this._processOfficialSearchResults(data, spotifyType)
+      return results.length === 0
+        ? { loadType: 'empty', data: {} }
+        : { loadType: 'search', data: results }
     } catch (e) {
       return {
         exception: { message: e.message, severity: 'fault' }
       }
     }
+  }
+
+  _processInternalSearchResults(searchV2, searchType) {
+    const results = []
+
+    if (searchType === 'track' && searchV2.tracksV2?.items) {
+      for (const item of searchV2.tracksV2.items) {
+        const track = this._buildTrackFromInternal(item.item.data)
+        if (track) results.push(track)
+      }
+    } else if (searchType === 'album' && searchV2.albumsV2?.items) {
+      for (const item of searchV2.albumsV2.items) {
+        const album = item.data
+        const info = {
+          title: album.name,
+          author: album.artists.items.map((a) => a.profile.name).join(', '),
+          length: 0,
+          identifier: album.uri.split(':').pop(),
+          isSeekable: true,
+          isStream: false,
+          uri: `https://open.spotify.com/album/${album.uri.split(':').pop()}`,
+          artworkUrl: album.coverArt?.sources?.[0]?.url || null,
+          isrc: null,
+          sourceName: 'spotify',
+          position: 0
+        }
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: { type: 'album' }
+        })
+      }
+    } else if (searchType === 'playlist' && searchV2.playlists?.items) {
+      for (const item of searchV2.playlists.items) {
+        const playlist = item.data
+        const info = {
+          title: playlist.name,
+          author: playlist.ownerV2?.data?.name || 'Unknown',
+          length: 0,
+          identifier: playlist.uri.split(':').pop(),
+          isSeekable: true,
+          isStream: false,
+          uri: `https://open.spotify.com/playlist/${playlist.uri.split(':').pop()}`,
+          artworkUrl: playlist.images?.items?.[0]?.sources?.[0]?.url || null,
+          isrc: null,
+          sourceName: 'spotify',
+          position: 0
+        }
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: { type: 'playlist' }
+        })
+      }
+    } else if (searchType === 'artist' && searchV2.artists?.items) {
+      for (const item of searchV2.artists.items) {
+        const artist = item.data
+        const info = {
+          title: artist.profile.name,
+          author: 'Spotify',
+          length: 0,
+          identifier: artist.uri.split(':').pop(),
+          isSeekable: false,
+          isStream: false,
+          uri: `https://open.spotify.com/artist/${artist.uri.split(':').pop()}`,
+          artworkUrl: artist.visuals?.avatarImage?.sources?.[0]?.url || null,
+          isrc: null,
+          sourceName: 'spotify',
+          position: 0
+        }
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: { type: 'artist' }
+        })
+      }
+    }
+
+    return results
+  }
+
+  _processOfficialSearchResults(data, spotifyType) {
+    const results = []
+
+    if (spotifyType === 'track' && data.tracks?.items) {
+      for (const item of data.tracks.items) {
+        const track = this._buildTrack(item)
+        if (track) results.push(track)
+      }
+    } else if (spotifyType === 'album' && data.albums?.items) {
+      for (const item of data.albums.items) {
+        if (!item) continue
+        const info = {
+          title: item.name,
+          author: item.artists.map((a) => a.name).join(', '),
+          length: 0,
+          identifier: item.id,
+          isSeekable: true,
+          isStream: false,
+          uri: item.external_urls?.spotify || `https://open.spotify.com/album/${item.id}`,
+          artworkUrl: item.images?.[0]?.url || null,
+          isrc: null,
+          sourceName: 'spotify',
+          position: 0
+        }
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: { type: 'album' }
+        })
+      }
+    } else if (spotifyType === 'playlist' && data.playlists?.items) {
+      for (const item of data.playlists.items) {
+        if (!item) continue
+        const info = {
+          title: item.name,
+          author: item.owner?.display_name || 'Unknown',
+          length: 0,
+          identifier: item.id,
+          isSeekable: true,
+          isStream: false,
+          uri: item.external_urls?.spotify || `https://open.spotify.com/playlist/${item.id}`,
+          artworkUrl: item.images?.[0]?.url || null,
+          isrc: null,
+          sourceName: 'spotify',
+          position: 0
+        }
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: { type: 'playlist' }
+        })
+      }
+    } else if (spotifyType === 'artist' && data.artists?.items) {
+      for (const item of data.artists.items) {
+        if (!item) continue
+        const info = {
+          title: item.name,
+          author: 'Spotify',
+          length: 0,
+          identifier: item.id,
+          isSeekable: false,
+          isStream: false,
+          uri: item.external_urls?.spotify || `https://open.spotify.com/artist/${item.id}`,
+          artworkUrl: item.images?.[0]?.url || null,
+          isrc: null,
+          sourceName: 'spotify',
+          position: 0
+        }
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: { type: 'artist' }
+        })
+      }
+    }
+
+    return results
   }
 
   async resolve(url) {
