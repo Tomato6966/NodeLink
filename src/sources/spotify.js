@@ -397,6 +397,8 @@ export default class SpotifySource {
       isSeekable: true,
       author:
         item.artists?.items?.map((a) => a.profile?.name || a.name).join(', ') ||
+        item.firstArtist?.items[0]?.profile?.name ||
+        item.otherArtists.items.map((a) => a.profile.name).join(', ') ||
         'Unknown',
       length:
         item.duration?.totalMilliseconds ||
