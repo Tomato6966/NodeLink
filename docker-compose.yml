@@ -9,19 +9,21 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Server Configuration
+      # --- Server Configuration ---
       NODELINK_SERVER_HOST: "0.0.0.0"
       NODELINK_SERVER_PORT: "3000"
       NODELINK_SERVER_PASSWORD: "youshallnotpass" # CHANGE THIS!
       # NODELINK_SERVER_USEBUNSERVER: "false" # set to true to use Bun.serve websocket (experimental)
 
-      # Cluster Configuration
+      # --- Cluster Configuration ---
       # NODELINK_CLUSTER_ENABLED: "true" # active cluster (or use env CLUSTER_ENABLED)
       # NODELINK_CLUSTER_WORKERS: "0" # 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
       # NODELINK_CLUSTER_MINWORKERS: "1" # Minimum workers to keep alive (improves availability during bursts)
       # NODELINK_CLUSTER_COMMANDTIMEOUT: "6000" # Timeout for heavy operations like loadTracks (6s)
       # NODELINK_CLUSTER_FASTCOMMANDTIMEOUT: "4000" # Timeout for player commands like play/pause (4s)
       # NODELINK_CLUSTER_MAXRETRIES: "2" # Number of retry attempts on timeout or worker failure
+      # NODELINK_CLUSTER_HIBERNATION_ENABLED: "true"
+      # NODELINK_CLUSTER_HIBERNATION_TIMEOUTMS: "1200000"
       # NODELINK_CLUSTER_SCALING_MAXPLAYERSPERWORKER: "20" # Reference capacity for utilization calculation
       # NODELINK_CLUSTER_SCALING_TARGETUTILIZATION: "0.7" # Target utilization for scaling up/down
       # NODELINK_CLUSTER_SCALING_SCALEUPTHRESHOLD: "0.75" # Utilization threshold to scale up
@@ -29,11 +31,15 @@ services:
       # NODELINK_CLUSTER_SCALING_CHECKINTERVALMS: "5000" # Interval to check for scaling needs
       # NODELINK_CLUSTER_SCALING_IDLEWORKERTIMEOUTMS: "60000" # Time in ms an idle worker should wait before being removed
       # NODELINK_CLUSTER_SCALING_QUEUELENGTHSCALEUPFACTOR: "5" # How many commands in queue per active worker trigger scale up
+      # NODELINK_CLUSTER_SCALING_LAGPENALTYLIMIT: "60" # Event loop lag threshold (ms) to penalize worker cost
+      # NODELINK_CLUSTER_SCALING_CPUPENALTYLIMIT: "0.85" # CPU usage threshold (85% of a core) to force scale up
 
-      # Logging Configuration
+      # --- Logging Configuration ---
       # NODELINK_LOGGING_LEVEL: "debug"
       # NODELINK_LOGGING_FILE_ENABLED: "false"
       # NODELINK_LOGGING_FILE_PATH: "logs"
+      # NODELINK_LOGGING_FILE_ROTATION: "daily"
+      # NODELINK_LOGGING_FILE_TTLDAYS: "7"
       # NODELINK_LOGGING_DEBUG_ALL: "false"
       # NODELINK_LOGGING_DEBUG_REQUEST: "true"
       # NODELINK_LOGGING_DEBUG_SESSION: "true"
@@ -44,29 +50,29 @@ services:
       # NODELINK_LOGGING_DEBUG_YOUTUBE: "true"
       # NODELINK_LOGGING_DEBUG_YOUTUBE_CIPHER: "true"
 
-      # Connection Configuration
+      # --- Connection Configuration ---
       # NODELINK_CONNECTION_LOGALLCHECKS: "false"
       # NODELINK_CONNECTION_INTERVAL: "300000" # 5 minutes
       # NODELINK_CONNECTION_TIMEOUT: "10000" # 10 seconds
       # NODELINK_CONNECTION_THRESHOLDS_BAD: "1" # Mbps
       # NODELINK_CONNECTION_THRESHOLDS_AVERAGE: "5" # Mbps
 
-      # General Limits
+      # --- General Limits & Timeouts ---
       # NODELINK_MAXSEARCHRESULTS: "10"
       # NODELINK_MAXALBUMPLAYLISTLENGTH: "100"
-
-      # Player Update & Zombie Detection
       # NODELINK_PLAYERUPDATEINTERVAL: "2000"
+      # NODELINK_STATSUPDATEINTERVAL: "30000"
       # NODELINK_TRACKSTUCKTHRESHOLDMS: "10000"
       # NODELINK_ZOMBIETHRESHOLDMS: "60000"
 
-      # Feature Toggles
+      # --- Feature Toggles ---
       # NODELINK_ENABLEHOLOTRACKS: "false"
       # NODELINK_ENABLETRACKSTREAMENDPOINT: "false"
+      # NODELINK_ENABLELOADSTREAMENDPOINT: "false"
       # NODELINK_RESOLVEEXTERNALLINKS: "false"
       # NODELINK_FETCHCHANNELINFO: "false"
 
-      # Filters Configuration
+      # --- Filters Configuration ---
       # NODELINK_FILTERS_ENABLED_TREMOLO: "true"
       # NODELINK_FILTERS_ENABLED_VIBRATO: "true"
       # NODELINK_FILTERS_ENABLED_LOWPASS: "true"
@@ -82,111 +88,173 @@ services:
       # NODELINK_FILTERS_ENABLED_PHASER: "true"
       # NODELINK_FILTERS_ENABLED_TIMESCALE: "true"
 
-      # Search Source Defaults
+      # --- Search Defaults ---
       # NODELINK_DEFAULTSEARCHSOURCE: "youtube"
       # NODELINK_UNIFIEDSEARCHSOURCES: '["youtube", "soundcloud"]'
 
-      # Sources Configuration
+      # --- Sources Configuration ---
+      # VK Music
+      # NODELINK_SOURCES_VKMUSIC_ENABLED: "true"
+      # NODELINK_SOURCES_VKMUSIC_USERTOKEN: ""
+      # NODELINK_SOURCES_VKMUSIC_USERCOOKIE: ""
+
+      # Amazon Music
+      # NODELINK_SOURCES_AMAZONMUSIC_ENABLED: "true"
+
+      # Mixcloud
+      # NODELINK_SOURCES_MIXCLOUD_ENABLED: "true"
+
+      # Deezer
       # NODELINK_SOURCES_DEEZER_ENABLED: "true"
       # NODELINK_SOURCES_DEEZER_ARL: ""
       # NODELINK_SOURCES_DEEZER_DECRYPTIONKEY: ""
+
+      # Bandcamp
       # NODELINK_SOURCES_BANDCAMP_ENABLED: "true"
+
+      # SoundCloud
       # NODELINK_SOURCES_SOUNDCLOUD_ENABLED: "true"
+
+      # Local Source
       # NODELINK_SOURCES_LOCAL_ENABLED: "true"
       # NODELINK_SOURCES_LOCAL_BASEPATH: "./local-music/"
+
+      # HTTP Source
       # NODELINK_SOURCES_HTTP_ENABLED: "true"
+
+      # Vimeo
+      # NODELINK_SOURCES_VIMEO_ENABLED: "true"
+
+      # Telegram
+      # NODELINK_SOURCES_TELEGRAM_ENABLED: "true"
+
+      # Bilibili
+      # NODELINK_SOURCES_BILIBILI_ENABLED: "true"
+      # NODELINK_SOURCES_BILIBILI_SESSDATA: ""
+
+      # JioSaavn
       # NODELINK_SOURCES_JIOSAAVN_ENABLED: "true"
       # NODELINK_SOURCES_JIOSAAVN_PLAYLISTLOADLIMIT: "50"
       # NODELINK_SOURCES_JIOSAAVN_ARTISTLOADLIMIT: "20"
-      # NODELINK_SOURCES_JIOSAAVN_SECRETKEY: "" # Optional, defaults to standard key
+
+      # Google TTS
+      # NODELINK_SOURCES_GOOGLE-TTS_ENABLED: "true"
+      # NODELINK_SOURCES_GOOGLE-TTS_LANGUAGE: "en-US"
+
+      # YouTube
       # NODELINK_SOURCES_YOUTUBE_ENABLED: "true"
-      # NODELINK_SOURCES_YOUTUBE_ALLOWITAG: "[]" # additional itags for audio streams, e.g., [140, 141]
-      # NODELINK_SOURCES_YOUTUBE_TARGETITAG: "" # force a specific itag for audio streams, overriding the quality option
+      # NODELINK_SOURCES_YOUTUBE_ALLOWITAG: "[]" # MUST be a JSON array string
+      # NODELINK_SOURCES_YOUTUBE_TARGETITAG: ""
       # NODELINK_SOURCES_YOUTUBE_GETOAUTHTOKEN: "false"
       # NODELINK_SOURCES_YOUTUBE_HL: "en"
       # NODELINK_SOURCES_YOUTUBE_GL: "US"
-      # NODELINK_SOURCES_YOUTUBE_CLIENTS_SEARCH: '["Android"]' # Clients used for searching tracks
-      # NODELINK_SOURCES_YOUTUBE_CLIENTS_PLAYBACK: '["AndroidVR", "TV", "TVEmbedded", "IOS"]' # Clients used for playback/streaming
-      # NODELINK_SOURCES_YOUTUBE_CLIENTS_RESOLVE: '["AndroidVR", "TV", "TVEmbedded", "IOS", "Web"]' # Clients used for resolving detailed track information (channel, external links, etc.)
-      # NODELINK_SOURCES_YOUTUBE_CLIENTS_SETTINGS_TV_REFRESHTOKEN: ""
+      # NODELINK_SOURCES_YOUTUBE_CLIENTS_SEARCH: '["Android"]' # MUST be a JSON array string
+      # NODELINK_SOURCES_YOUTUBE_CLIENTS_PLAYBACK: '["AndroidVR", "TV", "TVEmbedded", "IOS"]' # MUST be a JSON array string
+      # NODELINK_SOURCES_YOUTUBE_CLIENTS_RESOLVE: '["AndroidVR", "TV", "TVEmbedded", "IOS", "Web"]' # MUST be a JSON array string
+      # NODELINK_SOURCES_YOUTUBE_CLIENTS_SETTINGS_TV_REFRESHTOKEN: '["TOKEN_HERE"]' # MUST be a JSON array string
       NODELINK_SOURCES_YOUTUBE_CIPHER_URL: "https://cipher.kikkia.dev/api"
-      # NODELINK_SOURCES_YOUTUBE_CIPHER_TOKEN: "KEY" # CHANGE THIS!
+      # NODELINK_SOURCES_YOUTUBE_CIPHER_TOKEN: ""
+
+      # Instagram
       # NODELINK_SOURCES_INSTAGRAM_ENABLED: "true"
+
+      # Kwai
       # NODELINK_SOURCES_KWAI_ENABLED: "true"
+
+      # Twitch
       # NODELINK_SOURCES_TWITCH_ENABLED: "true"
+
+      # Spotify
       # NODELINK_SOURCES_SPOTIFY_ENABLED: "true"
-      # NODELINK_SOURCES_SPOTIFY_CLIENTID: "" # CHANGE THIS!
-      # NODELINK_SOURCES_SPOTIFY_CLIENTSECRET: "" # CHANGE THIS!
+      # NODELINK_SOURCES_SPOTIFY_CLIENTID: ""
+      # NODELINK_SOURCES_SPOTIFY_CLIENTSECRET: ""
+      NODELINK_SOURCES_SPOTIFY_EXTERNALAUTHURL: "http://get.1lucas1apk.fun/spotify/gettoken"
       # NODELINK_SOURCES_SPOTIFY_MARKET: "US"
-      # NODELINK_SOURCES_SPOTIFY_PLAYLISTLOADLIMIT: "1" # 0 means no limit (loads all tracks), 1 = 100 tracks, 2 = 100 and so on!
-      # NODELINK_SOURCES_SPOTIFY_PLAYLISTPAGELOADCONCURRENCY: "10" # How many pages to load simultaneously
-      # NODELINK_SOURCES_SPOTIFY_ALBUMLOADLIMIT: "1" # 0 means no limit (loads all tracks), 1 = 50 tracks, 2 = 100 tracks, etc.
-      # NODELINK_SOURCES_SPOTIFY_ALBUMPAGELOADCONCURRENCY: "5" # How many pages to load simultaneously
-      # NODELINK_SOURCES_SPOTIFY_ALLOWEXPLICIT: "true" # If true plays the explicit version of the song, If false plays the Non-Explicit version of the song. Normal songs are not affected.
+      # NODELINK_SOURCES_SPOTIFY_PLAYLISTLOADLIMIT: "1"
+      # NODELINK_SOURCES_SPOTIFY_PLAYLISTPAGELOADCONCURRENCY: "10"
+      # NODELINK_SOURCES_SPOTIFY_ALBUMLOADLIMIT: "1"
+      # NODELINK_SOURCES_SPOTIFY_ALBUMPAGELOADCONCURRENCY: "5"
+      # NODELINK_SOURCES_SPOTIFY_ALLOWEXPLICIT: "true"
+
+      # Apple Music
       # NODELINK_SOURCES_APPLEMUSIC_ENABLED: "true"
-      # NODELINK_SOURCES_APPLEMUSIC_MEDIAAPITOKEN: "token_here" # manually | or "token_here" to get a token automatically # CHANGE THIS!
+      # NODELINK_SOURCES_APPLEMUSIC_MEDIAAPITOKEN: "token_here"
       # NODELINK_SOURCES_APPLEMUSIC_MARKET: "US"
       # NODELINK_SOURCES_APPLEMUSIC_PLAYLISTLOADLIMIT: "0"
       # NODELINK_SOURCES_APPLEMUSIC_ALBUMLOADLIMIT: "0"
       # NODELINK_SOURCES_APPLEMUSIC_PLAYLISTPAGELOADCONCURRENCY: "5"
       # NODELINK_SOURCES_APPLEMUSIC_ALBUMPAGELOADCONCURRENCY: "5"
       # NODELINK_SOURCES_APPLEMUSIC_ALLOWEXPLICIT: "true"
+
+      # Tidal
       # NODELINK_SOURCES_TIDAL_ENABLED: "true"
-      # NODELINK_SOURCES_TIDAL_TOKEN: "" # get from tidal web player devtools; using login google account # CHANGE THIS!
+      # NODELINK_SOURCES_TIDAL_TOKEN: ""
       # NODELINK_SOURCES_TIDAL_COUNTRYCODE: "US"
-      # NODELINK_SOURCES_TIDAL_PLAYLISTLOADLIMIT: "2" # 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
-      # NODELINK_SOURCES_TIDAL_PLAYLISTPAGELOADCONCURRENCY: "5" # How many pages to load simultaneously
+      # NODELINK_SOURCES_TIDAL_PLAYLISTLOADLIMIT: "2"
+      # NODELINK_SOURCES_TIDAL_PLAYLISTPAGELOADCONCURRENCY: "5"
+
+      # Pandora
       # NODELINK_SOURCES_PANDORA_ENABLED: "true"
-      # NODELINK_SOURCES_PANDORA_CSRFTOKEN: "" # Optional, setting this manually can help unblocking countries (since pandora is US only.). May need to be updated periodically. # fetching manually: use a vpn connected to US, go on pandora.com, open devtools, Network tab, first request to appear and copy the 2nd csrfToken= value.
+      # NODELINK_SOURCES_PANDORA_REMOTETOKENURL: "https://get.1lucas1apk.fun/pandora/gettoken"
+
+      # Other Sources
       # NODELINK_SOURCES_NICOVIDEO_ENABLED: "true"
       # NODELINK_SOURCES_REDDIT_ENABLED: "true"
       # NODELINK_SOURCES_LASTFM_ENABLED: "true"
 
-      # Lyrics Configuration
+      # --- Lyrics Configuration ---
       # NODELINK_LYRICS_FALLBACKSOURCE: "genius"
       # NODELINK_LYRICS_YOUTUBE_ENABLED: "true"
       # NODELINK_LYRICS_GENIUS_ENABLED: "true"
       # NODELINK_LYRICS_MUSIXMATCH_ENABLED: "true"
       # NODELINK_LYRICS_MUSIXMATCH_SIGNATURESECRET: ""
       # NODELINK_LYRICS_LRCLIB_ENABLED: "true"
+      # NODELINK_LYRICS_BILIBILI_ENABLED: "true"
       # NODELINK_LYRICS_APPLEMUSIC_ENABLED: "true"
-      # NODELINK_LYRICS_APPLEMUSIC_ADVANCESEARCH: "true" # Uses YTMusic to fetch the correct title and artists instead of relying on messy YouTube video titles, improving lyrics accuracy
+      # NODELINK_LYRICS_APPLEMUSIC_ADVANCESEARCH: "true"
 
-      # Audio Configuration
-      # NODELINK_AUDIO_QUALITY: "high" # high, medium, low, lowest
+      # --- Audio Configuration ---
+      # NODELINK_AUDIO_QUALITY: "high"
       # NODELINK_AUDIO_ENCRYPTION: "aead_aes256_gcm_rtpsize"
-      # NODELINK_AUDIO_RESAMPLINGQUALITY: "best" # best, medium, fastest, zero order holder, linear
+      # NODELINK_AUDIO_RESAMPLINGQUALITY: "best"
 
-      # Route Planner Configuration
-      # NODELINK_ROUTEPLANNER_STRATEGY: "RotateOnBan" # RotateOnBan, RoundRobin, LoadBalance
-      # NODELINK_ROUTEPLANNER_BANNEDIPCOOLDOWN: "600000" # 10 minutes
-      # NODELINK_ROUTEPLANNER_IPBLOCKS: "[]"
+      # --- Route Planner Configuration ---
+      # NODELINK_ROUTEPLANNER_STRATEGY: "RotateOnBan"
+      # NODELINK_ROUTEPLANNER_BANNEDIPCOOLDOWN: "600000"
+      # NODELINK_ROUTEPLANNER_IPBLOCKS: "[]" # MUST be a JSON array string
 
-      # Rate Limit Configuration
+      # --- Rate Limit Configuration ---
       # NODELINK_RATELIMIT_ENABLED: "true"
       # NODELINK_RATELIMIT_GLOBAL_MAXREQUESTS: "1000"
-      # NODELINK_RATELIMIT_GLOBAL_TIMEWINDOWMS: "60000" # 1 minute
+      # NODELINK_RATELIMIT_GLOBAL_TIMEWINDOWMS: "60000"
       # NODELINK_RATELIMIT_PERIP_MAXREQUESTS: "100"
-      # NODELINK_RATELIMIT_PERIP_TIMEWINDOWMS: "10000" # 10 seconds
+      # NODELINK_RATELIMIT_PERIP_TIMEWINDOWMS: "10000"
       # NODELINK_RATELIMIT_PERUSERID_MAXREQUESTS: "50"
-      # NODELINK_RATELIMIT_PERUSERID_TIMEWINDOWMS: "5000" # 5 seconds
+      # NODELINK_RATELIMIT_PERUSERID_TIMEWINDOWMS: "5000"
       # NODELINK_RATELIMIT_PERGUILDID_MAXREQUESTS: "20"
-      # NODELINK_RATELIMIT_PERGUILDID_TIMEWINDOWMS: "5000" # 5 seconds
-      # NODELINK_RATELIMIT_IGNOREPATHS: "[]"
+      # NODELINK_RATELIMIT_PERGUILDID_TIMEWINDOWMS: "5000"
+      # NODELINK_RATELIMIT_IGNOREPATHS: "[]" # MUST be a JSON array string
 
-      # DoS Protection Configuration
+      # --- DoS Protection Configuration ---
       # NODELINK_DOSPROTECTION_ENABLED: "true"
       # NODELINK_DOSPROTECTION_THRESHOLDS_BURSTREQUESTS: "50"
-      # NODELINK_DOSPROTECTION_THRESHOLDS_TIMEWINDOWMS: "10000" # 10 seconds
+      # NODELINK_DOSPROTECTION_THRESHOLDS_TIMEWINDOWMS: "10000"
       # NODELINK_DOSPROTECTION_MITIGATION_DELAYMS: "500"
-      # NODELINK_DOSPROTECTION_MITIGATION_BLOCKDURATIONMS: "300000" # 5 minutes
+      # NODELINK_DOSPROTECTION_MITIGATION_BLOCKDURATIONMS: "300000"
 
-      # Metrics Configuration
+      # --- Metrics Configuration ---
       # NODELINK_METRICS_ENABLED: "true"
-      # NODELINK_METRICS_AUTHORIZATION_TYPE: "Bearer" # Bearer or Basic.
-      # NODELINK_METRICS_AUTHORIZATION_PASSWORD: "" # If empty, uses server.password
+      # NODELINK_METRICS_AUTHORIZATION_TYPE: "Bearer"
+      # NODELINK_METRICS_AUTHORIZATION_PASSWORD: ""
 
-    # Uncomment and configure these volumes if you want to persist data or use local files
+      # --- Audio Mix Configuration ---
+      # NODELINK_MIX_ENABLED: "true"
+      # NODELINK_MIX_DEFAULTVOLUME: "0.8"
+      # NODELINK_MIX_MAXLAYERSMIX: "5"
+      # NODELINK_MIX_AUTOCLEANUP: "true"
+
     # volumes:
-    #   - ./local-music:/app/local-music # Mount a local music directory for 'local' source
-    #   - ./logs:/app/logs # Mount logs directory if logging.file.enabled is true
+    #   - ./local-music:/app/local-music
+    #   - ./logs:/app/logs
+    #   - ./.cache:/app/.cache
+    restart: unless-stopped
