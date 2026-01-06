@@ -8,7 +8,8 @@ const voiceStateSchema = myzod
   .object({
     token: myzod.string(),
     endpoint: myzod.string(),
-    sessionId: myzod.string()
+    sessionId: myzod.string(),
+    channelId: myzod.string().optional()
   })
   .allowUnknownKeys()
 
@@ -190,7 +191,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         await session.players.create(guildId)
 
         if (payload.voice) {
-          const { endpoint, token, sessionId: voiceSessionId } = payload.voice
+          const { endpoint, token, sessionId: voiceSessionId, channelId } = payload.voice
           const currentPlayer = session.players.get(guildId)
           if (
             currentPlayer &&
