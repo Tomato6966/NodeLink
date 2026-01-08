@@ -46,7 +46,7 @@ export default class SoundCloudSource {
     this.searchTerms = ['scsearch']
     this.patterns = [TRACK_PATTERN, SEARCH_URL_PATTERN]
     this.priority = DEFAULT_PRIORITY
-    this.clientId = nodelink.options?.sources?.clientId ?? null
+    this.clientId = nodelink.options?.sources?.soundcloud.clientId ?? null
   }
 
   async setup() {
@@ -76,22 +76,20 @@ export default class SoundCloudSource {
       let clientId;
 
       if(mainPage.body?.match(CLIENT_ID_PATTERN)) {
-        const p = performance.now();
         clientId = mainPage.body.match(CLIENT_ID_PATTERN)[1]
-        console.log(p - performance.now())
         logger('debug', 'Sources', `SoundCloud client_id (${clientId}) Found from main page`)
-      }
-
-      const assetMatches = [...mainPage.body.matchAll(ASSET_PATTERN)]
-
-      if (assetMatches.length === 0) {
-        logger('warn', 'Sources', 'SoundCloud asset URL not found')
-
-        return false
       }
 
       try {
         if (!clientId) {
+          const assetMatches = [...mainPage.body.matchAll(ASSET_PATTERN)]
+
+          if (assetMatches.length === 0) {
+            logger('warn', 'Sources', 'SoundCloud asset URL not found')
+
+            return false
+          }
+
           clientId = await Promise.any(
             assetMatches.map(async (match) => {
               const assetUrl = match[0]
