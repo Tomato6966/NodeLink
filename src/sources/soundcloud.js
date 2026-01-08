@@ -11,7 +11,7 @@ import {
 const BASE_URL = 'https://api-v2.soundcloud.com'
 const SOUNDCLOUD_URL = 'https://soundcloud.com'
 const ASSET_PATTERN = /https:\/\/a-v2\.sndcdn\.com\/assets\/[a-zA-Z0-9-]+\.js/g
-const CLIENT_ID_PATTERN = /client_id=([a-zA-Z0-9]{32})/
+const CLIENT_ID_PATTERN = /(?:[?&/]?(?:client_id)[\s:=&]*"?|"data":{"id":")([A-Za-z0-9]{32})"?/
 const TRACK_PATTERN =
   /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:sets\/)?[^/\s]+$/
 const SEARCH_URL_PATTERN =
@@ -70,6 +70,18 @@ export default class SoundCloudSource {
         return false
       }
 
+      /**
+       * @type {string | undefined}
+       */
+      let clientId;
+
+      if(mainPage.body?.match(CLIENT_ID_PATTERN)) {
+        const p = performance.now();
+        clientId = mainPage.body.match(CLIENT_ID_PATTERN)[1]
+        console.log(p - performance.now())
+        logger('debug', 'Sources', `SoundCloud client_id (${clientId}) Found from main page`)
+      }
+
       const assetMatches = [...mainPage.body.matchAll(ASSET_PATTERN)]
 
       if (assetMatches.length === 0) {
@@ -79,20 +91,22 @@ export default class SoundCloudSource {
       }
 
       try {
-        const clientId = await Promise.any(
-          assetMatches.map(async (match) => {
-            const assetUrl = match[0]
-            const asset = await http1makeRequest(assetUrl)
-
-            if (asset && !asset.error) {
-              const idMatch = asset.body.match(CLIENT_ID_PATTERN)
-              if (idMatch?.[1]) {
-                return idMatch[1]
+        if (!clientId) {
+          clientId = await Promise.any(
+            assetMatches.map(async (match) => {
+              const assetUrl = match[0]
+              const asset = await http1makeRequest(assetUrl)
+              
+              if (asset && !asset.error) {
+                const idMatch = asset.body.match(CLIENT_ID_PATTERN)
+                if (idMatch?.[1]) {
+                  return idMatch[1]
+                }
               }
-            }
-            throw new Error('No client_id found in asset')
-          })
-        )
+              throw new Error('No client_id found in asset')
+            })
+          )
+        }
 
         this.clientId = clientId
         this.nodelink.credentialManager.set(
