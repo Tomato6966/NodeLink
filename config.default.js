@@ -110,7 +110,8 @@ export default {
       enabled: true
     },
     soundcloud: {
-      enabled: true
+      enabled: true,
+      // clientId: ""
     },
     local: {
       enabled: true,
@@ -319,10 +320,10 @@ export default {
     autoCleanup: true
   },
   plugins: [
-/*  {
-      name: 'nodelink-sample-plugin',
-      source: 'local'
-    } */
+    /*  {
+          name: 'nodelink-sample-plugin',
+          source: 'local'
+        } */
   ],
   pluginConfig: {}
 }
