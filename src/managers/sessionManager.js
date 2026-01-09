@@ -123,7 +123,7 @@ export default class SessionManager {
       }
     }
 
-    session.socket?.destroy()
+    session.socket?.destroy?.()
   }
 
   async shutdown(sessionId) {
