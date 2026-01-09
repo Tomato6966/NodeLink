@@ -10,6 +10,7 @@ import TVEmbedded from './clients/TVEmbedded.js'
 import Web from './clients/Web.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
 import OAuth from './OAuth.js'
+import { SabrStream } from './sabr.js'
 
 const CHUNK_SIZE = 64 * 1024
 const MAX_RETRIES = 3
@@ -1010,6 +1011,10 @@ export default class YouTubeSource {
           continue
         }
 
+        if (urlData.protocol === 'sabr') {
+          return urlData
+        }
+
         if (urlData.url) {
           const check = await http1makeRequest(urlData.url, {
             method: 'GET',
@@ -1155,6 +1160,38 @@ export default class YouTubeSource {
     this.activeStreams.set(streamKey, cancelSignal)
 
     try {
+      if (protocol === 'sabr') {
+        const sabr = new SabrStream({
+          videoId: decodedTrack.identifier,
+          accessToken: additionalData.accessToken,
+          visitorData: additionalData.visitorData,
+          serverAbrStreamingUrl: additionalData.serverAbrStreamingUrl,
+          videoPlaybackUstreamerConfig: additionalData.videoPlaybackUstreamerConfig,
+          poToken: additionalData.poToken,
+          clientInfo: additionalData.clientInfo,
+          formats: additionalData.formats,
+          startTime: additionalData.startTime || 0,
+          positionCallback: additionalData.positionCallback
+        })
+
+        const stream = new PassThrough()
+
+        sabr.on('data', (chunk) => stream.write(chunk))
+        sabr.on('end', () => stream.end())
+        sabr.on('error', (err) => {
+          logger('error', 'YouTube', `SABR stream error: ${err.message}`)
+          stream.destroy(err)
+        })
+
+        const bestAudio = additionalData.formats.filter(f => f.mimeType?.includes('audio')).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+        
+        sabr.start(bestAudio.itag)
+
+        const type = bestAudio.mimeType?.includes('webm') ? 'webm/opus' : 'm4a'
+
+        return { stream, type }
+      }
+
       if (protocol === 'hls') {
         const stream = new PassThrough()
         _manageYoutubeHlsStream(url, stream, cancelSignal, streamKey, this)

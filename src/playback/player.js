@@ -421,6 +421,11 @@ export class Player {
     if (startTime)
       urlData.additionalData = { startTime, ...urlData.additionalData }
 
+    urlData.additionalData = {
+      ...urlData.additionalData,
+      positionCallback: () => this._realPosition()
+    }
+
     const track = urlData?.newTrack ? urlData?.newTrack?.info : info
     const fetched = await this.nodelink.sources.getTrackStream(
       track,
