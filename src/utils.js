@@ -509,37 +509,163 @@ function decodeTrack(encoded) {
   let position = 0
   let step = 'init'
 
+  const ensure = (n) => {
+    if (position + n > buffer.length) {
+      throw new Error(`Unexpected end of buffer (need ${n} bytes)`)
+    }
+  }
+
+  const readModifiedUTF8 = () => {
+    ensure(2)
+    const utflen = buffer.readUInt16BE(position)
+    position += 2
+    ensure(utflen)
+
+    const end = position + utflen
+    const chars = []
+    let i = position
+
+    while (i < end) {
+      const c = buffer[i] & 0xff
+
+      if (c < 0x80) {
+        i += 1
+        chars.push(String.fromCharCode(c))
+        continue
+      }
+
+      if ((c & 0xe0) === 0xc0) {
+        if (i + 1 >= end) throw new Error('Malformed utf')
+        const c2 = buffer[i + 1] & 0xff
+        if ((c2 & 0xc0) !== 0x80) throw new Error('Malformed utf')
+        const ch = ((c & 0x1f) << 6) | (c2 & 0x3f)
+        i += 2
+        chars.push(String.fromCharCode(ch))
+        continue
+      }
+
+      if ((c & 0xf0) === 0xe0) {
+        if (i + 2 >= end) throw new Error('Malformed utf')
+        const c2 = buffer[i + 1] & 0xff
+        const c3 = buffer[i + 2] & 0xff
+        if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80) throw new Error('Malformed utf')
+        const ch = ((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f)
+        i += 3
+        chars.push(String.fromCharCode(ch))
+        continue
+      }
+
+      throw new Error('Malformed utf')
+    }
+
+    position = end
+    return chars.join('')
+  }
+
+  const readNullableText = () => {
+    const present = read.byte() !== 0
+    return present ? read.utf() : null
+  }
+
   const read = {
-    byte: () => buffer[position++],
-    ushort: () => {
-      const value = buffer.readUInt16BE(position)
-      position += 2
-      return value
+    byte: () => {
+      ensure(1)
+      return buffer[position++]
     },
     int: () => {
+      ensure(4)
       const value = buffer.readInt32BE(position)
       position += 4
       return value
     },
     long: () => {
+      ensure(8)
       const value = buffer.readBigInt64BE(position)
       position += 8
       return value
     },
-    utf: () => {
-      const length = buffer.readUInt16BE(position)
-      position += 2
-      const value = buffer.toString('utf8', position, position + length)
-      position += length
-      return value
+    utf: readModifiedUTF8
+  }
+
+  const decodeDetailsAsList = (detailsBuf) => {
+    let p = 0
+    const ensure2 = (n) => {
+      if (p + n > detailsBuf.length) throw new Error('Unexpected end of details')
     }
+
+    const readUTF2 = () => {
+      ensure2(2)
+      const utflen = detailsBuf.readUInt16BE(p)
+      p += 2
+      ensure2(utflen)
+
+      const end = p + utflen
+      const chars = []
+      let i = p
+
+      while (i < end) {
+        const c = detailsBuf[i] & 0xff
+
+        if (c < 0x80) {
+          i += 1
+          chars.push(String.fromCharCode(c))
+          continue
+        }
+
+        if ((c & 0xe0) === 0xc0) {
+          if (i + 1 >= end) throw new Error('Malformed utf')
+          const c2 = detailsBuf[i + 1] & 0xff
+          if ((c2 & 0xc0) !== 0x80) throw new Error('Malformed utf')
+          const ch = ((c & 0x1f) << 6) | (c2 & 0x3f)
+          i += 2
+          chars.push(String.fromCharCode(ch))
+          continue
+        }
+
+        if ((c & 0xf0) === 0xe0) {
+          if (i + 2 >= end) throw new Error('Malformed utf')
+          const c2 = detailsBuf[i + 1] & 0xff
+          const c3 = detailsBuf[i + 2] & 0xff
+          if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80) throw new Error('Malformed utf')
+          const ch = ((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f)
+          i += 3
+          chars.push(String.fromCharCode(ch))
+          continue
+        }
+
+        throw new Error('Malformed utf')
+      }
+
+      p = end
+      return chars.join('')
+    }
+
+    const readNullable2 = () => {
+      ensure2(1)
+      const present = detailsBuf[p++] !== 0
+      return present ? readUTF2() : null
+    }
+
+    const out = []
+    while (p < detailsBuf.length) out.push(readNullable2())
+    while (out.length && out[out.length - 1] === null) out.pop()
+    return out
+  }
+
+  const stripSeekableMetaFromDetails = (details) => {
+    if (!details.length) return { details, seekable: undefined }
+    const last = details[details.length - 1]
+    if (typeof last !== 'string') return { details, seekable: undefined }
+    if (last === '__seekable:0') return { details: details.slice(0, -1), seekable: false }
+    if (last === '__seekable:1') return { details: details.slice(0, -1), seekable: true }
+    return { details, seekable: undefined }
   }
 
   try {
     step = 'header'
     const firstInt = read.int()
     const isVersioned = ((firstInt & 0xc0000000) >> 30) & 1
-    const version = isVersioned ? read.byte() : 1
+    const version = isVersioned ? (read.byte() & 0xff) : 1
 
     step = 'title'
     const title = read.utf()
@@ -553,11 +679,8 @@ function decodeTrack(encoded) {
     step = 'identifier'
     const identifier = read.utf()
 
-    step = 'isSeekable'
-    const isSeekable = !!read.byte()
-
     step = 'isStream'
-    const isStream = !!read.byte()
+    const isStream = read.byte() !== 0
 
     let uri = null
     let artworkUrl = null
@@ -565,34 +688,31 @@ function decodeTrack(encoded) {
 
     if (version >= 2) {
       step = 'uri'
-      const hasUri = read.byte()
-      if (hasUri) {
-        step = 'uri'
-        uri = read.utf()
-      }
+      uri = readNullableText()
     }
 
-    if (version === 3) {
+    if (version >= 3) {
       step = 'artworkUrl'
-      const hasArtwork = read.byte()
-      if (hasArtwork) {
-        step = 'artworkUrl'
-        artworkUrl = read.utf()
-      }
+      artworkUrl = readNullableText()
 
       step = 'isrc'
-      const hasIsrc = read.byte()
-      if (hasIsrc) {
-        step = 'isrc'
-        isrc = read.utf()
-      }
+      isrc = readNullableText()
     }
 
     step = 'sourceName'
     const sourceName = read.utf()
 
+    step = 'detailsSlice'
+    if (buffer.length - position < 8) throw new Error('Buffer too small for position')
+    const detailsEnd = buffer.length - 8
+    const detailsBuf = detailsEnd > position ? buffer.subarray(position, detailsEnd) : Buffer.alloc(0)
+    position = detailsEnd
+
     step = 'position'
     const trackPosition = Number(read.long())
+
+    const rawDetails = detailsBuf.length > 0 ? decodeDetailsAsList(detailsBuf) : []
+    const { details, seekable } = stripSeekableMetaFromDetails(rawDetails)
 
     return {
       encoded,
@@ -601,7 +721,7 @@ function decodeTrack(encoded) {
         author,
         length,
         identifier,
-        isSeekable,
+        isSeekable: typeof seekable === 'boolean' ? seekable : !isStream,
         isStream,
         uri,
         artworkUrl,
@@ -609,6 +729,7 @@ function decodeTrack(encoded) {
         sourceName,
         position: trackPosition
       },
+      details,
       pluginInfo: {},
       userData: {}
     }
@@ -625,39 +746,65 @@ function encodeTrack(track) {
 
   const bufferArray = []
 
+  function writeModifiedUTF8(value) {
+    const str = String(value)
+    const bytes = []
+
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i)
+
+      if (ch >= 0x0001 && ch <= 0x007f) {
+        bytes.push(ch)
+      } else if (ch === 0x0000 || (ch >= 0x0080 && ch <= 0x07ff)) {
+        bytes.push(0xc0 | ((ch >> 6) & 0x1f))
+        bytes.push(0x80 | (ch & 0x3f))
+      } else {
+        bytes.push(0xe0 | ((ch >> 12) & 0x0f))
+        bytes.push(0x80 | ((ch >> 6) & 0x3f))
+        bytes.push(0x80 | (ch & 0x3f))
+      }
+    }
+
+    if (bytes.length > 65535) throw new Error('Encode Error: UTF string too long')
+
+    const lenBuf = Buffer.alloc(2)
+    lenBuf.writeUInt16BE(bytes.length)
+    bufferArray.push(lenBuf)
+    bufferArray.push(Buffer.from(bytes))
+  }
+
+  function writeNullableText(value) {
+    if (value === undefined || value === null) {
+      bufferArray.push(Buffer.from([0]))
+      return
+    }
+    bufferArray.push(Buffer.from([1]))
+    writeModifiedUTF8(String(value))
+  }
+
   function write(type, value, fieldName) {
+    if (type === 'buffer') {
+      bufferArray.push(value)
+      return
+    }
+
     if (value === undefined || value === null) {
       throw new Error(`Encode Error: Field '${fieldName}' is missing or null`)
     }
 
     try {
-      if (type === 'byte') bufferArray.push(Buffer.from([value]))
-
-      if (type === 'ushort') {
-        const buf = Buffer.alloc(2)
-        buf.writeUInt16BE(value)
-        bufferArray.push(buf)
-      }
-
+      if (type === 'byte') bufferArray.push(Buffer.from([value & 0xff]))
       if (type === 'int') {
         const buf = Buffer.alloc(4)
         buf.writeInt32BE(value)
         bufferArray.push(buf)
       }
-
       if (type === 'long') {
         const buf = Buffer.alloc(8)
         buf.writeBigInt64BE(BigInt(value))
         bufferArray.push(buf)
       }
-
-      if (type === 'utf') {
-        const strBuf = Buffer.from(value, 'utf8')
-        const lenBuf = Buffer.alloc(2)
-        lenBuf.writeUInt16BE(strBuf.length)
-        bufferArray.push(lenBuf)
-        bufferArray.push(strBuf)
-      }
+      if (type === 'utf') writeModifiedUTF8(value)
     } catch (err) {
       throw new Error(`Encode Error at [${fieldName}]: ${err.message}. Value: ${value}`)
     }
@@ -668,32 +815,38 @@ function encodeTrack(track) {
   const firstInt = isVersioned << 30
 
   write('int', firstInt, 'header')
-
-  if (isVersioned) {
-    write('byte', version, 'version')
-  }
+  if (isVersioned) write('byte', version, 'version')
 
   write('utf', track.title, 'title')
   write('utf', track.author, 'author')
   write('long', track.length, 'length')
   write('utf', track.identifier, 'identifier')
-  write('byte', track.isSeekable ? 1 : 0, 'isSeekable')
   write('byte', track.isStream ? 1 : 0, 'isStream')
 
-  if (version >= 2) {
-    write('byte', track.uri ? 1 : 0, 'uri')
-    if (track.uri) write('utf', track.uri, 'uri')
-  }
-
-  if (version === 3) {
-    write('byte', track.artworkUrl ? 1 : 0, 'artworkUrl')
-    if (track.artworkUrl) write('utf', track.artworkUrl, 'artworkUrl')
-
-    write('byte', track.isrc ? 1 : 0, 'isrc')
-    if (track.isrc) write('utf', track.isrc, 'isrc')
+  if (version >= 2) writeNullableText(track.uri ?? null)
+  if (version >= 3) {
+    writeNullableText(track.artworkUrl ?? null)
+    writeNullableText(track.isrc ?? null)
   }
 
   write('utf', track.sourceName, 'sourceName')
+
+  const detailsOut = Array.isArray(track.details) ? [...track.details] : []
+  const seekable =
+    typeof track.isSeekable === 'boolean'
+      ? track.isSeekable
+      : typeof track?.info?.isSeekable === 'boolean'
+        ? track.info.isSeekable
+        : undefined
+
+  if (typeof seekable === 'boolean') {
+    detailsOut.push(seekable ? '__seekable:1' : '__seekable:0')
+  }
+
+  if (detailsOut.length) {
+    for (const v of detailsOut) writeNullableText(v)
+  }
+
   write('long', track.position, 'position')
 
   return Buffer.concat(bufferArray).toString('base64')
