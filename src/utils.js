@@ -510,23 +510,21 @@ function decodeTrack(encoded) {
   let step = 'init'
 
   const ensure = (n) => {
-    if (position + n > buffer.length) {
-      throw new Error(`Unexpected end of buffer (need ${n} bytes)`)
-    }
+    if (position + n > buffer.length) throw new Error(`Unexpected end of buffer (need ${n} bytes)`)
   }
 
-  const readModifiedUTF8 = () => {
-    ensure(2)
-    const utflen = buffer.readUInt16BE(position)
-    position += 2
-    ensure(utflen)
+  const readModifiedUTF8From = (buf, pRef) => {
+    if (pRef.value + 2 > buf.length) throw new Error('Unexpected end of buffer (need 2 bytes)')
+    const utflen = buf.readUInt16BE(pRef.value)
+    pRef.value += 2
+    if (pRef.value + utflen > buf.length) throw new Error(`Unexpected end of buffer (need ${utflen} bytes)`)
 
-    const end = position + utflen
+    const end = pRef.value + utflen
     const chars = []
-    let i = position
+    let i = pRef.value
 
     while (i < end) {
-      const c = buffer[i] & 0xff
+      const c = buf[i] & 0xff
 
       if (c < 0x80) {
         i += 1
@@ -536,7 +534,7 @@ function decodeTrack(encoded) {
 
       if ((c & 0xe0) === 0xc0) {
         if (i + 1 >= end) throw new Error('Malformed utf')
-        const c2 = buffer[i + 1] & 0xff
+        const c2 = buf[i + 1] & 0xff
         if ((c2 & 0xc0) !== 0x80) throw new Error('Malformed utf')
         const ch = ((c & 0x1f) << 6) | (c2 & 0x3f)
         i += 2
@@ -546,8 +544,8 @@ function decodeTrack(encoded) {
 
       if ((c & 0xf0) === 0xe0) {
         if (i + 2 >= end) throw new Error('Malformed utf')
-        const c2 = buffer[i + 1] & 0xff
-        const c3 = buffer[i + 2] & 0xff
+        const c2 = buf[i + 1] & 0xff
+        const c3 = buf[i + 2] & 0xff
         if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80) throw new Error('Malformed utf')
         const ch = ((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f)
         i += 3
@@ -558,33 +556,14 @@ function decodeTrack(encoded) {
       throw new Error('Malformed utf')
     }
 
-    position = end
+    pRef.value = end
     return chars.join('')
   }
 
-  const readNullableText = () => {
-    const present = read.byte() !== 0
-    return present ? read.utf() : null
-  }
-
-  const read = {
-    byte: () => {
-      ensure(1)
-      return buffer[position++]
-    },
-    int: () => {
-      ensure(4)
-      const value = buffer.readInt32BE(position)
-      position += 4
-      return value
-    },
-    long: () => {
-      ensure(8)
-      const value = buffer.readBigInt64BE(position)
-      position += 8
-      return value
-    },
-    utf: readModifiedUTF8
+  const readNullableTextFrom = (buf, pRef) => {
+    if (pRef.value + 1 > buf.length) throw new Error('Unexpected end of buffer (need 1 byte)')
+    const present = buf[pRef.value++] !== 0
+    return present ? readModifiedUTF8From(buf, pRef) : null
   }
 
   const decodeDetailsAsList = (detailsBuf) => {
@@ -652,67 +631,91 @@ function decodeTrack(encoded) {
     return out
   }
 
-  const stripSeekableMetaFromDetails = (details) => {
-    if (!details.length) return { details, seekable: undefined }
-    const last = details[details.length - 1]
-    if (typeof last !== 'string') return { details, seekable: undefined }
-    if (last === '__seekable:0') return { details: details.slice(0, -1), seekable: false }
-    if (last === '__seekable:1') return { details: details.slice(0, -1), seekable: true }
-    return { details, seekable: undefined }
+  const tryParseSeekableTrailer = (buf) => {
+    let p = 0
+    try {
+      if (buf.length < 1) return { ok: false }
+      const present = buf[p++] !== 0
+      if (!present) return { ok: false }
+      const pRef = { value: p }
+      const s = readModifiedUTF8From(buf, pRef)
+      if (pRef.value !== buf.length) return { ok: false }
+      if (s === 'NLK:seekableY') return { ok: true, seekable: true }
+      if (s === 'NLK:seekableN') return { ok: true, seekable: false }
+      return { ok: false }
+    } catch {
+      return { ok: false }
+    }
   }
 
   try {
-    step = 'header'
-    const firstInt = read.int()
-    const isVersioned = ((firstInt & 0xc0000000) >> 30) & 1
-    const version = isVersioned ? (read.byte() & 0xff) : 1
+    step = 'messageHeader'
+    ensure(4)
+    const header = buffer.readInt32BE(position)
+    position += 4
 
-    step = 'title'
-    const title = read.utf()
+    const flags = (header >>> 30) & 0x3
+    const messageSize = header & 0x3fffffff
+    if (messageSize === 0) throw new Error('message size: 0')
 
-    step = 'author'
-    const author = read.utf()
+    step = 'messageBody'
+    ensure(messageSize)
+    let messageBuf = buffer.subarray(position, position + messageSize)
+    position += messageSize
 
-    step = 'length'
-    const length = Number(read.long())
-
-    step = 'identifier'
-    const identifier = read.utf()
-
-    step = 'isStream'
-    const isStream = read.byte() !== 0
-
-    let uri = null
-    let artworkUrl = null
-    let isrc = null
-
-    if (version >= 2) {
-      step = 'uri'
-      uri = readNullableText()
+    let seekable = undefined
+    {
+      const tailTryMax = Math.min(messageBuf.length, 512)
+      for (let cut = 1; cut <= tailTryMax; cut++) {
+        const tail = messageBuf.subarray(messageBuf.length - cut)
+        const parsed = tryParseSeekableTrailer(tail)
+        if (parsed.ok) {
+          seekable = parsed.seekable
+          messageBuf = messageBuf.subarray(0, messageBuf.length - cut)
+          break
+        }
+      }
     }
 
-    if (version >= 3) {
-      step = 'artworkUrl'
-      artworkUrl = readNullableText()
+    step = 'payload'
+    const pRef = { value: 0 }
 
-      step = 'isrc'
-      isrc = readNullableText()
+    if (pRef.value + 1 > messageBuf.length) throw new Error('Unexpected end of message (need 1 byte)')
+    const version = messageBuf[pRef.value++] & 0xff
+
+    const title = readModifiedUTF8From(messageBuf, pRef)
+    const author = readModifiedUTF8From(messageBuf, pRef)
+
+    if (pRef.value + 8 > messageBuf.length) throw new Error('Unexpected end of message (need 8 bytes)')
+    const length = Number(messageBuf.readBigInt64BE(pRef.value))
+    pRef.value += 8
+
+    const identifier = readModifiedUTF8From(messageBuf, pRef)
+
+    if (pRef.value + 1 > messageBuf.length) throw new Error('Unexpected end of message (need 1 byte)')
+    const isStream = messageBuf[pRef.value++] !== 0
+
+    const uri = version >= 2 ? readNullableTextFrom(messageBuf, pRef) : null
+    const artworkUrl = version >= 3 ? readNullableTextFrom(messageBuf, pRef) : null
+    const isrc = version >= 3 ? readNullableTextFrom(messageBuf, pRef) : null
+
+    const sourceName = readModifiedUTF8From(messageBuf, pRef)
+
+    if (messageBuf.length - pRef.value < 8) throw new Error('Unexpected end of message (need 8 bytes for position)')
+    const positionOffset = messageBuf.length - 8
+
+    const detailsBuf = messageBuf.subarray(pRef.value, positionOffset)
+
+    const trackPosition = Number(messageBuf.readBigInt64BE(positionOffset))
+
+    let details = []
+    if (detailsBuf.length > 0) {
+      try {
+        details = decodeDetailsAsList(detailsBuf)
+      } catch {
+        details = []
+      }
     }
-
-    step = 'sourceName'
-    const sourceName = read.utf()
-
-    step = 'detailsSlice'
-    if (buffer.length - position < 8) throw new Error('Buffer too small for position')
-    const detailsEnd = buffer.length - 8
-    const detailsBuf = detailsEnd > position ? buffer.subarray(position, detailsEnd) : Buffer.alloc(0)
-    position = detailsEnd
-
-    step = 'position'
-    const trackPosition = Number(read.long())
-
-    const rawDetails = detailsBuf.length > 0 ? decodeDetailsAsList(detailsBuf) : []
-    const { details, seekable } = stripSeekableMetaFromDetails(rawDetails)
 
     return {
       encoded,
@@ -731,7 +734,8 @@ function decodeTrack(encoded) {
       },
       details,
       pluginInfo: {},
-      userData: {}
+      userData: {},
+      messageFlags: flags
     }
 
   } catch (err) {
@@ -744,9 +748,7 @@ function encodeTrack(track) {
     throw new Error('Encode Error: Input track must be a valid object')
   }
 
-  const bufferArray = []
-
-  function writeModifiedUTF8(value) {
+  const encodeModifiedUTF8 = (value) => {
     const str = String(value)
     const bytes = []
 
@@ -769,69 +771,31 @@ function encodeTrack(track) {
 
     const lenBuf = Buffer.alloc(2)
     lenBuf.writeUInt16BE(bytes.length)
-    bufferArray.push(lenBuf)
-    bufferArray.push(Buffer.from(bytes))
+    return Buffer.concat([lenBuf, Buffer.from(bytes)])
   }
 
-  function writeNullableText(value) {
-    if (value === undefined || value === null) {
-      bufferArray.push(Buffer.from([0]))
-      return
-    }
-    bufferArray.push(Buffer.from([1]))
-    writeModifiedUTF8(String(value))
+  const chunks = []
+  const push = (b) => chunks.push(b)
+
+  const writeByte = (v) => push(Buffer.from([v & 0xff]))
+  const writeLong = (v) => {
+    const b = Buffer.alloc(8)
+    b.writeBigInt64BE(BigInt(v))
+    push(b)
   }
-
-  function write(type, value, fieldName) {
-    if (type === 'buffer') {
-      bufferArray.push(value)
-      return
-    }
-
-    if (value === undefined || value === null) {
-      throw new Error(`Encode Error: Field '${fieldName}' is missing or null`)
-    }
-
-    try {
-      if (type === 'byte') bufferArray.push(Buffer.from([value & 0xff]))
-      if (type === 'int') {
-        const buf = Buffer.alloc(4)
-        buf.writeInt32BE(value)
-        bufferArray.push(buf)
-      }
-      if (type === 'long') {
-        const buf = Buffer.alloc(8)
-        buf.writeBigInt64BE(BigInt(value))
-        bufferArray.push(buf)
-      }
-      if (type === 'utf') writeModifiedUTF8(value)
-    } catch (err) {
-      throw new Error(`Encode Error at [${fieldName}]: ${err.message}. Value: ${value}`)
+  const writeUTF = (v) => push(encodeModifiedUTF8(v))
+  const writeNullableText = (v) => {
+    if (v === undefined || v === null) {
+      writeByte(0)
+    } else {
+      writeByte(1)
+      writeUTF(String(v))
     }
   }
 
   const version = (track.artworkUrl || track.isrc) ? 3 : (track.uri ? 2 : 1)
-  const isVersioned = version > 1 ? 1 : 0
-  const firstInt = isVersioned << 30
+  const flags = 1
 
-  write('int', firstInt, 'header')
-  if (isVersioned) write('byte', version, 'version')
-
-  write('utf', track.title, 'title')
-  write('utf', track.author, 'author')
-  write('long', track.length, 'length')
-  write('utf', track.identifier, 'identifier')
-  write('byte', track.isStream ? 1 : 0, 'isStream')
-
-  if (version >= 2) writeNullableText(track.uri ?? null)
-  if (version >= 3) {
-    writeNullableText(track.artworkUrl ?? null)
-    writeNullableText(track.isrc ?? null)
-  }
-
-  write('utf', track.sourceName, 'sourceName')
-
-  const detailsOut = Array.isArray(track.details) ? [...track.details] : []
   const seekable =
     typeof track.isSeekable === 'boolean'
       ? track.isSeekable
@@ -839,17 +803,34 @@ function encodeTrack(track) {
         ? track.info.isSeekable
         : undefined
 
+  writeByte(version)
+  writeUTF(track.title)
+  writeUTF(track.author)
+  writeLong(track.length)
+  writeUTF(track.identifier)
+  writeByte(track.isStream ? 1 : 0)
+
+  if (version >= 2) writeNullableText(track.uri ?? null)
+  if (version >= 3) {
+    writeNullableText(track.artworkUrl ?? null)
+    writeNullableText(track.isrc ?? null)
+  }
+
+  writeUTF(track.sourceName)
+
+  writeLong(track.position ?? 0)
+
   if (typeof seekable === 'boolean') {
-    detailsOut.push(seekable ? '__seekable:1' : '__seekable:0')
+    writeNullableText(seekable ? 'NLK:seekableY' : 'NLK:seekableN')
   }
 
-  if (detailsOut.length) {
-    for (const v of detailsOut) writeNullableText(v)
-  }
+  const messageBuf = Buffer.concat(chunks)
+  const header = (messageBuf.length & 0x3fffffff) | ((flags & 0x3) << 30)
 
-  write('long', track.position, 'position')
+  const headerBuf = Buffer.alloc(4)
+  headerBuf.writeInt32BE(header)
 
-  return Buffer.concat(bufferArray).toString('base64')
+  return Buffer.concat([headerBuf, messageBuf]).toString('base64')
 }
 
 const generateRandomLetters = (l) =>
