@@ -503,8 +503,11 @@ function verifyMethod(
 }
 
 function decodeTrack(encoded) {
+  if (!encoded) throw new Error('Decode Error: Input string is null or empty')
+
   const buffer = Buffer.from(encoded, 'base64')
   let position = 0
+  let step = 'init'
 
   const read = {
     byte: () => buffer[position++],
@@ -524,96 +527,174 @@ function decodeTrack(encoded) {
       return value
     },
     utf: () => {
-      const length = read.ushort()
+      const length = buffer.readUInt16BE(position)
+      position += 2
       const value = buffer.toString('utf8', position, position + length)
       position += length
       return value
     }
   }
 
-  const firstInt = read.int()
-  const isVersioned = ((firstInt & 0xc0000000) >> 30) & 1
-  const version = isVersioned ? read.byte() : 1
+  try {
+    step = 'header'
+    const firstInt = read.int()
+    const isVersioned = ((firstInt & 0xc0000000) >> 30) & 1
+    const version = isVersioned ? read.byte() : 1
 
-  return {
-    encoded: encoded,
-    info: {
-      title: read.utf(),
-      author: read.utf(),
-      length: Number(read.long()),
-      identifier: read.utf(),
-      isSeekable: !!read.byte(),
-      isStream: !!read.byte(),
-      uri: version >= 2 && read.byte() ? read.utf() : null,
-      artworkUrl: version === 3 && read.byte() ? read.utf() : null,
-      isrc: version === 3 && read.byte() ? read.utf() : null,
-      sourceName: read.utf(),
-      position: Number(read.long())
-    },
-    pluginInfo: {},
-    userData: {}
+    step = 'title'
+    const title = read.utf()
+
+    step = 'author'
+    const author = read.utf()
+
+    step = 'length'
+    const length = Number(read.long())
+
+    step = 'identifier'
+    const identifier = read.utf()
+
+    step = 'isSeekable'
+    const isSeekable = !!read.byte()
+
+    step = 'isStream'
+    const isStream = !!read.byte()
+
+    let uri = null
+    let artworkUrl = null
+    let isrc = null
+
+    if (version >= 2) {
+      step = 'uri'
+      const hasUri = read.byte()
+      if (hasUri) {
+        step = 'uri'
+        uri = read.utf()
+      }
+    }
+
+    if (version === 3) {
+      step = 'artworkUrl'
+      const hasArtwork = read.byte()
+      if (hasArtwork) {
+        step = 'artworkUrl'
+        artworkUrl = read.utf()
+      }
+
+      step = 'isrc'
+      const hasIsrc = read.byte()
+      if (hasIsrc) {
+        step = 'isrc'
+        isrc = read.utf()
+      }
+    }
+
+    step = 'sourceName'
+    const sourceName = read.utf()
+
+    step = 'position'
+    const trackPosition = Number(read.long())
+
+    return {
+      encoded,
+      info: {
+        title,
+        author,
+        length,
+        identifier,
+        isSeekable,
+        isStream,
+        uri,
+        artworkUrl,
+        isrc,
+        sourceName,
+        position: trackPosition
+      },
+      pluginInfo: {},
+      userData: {}
+    }
+
+  } catch (err) {
+    throw new Error(`Decode Error at [${step}]: ${err.message} (Buffer pos: ${position}/${buffer.length})`)
   }
 }
 
 function encodeTrack(track) {
+  if (!track || typeof track !== 'object') {
+    throw new Error('Encode Error: Input track must be a valid object')
+  }
+
   const bufferArray = []
 
-  function write(type, value) {
-    if (type === 'byte') bufferArray.push(Buffer.from([value]))
-    if (type === 'ushort') {
-      const buf = Buffer.alloc(2)
-      buf.writeUInt16BE(value)
-      bufferArray.push(buf)
+  function write(type, value, fieldName) {
+    if (value === undefined || value === null) {
+      throw new Error(`Encode Error: Field '${fieldName}' is missing or null`)
     }
-    if (type === 'int') {
-      const buf = Buffer.alloc(4)
-      buf.writeInt32BE(value)
-      bufferArray.push(buf)
-    }
-    if (type === 'long') {
-      const buf = Buffer.alloc(8)
-      buf.writeBigInt64BE(BigInt(value))
-      bufferArray.push(buf)
-    }
-    if (type === 'utf') {
-      const strBuf = Buffer.from(value, 'utf8')
-      write('ushort', strBuf.length)
-      bufferArray.push(strBuf)
+
+    try {
+      if (type === 'byte') bufferArray.push(Buffer.from([value]))
+
+      if (type === 'ushort') {
+        const buf = Buffer.alloc(2)
+        buf.writeUInt16BE(value)
+        bufferArray.push(buf)
+      }
+
+      if (type === 'int') {
+        const buf = Buffer.alloc(4)
+        buf.writeInt32BE(value)
+        bufferArray.push(buf)
+      }
+
+      if (type === 'long') {
+        const buf = Buffer.alloc(8)
+        buf.writeBigInt64BE(BigInt(value))
+        bufferArray.push(buf)
+      }
+
+      if (type === 'utf') {
+        const strBuf = Buffer.from(value, 'utf8')
+        const lenBuf = Buffer.alloc(2)
+        lenBuf.writeUInt16BE(strBuf.length)
+        bufferArray.push(lenBuf)
+        bufferArray.push(strBuf)
+      }
+    } catch (err) {
+      throw new Error(`Encode Error at [${fieldName}]: ${err.message}. Value: ${value}`)
     }
   }
 
-  const version = track.artworkUrl || track.isrc ? 3 : track.uri ? 2 : 1
-
+  const version = (track.artworkUrl || track.isrc) ? 3 : (track.uri ? 2 : 1)
   const isVersioned = version > 1 ? 1 : 0
   const firstInt = isVersioned << 30
-  write('int', firstInt)
+
+  write('int', firstInt, 'header')
 
   if (isVersioned) {
-    write('byte', version)
+    write('byte', version, 'version')
   }
 
-  write('utf', track.title)
-  write('utf', track.author)
-  write('long', track.length)
-  write('utf', track.identifier)
-  write('byte', track.isSeekable ? 1 : 0)
-  write('byte', track.isStream ? 1 : 0)
+  write('utf', track.title, 'title')
+  write('utf', track.author, 'author')
+  write('long', track.length, 'length')
+  write('utf', track.identifier, 'identifier')
+  write('byte', track.isSeekable ? 1 : 0, 'isSeekable')
+  write('byte', track.isStream ? 1 : 0, 'isStream')
 
   if (version >= 2) {
-    write('byte', track.uri ? 1 : 0)
-    if (track.uri) write('utf', track.uri)
+    write('byte', track.uri ? 1 : 0, 'uri')
+    if (track.uri) write('utf', track.uri, 'uri')
   }
 
   if (version === 3) {
-    write('byte', track.artworkUrl ? 1 : 0)
-    if (track.artworkUrl) write('utf', track.artworkUrl)
+    write('byte', track.artworkUrl ? 1 : 0, 'artworkUrl')
+    if (track.artworkUrl) write('utf', track.artworkUrl, 'artworkUrl')
 
-    write('byte', track.isrc ? 1 : 0)
-    if (track.isrc) write('utf', track.isrc)
+    write('byte', track.isrc ? 1 : 0, 'isrc')
+    if (track.isrc) write('utf', track.isrc, 'isrc')
   }
 
-  write('utf', track.sourceName)
-  write('long', track.position)
+  write('utf', track.sourceName, 'sourceName')
+  write('long', track.position, 'position')
 
   return Buffer.concat(bufferArray).toString('base64')
 }
