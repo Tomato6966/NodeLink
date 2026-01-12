@@ -10,9 +10,11 @@ export default {
     workers: 0, // 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
     minWorkers: 1, // Minimum workers to keep alive (improves availability during bursts)
     specializedSourceWorker: {
-      enabled: true,
-      microWorkers: 2,
-      silentLogs: true
+      enabled: true, // If true, source loading (search, lyrics, etc.) is delegated to dedicated workers to prevent voice worker lag
+      count: 1, // Number of separate process clusters for source operations
+      microWorkers: 2, // Number of worker threads per process cluster
+      tasksPerWorker: 32, // Number of parallel tasks each micro-worker can handle before queuing
+      silentLogs: true // If true, micro-workers will only log warnings and errors
     },
     commandTimeout: 6000, // Timeout for heavy operations like loadTracks (6s)
     fastCommandTimeout: 4000, // Timeout for player commands like play/pause (4s)

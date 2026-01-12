@@ -24,6 +24,7 @@ if (isMainThread) {
   }
 
   const threadCount = specConfig.microWorkers || Math.min(2, os.cpus().length)
+  const TASKS_PER_WORKER = specConfig.tasksPerWorker || 32
   const workerPool = []
   const taskQueue = []
 
@@ -35,7 +36,7 @@ if (isMainThread) {
     })
     
     worker.ready = false
-    worker.busy = false
+    worker.load = 0
 
     worker.on('message', (msg) => {
       if (msg.type === 'ready') {
@@ -46,7 +47,7 @@ if (isMainThread) {
         const { socketPath, id, result, error } = msg
         finishTask(socketPath, id, result, error)
         
-        worker.busy = false
+        worker.load = Math.max(0, worker.load - 1)
         processNextTask()
       }
     })
@@ -73,7 +74,8 @@ if (isMainThread) {
       if (error) {
         sendFrame(socket, id, 2, Buffer.from(error, 'utf8'))
       } else {
-        sendFrame(socket, id, 0, Buffer.from(JSON.stringify(result), 'utf8'))
+        // result is already a string
+        sendFrame(socket, id, 0, Buffer.from(result, 'utf8'))
         sendFrame(socket, id, 1, Buffer.alloc(0))
       }
     }).catch(e => {
@@ -95,12 +97,22 @@ if (isMainThread) {
   function processNextTask() {
     if (taskQueue.length === 0) return
     
-    const freeWorker = workerPool.find(w => w.ready && !w.busy)
+    let bestWorker = null
+    let minLoad = Infinity
+
+    for (const worker of workerPool) {
+      if (worker.ready && worker.load < TASKS_PER_WORKER && worker.load < minLoad) {
+        bestWorker = worker
+        minLoad = worker.load
+      }
+    }
     
-    if (freeWorker) {
+    if (bestWorker) {
       const task = taskQueue.shift()
-      freeWorker.busy = true
-      freeWorker.postMessage(task)
+      bestWorker.load++
+      bestWorker.postMessage(task)
+      
+      if (taskQueue.length > 0) setImmediate(processNextTask)
     }
   }
 
@@ -166,11 +178,12 @@ if (isMainThread) {
         case 'unifiedSearch':
           result = await nodelink.sources.unifiedSearch(payload.query)
           break
-        case 'loadLyrics':
-          result = await nodelink.lyrics.loadLyrics(payload.decodedTrack, payload.language)
-          break
-      }
-      parentPort.postMessage({ type: 'result', id, socketPath, result })
+                  case 'loadLyrics':
+                  result = await nodelink.lyrics.loadLyrics(payload.decodedTrack, payload.language)
+                  break
+              }
+              parentPort.postMessage({ type: 'result', id, socketPath, result: JSON.stringify(result) })
+        
     } catch (e) {
       parentPort.postMessage({ type: 'result', id, socketPath, error: e.message })
     }

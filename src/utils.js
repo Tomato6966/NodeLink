@@ -865,13 +865,13 @@ function parseClient(agent) {
 const httpAgent = new http.Agent({ 
   keepAlive: true, 
   maxFreeSockets: 32, 
-  maxSockets: 64,
+  maxSockets: Infinity,
   timeout: 60000 
 })
 const httpsAgent = new https.Agent({ 
   keepAlive: true, 
   maxFreeSockets: 32, 
-  maxSockets: 64,
+  maxSockets: Infinity,
   timeout: 60000 
 })
 const http2FailedHosts = new Set()
