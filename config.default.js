@@ -9,6 +9,11 @@ export default {
     enabled: true, // active cluster (or use env CLUSTER_ENABLED)
     workers: 0, // 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
     minWorkers: 1, // Minimum workers to keep alive (improves availability during bursts)
+    specializedSourceWorker: {
+      enabled: true,
+      microWorkers: 2,
+      silentLogs: true
+    },
     commandTimeout: 6000, // Timeout for heavy operations like loadTracks (6s)
     fastCommandTimeout: 4000, // Timeout for player commands like play/pause (4s)
     maxRetries: 2, // Number of retry attempts on timeout or worker failure

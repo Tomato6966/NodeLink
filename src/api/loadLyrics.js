@@ -57,8 +57,16 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       `Request to load lyrics for: ${decodedTrack.info.title}${language ? ` (Lang: ${language})` : ''}`
     )
 
+    if (nodelink.sourceWorkerManager) {
+      const delegated = nodelink.sourceWorkerManager.delegate(req, res, 'loadLyrics', {
+        encodedTrack,
+        language
+      })
+      if (delegated) return
+    }
+
     let lyricsData
-    if (nodelink.workerManager) {
+    if (nodelink.workerManager && !nodelink.sourceWorkerManager) {
       const worker = nodelink.workerManager.getBestWorker()
       lyricsData = await nodelink.workerManager.execute(worker, 'loadLyrics', {
         decodedTrack,

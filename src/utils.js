@@ -862,8 +862,18 @@ function parseClient(agent) {
   return info
 }
 
-const httpAgent = new http.Agent({ keepAlive: true })
-const httpsAgent = new https.Agent({ keepAlive: true })
+const httpAgent = new http.Agent({ 
+  keepAlive: true, 
+  maxFreeSockets: 32, 
+  maxSockets: 64,
+  timeout: 60000 
+})
+const httpsAgent = new https.Agent({ 
+  keepAlive: true, 
+  maxFreeSockets: 32, 
+  maxSockets: 64,
+  timeout: 60000 
+})
 const http2FailedHosts = new Set()
 
 setInterval(() => {

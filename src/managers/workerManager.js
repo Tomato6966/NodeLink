@@ -1,6 +1,7 @@
 import cluster from 'node:cluster'
 import crypto from 'node:crypto'
 import os from 'node:os'
+import net from 'node:net'
 
 import { logger } from '../utils.js'
 
@@ -50,17 +51,25 @@ export default class WorkerManager {
       cpuPenaltyLimit: config.cluster.scaling?.cpuPenaltyLimit || 0.85
     }
 
+    this.socketPath = os.platform() === 'win32'
+      ? `\\\\.\\pipe\\nodelink-events-${crypto.randomBytes(8).toString('hex')}`
+      : `/tmp/nodelink-events-${crypto.randomBytes(8).toString('hex')}.sock`
+    this.server = null
+
     logger(
       'info',
       'Cluster',
       `Primary PID ${process.pid} - WorkerManager initialized. Min: ${this.minWorkers}, Max: ${this.maxWorkers} workers`
     )
 
+    this._startSocketServer()
     this._ensureWorkerAvailability()
     this._startScalingCheck()
     this._startHealthCheck()
 
     cluster.on('exit', (worker, code, signal) => {
+      if (worker.workerType !== 'playback') return
+
       const isSystemSignal = signal === 'SIGINT' || signal === 'SIGTERM' || code === 130 || code === 143
       if (this.isDestroying || isSystemSignal) {
         const index = this.workers.indexOf(worker)
@@ -327,6 +336,52 @@ export default class WorkerManager {
     )
   }
 
+  _startSocketServer() {
+    this.server = net.createServer((socket) => {
+      let buffer = Buffer.alloc(0)
+
+      socket.on('data', (chunk) => {
+        buffer = Buffer.concat([buffer, chunk])
+
+        while (buffer.length >= 6) {
+          const idSize = buffer.readUInt8(0)
+          const type = buffer.readUInt8(1)
+          const payloadSize = buffer.readUInt32BE(2)
+          const totalSize = 6 + idSize + payloadSize
+
+          if (buffer.length < totalSize) break
+
+          const payload = buffer.toString('utf8', 6 + idSize, totalSize)
+          buffer = buffer.subarray(totalSize)
+
+          try {
+            const data = JSON.parse(payload)
+            if (type === 3) { // playerEvent
+              if (global.nodelink) global.nodelink.handleIPCMessage({ type: 'playerEvent', payload: data })
+            } else if (type === 4) { // workerStats
+              const workerId = data.workerId
+              delete data.workerId
+              this.statsUpdateBatch.set(workerId, data)
+              if (!this.statsUpdateTimer) {
+                this.statsUpdateTimer = setTimeout(() => this._flushStatsUpdates(), 100)
+              }
+            }
+          } catch (e) {
+            logger('error', 'Cluster', `Socket event parse error: ${e.message}`)
+          }
+        }
+      })
+    })
+
+    this.server.on('error', (err) => {
+      logger('error', 'Cluster', `Event socket server error: ${err.message}`)
+    })
+
+    this.server.listen(this.socketPath, () => {
+      logger('info', 'Cluster', `Event socket server listening at ${this.socketPath}`)
+    })
+  }
+
   forkWorker() {
     if (this.workers.length >= this.maxWorkers) {
       logger(
@@ -337,7 +392,9 @@ export default class WorkerManager {
       return null
     }
 
-    const worker = cluster.fork()
+    cluster.setupPrimary({ exec: './src/index.js' })
+    const worker = cluster.fork({ EVENT_SOCKET_PATH: this.socketPath })
+    worker.workerType = 'playback'
 
     this.workers.push(worker)
     this.workersById.set(worker.id, worker)
@@ -484,6 +541,9 @@ export default class WorkerManager {
           )
         )
       }
+    } else if (msg.type === 'ready' && worker.onSourceReady) {
+       // This part might be handled by SourceWorkerManager if integrated deeper, 
+       // but for now we keep WorkerManager clean of SourceWorker logic.
     } else if (global.nodelink) {
       global.nodelink.handleIPCMessage(msg)
     }
@@ -831,7 +891,7 @@ export default class WorkerManager {
               isFast
             )
           } else {
-            reject(new Error('No workers available'))
+            reject(new Error('No workers available for retry'))
           }
         } else {
           reject(new Error('Worker disconnected and max retries reached'))

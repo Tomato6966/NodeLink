@@ -1,4 +1,5 @@
 import os from 'node:os'
+import net from 'node:net'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import v8 from 'node:v8'
 import { GatewayEvents } from './constants.js'
@@ -6,7 +7,6 @@ import ConnectionManager from './managers/connectionManager.js'
 import CredentialManager from './managers/credentialManager.js'
 import LyricsManager from './managers/lyricsManager.js'
 import PluginManager from './managers/pluginManager.js'
-import RateLimitManager from './managers/rateLimitManager.js'
 import RoutePlannerManager from './managers/routePlannerManager.js'
 import SourceManager from './managers/sourceManager.js'
 import StatsManager from './managers/statsManager.js'
@@ -45,7 +45,42 @@ const HIBERNATION_TIMEOUT =
 initLogger(config)
 
 const players = new Map()
-const commandQueue = []
+const guildQueues = new Map() // guildId -> { queue: [], processing: false }
+
+let eventSocket = null
+const eventSocketPath = process.env.EVENT_SOCKET_PATH
+
+if (eventSocketPath) {
+  const connect = () => {
+    const socket = net.createConnection(eventSocketPath, () => {
+      eventSocket = socket
+      logger('info', 'Worker', 'Connected to Master event socket')
+    })
+    socket.on('error', () => {
+      eventSocket = null
+      setTimeout(connect, 1000)
+    })
+    socket.on('close', () => {
+      eventSocket = null
+      setTimeout(connect, 1000)
+    })
+  }
+  connect()
+}
+
+function sendEventFrame(type, data) {
+  if (!eventSocket || eventSocket.destroyed) return false
+  
+  const payload = JSON.stringify(data)
+  const payloadBuf = Buffer.from(payload, 'utf8')
+  
+  const header = Buffer.alloc(6)
+  header.writeUInt8(0, 0) // No ID needed for these events
+  header.writeUInt8(type, 1)
+  header.writeUInt32BE(payloadBuf.length, 2)
+  
+  return eventSocket.write(Buffer.concat([header, payloadBuf]))
+}
 
 const nodelink = {
   options: config,
@@ -217,23 +252,28 @@ function startTimers(hibernating = false) {
 
       const mem = process.memoryUsage()
 
-      if (process.connected) {
+      const stats = {
+        workerId: parseInt(process.env.NODE_UNIQUE_ID || 0) + 1,
+        isHibernating,
+        players: localPlayers,
+        playingPlayers: localPlayingPlayers,
+        commandQueueLength: Array.from(guildQueues.values()).reduce((acc, curr) => acc + curr.queue.length, 0),
+        cpu: { nodelinkLoad },
+        eventLoopLag: hndl.mean / 1e6,
+        memory: {
+          used: mem.heapUsed,
+          allocated: mem.heapTotal
+        },
+        frameStats: localFrameStats
+      }
+
+      if (eventSocket && !eventSocket.destroyed) {
+        sendEventFrame(4, stats)
+      } else if (process.connected) {
         const success = process.send({
           type: 'workerStats',
           pid: process.pid,
-          stats: {
-            isHibernating,
-            players: localPlayers,
-            playingPlayers: localPlayingPlayers,
-            commandQueueLength: commandQueue.length,
-            cpu: { nodelinkLoad },
-            eventLoopLag: hndl.mean / 1e6,
-            memory: {
-              used: mem.heapUsed,
-              allocated: mem.heapTotal
-            },
-            frameStats: localFrameStats
-          }
+          stats
         })
 
         if (!success) {
@@ -338,10 +378,15 @@ process.on('unhandledRejection', (reason, promise) => {
   )
 })
 
-async function processQueue() {
-  if (commandQueue.length === 0) return
+async function processQueue(queueKey) {
+  const queueEntry = guildQueues.get(queueKey)
+  if (!queueEntry || queueEntry.queue.length === 0) {
+    if (queueEntry) queueEntry.processing = false
+    return
+  }
 
-  const { type, requestId, payload } = commandQueue.shift()
+  queueEntry.processing = true
+  const { type, requestId, payload } = queueEntry.queue.shift()
 
   lastActivityTime = Date.now()
   if (isHibernating) {
@@ -391,7 +436,9 @@ async function processQueue() {
           userId: userId,
           socket: {
             send: (data) => {
-              if (process.connected) {
+              if (eventSocket && !eventSocket.destroyed) {
+                sendEventFrame(3, { sessionId, guildId, data })
+              } else if (process.connected) {
                 try {
                   process.send({
                     type: 'playerEvent',
@@ -479,7 +526,9 @@ async function processQueue() {
           userId: userId,
           socket: {
             send: (data) => {
-              if (process.connected) {
+              if (eventSocket && !eventSocket.destroyed) {
+                sendEventFrame(3, { sessionId, guildId, data })
+              } else if (process.connected) {
                 try {
                   process.send({
                     type: 'playerEvent',
@@ -658,8 +707,11 @@ async function processQueue() {
       }
     }
   } finally {
-    if (commandQueue.length > 0) {
-      setImmediate(processQueue)
+    const queueEntry = guildQueues.get(queueKey)
+    if (queueEntry && queueEntry.queue.length > 0) {
+      setImmediate(() => processQueue(queueKey))
+    } else {
+      if (queueEntry) queueEntry.processing = false
     }
   }
 }
@@ -678,10 +730,16 @@ process.on('message', (msg) => {
 
   if (!msg.type || !msg.requestId) return
 
-  commandQueue.push(msg)
+  const guildId = msg.payload?.guildId || 'global'
+  if (!guildQueues.has(guildId)) {
+    guildQueues.set(guildId, { queue: [], processing: false })
+  }
 
-  if (commandQueue.length === 1) {
-    setImmediate(processQueue)
+  const queueEntry = guildQueues.get(guildId)
+  queueEntry.queue.push(msg)
+
+  if (!queueEntry.processing) {
+    setImmediate(() => processQueue(guildId))
   }
 })
 

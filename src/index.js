@@ -8,12 +8,9 @@ import WebSocketServer from '@performanc/pwsl-server'
 import requestHandler from './api/index.js'
 import connectionManager from './managers/connectionManager.js'
 import CredentialManager from './managers/credentialManager.js'
-import lyricsManager from './managers/lyricsManager.js'
 import routePlannerManager from './managers/routePlannerManager.js'
 import sessionManager from './managers/sessionManager.js'
-import sourceManager from './managers/sourceManager.js'
 import statsManager from './managers/statsManager.js'
-import OAuth from './sources/youtube/OAuth.js'
 import {
   applyEnvOverrides,
   checkForUpdates,
@@ -34,6 +31,7 @@ import DosProtectionManager from './managers/dosProtectionManager.js'
 import PlayerManager from './managers/playerManager.js'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
+import SourceWorkerManager from './managers/sourceWorkerManager.js'
 
 let config
 
@@ -160,13 +158,11 @@ class NodelinkServer extends EventEmitter {
     this._usingBunServer = Boolean(isBun && options?.server?.useBunServer)
 
     this.sessions = new sessionManager(this, PlayerManagerClass)
-    if (!isClusterPrimary || options.enableLoadStreamEndpoint) {
-      this.sources = new sourceManager(this)
-      this.lyrics = new lyricsManager(this)
-    } else {
-      this.sources = null
-      this.lyrics = null
-    }
+    this.sources = null
+    this.lyrics = null
+    
+    this._sourceInitPromise = this._initSources(isClusterPrimary, options)
+
     this.routePlanner = new routePlannerManager(this)
     this.credentialManager = new CredentialManager(this)
     this.connectionManager = new connectionManager(this)
@@ -174,6 +170,7 @@ class NodelinkServer extends EventEmitter {
     this.rateLimitManager = new RateLimitManager(this)
     this.dosProtectionManager = new DosProtectionManager(this)
     this.pluginManager = new PluginManager(this)
+    this.sourceWorkerManager = (isClusterPrimary && options.cluster?.specializedSourceWorker?.enabled) ? new SourceWorkerManager(this) : null
     this.registry = registry
     this.version = getVersion()
     this.gitInfo = getGitInfo()
@@ -210,6 +207,17 @@ class NodelinkServer extends EventEmitter {
       'Server',
       `git branch: ${this.gitInfo.branch}, commit: ${this.gitInfo.commit}, committed on: ${new Date(this.gitInfo.commitTime).toISOString()}`
     )
+  }
+
+  async _initSources(isClusterPrimary, options) {
+    if (!isClusterPrimary || (options.enableLoadStreamEndpoint && !options.cluster?.specializedSourceWorker?.enabled)) {
+      const [{ default: sourceMan }, { default: lyricsMan }] = await Promise.all([
+        import('./managers/sourceManager.js'),
+        import('./managers/lyricsManager.js')
+      ])
+      this.sources = new sourceMan(this)
+      this.lyrics = new lyricsMan(this)
+    }
   }
 
   _startHeartbeat() {
@@ -1275,13 +1283,23 @@ class NodelinkServer extends EventEmitter {
 
     await this.credentialManager.load()
     await this.statsManager.initialize()
+    
+    // Ensure sources are initialized before proceeding
+    if (this._sourceInitPromise) await this._sourceInitPromise
+
     await this.pluginManager.load('master')
+
+    if (this.sourceWorkerManager) {
+      await this.sourceWorkerManager.start()
+    }
+
+    const specEnabled = this.options.cluster?.specializedSourceWorker?.enabled
 
     if (!startOptions.isClusterPrimary) {
       await this.pluginManager.load('worker')
     }
 
-    if (this.sources) {
+    if (this.sources && (!startOptions.isClusterPrimary || !specEnabled)) {
       await this.sources.loadFolder()
       await this.lyrics.loadFolder()
     }
