@@ -726,7 +726,7 @@ class NodelinkServer extends EventEmitter {
             logger(
               'warn',
               'Server',
-              `Unauthorized connection attempt from ${clientAddress} - Invalid Password`
+              `Unauthorized connection attempt from ${clientAddress} - Invalid password provided: ${auth || 'None'}`
             )
             return new Response('Invalid password provided.', {
               status: 401,
@@ -928,7 +928,7 @@ class NodelinkServer extends EventEmitter {
         logger(
           'warn',
           'Server',
-          `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
+          `Unauthorized connection attempt from ${clientAddress} - Invalid password provided: ${headers.authorization || 'None'}`
         )
         return rejectUpgrade(401, 'Unauthorized', 'Invalid password provided.')
       }

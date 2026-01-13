@@ -150,7 +150,7 @@ async function requestHandler(nodelink, req, res) {
       logger(
         'warn',
         'Metrics',
-        `Unauthorized metrics access attempt from ${clientAddress} - Invalid password provided`
+        `Unauthorized metrics access attempt from ${clientAddress} - Invalid password provided: ${authHeader || 'None'}`
       )
       res.writeHead(401, { 'Content-Type': 'text/plain' })
       res.end('Unauthorized')
@@ -218,16 +218,16 @@ async function requestHandler(nodelink, req, res) {
   }
 
   if (!isMetricsEndpoint) {
+    const authHeader = req.headers?.authorization
     if (
-      !req.headers ||
-      (req.headers.authorization !== nodelink.options.server.password &&
-        req.headers.authorization !==
-          `Bearer ${nodelink.options.server.password}`)
+      !authHeader ||
+      (authHeader !== nodelink.options.server.password &&
+        authHeader !== `Bearer ${nodelink.options.server.password}`)
     ) {
       logger(
         'warn',
         'Server',
-        `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
+        `Unauthorized connection attempt from ${clientAddress} - Invalid password provided: ${authHeader || 'None'}`
       )
 
       res.writeHead(401, { 'Content-Type': 'text/plain' })
