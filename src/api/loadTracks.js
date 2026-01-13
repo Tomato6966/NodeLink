@@ -27,23 +27,24 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const identifier = result.identifier
   logger('debug', 'Tracks', `Loading tracks with identifier: "${identifier}"`)
 
-  const re =
-    /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>[A-Za-z0-9]+):(?<query>[^/\s].*))$/i
+  const re = /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>(?![A-Z]:\\)[A-Za-z0-9]+):(?<query>(?!\/\/).+)|(?<local>(?:\/|[A-Z]:\\|\\).+))$/i
   const match = re.exec(identifier)
-  if (!match) {
-    logger('warn', 'Tracks', `Invalid identifier: "${identifier}"`)
-    return sendErrorResponse(
-      req,
-      res,
-      400,
-      'invalid identifier parameter',
-      'identifier parameter is invalid',
-      parsedUrl.pathname,
-      true
-    )
-  }
 
-  const { url, source, query } = match.groups
+  let url, source, query
+
+  if (match) {
+    url = match.groups.url
+    source = match.groups.source
+    query = match.groups.query
+
+    if (match.groups.local) {
+      source = 'local'
+      query = match.groups.local
+    }
+  } else {
+    source = nodelink.options.defaultSearchSource
+    query = identifier
+  }
 
   try {
     if (nodelink.sourceWorkerManager) {

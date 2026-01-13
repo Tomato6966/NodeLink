@@ -369,7 +369,8 @@ export default class YouTubeSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.config = nodelink.options.sources.youtube
-    this.searchTerms = ['youtube', 'ytsearch', 'ytmsearch', 'ytmusic']
+    this.additionalsSourceName = ['ytmusic']
+    this.searchTerms = ['ytsearch', 'ytmsearch']
     this.patterns = [
       /^https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?v=[\w-]+(?:&list=[\w-]+)?|playlist\?list=[\w-]+|live\/[\w-]+)|youtu\.be\/[\w-]+)/,
       /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+/,

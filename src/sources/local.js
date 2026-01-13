@@ -70,7 +70,7 @@ function readFileInfo(filePath) {
 export default class LocalSource {
   constructor(nodelink) {
     this.nodelink = nodelink
-    this.searchTerms = ['local', 'file']
+    this.searchTerms = []
     this.priority = 20
   }
 
@@ -79,14 +79,15 @@ export default class LocalSource {
   }
 
   async search(query) {
+    const isAbsolute = path.isAbsolute(query)
     const basePath = path.resolve(
       this.nodelink.options.sources.local.basePath || './'
     )
-    const filePath = path.resolve(basePath, query)
+    const filePath = isAbsolute ? path.resolve(query) : path.resolve(basePath, query)
 
     logger('debug', 'Sources', `Searching local file: ${filePath}`)
 
-    if (!filePath.startsWith(basePath)) {
+    if (!isAbsolute && !filePath.startsWith(basePath)) {
       logger(
         'warn',
         'Sources',
@@ -111,7 +112,7 @@ export default class LocalSource {
         'Sources',
         `Local track found: ${track.info.title} [${meta.fileType}]`
       )
-      return { loadType: 'search', data: [track] }
+      return { loadType: 'track', data: track }
     } catch (err) {
       logger(
         'warn',

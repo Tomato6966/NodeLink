@@ -3,7 +3,7 @@ import { encodeTrack, logger, http1makeRequest } from '../utils.js'
 export default class HttpSource {
   constructor(nodelink) {
     this.nodelink = nodelink
-    this.searchTerms = ['http']
+    this.searchTerms = []
     this.priority = 10
   }
 
