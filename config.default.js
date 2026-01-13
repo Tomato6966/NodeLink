@@ -34,6 +34,11 @@ export default {
       queueLengthScaleUpFactor: 5, // How many commands in queue per active worker trigger scale up
       lagPenaltyLimit: 60, // Event loop lag threshold (ms) to penalize worker cost
       cpuPenaltyLimit: 0.85 // CPU usage threshold (85% of a core) to force scale up
+    },
+    endpoint: {
+      patchEnabled: true,
+      allowExternalPatch: false,
+      code: 'CAPYBARA'
     }
   },
   logging: {

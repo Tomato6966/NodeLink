@@ -1265,14 +1265,27 @@ class NodelinkServer extends EventEmitter {
       for (const [sessionId, guildsInSession] of sessionsToNotify.entries()) {
         const session = this.sessions.get(sessionId)
         if (session?.socket) {
+          const affected = Array.from(guildsInSession)
           session.socket.send(
             JSON.stringify({
               op: 'event',
               type: 'WorkerFailedEvent',
-              affectedGuilds: Array.from(guildsInSession),
-              message: `Players for guilds ${Array.from(guildsInSession).join(', ')} lost due to worker failure.`
+              affectedGuilds: affected,
+              message: `Players for guilds ${affected.join(', ')} lost due to worker failure.`
             })
           )
+          for (const guildId of affected) {
+            session.socket.send(
+              JSON.stringify({
+                op: 'event',
+                type: GatewayEvents.WEBSOCKET_CLOSED,
+                guildId,
+                code: 5001,
+                reason: 'worker_failed',
+                byRemote: false
+              })
+            )
+          }
         }
       }
     }
