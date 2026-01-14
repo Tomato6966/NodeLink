@@ -160,8 +160,22 @@ export default class SourcesManager {
   }
 
   async searchWithDefault(query) {
-    const defaultSource = this.nodelink.options.defaultSearchSource
-    return this.search(defaultSource, query)
+    const defaultSources = Array.isArray(this.nodelink.options.defaultSearchSource)
+      ? this.nodelink.options.defaultSearchSource
+      : [this.nodelink.options.defaultSearchSource]
+
+    for (const source of defaultSources) {
+      try {
+        const result = await this.search(source, query)
+        if (result.loadType === 'search' && result.data.length > 0) {
+          return result
+        }
+      } catch (e) {
+        logger('warn', 'Sources', `Default source search failed for ${source}: ${e.message}`)
+      }
+    }
+
+    return { loadType: 'empty', data: {} }
   }
 
   async unifiedSearch(query) {

@@ -1547,15 +1547,21 @@ function applyEnvOverrides(config, prefix = 'NODELINK') {
         } else if (typeof config[key] === 'string') {
           config[key] = envValue;
         } else if (Array.isArray(config[key])) {
+          let newValue = null
           try {
-            const parsedArray = JSON.parse(envValue);
-            if (Array.isArray(parsedArray)) {
-              config[key] = parsedArray;
-            } else {
-              logger('warn', 'Config', `Environment variable ${envVarName} has non-array JSON value "${envValue}"; expected a JSON array, keeping default.`)
-            }
-          } catch (e) {
-            logger('warn', 'Config', `Environment variable ${envVarName} has non-JSON or invalid JSON value "${envValue}"; expected a JSON array, keeping default.`)
+            const parsedArray = JSON.parse(envValue)
+            if (Array.isArray(parsedArray)) newValue = parsedArray
+          } catch (e) {}
+
+          if (!newValue) {
+            const splitValue = envValue.split(',').map((s) => s.trim()).filter(Boolean)
+            if (splitValue.length > 0) newValue = splitValue
+          }
+
+          if (newValue) {
+            config[key] = newValue
+          } else {
+            logger('warn', 'Config', `Environment variable ${envVarName} has invalid array value "${envValue}"; keeping default.`)
           }
         }
       } else if (typeof config[key] === 'object' && config[key] !== null && !Array.isArray(config[key])) {

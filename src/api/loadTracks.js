@@ -42,7 +42,9 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       query = match.groups.local
     }
   } else {
-    source = nodelink.options.defaultSearchSource
+    source = Array.isArray(nodelink.options.defaultSearchSource)
+      ? nodelink.options.defaultSearchSource[0]
+      : nodelink.options.defaultSearchSource
     query = identifier
   }
 

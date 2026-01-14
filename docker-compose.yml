@@ -89,7 +89,7 @@ services:
       # NODELINK_FILTERS_ENABLED_TIMESCALE: "true"
 
       # --- Search Defaults ---
-      # NODELINK_DEFAULTSEARCHSOURCE: "youtube"
+      # NODELINK_DEFAULTSEARCHSOURCE: '["youtube", "soundcloud"]'
       # NODELINK_UNIFIEDSEARCHSOURCES: '["youtube", "soundcloud"]'
 
       # --- Sources Configuration ---

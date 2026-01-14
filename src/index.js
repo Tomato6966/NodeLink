@@ -399,9 +399,11 @@ class NodelinkServer extends EventEmitter {
     validateProperty(
       this.options.defaultSearchSource,
       'defaultSearchSource',
-      'key of an enabled source in config.sources',
-      (v) =>
-        typeof v === 'string' && Boolean(this.options.sources?.[v]?.enabled)
+      'key or array of keys of enabled sources in config.sources',
+      (v) => {
+        const sources = Array.isArray(v) ? v : [v]
+        return sources.every((s) => typeof s === 'string' && Boolean(this.options.sources?.[s]?.enabled))
+      }
     )
 
     validateProperty(

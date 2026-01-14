@@ -103,7 +103,7 @@ export default {
       timescale: true
     }
   },
-  defaultSearchSource: 'youtube',
+  defaultSearchSource: ['youtube', 'soundcloud'],
   unifiedSearchSources: ['youtube', 'soundcloud'],
   sources: {
     vkmusic: {
