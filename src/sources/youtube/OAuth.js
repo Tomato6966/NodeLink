@@ -91,7 +91,7 @@ export default class OAuth {
             )
             return this.accessToken
           }
-        } catch (e) {}
+        } catch (_e) {}
 
         await new Promise((r) => setTimeout(r, 2000))
       }
@@ -165,132 +165,127 @@ export default class OAuth {
       client_id: CLIENT_ID,
       scope: SCOPES
     }
+    const {
+      body: response,
+      error,
+      statusCode
+    } = await makeRequest('https://www.youtube.com/o/oauth2/device/code', {
+      method: 'POST',
+      body: data
+    })
 
-    try {
-      const {
-        body: response,
-        error,
-        statusCode
-      } = await makeRequest('https://www.youtube.com/o/oauth2/device/code', {
-        method: 'POST',
-        body: data
-      })
+    if (error || statusCode !== 200 || response.error) {
+      throw new Error(
+        `Error obtaining device code: ${error?.message || response.error_description || 'Invalid response'}`
+      )
+    }
 
-      if (error || statusCode !== 200 || response.error) {
-        throw new Error(
-          `Error obtaining device code: ${error?.message || response.error_description || 'Invalid response'}`
-        )
-      }
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[33m==================================================================\x1b[0m'
+    )
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[1m\x1b[31m🚨 ALERT: DO NOT USE YOUR MAIN GOOGLE ACCOUNT! USE A SECONDARY OR BURNER ACCOUNT ONLY!\x1b[0m'
+    )
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[36mTo authorize, visit the following URL in your browser:\x1b[0m'
+    )
+    logger(
+      'info',
+      'OAuth',
+      `\x1b[1m\x1b[32mURL: ${response.verification_url}\x1b[0m`
+    )
+    logger(
+      'info',
+      'OAuth',
+      `\x1b[36mAnd enter the code: \x1b[1m\x1b[37m${response.user_code}\x1b[0m`
+    )
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[33m==================================================================\x1b[0m'
+    )
 
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[33m==================================================================\x1b[0m'
-      )
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[1m\x1b[31m🚨 ALERT: DO NOT USE YOUR MAIN GOOGLE ACCOUNT! USE A SECONDARY OR BURNER ACCOUNT ONLY!\x1b[0m'
-      )
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[36mTo authorize, visit the following URL in your browser:\x1b[0m'
-      )
-      logger(
-        'info',
-        'OAuth',
-        `\x1b[1m\x1b[32mURL: ${response.verification_url}\x1b[0m`
-      )
-      logger(
-        'info',
-        'OAuth',
-        `\x1b[36mAnd enter the code: \x1b[1m\x1b[37m${response.user_code}\x1b[0m`
-      )
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[33m==================================================================\x1b[0m'
-      )
+    const refreshToken = await OAuth.pollForToken(
+      response.device_code,
+      response.interval
+    )
 
-      const refreshToken = await OAuth.pollForToken(
-        response.device_code,
-        response.interval
-      )
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[33m==================================================================\x1b[0m'
+    )
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[1m\x1b[32mAuthorization granted successfully! :)\x1b[0m'
+    )
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[33m==================================================================\x1b[0m'
+    )
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[36mCopy your Refresh Token and paste it in your \x1b[1mconfig.js\x1b[36m:\x1b[0m'
+    )
+    logger('info', 'OAuth', `\x1b[1m\x1b[37m${refreshToken}\x1b[0m`)
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[33m==================================================================\x1b[0m'
+    )
+    logger('info', 'OAuth', '\x1b[1m\x1b[31mIMPORTANT:\x1b[0m')
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[37mAfter pasting the token, you \x1b[1mMUST\x1b[37m set \x1b[33mgetOAuthToken\x1b[37m to \x1b[31mfalse\x1b[0m'
+    )
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[37motherwise the server will keep trying to obtain a new token on every restart.\x1b[0m'
+    )
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[33mExample JSON structure for your config.js:\x1b[0m'
+    )
 
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[33m==================================================================\x1b[0m'
-      )
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[1m\x1b[32mAuthorization granted successfully! :)\x1b[0m'
-      )
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[33m==================================================================\x1b[0m'
-      )
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[36mCopy your Refresh Token and paste it in your \x1b[1mconfig.js\x1b[36m:\x1b[0m'
-      )
-      logger('info', 'OAuth', `\x1b[1m\x1b[37m${refreshToken}\x1b[0m`)
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[33m==================================================================\x1b[0m'
-      )
-      logger('info', 'OAuth', '\x1b[1m\x1b[31mIMPORTANT:\x1b[0m')
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[37mAfter pasting the token, you \x1b[1mMUST\x1b[37m set \x1b[33mgetOAuthToken\x1b[37m to \x1b[31mfalse\x1b[0m'
-      )
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[37motherwise the server will keep trying to obtain a new token on every restart.\x1b[0m'
-      )
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[33mExample JSON structure for your config.js:\x1b[0m'
-      )
-
-      const exampleJson = JSON.stringify(
-        {
-          sources: {
-            youtube: {
-              getOAuthToken: false,
-              clients: {
-                settings: {
-                  TV: {
-                    refreshToken: [refreshToken]
-                  }
+    const exampleJson = JSON.stringify(
+      {
+        sources: {
+          youtube: {
+            getOAuthToken: false,
+            clients: {
+              settings: {
+                TV: {
+                  refreshToken: [refreshToken]
                 }
               }
             }
           }
-        },
-        null,
-        2
-      )
+        }
+      },
+      null,
+      2
+    )
 
-      logger('info', 'OAuth', `\x1b[32m${exampleJson}\x1b[0m`)
-      logger(
-        'info',
-        'OAuth',
-        '\x1b[33m==================================================================\x1b[0m\n'
-      )
+    logger('info', 'OAuth', `\x1b[32m${exampleJson}\x1b[0m`)
+    logger(
+      'info',
+      'OAuth',
+      '\x1b[33m==================================================================\x1b[0m\n'
+    )
 
-      return refreshToken
-    } catch (error) {
-      throw error
-    }
+    return refreshToken
   }
 
   static async pollForToken(deviceCode, interval) {
@@ -336,7 +331,7 @@ export default class OAuth {
             logger('info', 'OAuth', '>>> TOKEN RECEIVED :)')
             resolve(response.refresh_token)
           }
-        } catch (error) {
+        } catch (_error) {
           setTimeout(poll, interval * 1000)
         }
       }

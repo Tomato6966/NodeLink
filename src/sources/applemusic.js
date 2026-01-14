@@ -1,16 +1,15 @@
+import path from 'node:path'
 import {
   encodeTrack,
+  getBestMatch,
   http1makeRequest,
-  logger,
-  getBestMatch
+  logger
 } from '../utils.js'
-import fs from 'node:fs/promises'
-import path from 'node:path'
 
 const API_BASE = 'https://api.music.apple.com/v1'
 const MAX_PAGE_ITEMS = 300
 const BATCH_SIZE_DEFAULT = 5
-const CACHE_VALIDITY_DAYS = 7
+const _CACHE_VALIDITY_DAYS = 7
 
 export default class AppleMusicSource {
   constructor(nodelink) {
@@ -154,7 +153,7 @@ export default class AppleMusicSource {
       const scriptTagMatch = html.match(
         /<script\s+type="module"\s+crossorigin\s+src="([^"]+)"/
       )
-      const scriptTag = scriptTagMatch && scriptTagMatch[1]
+      const scriptTag = scriptTagMatch?.[1]
 
       if (!scriptTag) {
         throw new Error('Module script tag not found in Apple Music HTML.')
@@ -256,8 +255,7 @@ export default class AppleMusicSource {
     const isExplicit = attributes.contentRating === 'explicit'
     let trackUri = attributes.url || ''
     if (trackUri) {
-      trackUri +=
-        (trackUri.includes('?') ? '&' : '?') + `explicit=${isExplicit}`
+      trackUri += `${trackUri.includes('?') ? '&' : '?'}explicit=${isExplicit}`
     }
 
     const trackInfo = {
@@ -501,7 +499,7 @@ export default class AppleMusicSource {
       try {
         const url = new URL(decodedTrack.uri)
         isExplicit = url.searchParams.get('explicit') === 'true'
-      } catch (error) {
+      } catch (_error) {
         // Ignore malformed URI
       }
     }

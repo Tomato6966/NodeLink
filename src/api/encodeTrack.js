@@ -1,16 +1,11 @@
 import myzod from 'myzod'
-import {
-  encodeTrack,
-  logger,
-  sendResponse,
-  sendErrorResponse
-} from '../utils.js'
+import { encodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const encodeTrackSchema = myzod.object({
   track: myzod.string()
 })
 
-function handler(nodelink, req, res, sendResponse, parsedUrl) {
+function handler(_nodelink, req, res, sendResponse, parsedUrl) {
   const result = encodeTrackSchema.try({
     track: parsedUrl.searchParams.get('track')
   })

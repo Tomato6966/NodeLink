@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
-import { PassThrough } from 'node:stream'
 import crypto from 'node:crypto'
-import { encodeTrack, logger, makeRequest, http1makeRequest } from '../utils.js'
+import { PassThrough } from 'node:stream'
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
 
 const API_BASE = 'https://api.vk.com/method/'
 const API_VERSION = '5.131'
@@ -210,7 +210,7 @@ export default class VKMusicSource {
           await this._refreshAccessToken()
         }
         const response = await this._apiRequest('users.get', {})
-        if (response && response[0]) {
+        if (response?.[0]) {
           this.userId = response[0].id
           this.hasToken = true
           logger(
@@ -390,14 +390,14 @@ export default class VKMusicSource {
         }
         if (accessKey) params.access_key = accessKey
         const res = await this._apiRequest('audio.get', params)
-        if (res && res.items && res.items.length > 0) {
+        if (res?.items && res.items.length > 0) {
           let playlistTitle = `VK Playlist ${ownerId}_${playlistId}`
           try {
             const plList = await this._apiRequest('audio.getPlaylists', {
               owner_id: ownerId,
               count: 50
             })
-            const pl = plList?.items?.find((p) => p.id == playlistId)
+            const pl = plList?.items?.find((p) => p.id === playlistId)
             if (pl) playlistTitle = pl.title
           } catch {}
           const tracks = res.items.map((item) => this.buildTrack(item))
@@ -530,7 +530,7 @@ export default class VKMusicSource {
       duration = data[5]
     let rawUrl = data[2]
     const coverUrl = data[14] ? data[14].split(',')[0] : null
-    if (rawUrl && rawUrl.includes('audio_api_unavailable'))
+    if (rawUrl?.includes('audio_api_unavailable'))
       rawUrl = this._unmask_url(rawUrl, this.userId)
     const id = `${ownerId}_${trackId}`
     const trackInfo = {
@@ -559,7 +559,7 @@ export default class VKMusicSource {
       duration = item.duration * 1000,
       id = `${item.owner_id}_${item.id}`
     let uri = item.url || ''
-    if (uri && uri.includes('audio_api_unavailable'))
+    if (uri?.includes('audio_api_unavailable'))
       uri = this._unmask_url(uri, this.userId)
     const trackInfo = {
       identifier: id,
@@ -592,10 +592,10 @@ export default class VKMusicSource {
         const res = await this._apiRequest('audio.getById', { audios })
         if (res && res.length > 0) {
           url = res[0].url
-          if (url && url.includes('audio_api_unavailable'))
+          if (url?.includes('audio_api_unavailable'))
             url = this._unmask_url(url, this.userId)
         }
-      } catch (e) {}
+      } catch (_e) {}
     }
     if (!url) {
       const scrapeRes = await this._scrapeTrack(
@@ -627,7 +627,7 @@ export default class VKMusicSource {
     }
   }
 
-  async loadStream(track, url, protocol) {
+  async loadStream(_track, url, _protocol) {
     try {
       if (url.includes('.m3u8')) {
         const stream = new PassThrough()

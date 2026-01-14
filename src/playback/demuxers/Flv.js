@@ -25,7 +25,7 @@ export class FlvDemuxer extends Transform {
     this.currentTag = null
   }
 
-  _transform(chunk, encoding, callback) {
+  _transform(chunk, _encoding, callback) {
     this.ringBuffer.write(chunk)
 
     while (this.ringBuffer.length >= this.expectedSize) {

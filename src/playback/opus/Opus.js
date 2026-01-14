@@ -1,6 +1,6 @@
-import { Transform } from 'node:stream'
-import { createRequire } from 'node:module'
 import { Buffer } from 'node:buffer'
+import { createRequire } from 'node:module'
+import { Transform } from 'node:stream'
 
 const require = createRequire(import.meta.url)
 
@@ -50,7 +50,7 @@ const _createInstance = (rate, channels, app) => {
   return { instance: new Encoder(rate, channels, type), lib }
 }
 
-const _applyCtl = (enc, libName, id, val) => {
+const _applyCtl = (enc, _libName, id, val) => {
   if (!enc) throw new Error('Encoder not ready.')
 
   if (id === OPUS_CTL.BITRATE) {

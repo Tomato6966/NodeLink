@@ -1,4 +1,4 @@
-import { sendResponse, sendErrorResponse } from '../utils.js'
+import { sendErrorResponse, sendResponse } from '../utils.js'
 
 const LOOPBACKS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 
@@ -151,7 +151,7 @@ function handlePatch(nodelink, req, res, parsedUrl) {
   )
 }
 
-function handler(nodelink, req, res, sendResponse, parsedUrl) {
+function handler(nodelink, req, res, _sendResponse, parsedUrl) {
   if (req.method === 'GET') return handleGet(nodelink, req, res)
   if (req.method === 'PATCH') return handlePatch(nodelink, req, res, parsedUrl)
 

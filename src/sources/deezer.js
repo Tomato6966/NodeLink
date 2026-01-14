@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
-import { encodeTrack, logger, makeRequest, http1makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
 
 const IV = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])
 
@@ -313,7 +313,7 @@ export default class DeezerSource {
           loadType: 'artist',
           data: {
             info: {
-              name: `${artistData.name}\'s Top Tracks`,
+              name: `${artistData.name}'s Top Tracks`,
               selectedTrack: 0
             },
             pluginInfo: {},
@@ -444,7 +444,7 @@ export default class DeezerSource {
     return { newTrack: bestMatch, ...streamInfo }
   }
 
-  loadStream(decodedTrack, url, format, additionalData) {
+  loadStream(decodedTrack, url, _format, additionalData) {
     return new Promise(async (resolve) => {
       try {
         const outputStream = new PassThrough()

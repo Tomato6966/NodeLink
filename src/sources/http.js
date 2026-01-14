@@ -1,4 +1,4 @@
-import { encodeTrack, logger, http1makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
 export default class HttpSource {
   constructor(nodelink) {
@@ -103,7 +103,7 @@ export default class HttpSource {
     return { url: info.uri, protocol: 'http' }
   }
 
-  async loadStream(decodedTrack, url) {
+  async loadStream(_decodedTrack, url) {
     try {
       const opts = {
         method: 'GET',

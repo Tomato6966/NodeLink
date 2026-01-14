@@ -1,6 +1,6 @@
 import myzod from 'myzod'
 import OAuth from '../sources/youtube/OAuth.js'
-import { logger, sendResponse, sendErrorResponse } from '../utils.js'
+import { logger, sendErrorResponse } from '../utils.js'
 
 const configSchema = myzod
   .object({
@@ -50,7 +50,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
         const token = await validator.getAccessToken()
         isValid = !!token
-      } catch (e) {
+      } catch (_e) {
         isValid = false
       }
     }

@@ -1,7 +1,7 @@
 import cluster from 'node:cluster'
 import crypto from 'node:crypto'
-import os from 'node:os'
 import net from 'node:net'
+import os from 'node:os'
 import v8 from 'node:v8'
 
 import { logger } from '../utils.js'
@@ -126,7 +126,7 @@ export default class WorkerManager {
     })
   }
 
-  _shouldRespawnWorker(workerId, exitCode, affectedGuildsCount) {
+  _shouldRespawnWorker(workerId, _exitCode, affectedGuildsCount) {
     if (this.isDestroying) return false
     if (this.workers.length < this.minWorkers) return true
     if (affectedGuildsCount > 0) return true

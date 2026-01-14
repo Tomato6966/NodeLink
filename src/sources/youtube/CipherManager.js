@@ -1,9 +1,8 @@
-import { URLSearchParams } from 'node:url'
 import {
+  getVersion,
   http1makeRequest,
   logger,
-  makeRequest,
-  getVersion
+  makeRequest
 } from '../../utils.js'
 
 const CACHE_DURATION_MS = 12 * 60 * 60 * 1000
@@ -251,7 +250,7 @@ export default class CipherManager {
         `Cipher server at ${this.config.url} is online.`
       )
       return true
-    } catch (e) {
+    } catch (_e) {
       logger(
         'warn',
         'YouTube-Cipher',
@@ -267,7 +266,7 @@ export default class CipherManager {
     nParam,
     signatureKey,
     playerScript,
-    context
+    _context
   ) {
     if (!this.config.url) {
       throw new Error('Remote cipher URL is not configured.')

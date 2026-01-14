@@ -1,6 +1,6 @@
-import { encodeTrack, logger, http1makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
-const DURATION_TOLERANCE = 0.15
+const _DURATION_TOLERANCE = 0.15
 
 export default class GeniusSource {
   constructor(nodelink) {
@@ -17,7 +17,7 @@ export default class GeniusSource {
     return true
   }
 
-  async search(query) {
+  async search(_query) {
     return { loadType: 'empty', data: {} }
   }
 
@@ -54,7 +54,7 @@ export default class GeniusSource {
         try {
           const jsonParseArg = scriptMatch[1]
           const parseFunction = new Function(
-            'return JSON.parse(' + jsonParseArg + ')'
+            `return JSON.parse(${jsonParseArg})`
           )
           songInfo = parseFunction()
         } catch (e) {
@@ -98,7 +98,7 @@ export default class GeniusSource {
 
       for (const m of media) {
         if ((m.type === 'video' || m.type === 'audio') && m.url) {
-          let trackInfo = {
+          const trackInfo = {
             identifier: m.url,
             isSeekable: true,
             author: artist,
@@ -183,7 +183,7 @@ export default class GeniusSource {
   }
 
   async getTrackUrl(decodedTrack) {
-    if (decodedTrack.uri && decodedTrack.uri.startsWith('http')) {
+    if (decodedTrack.uri?.startsWith('http')) {
       try {
         const result = await this.nodelink.sources.resolve(decodedTrack.uri)
 
@@ -246,7 +246,7 @@ export default class GeniusSource {
     }
   }
 
-  async _findBestMatch(list, target, original) {
+  async _findBestMatch(list, _target, original) {
     const normalizedOriginalTitle = this._normalize(original.title)
     const normalizedOriginalAuthor = this._normalize(original.author)
 

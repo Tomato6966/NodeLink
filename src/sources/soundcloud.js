@@ -264,7 +264,6 @@ export default class SoundCloudSource {
         return this._processPlaylists(collection)
       case 'all':
         return this._processAll(collection)
-      case 'tracks':
       default:
         return this._processTracks(collection)
     }
@@ -751,7 +750,7 @@ export default class SoundCloudSource {
     }
   }
 
-  async loadStream(track, url, protocol, additionalData) {
+  async loadStream(_track, url, protocol, _additionalData) {
     const stream = new PassThrough()
 
     if (protocol === 'progressive') {

@@ -49,7 +49,7 @@ export default class YouTubeLyrics {
           captionTracks.find((c) => c.kind !== 'asr') ||
           captionTracks[0]
 
-        if (defaultTrack && defaultTrack.isTranslatable) {
+        if (defaultTrack?.isTranslatable) {
           trackLang = {
             ...defaultTrack,
             languageCode: language,

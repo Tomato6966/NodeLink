@@ -545,8 +545,8 @@ export default class TwitchSource {
       for (const quality of clipData.videoQualities) {
         if (
           !bestQuality ||
-          Number.parseInt(quality.quality) >
-            Number.parseInt(bestQuality.quality)
+          Number.parseInt(quality.quality, 10) >
+            Number.parseInt(bestQuality.quality, 10)
         ) {
           bestQuality = quality
         }
@@ -654,7 +654,7 @@ export default class TwitchSource {
     return bestUrl ? { url: bestUrl } : null
   }
 
-  async loadStream(track, url, protocol) {
+  async loadStream(_track, url, protocol) {
     if (protocol === 'hls') {
       const stream = new PassThrough()
       manageHlsStream(url, stream)
@@ -675,7 +675,7 @@ export default class TwitchSource {
     return { stream, type: 'mp4' }
   }
 
-  search(query) {
+  search(_query) {
     return {
       exception: {
         message: 'Search is not supported for Twitch',

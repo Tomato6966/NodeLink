@@ -163,7 +163,7 @@ export default class PlayerManager {
           args: [trackPayload]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -194,7 +194,7 @@ export default class PlayerManager {
           args: []
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -229,7 +229,7 @@ export default class PlayerManager {
           args: [shouldPause]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -265,7 +265,7 @@ export default class PlayerManager {
           args: [position, endTime]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -296,7 +296,7 @@ export default class PlayerManager {
           args: [level]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -331,7 +331,7 @@ export default class PlayerManager {
           args: [filtersPayload]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -366,7 +366,7 @@ export default class PlayerManager {
           args: [voicePayload]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -394,7 +394,7 @@ export default class PlayerManager {
           args: []
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -422,7 +422,7 @@ export default class PlayerManager {
           args: [trackPayload, volume]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -450,7 +450,7 @@ export default class PlayerManager {
           args: [mixId]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -478,7 +478,7 @@ export default class PlayerManager {
           args: [mixId, volume]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -506,7 +506,7 @@ export default class PlayerManager {
           args: []
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result

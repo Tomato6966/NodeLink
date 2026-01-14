@@ -1,11 +1,10 @@
+import path from 'node:path'
 import {
   encodeTrack,
+  getBestMatch,
   http1makeRequest,
-  logger,
-  getBestMatch
+  logger
 } from '../utils.js'
-import fs from 'node:fs/promises'
-import path from 'node:path'
 
 const API_BASE = 'https://api.tidal.com/v1/'
 const CACHE_VALIDITY_DAYS = 7
@@ -30,7 +29,7 @@ export default class TidalSource {
     this.searchTerms = ['tdsearch']
     this.recommendationTerm = ['tdrec']
     this.patterns = [
-      /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9\-]+)/
+      /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9-]+)/
     ]
     this.priority = 90
     this.token = this.config?.token
@@ -367,7 +366,7 @@ export default class TidalSource {
     }
   }
 
-  async loadStream(track, url, protocol, additionalData) {
+  async loadStream(_track, _url, _protocol, _additionalData) {
     throw new Error(
       'Tidal source uses mirroring and does not load streams directly.'
     )

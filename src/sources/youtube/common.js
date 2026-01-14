@@ -57,7 +57,7 @@ function formatDuration(ms) {
 }
 
 function formatNumber(num) {
-  if (!num || isNaN(num)) return '0'
+  if (!num || Number.isNaN(num)) return '0'
   if (num >= 1000000000) return `${(num / 1000000000).toFixed(1)}B`
   if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
   if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
@@ -125,7 +125,7 @@ function parsePublishedAt(publishedText) {
 
   const date = new Date(publishedText)
 
-  if (!isNaN(date.getTime())) {
+  if (!Number.isNaN(date.getTime())) {
     return _buildPublishedAtFromTimestamp(date.getTime(), publishedText)
   }
 
@@ -550,7 +550,7 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
         followRedirects: true,
         maxRedirects: 5
       })
-      if (response.finalUrl && response.finalUrl.includes('spotify.com')) {
+      if (response.finalUrl?.includes('spotify.com')) {
         resolved.spotify = response.finalUrl
 
         const match = response.finalUrl.match(
@@ -563,7 +563,7 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
           }
         }
       }
-    } catch (e) {}
+    } catch (_e) {}
   }
 
   if (
@@ -577,10 +577,10 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
         followRedirects: true,
         maxRedirects: 5
       })
-      if (response.finalUrl && response.finalUrl.includes('music.apple.com')) {
+      if (response.finalUrl?.includes('music.apple.com')) {
         resolved.appleMusic = response.finalUrl
       }
-    } catch (e) {}
+    } catch (_e) {}
   }
 
   return resolved
@@ -588,8 +588,8 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
 
 function extractExternalLinks(
   description,
-  resolve = false,
-  makeRequest = null
+  _resolve = false,
+  _makeRequest = null
 ) {
   if (!description) return null
 
@@ -701,8 +701,8 @@ function extractVideoQualities(streamingData) {
   }
 
   return Array.from(qualityMap.values()).sort((a, b) => {
-    const resA = Number.parseInt(a.quality) || 0
-    const resB = Number.parseInt(b.quality) || 0
+    const resA = Number.parseInt(a.quality, 10) || 0
+    const resB = Number.parseInt(b.quality, 10) || 0
     return resA - resB
   })
 }
@@ -1181,7 +1181,7 @@ export async function buildHoloTrack(
 
   let thumbnails = {}
   let viewCount = null
-  let badges = []
+  let _badges = []
   let accessibilityLabel = `${trackInfo.title} by ${trackInfo.author}`
   let publishedAt = null
   let keywords = []
@@ -1282,7 +1282,7 @@ export async function buildHoloTrack(
     accessibilityLabel = accessibilityLabel || rendererAccessibility
 
     const ownerBadges = renderer.ownerBadges || []
-    badges = ownerBadges
+    _badges = ownerBadges
       .map((b) =>
         getItemValue(b, [
           'metadataBadgeRenderer.tooltip',
@@ -1481,7 +1481,7 @@ export async function fetchEncryptedHostFlags(videoId) {
     }
     const match = body.match(/"encryptedHostFlags":"([^"]+)"/)
 
-    if (match && match[1]) {
+    if (match?.[1]) {
       logger(
         'debug',
         'fetchEncryptedHostFlags',
@@ -1538,7 +1538,7 @@ export class BaseClient {
     return {}
   }
 
-  async search(query, type) {
+  async search(_query, _type) {
     return { loadType: 'empty', data: {} }
   }
 
@@ -1570,7 +1570,7 @@ export class BaseClient {
     if (this.requirePlayerScript() && cipherManager) {
       try {
         const playerScript = await cipherManager.getCachedPlayerScript()
-        if (playerScript && playerScript.url) {
+        if (playerScript?.url) {
           const signatureTimestamp = await cipherManager.getTimestamp(
             playerScript.url
           )
@@ -1617,7 +1617,7 @@ export class BaseClient {
     return response
   }
 
-  async _handlePlayerResponse(playerResponse, sourceName, videoId, context) {
+  async _handlePlayerResponse(playerResponse, sourceName, videoId, _context) {
     if (!playerResponse || typeof playerResponse !== 'object') {
       logger(
         'error',
@@ -1710,7 +1710,7 @@ export class BaseClient {
     currentVideoId,
     playlistResponse,
     sourceName,
-    context
+    _context
   ) {
     if (playlistResponse?.error) {
       const errMsg =
@@ -1814,7 +1814,7 @@ export class BaseClient {
     playlistId,
     browseResponse,
     sourceName,
-    context
+    _context
   ) {
     if (browseResponse?.error) {
       const errMsg =
@@ -1986,9 +1986,7 @@ export class BaseClient {
         }
       }
     } else {
-      const defaultFormats = formats.filter(
-        (f) => f.audioTrack && f.audioTrack.audioIsDefault
-      )
+      const defaultFormats = formats.filter((f) => f.audioTrack?.audioIsDefault)
 
       if (defaultFormats.length > 0) {
         logger('debug', `youtube-${this.name}`, `Using default audio track.`)
@@ -2242,7 +2240,7 @@ export class BaseClient {
     }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()
@@ -2366,7 +2364,7 @@ export class BaseClient {
   }
 
   async getTrackUrl(decodedTrack, context, cipherManager) {
-    const sourceName = decodedTrack.sourceName || 'youtube'
+    const _sourceName = decodedTrack.sourceName || 'youtube'
 
     const headers = this.oauth ? await this.getAuthHeaders() : {}
     const { body: playerResponse, statusCode } = await this._makePlayerRequest(

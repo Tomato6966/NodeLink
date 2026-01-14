@@ -18,7 +18,7 @@ const pathSchema = myzod.object({
   mixId: myzod.string()
 })
 
-async function handler(nodelink, req, res, sendResponse, parsedUrl) {
+async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
   const method = req.method
   const pathParts = parsedUrl.pathname.split('/')
   const sessionId = pathParts[3]

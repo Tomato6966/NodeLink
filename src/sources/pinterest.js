@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, logger, http1makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
 export default class PinterestSource {
   constructor(nodelink) {
@@ -128,7 +128,7 @@ export default class PinterestSource {
     }
   }
 
-  async loadStream(decodedTrack, url) {
+  async loadStream(_decodedTrack, url) {
     try {
       const options = {
         method: 'GET',

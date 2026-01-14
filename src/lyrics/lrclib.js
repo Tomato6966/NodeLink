@@ -8,8 +8,7 @@ const CLEAN_PATTERNS = [
 ]
 // this clears titles like [Official] or (Official), etc... this improves the accuary of the lyrics
 
-const FEAT_PATTERN =
-  /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
+const FEAT_PATTERN = /\s*[([]\s*(?:ft\.?|feat\.?|featuring)\s+[^)\]]+[)\]]/gi
 
 const SEPARATORS = [' - ', ' – ', ' — ']
 

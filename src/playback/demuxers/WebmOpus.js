@@ -217,7 +217,7 @@ class WebmBaseDemuxer extends Transform {
       try {
         this._checkHead(data)
         this.emit('head', data)
-      } catch (e) {}
+      } catch (_e) {}
     } else if (tag === 'a3') {
       if (this.currentTrack && (data[0] & 0xf) === this.currentTrack.number) {
         this.push(data.subarray(4))

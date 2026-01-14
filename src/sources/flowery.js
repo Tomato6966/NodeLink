@@ -111,7 +111,7 @@ export default class FlowerySource {
   async resolve(url) {
     try {
       let text = ''
-      let params = {}
+      const params = {}
 
       if (url.startsWith('ftts://')) {
         const pathAndQuery = url.slice(7)
@@ -245,7 +245,7 @@ export default class FlowerySource {
         else if (audioFormat === 'ogg_opus') format = 'opus'
         else if (audioFormat === 'mp3') format = 'mp3'
       }
-    } catch (e) {
+    } catch (_e) {
       // ignore
     }
 

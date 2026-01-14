@@ -1,5 +1,5 @@
 import myzod from 'myzod'
-import { logger, sendResponse, sendErrorResponse } from '../utils.js'
+import { logger, sendErrorResponse } from '../utils.js'
 
 const loadTracksSchema = myzod.object({
   identifier: myzod.string()

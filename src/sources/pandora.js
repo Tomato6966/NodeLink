@@ -1,9 +1,9 @@
 import {
   encodeTrack,
+  getBestMatch,
   http1makeRequest,
   logger,
-  makeRequest,
-  getBestMatch
+  makeRequest
 } from '../utils.js'
 
 export default class PandoraSource {
@@ -45,7 +45,7 @@ export default class PandoraSource {
 
         logger('debug', 'Pandora', 'Setting Pandora auth and CSRF token.')
 
-        let csrfTokenValue = this.csrfTokenConfig
+        const csrfTokenValue = this.csrfTokenConfig
         const remoteUrl = this.config.sources?.pandora?.remoteTokenUrl
 
         if (remoteUrl) {

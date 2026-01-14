@@ -1,20 +1,19 @@
 import { Buffer } from 'node:buffer'
-import { PassThrough, Readable, Transform, pipeline } from 'node:stream'
+import { PassThrough, pipeline, Readable, Transform } from 'node:stream'
 
 import LibSampleRate from '@alexanderolsen/libsamplerate-js'
 import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js'
 import { SeekError, seekableStream } from '@ecliptia/seekable-stream'
+import { SymphoniaDecoder } from '@toddynnn/symphonia-decoder'
 import * as MP4Box from 'mp4box'
-
 import { normalizeFormat, SupportedFormats } from '../constants.js'
 import { logger } from '../utils.js'
-import WebmOpusDemuxer from './demuxers/WebmOpus.js'
 import FlvDemuxer from './demuxers/Flv.js'
+import WebmOpusDemuxer from './demuxers/WebmOpus.js'
 import { FiltersManager } from './filtersManager.js'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from './opus/Opus.js'
-import { VolumeTransformer } from './VolumeTransformer.js'
-import { SymphoniaDecoder } from '@toddynnn/symphonia-decoder'
 import { RingBuffer } from './RingBuffer.js'
+import { VolumeTransformer } from './VolumeTransformer.js'
 
 const AUDIO_CONFIG = Object.freeze({
   sampleRate: 48000,
@@ -42,9 +41,9 @@ const MPEGTS_CONFIG = Object.freeze({
   aacStreamType: 0x0f
 })
 
-const DOWNMIX_COEFFICIENTS = Object.freeze({
-  center: 0.7071,
-  surround: 0.7071,
+const _DOWNMIX_COEFFICIENTS = Object.freeze({
+  center: Math.SQRT1_2,
+  surround: Math.SQRT1_2,
   lfe: 0.5
 })
 
@@ -310,7 +309,7 @@ class SymphoniaDecoderStream extends Transform {
     return this.decoder !== null && !this._aborted && !this.isFinished
   }
 
-  _transform(chunk, encoding, callback) {
+  _transform(chunk, _encoding, callback) {
     if (this._aborted || !this.decoder) return callback()
 
     this.decoder.push(chunk)
@@ -544,7 +543,7 @@ class MPEGTSToAACStream extends Transform {
     this.aacData = []
   }
 
-  _transform(chunk, encoding, callback) {
+  _transform(chunk, _encoding, callback) {
     if (this._aborted) {
       callback()
       return
@@ -709,8 +708,8 @@ class AACDecoderStream extends Transform {
       return stereo
     }
 
-    const CENTER_MIX = 0.7071
-    const SURROUND_MIX = 0.7071
+    const CENTER_MIX = Math.SQRT1_2
+    const SURROUND_MIX = Math.SQRT1_2
     const LFE_MIX = 0.5
 
     for (let i = 0; i < samplesPerChannel; i++) {
@@ -818,7 +817,7 @@ class AACDecoderStream extends Transform {
     this._decodeChunk(chunk, encoding, callback)
   }
 
-  async _decodeChunk(chunk, encoding, callback) {
+  async _decodeChunk(chunk, _encoding, callback) {
     try {
       this.ringBuffer.write(chunk)
 
@@ -889,7 +888,7 @@ class AACDecoderStream extends Transform {
               this.push(Buffer.from(pcmInt16.buffer))
             }
           }
-        } catch (decodeErr) {
+        } catch (_decodeErr) {
           // Skip bad frame
         }
 
@@ -916,7 +915,7 @@ class AACDecoderStream extends Transform {
             this.push(Buffer.from(pcmInt16.buffer))
           }
         }
-      } catch (err) {}
+      } catch (_err) {}
     }
 
     if (this.resampler) this.resampler.destroy?.()
@@ -971,7 +970,7 @@ class MP4ToAACStream extends Transform {
       }
     }
 
-    this.mp4boxFile.onSamples = (id, user, samples) => {
+    this.mp4boxFile.onSamples = (_id, _user, samples) => {
       if (this._aborted) return
 
       try {
@@ -1053,7 +1052,7 @@ class MP4ToAACStream extends Transform {
     }
   }
 
-  _transform(chunk, encoding, callback) {
+  _transform(chunk, _encoding, callback) {
     if (this._aborted || !this.mp4boxFile) {
       callback()
       return
@@ -1274,7 +1273,7 @@ class FMP4ToAACStream extends Transform {
     return null
   }
 
-  _transform(chunk, encoding, callback) {
+  _transform(chunk, _encoding, callback) {
     try {
       if (!this.initSegmentProcessed && chunk.length > 8) {
         const boxType = chunk.toString('ascii', 4, 8)
@@ -1294,7 +1293,7 @@ class FMP4ToAACStream extends Transform {
       }
 
       callback()
-    } catch (err) {
+    } catch (_err) {
       callback()
     }
   }
@@ -1375,7 +1374,7 @@ class MixerTransform extends Transform {
     this.audioMixer = audioMixer
   }
 
-  _transform(mainChunk, encoding, callback) {
+  _transform(mainChunk, _encoding, callback) {
     if (
       !this.audioMixer ||
       !this.audioMixer.enabled ||
@@ -1388,7 +1387,7 @@ class MixerTransform extends Transform {
       const layerChunks = this.audioMixer.readLayerChunks(mainChunk.length)
       const mixed = this.audioMixer.mixBuffers(mainChunk, layerChunks)
       callback(null, mixed)
-    } catch (error) {
+    } catch (_error) {
       callback(null, mainChunk)
     }
   }
@@ -1464,7 +1463,7 @@ class StreamAudioResource extends BaseAudioResource {
     }
   }
 
-  _createFLVPipeline(stream, type, resamplingQuality) {
+  _createFLVPipeline(stream, _type, resamplingQuality) {
     const demuxer = new FLVToAACStream()
     const decoder = new AACDecoderStream({ resamplingQuality })
 
@@ -1481,7 +1480,7 @@ class StreamAudioResource extends BaseAudioResource {
 
   _createAACPipeline(stream, type, resamplingQuality) {
     const lowerType = type.toLowerCase()
-    let aacStream = stream
+    const _aacStream = stream
     const streams = [stream]
 
     if (_isFmp4Format(lowerType)) {

@@ -1,9 +1,9 @@
 import { logger, makeRequest } from '../../../utils.js'
 import {
   BaseClient,
-  YOUTUBE_CONSTANTS,
   buildTrack,
-  checkURLType
+  checkURLType,
+  YOUTUBE_CONSTANTS
 } from '../common.js'
 
 export default class Music extends BaseClient {
@@ -87,7 +87,7 @@ export default class Music extends BaseClient {
       searchResult.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer
         ?.content
 
-    let loggedVideoData = false
+    const _loggedVideoData = false
     const tracks = []
     let videos = null
 
@@ -141,10 +141,10 @@ export default class Music extends BaseClient {
     return { loadType: 'search', data: tracks }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'ytmusic'
     const urlType = checkURLType(url, sourceName)
-    const apiEndpoint = this.getApiEndpoint()
+    const _apiEndpoint = this.getApiEndpoint()
 
     switch (urlType) {
       case YOUTUBE_CONSTANTS.VIDEO:
@@ -230,7 +230,7 @@ export default class Music extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager) {
+  async getTrackUrl(_decodedTrack, _context, _cipherManager) {
     return {
       exception: {
         message: 'Music client does not provide direct track URLs.',

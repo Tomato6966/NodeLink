@@ -385,7 +385,7 @@ export class Player {
       reason: reason
     })
 
-    if (this.audioMixer && this.audioMixer.autoCleanup) {
+    if (this.audioMixer?.autoCleanup) {
       this.audioMixer.clearLayers('MAIN_ENDED')
     }
   }

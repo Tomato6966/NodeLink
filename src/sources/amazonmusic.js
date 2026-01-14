@@ -1,8 +1,8 @@
 import {
   encodeTrack,
-  logger,
+  getBestMatch,
   http1makeRequest,
-  getBestMatch
+  logger
 } from '../utils.js'
 
 const BOT_USER_AGENT =
@@ -159,7 +159,7 @@ export default class AmazonMusicSource {
         if (collection.image) collectionImage = collection.image
       }
 
-      if (collection && collection.track) {
+      if (collection?.track) {
         for (const t of collection.track) {
           const id =
             t.url?.split('/').pop() ||
@@ -200,8 +200,8 @@ export default class AmazonMusicSource {
             isSeekable: true,
             author: tArtist,
             length: tDuration.includes(':')
-              ? (parseInt(tDuration.split(':')[0]) * 60 +
-                  parseInt(tDuration.split(':')[1])) *
+              ? (parseInt(tDuration.split(':')[0], 10) * 60 +
+                  parseInt(tDuration.split(':')[1], 10)) *
                 1000
               : 0,
             isStream: false,

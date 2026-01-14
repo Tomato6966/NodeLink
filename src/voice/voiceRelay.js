@@ -1,10 +1,10 @@
 import discordVoice from '@performanc/voice'
 import { Decoder as OpusDecoder } from '../playback/opus/Opus.js'
 import {
-  VOICE_FORMATS,
-  VOICE_FRAME_OPS,
   buildVoiceFrame,
-  resolveVoiceFormat
+  resolveVoiceFormat,
+  VOICE_FORMATS,
+  VOICE_FRAME_OPS
 } from './voiceFrames.js'
 
 const EMPTY_BUFFER = Buffer.alloc(0)

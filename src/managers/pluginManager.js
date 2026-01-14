@@ -67,7 +67,7 @@ export default class PluginManager {
 
     try {
       let entryPoint = null
-      let pluginMeta = {
+      const pluginMeta = {
         name,
         version: '0.0.0',
         author: 'Unknown',
@@ -88,7 +88,7 @@ export default class PluginManager {
             if (pkg.author)
               pluginMeta.author =
                 typeof pkg.author === 'object' ? pkg.author.name : pkg.author
-            if (pkg.homepage || (pkg.repository && pkg.repository.url)) {
+            if (pkg.homepage || pkg.repository?.url) {
               pluginMeta.topic = pkg.homepage || pkg.repository.url
             }
 
@@ -114,11 +114,11 @@ export default class PluginManager {
             if (pkg.author)
               pluginMeta.author =
                 typeof pkg.author === 'object' ? pkg.author.name : pkg.author
-            if (pkg.homepage || (pkg.repository && pkg.repository.url)) {
+            if (pkg.homepage || pkg.repository?.url) {
               pluginMeta.topic = pkg.homepage || pkg.repository.url
             }
           }
-        } catch (e) {
+        } catch (_e) {
           logger(
             'warn',
             'PluginManager',

@@ -1,4 +1,4 @@
-import { encodeTrack, logger, http1makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
 export default class TelegramSource {
   constructor(nodelink) {
@@ -168,7 +168,7 @@ export default class TelegramSource {
     }
     if (result.loadType === 'playlist') {
       const parts = track.identifier.split('/')
-      const index = parseInt(parts[parts.length - 1])
+      const index = parseInt(parts[parts.length - 1], 10)
       const selectedTrack = result.data.tracks[index] || result.data.tracks[0]
       return {
         url: selectedTrack.pluginInfo.directUrl,
@@ -181,7 +181,7 @@ export default class TelegramSource {
     }
   }
 
-  async loadStream(decodedTrack, url) {
+  async loadStream(_decodedTrack, url) {
     try {
       const response = await http1makeRequest(url, {
         method: 'GET',
@@ -204,7 +204,7 @@ export default class TelegramSource {
     }
   }
 
-  async search(query) {
+  async search(_query) {
     return { loadType: 'empty', data: {} }
   }
 }

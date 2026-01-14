@@ -1,7 +1,7 @@
 import cluster from 'node:cluster'
+import crypto from 'node:crypto'
 import net from 'node:net'
 import os from 'node:os'
-import crypto from 'node:crypto'
 import { logger } from '../utils.js'
 
 class SourceWorkerManager {
@@ -108,7 +108,7 @@ class SourceWorkerManager {
 
     cluster.setupPrimary({ exec: './src/index.js' })
 
-    cluster.on('exit', (worker, code, signal) => {
+    cluster.on('exit', (worker, _code, _signal) => {
       if (worker.workerType !== 'source') return
 
       logger(

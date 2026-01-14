@@ -1,12 +1,12 @@
 import net from 'node:net'
-import {
-  Worker,
-  isMainThread,
-  parentPort,
-  workerData
-} from 'node:worker_threads'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import {
+  isMainThread,
+  parentPort,
+  Worker,
+  workerData
+} from 'node:worker_threads'
 import * as utils from './utils.js'
 
 const __filename = fileURLToPath(import.meta.url)

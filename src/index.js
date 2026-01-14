@@ -2,7 +2,7 @@ import cluster from 'node:cluster'
 import { EventEmitter } from 'node:events'
 import http from 'node:http'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
 import WebSocketServer from '@performanc/pwsl-server'
 
 import requestHandler from './api/index.js'
@@ -32,8 +32,8 @@ import PlayerManager from './managers/playerManager.js'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
 import SourceWorkerManager from './managers/sourceWorkerManager.js'
-import { createVoiceRelay } from './voice/voiceRelay.js'
 import { parseVoiceFrameHeader } from './voice/voiceFrames.js'
+import { createVoiceRelay } from './voice/voiceRelay.js'
 
 let config
 
@@ -74,11 +74,11 @@ const clusterEnabled =
   (typeof config.cluster?.enabled === 'boolean' && config.cluster.enabled) ||
   false
 
-let configuredWorkers = 0
+let _configuredWorkers = 0
 if (process.env.CLUSTER_WORKERS)
-  configuredWorkers = Number(process.env.CLUSTER_WORKERS)
+  _configuredWorkers = Number(process.env.CLUSTER_WORKERS)
 else if (typeof config.cluster?.workers === 'number')
-  configuredWorkers = config.cluster.workers
+  _configuredWorkers = config.cluster.workers
 
 initLogger(config)
 
@@ -144,7 +144,7 @@ let registry = null
 if (process.embedder === 'nodejs') {
   try {
     registry = await import('./registry.js')
-  } catch (e) {}
+  } catch (_e) {}
 }
 
 class NodelinkServer extends EventEmitter {
@@ -222,7 +222,7 @@ class NodelinkServer extends EventEmitter {
     )
   }
 
-  async _initSources(isClusterPrimary, options) {
+  async _initSources(isClusterPrimary, _options) {
     if (!isClusterPrimary) {
       const [{ default: sourceMan }, { default: lyricsMan }] =
         await Promise.all([
@@ -250,7 +250,7 @@ class NodelinkServer extends EventEmitter {
             } else if (typeof session.socket.ping === 'function') {
               session.socket.ping()
             }
-          } catch (e) {
+          } catch (_e) {
             logger(
               'debug',
               'Server',
@@ -1118,7 +1118,7 @@ class NodelinkServer extends EventEmitter {
 
     this.socket.on(
       '/v4/websocket/voice',
-      (socket, request, clientInfo, _sessionId, guildId) => {
+      (socket, request, _clientInfo, _sessionId, guildId) => {
         if (!this.options.voiceReceive?.enabled) {
           try {
             socket.close(1008, 'Voice receive disabled')
@@ -1311,10 +1311,10 @@ class NodelinkServer extends EventEmitter {
             try {
               session.socket.close(1000, 'Server shutdown')
               closedCount++
-            } catch (e) {
+            } catch (_e) {
               try {
                 session.socket.destroy()
-              } catch (destroyErr) {
+              } catch (_destroyErr) {
                 logger(
                   'debug',
                   'WebSocket',
@@ -1445,7 +1445,7 @@ class NodelinkServer extends EventEmitter {
         try {
           try {
             handle.pause?.()
-          } catch (e) {}
+          } catch (_e) {}
           this.server.emit('connection', handle)
         } catch (err) {
           logger(
@@ -1455,7 +1455,7 @@ class NodelinkServer extends EventEmitter {
           )
           try {
             handle.destroy?.()
-          } catch (e) {}
+          } catch (_e) {}
         }
       })
     } else {

@@ -14,10 +14,10 @@ import Lowpass from './filters/lowpass.js'
 import Phaser from './filters/phaser.js'
 import Reverb from './filters/reverb.js'
 import Rotation from './filters/rotation.js'
+import Spatial from './filters/spatial.js'
 import Timescale from './filters/timescale.js'
 import Tremolo from './filters/tremolo.js'
 import Vibrato from './filters/vibrato.js'
-import Spatial from './filters/spatial.js'
 
 const FILTER_CLASSES = {
   tremolo: Tremolo,
@@ -105,7 +105,7 @@ export class FiltersManager extends Transform {
     }
   }
 
-  _transform(chunk, encoding, callback) {
+  _transform(chunk, _encoding, callback) {
     if (this.activeFilters.length === 0) {
       this.push(chunk)
       return callback()

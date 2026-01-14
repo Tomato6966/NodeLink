@@ -1,10 +1,10 @@
 import { PassThrough } from 'node:stream'
 import {
   encodeTrack,
-  logger,
-  makeRequest,
   http1makeRequest,
-  loadHLSPlaylist
+  loadHLSPlaylist,
+  logger,
+  makeRequest
 } from '../utils.js'
 
 const DECRYPTION_KEY = 'IFYOUWANTTHEARTISTSTOGETPAIDDONOTDOWNLOADFROMMIXCLOUD'
@@ -354,7 +354,7 @@ export default class MixcloudSource {
     throw new Error('No stream URL available for Mixcloud track')
   }
 
-  async loadStream(decodedTrack, url, protocol) {
+  async loadStream(_decodedTrack, url, protocol) {
     try {
       if (protocol === 'hls') {
         const stream = new PassThrough()

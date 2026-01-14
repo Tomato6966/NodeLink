@@ -115,7 +115,7 @@ export default class InstagramSource {
     }
     for (const [index, pattern] of this.patterns.entries()) {
       const match = url.match(pattern)
-      if (match && match[1]) {
+      if (match?.[1]) {
         if (index === 0) {
           return { id: match[1], error: null, type: 'audio' }
         }
@@ -278,7 +278,7 @@ export default class InstagramSource {
       }
       try {
         responseData = JSON.parse(responseData)
-      } catch (e) {
+      } catch (_e) {
         return {
           data: null,
           exception: {
@@ -355,7 +355,7 @@ export default class InstagramSource {
         const urlMatch = musicConsumption.dash_manifest.match(
           /<BaseURL>(.*?)<\/BaseURL>/
         )
-        if (urlMatch && urlMatch[1]) {
+        if (urlMatch?.[1]) {
           audioUrl = urlMatch[1].replace(/&amp;/g, '&')
         }
       }
@@ -461,7 +461,7 @@ export default class InstagramSource {
     if (typeof responseData === 'string') {
       try {
         responseData = JSON.parse(responseData)
-      } catch (e) {
+      } catch (_e) {
         return {
           data: null,
           exception: {
@@ -663,7 +663,7 @@ export default class InstagramSource {
     }
   }
 
-  async loadStream(decodedTrack, url, protocol, additionalData) {
+  async loadStream(decodedTrack, url, _protocol, _additionalData) {
     try {
       const options = {
         method: 'GET',
@@ -706,7 +706,7 @@ export default class InstagramSource {
     }
   }
 
-  async search(query, type) {
+  async search(query, _type) {
     if (this.isLinkMatch(query)) {
       return this.resolve(query)
     }

@@ -46,7 +46,7 @@ function buildVoiceFrame(
     throw new Error('Voice frame id too long.')
   }
 
-  const payloadBuf = payload && payload.length ? payload : EMPTY_BUFFER
+  const payloadBuf = payload?.length ? payload : EMPTY_BUFFER
   const totalLength =
     1 + 1 + 1 + guildBuf.length + 1 + userBuf.length + 4 + 4 + payloadBuf.length
 

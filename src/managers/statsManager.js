@@ -29,7 +29,7 @@ export default class StatsManager {
       let promClient
       try {
         promClient = await import('prom-client')
-      } catch (e) {
+      } catch (_e) {
         logger(
           'error',
           'StatsManager',
@@ -459,8 +459,7 @@ export default class StatsManager {
       Object.keys(this.stats.api.requests).length > 500 &&
       !this.stats.api.requests[sanitized]
     ) {
-      this.stats.api.requests['others'] =
-        (this.stats.api.requests['others'] || 0) + 1
+      this.stats.api.requests.others = (this.stats.api.requests.others || 0) + 1
     } else {
       this.stats.api.requests[sanitized] =
         (this.stats.api.requests[sanitized] || 0) + 1
@@ -478,8 +477,7 @@ export default class StatsManager {
       Object.keys(this.stats.api.errors).length > 500 &&
       !this.stats.api.errors[sanitized]
     ) {
-      this.stats.api.errors['others'] =
-        (this.stats.api.errors['others'] || 0) + 1
+      this.stats.api.errors.others = (this.stats.api.errors.others || 0) + 1
     } else {
       this.stats.api.errors[sanitized] =
         (this.stats.api.errors[sanitized] || 0) + 1
@@ -692,7 +690,7 @@ export default class StatsManager {
 
   incrementPlayerDestruction(sessionId, reason) {
     if (this.promPlayerDestructions && sessionId) {
-      const sanitizedSessionId = 'session_' + sessionId.substring(0, 4) + '...'
+      const sanitizedSessionId = `session_${sessionId.substring(0, 4)}...`
       this.promPlayerDestructions.inc({
         session_id: sanitizedSessionId,
         reason: reason || 'unknown'
@@ -724,7 +722,7 @@ export default class StatsManager {
 
   incrementPlayerStuck(guildId, reason) {
     if (this.promPlayerStuck && guildId && reason) {
-      const sanitizedGuildId = 'guild_' + guildId.substring(0, 4) + '...'
+      const sanitizedGuildId = `guild_${guildId.substring(0, 4)}...`
       this.promPlayerStuck.inc({ guild_id: sanitizedGuildId, reason })
     }
   }
@@ -804,7 +802,7 @@ export default class StatsManager {
       const sanitized = this._sanitizeEndpoint(endpoint)
       const sanitizedIp = ip.includes(':')
         ? '[IPv6]'
-        : ip.split('.').slice(0, 2).join('.') + '.xxx.xxx'
+        : `${ip.split('.').slice(0, 2).join('.')}.xxx.xxx`
       this.promRateLimitHits.inc({ endpoint: sanitized, ip: sanitizedIp })
     }
   }
@@ -813,7 +811,7 @@ export default class StatsManager {
     if (this.promDosProtectionBlocks && ip && reason) {
       const sanitizedIp = ip.includes(':')
         ? '[IPv6]'
-        : ip.split('.').slice(0, 2).join('.') + '.xxx.xxx'
+        : `${ip.split('.').slice(0, 2).join('.')}.xxx.xxx`
       this.promDosProtectionBlocks.inc({ ip: sanitizedIp, reason })
     }
   }

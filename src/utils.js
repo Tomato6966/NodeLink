@@ -14,7 +14,6 @@ import packageJson from '../package.json' with { type: 'json' }
 import {
   DEFAULT_MAX_REDIRECTS,
   DISCORD_ID_REGEX,
-  HLS_SEGMENT_DOWNLOAD_CONCURRENCY_LIMIT,
   REDIRECT_STATUS_CODES,
   SEMVER_PATTERN
 } from './constants.js'
@@ -670,7 +669,7 @@ function decodeTrack(encoded) {
     let messageBuf = buffer.subarray(position, position + messageSize)
     position += messageSize
 
-    let seekable = undefined
+    let seekable
     {
       const tailTryMax = Math.min(messageBuf.length, 512)
       for (let cut = 1; cut <= tailTryMax; cut++) {
@@ -1079,7 +1078,7 @@ async function http1makeRequest(urlString, options = {}) {
 
       if (isRetryable && attempt < maxRetries) {
         attempt++
-        const delay = 100 * Math.pow(2, attempt)
+        const delay = 100 * 2 ** attempt
         logger(
           'warn',
           'Network',
@@ -1143,7 +1142,7 @@ async function makeRequest(urlString, options, nodelink) {
         finalNodeLink
       )
     }
-  } catch (e) {
+  } catch (_e) {
     return http1makeRequest(
       urlString,
       { ...options, localAddress },
@@ -1164,7 +1163,7 @@ async function makeRequest(urlString, options, nodelink) {
       try {
         const url = new URL(urlString)
         http2FailedHosts.add(url.host)
-      } catch (e) {}
+      } catch (_e) {}
       resolve(
         http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
       )
@@ -1357,7 +1356,7 @@ async function makeRequest(urlString, options, nodelink) {
       } else {
         req.end()
       }
-    } catch (err) {
+    } catch (_err) {
       if (session && !session.closed && !session.destroyed && !sessionClosed) {
         session.close()
       }
@@ -1366,7 +1365,7 @@ async function makeRequest(urlString, options, nodelink) {
   })
 }
 
-function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
+function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
   //biome-ignore lint: no-promise-executor-return
   return new Promise(async (resolve) => {
     try {
@@ -1556,7 +1555,7 @@ export function cleanupHttpAgents() {
 
 function applyEnvOverrides(config, prefix = 'NODELINK') {
   for (const key in config) {
-    if (Object.prototype.hasOwnProperty.call(config, key)) {
+    if (Object.hasOwn(config, key)) {
       const envVarName = `${prefix}_${key.toUpperCase()}`
       const envValue = process.env[envVarName]
 
@@ -1565,7 +1564,7 @@ function applyEnvOverrides(config, prefix = 'NODELINK') {
           config[key] = envValue.toLowerCase() === 'true'
         } else if (typeof config[key] === 'number') {
           const numValue = Number(envValue)
-          if (!isNaN(numValue)) {
+          if (!Number.isNaN(numValue)) {
             config[key] = numValue
           } else {
             logger(
@@ -1581,7 +1580,7 @@ function applyEnvOverrides(config, prefix = 'NODELINK') {
           try {
             const parsedArray = JSON.parse(envValue)
             if (Array.isArray(parsedArray)) newValue = parsedArray
-          } catch (e) {}
+          } catch (_e) {}
 
           if (!newValue) {
             const splitValue = envValue

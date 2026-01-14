@@ -1,9 +1,9 @@
 import { logger, makeRequest } from '../../../utils.js'
 import {
   BaseClient,
-  YOUTUBE_CONSTANTS,
   buildTrack,
-  checkURLType
+  checkURLType,
+  YOUTUBE_CONSTANTS
 } from '../common.js'
 
 export default class Web extends BaseClient {
@@ -31,7 +31,7 @@ export default class Web extends BaseClient {
     return true
   }
 
-  async search(query, type, context) {
+  async search(query, _type, context) {
     const sourceName = 'youtube'
 
     const requestBody = {
@@ -129,7 +129,7 @@ export default class Web extends BaseClient {
     return { loadType: 'search', data: tracks }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()
@@ -345,7 +345,7 @@ export default class Web extends BaseClient {
           renderer.timeDescription?.runs?.[0]?.text
 
         let thumbnails = []
-        if (renderer.thumbnail && renderer.thumbnail.thumbnails) {
+        if (renderer.thumbnail?.thumbnails) {
           thumbnails = renderer.thumbnail.thumbnails
         }
 

@@ -1,10 +1,5 @@
 import myzod from 'myzod'
-import {
-  decodeTrack,
-  logger,
-  sendResponse,
-  sendErrorResponse
-} from '../utils.js'
+import { logger, sendErrorResponse } from '../utils.js'
 
 const sessionPatchSchema = myzod
   .object({

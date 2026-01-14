@@ -1,9 +1,9 @@
 import { logger, makeRequest } from '../../../utils.js'
 import {
   BaseClient,
-  YOUTUBE_CONSTANTS,
   buildTrack,
-  checkURLType
+  checkURLType,
+  YOUTUBE_CONSTANTS
 } from '../common.js'
 
 export default class Android extends BaseClient {
@@ -104,7 +104,7 @@ export default class Android extends BaseClient {
       const tracks = []
       const allSections =
         searchResult.contents?.sectionListRenderer?.contents || []
-      let items = []
+      const items = []
 
       for (const section of allSections) {
         let contents = section.itemSectionRenderer?.contents
@@ -183,7 +183,7 @@ export default class Android extends BaseClient {
     }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = 'https://youtubei.googleapis.com'

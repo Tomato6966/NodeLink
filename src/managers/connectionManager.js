@@ -130,9 +130,7 @@ export default class ConnectionManager {
 
         this.isChecking = false
         return
-      } catch (e) {
-        continue
-      }
+      } catch (_e) {}
     }
 
     this.isChecking = false

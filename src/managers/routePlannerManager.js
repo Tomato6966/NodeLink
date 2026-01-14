@@ -17,7 +17,7 @@ export default class RoutePlannerManager {
   _ipToBigInt(ip) {
     if (ip.includes(':')) {
       const parts = ip.split(':')
-      let fullParts = []
+      const fullParts = []
       for (let i = 0; i < parts.length; i++) {
         if (parts[i] === '') {
           const missing = 8 - (parts.length - 1)
@@ -26,7 +26,7 @@ export default class RoutePlannerManager {
           fullParts.push(parts[i].padStart(4, '0'))
         }
       }
-      return BigInt('0x' + fullParts.join(''))
+      return BigInt(`0x${fullParts.join('')}`)
     } else {
       return BigInt(
         ip.split('.').reduce((acc, oct) => (acc << 8n) + BigInt(oct), 0n)
@@ -36,14 +36,14 @@ export default class RoutePlannerManager {
 
   _bigIntToIp(bigint, isIpv6) {
     if (isIpv6) {
-      let hex = bigint.toString(16).padStart(32, '0')
-      let parts = []
+      const hex = bigint.toString(16).padStart(32, '0')
+      const parts = []
       for (let i = 0; i < 8; i++) {
         parts.push(hex.substring(i * 4, i * 4 + 4))
       }
       return parts.join(':').replace(/\b0{1,3}/g, '')
     } else {
-      let parts = []
+      const parts = []
       for (let i = 0; i < 4; i++) {
         parts.unshift(Number(bigint & 255n))
         bigint >>= 8n
@@ -105,7 +105,7 @@ export default class RoutePlannerManager {
 
   _getNextIp() {
     const now = Date.now()
-    const startBlockIdx = this.lastUsedBlockIndex
+    const _startBlockIdx = this.lastUsedBlockIndex
 
     for (let i = 0; i < this.blocks.length; i++) {
       this.lastUsedBlockIndex =

@@ -18,7 +18,7 @@ export default class JioSaavnSource {
     this.searchTerms = ['jssearch']
     this.recommendationTerm = ['jsrec']
     this.patterns = [
-      /https?:\/\/(?:www\.)?jiosaavn\.com\/(?:(?<type>album|featured|song|s\/playlist|artist)\/)(?:[^/]+\/)(?<id>[A-Za-z0-9_,\-]+)/
+      /https?:\/\/(?:www\.)?jiosaavn\.com\/(?:(?<type>album|featured|song|s\/playlist|artist)\/)(?:[^/]+\/)(?<id>[A-Za-z0-9_,-]+)/
     ]
     this.priority = 60
     this.playlistLoadLimit = this.config.playlistLoadLimit || 50
@@ -62,7 +62,7 @@ export default class JioSaavnSource {
 
   async getRecommendations(query) {
     let id = query
-    if (!/^[A-Za-z0-9_,\-]+$/.test(query)) {
+    if (!/^[A-Za-z0-9_,-]+$/.test(query)) {
       const searchRes = await this.search(query, 'jssearch')
       if (searchRes.loadType === 'search' && searchRes.data.length > 0) {
         id = searchRes.data[0].info.identifier
@@ -212,7 +212,7 @@ export default class JioSaavnSource {
     }
   }
 
-  async loadStream(track, url, protocol, additionalData) {
+  async loadStream(_track, url, _protocol, _additionalData) {
     const { stream, error, statusCode } = await http1makeRequest(url, {
       method: 'GET',
       streamOnly: true
@@ -251,7 +251,7 @@ export default class JioSaavnSource {
 
     try {
       return typeof body === 'string' ? JSON.parse(body) : body
-    } catch (e) {
+    } catch (_e) {
       throw new Error('Failed to parse JioSaavn response')
     }
   }

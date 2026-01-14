@@ -221,7 +221,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
         let trackToPlay = null
         let stopPlayer = false
-        let userData = payload.track?.userData
+        const userData = payload.track?.userData
 
         const trackPayload = payload.track
         const legacyEncodedTrack = payload.encodedTrack
@@ -336,7 +336,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
         if (stopPlayer) {
           const player = session.players.get(guildId)
-          if (player && player.isUpdatingTrack) {
+          if (player?.isUpdatingTrack) {
             logger(
               'debug',
               'PlayerUpdate',

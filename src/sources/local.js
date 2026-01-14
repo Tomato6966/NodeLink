@@ -155,7 +155,7 @@ export default class LocalSource {
     }
   }
 
-  async loadStream(decoded, url, protocol, additional) {
+  async loadStream(decoded, _url, _protocol, additional) {
     if (additional?.startTime && decoded.isSeekable) {
       const info = readFileInfo(decoded.uri)
       const bps =

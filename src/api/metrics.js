@@ -5,7 +5,7 @@
  * @param {*} res
  * @returns
  */
-async function handler(nodelink, req, res) {
+async function handler(nodelink, _req, res) {
   const register = nodelink.statsManager.promRegister
 
   if (!register) {

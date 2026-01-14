@@ -1,10 +1,5 @@
 import myzod from 'myzod'
-import {
-  decodeTrack,
-  logger,
-  sendErrorResponse,
-  sendResponse
-} from '../utils.js'
+import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const mixTrackSchema = myzod
   .object({

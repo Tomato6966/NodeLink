@@ -134,7 +134,7 @@ export default class SourcesManager {
 
   async search(sourceTerm, query) {
     let instance = this.searchAliasMap.get(sourceTerm)
-    let sourceName = sourceTerm
+    const sourceName = sourceTerm
 
     if (!instance) {
       instance = this.sourceMap.get(sourceTerm)

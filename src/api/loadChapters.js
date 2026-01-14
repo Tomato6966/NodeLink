@@ -1,10 +1,5 @@
 import myzod from 'myzod'
-import {
-  decodeTrack,
-  logger,
-  sendResponse,
-  sendErrorResponse
-} from '../utils.js'
+import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const loadChaptersSchema = myzod.object({
   encodedTrack: myzod.string()

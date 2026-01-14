@@ -1,7 +1,7 @@
 import { pipeline } from 'node:stream'
 import myzod from 'myzod'
-import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 import { createPCMStream } from '../playback/streamProcessor.js'
+import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const loadStreamSchema = myzod.object({
   encodedTrack: myzod.string(),
@@ -10,7 +10,7 @@ const loadStreamSchema = myzod.object({
   filters: myzod.unknown().optional()
 })
 
-async function handler(nodelink, req, res, sendResponse, parsedUrl) {
+async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
   if (!nodelink.options.enableLoadStreamEndpoint) {
     return sendErrorResponse(
       req,
@@ -28,7 +28,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       result = loadStreamSchema.try(req.body)
     } else {
       const filtersRaw = parsedUrl.searchParams.get('filters')
-      let filters = undefined
+      let filters
       if (filtersRaw) {
         try {
           filters = JSON.parse(filtersRaw)

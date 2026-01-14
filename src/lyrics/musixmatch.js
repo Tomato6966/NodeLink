@@ -1,9 +1,9 @@
-import { readFile, unlink, writeFile } from 'node:fs/promises'
+import crypto from 'node:crypto'
+import { unlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import crypto from 'node:crypto'
 
-import { logger, http1makeRequest } from '../utils.js'
+import { http1makeRequest, logger } from '../utils.js'
 
 const APP_ID = 'web-desktop-app-v1.0'
 const TOKEN_TTL = 55000
@@ -25,8 +25,7 @@ const CLEAN_PATTERNS = [
   /VEVO$/i
 ]
 
-const FEAT_PATTERN =
-  /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
+const FEAT_PATTERN = /\s*[([]\s*(?:ft\.?|feat\.?|featuring)\s+[^)\]]+[)\]]/gi
 
 const SEPARATORS = [' - ', ' – ', ' — ']
 

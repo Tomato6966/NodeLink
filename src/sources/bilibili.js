@@ -117,7 +117,7 @@ export default class BilibiliSource {
   async search(query) {
     try {
       let body
-      let error
+      let _error
 
       const searchResponse = await makeRequest(
         `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(query)}`,
@@ -131,7 +131,7 @@ export default class BilibiliSource {
         }
       )
       body = searchResponse.body
-      error = searchResponse.error
+      _error = searchResponse.error
 
       if (
         !body?.data?.result ||
@@ -150,7 +150,7 @@ export default class BilibiliSource {
           }
         )
         body = allSearchResponse.body
-        error = allSearchResponse.error
+        _error = allSearchResponse.error
       }
 
       const results = body?.data?.result || []
@@ -342,7 +342,7 @@ export default class BilibiliSource {
         }
 
         if (type === 'ep') {
-          const target = tracks.find((t) => t.pluginInfo.ep_id == id)
+          const target = tracks.find((t) => t.pluginInfo.ep_id === id)
           if (target) {
             return {
               loadType: 'track',
@@ -628,7 +628,7 @@ export default class BilibiliSource {
         for (const stream of streams) {
           if (stream.protocol_name === 'http_stream') {
             const fmt = stream.format.find((f) => f.format_name === 'flv')
-            if (fmt && fmt.codec && fmt.codec.length > 0) {
+            if (fmt?.codec && fmt.codec.length > 0) {
               targetFormat = fmt.codec[0]
               formatType = 'flv'
               protocol = 'http'
@@ -640,7 +640,7 @@ export default class BilibiliSource {
         if (!targetFormat) {
           for (const stream of streams) {
             const fmt = stream.format[0]
-            if (fmt && fmt.codec && fmt.codec.length > 0) {
+            if (fmt?.codec && fmt.codec.length > 0) {
               targetFormat = fmt.codec[0]
               formatType = fmt.format_name === 'ts' ? 'mpegts' : fmt.format_name
               protocol = stream.protocol_name === 'http_hls' ? 'hls' : 'http'
@@ -668,7 +668,7 @@ export default class BilibiliSource {
         throw new Error('No supported stream format found')
       }
 
-      let aid = track.pluginInfo?.aid
+      let _aid = track.pluginInfo?.aid
       let cid = track.pluginInfo?.cid
       const bvid = track.pluginInfo?.bvid || track.identifier.split('?')[0]
 
@@ -683,10 +683,10 @@ export default class BilibiliSource {
         if (body.code !== 0)
           throw new Error('Failed to fetch video metadata for stream')
 
-        aid = body.data.aid
+        _aid = body.data.aid
 
         const pMatch = track.identifier.match(/\?p=(\d+)/)
-        const pageIndex = pMatch ? parseInt(pMatch[1]) : 1
+        const pageIndex = pMatch ? parseInt(pMatch[1], 10) : 1
         const page = body.data.pages.find((p) => p.page === pageIndex)
         cid = page ? page.cid : body.data.cid
       }
@@ -759,7 +759,7 @@ export default class BilibiliSource {
     }
   }
 
-  async loadStream(decodedTrack, url, protocol, additionalData) {
+  async loadStream(decodedTrack, url, _protocol, additionalData) {
     try {
       let type = decodedTrack.format
 

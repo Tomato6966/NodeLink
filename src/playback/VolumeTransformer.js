@@ -1,5 +1,4 @@
 import { Transform } from 'node:stream'
-import { clamp16Bit } from './filters/dsp/clamp16Bit.js'
 
 const FADE_FRAMES = 50 // 50 frames * 20ms/frame = 1 second fade
 

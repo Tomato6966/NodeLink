@@ -1,5 +1,5 @@
-import os from 'node:os'
 import net from 'node:net'
+import os from 'node:os'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import v8 from 'node:v8'
 import { GatewayEvents } from './constants.js'
@@ -11,8 +11,8 @@ import RoutePlannerManager from './managers/routePlannerManager.js'
 import SourceManager from './managers/sourceManager.js'
 import StatsManager from './managers/statsManager.js'
 import { bufferPool } from './playback/BufferPool.js'
-import { createPCMStream } from './playback/streamProcessor.js'
 import { Player } from './playback/player.js'
+import { createPCMStream } from './playback/streamProcessor.js'
 import { cleanupHttpAgents, initLogger, logger } from './utils.js'
 import { createVoiceRelay } from './voice/voiceRelay.js'
 
@@ -28,7 +28,7 @@ hndl.enable()
 
 try {
   os.setPriority(os.constants.priority.PRIORITY_HIGH)
-} catch (e) {
+} catch (_e) {
   // Ignore errors
 }
 
@@ -413,7 +413,7 @@ function startTimers(hibernating = false) {
       const mem = process.memoryUsage()
 
       const stats = {
-        workerId: parseInt(process.env.NODE_UNIQUE_ID || 0) + 1,
+        workerId: parseInt(process.env.NODE_UNIQUE_ID || 0, 10) + 1,
         isHibernating,
         players: localPlayers,
         playingPlayers: localPlayingPlayers,
