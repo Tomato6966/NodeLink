@@ -60,6 +60,68 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       return sendErrorResponse(req, res, 400, 'Bad Request', 'Invalid encoded track', parsedUrl.pathname)
     }
 
+    if (nodelink.sourceWorkerManager) {
+      const delegated = nodelink.sourceWorkerManager.delegate(
+        req,
+        res,
+        'loadStream',
+        {
+          decodedTrackInfo: decodedTrack.info,
+          volume,
+          position,
+          filters
+        },
+        {
+          headers: {
+            'Content-Type': 'audio/l16;rate=48000;channels=2',
+            'Transfer-Encoding': 'chunked',
+            'Connection': 'keep-alive'
+          }
+        }
+      )
+      if (delegated) return
+    }
+
+    if (!nodelink.sources && nodelink.workerManager) {
+      const delegated = nodelink.workerManager.delegateStream(
+        req,
+        res,
+        {
+          decodedTrackInfo: decodedTrack.info,
+          volume,
+          position,
+          filters
+        },
+        {
+          headers: {
+            'Content-Type': 'audio/l16;rate=48000;channels=2',
+            'Transfer-Encoding': 'chunked',
+            'Connection': 'keep-alive'
+          }
+        }
+      )
+      if (delegated) return
+      return sendErrorResponse(
+        req,
+        res,
+        503,
+        'Service Unavailable',
+        'No available workers to stream audio.',
+        parsedUrl.pathname
+      )
+    }
+
+    if (!nodelink.sources && !nodelink.workerManager) {
+      return sendErrorResponse(
+        req,
+        res,
+        503,
+        'Service Unavailable',
+        'Sources manager is not available for loadStream.',
+        parsedUrl.pathname
+      )
+    }
+
     let urlResult
     if (nodelink.workerManager) {
       const worker = nodelink.workerManager.getBestWorker()

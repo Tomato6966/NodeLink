@@ -38,29 +38,40 @@ class SourceWorkerManager {
           const request = this.requests.get(id)
           if (request) {
             if (type === 0) {
+              if (request.timeout) {
+                clearTimeout(request.timeout)
+                request.timeout = null
+              }
               if (!request.res.headersSent) {
-                request.res.setHeader('Content-Type', 'application/json')
-                request.res.writeHead(200)
+                const headers = request.options?.headers
+                if (headers) {
+                  for (const [key, value] of Object.entries(headers)) {
+                    request.res.setHeader(key, value)
+                  }
+                } else {
+                  request.res.setHeader('Content-Type', 'application/json')
+                }
+                request.res.writeHead(request.options?.statusCode || 200)
               }
               request.res.write(payload)
             } else if (type === 1) { 
               request.res.end()
-              this._decrementLoad(request.workerId)
-              this.requests.delete(id)
-              clearTimeout(request.timeout)
+              this._cleanupRequest(id, request)
             } else if (type === 2) { 
               const errorMsg = payload.toString('utf8')
-              request.res.writeHead(500, { 'Content-Type': 'application/json' })
-              request.res.end(JSON.stringify({
-                timestamp: Date.now(),
-                status: 500,
-                error: 'Worker Error',
-                message: errorMsg,
-                path: request.req.url
-              }))
-              this._decrementLoad(request.workerId)
-              this.requests.delete(id)
-              clearTimeout(request.timeout)
+              if (!request.res.headersSent) {
+                request.res.writeHead(500, { 'Content-Type': 'application/json' })
+                request.res.end(JSON.stringify({
+                  timestamp: Date.now(),
+                  status: 500,
+                  error: 'Worker Error',
+                  message: errorMsg,
+                  path: request.req.url
+                }))
+              } else {
+                request.res.end()
+              }
+              this._cleanupRequest(id, request)
             }
           }
         }
@@ -116,7 +127,15 @@ class SourceWorkerManager {
     this.workerLoads.set(workerId, Math.max(0, load - 1))
   }
 
-  delegate(req, res, task, payload) {
+  _cleanupRequest(id, request) {
+    if (!request || request.cleaned) return
+    request.cleaned = true
+    if (request.timeout) clearTimeout(request.timeout)
+    this._decrementLoad(request.workerId)
+    this.requests.delete(id)
+  }
+
+  delegate(req, res, task, payload, options = {}) {
     const id = crypto.randomBytes(16).toString('hex')
     
     let bestWorker = null
@@ -132,17 +151,21 @@ class SourceWorkerManager {
 
     if (!bestWorker) return false
 
-    const timeout = setTimeout(() => {
-      if (this.requests.has(id)) {
+    const request = { req, res, timeout: null, workerId: bestWorker.id, options, cleaned: false }
+    request.timeout = setTimeout(() => {
+      const activeRequest = this.requests.get(id)
+      if (activeRequest) {
         res.writeHead(504, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: 'Gateway Timeout', message: 'Source worker timed out' }))
-        this._decrementLoad(bestWorker.id)
-        this.requests.delete(id)
+        this._cleanupRequest(id, activeRequest)
       }
     }, 60000)
-
-    this.requests.set(id, { req, res, timeout, workerId: bestWorker.id })
+    this.requests.set(id, request)
     this.workerLoads.set(bestWorker.id, minLoad + 1)
+
+    res.on('close', () => {
+      this._cleanupRequest(id, request)
+    })
 
     bestWorker.send({
       type: 'sourceTask',

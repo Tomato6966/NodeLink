@@ -14,6 +14,7 @@ export default class WorkerManager {
     this.workerToGuilds = new Map()
     this.nextStatelessWorkerIndex = 0
     this.pendingRequests = new Map()
+    this.streamRequests = new Map()
     this.maxWorkers =
       config.cluster.workers === 0
         ? os.cpus().length
@@ -351,11 +352,25 @@ export default class WorkerManager {
 
           if (buffer.length < totalSize) break
 
-          const payload = buffer.toString('utf8', 6 + idSize, totalSize)
+          const id = buffer.toString('utf8', 6, 6 + idSize)
+          const payload = buffer.subarray(6 + idSize, totalSize)
           buffer = buffer.subarray(totalSize)
 
+          if (type === 5) {
+            this._handleStreamChunk(id, payload)
+            continue
+          }
+          if (type === 6) {
+            this._handleStreamEnd(id)
+            continue
+          }
+          if (type === 7) {
+            this._handleStreamError(id, payload.toString('utf8'))
+            continue
+          }
+
           try {
-            const data = JSON.parse(payload)
+            const data = JSON.parse(payload.toString('utf8'))
             if (type === 3) { // playerEvent
               if (global.nodelink) global.nodelink.handleIPCMessage({ type: 'playerEvent', payload: data })
             } else if (type === 4) { // workerStats
@@ -380,6 +395,124 @@ export default class WorkerManager {
     this.server.listen(this.socketPath, () => {
       logger('info', 'Cluster', `Event socket server listening at ${this.socketPath}`)
     })
+  }
+
+  _handleStreamChunk(streamId, payload) {
+    const request = this.streamRequests.get(streamId)
+    if (!request) return
+
+    if (request.timeout) {
+      clearTimeout(request.timeout)
+      request.timeout = null
+    }
+
+    if (!request.res.headersSent) {
+      const headers = request.options?.headers
+      if (headers) {
+        for (const [key, value] of Object.entries(headers)) {
+          request.res.setHeader(key, value)
+        }
+      }
+      request.res.writeHead(request.options?.statusCode || 200)
+    }
+
+    request.res.write(payload)
+  }
+
+  _handleStreamEnd(streamId) {
+    const request = this.streamRequests.get(streamId)
+    if (!request) return
+    request.res.end()
+    this._cleanupStreamRequest(streamId, false)
+  }
+
+  _handleStreamError(streamId, errorMsg) {
+    const request = this.streamRequests.get(streamId)
+    if (!request) return
+
+    if (!request.res.headersSent) {
+      request.res.writeHead(500, { 'Content-Type': 'application/json' })
+      request.res.end(JSON.stringify({
+        timestamp: Date.now(),
+        status: 500,
+        error: 'Worker Error',
+        message: errorMsg,
+        path: request.req.url
+      }))
+    } else {
+      request.res.end()
+    }
+
+    this._cleanupStreamRequest(streamId, false)
+  }
+
+  _cleanupStreamRequest(streamId, sendCancel) {
+    const request = this.streamRequests.get(streamId)
+    if (!request || request.cleaned) return
+    request.cleaned = true
+
+    if (request.timeout) clearTimeout(request.timeout)
+    this.streamRequests.delete(streamId)
+
+    if (sendCancel) {
+      const worker = this.workersById.get(request.workerId)
+      if (worker?.isConnected()) {
+        this._sendStreamCommand(worker, {
+          type: 'cancelStream',
+          requestId: streamId,
+          payload: { streamId }
+        })
+      }
+    }
+  }
+
+  _failStreamsForWorker(workerId, reason = 'Worker exited') {
+    const streamIds = []
+    for (const [streamId, request] of this.streamRequests) {
+      if (request.workerId !== workerId) continue
+      streamIds.push(streamId)
+
+      if (!request.res.headersSent) {
+        request.res.writeHead(500, { 'Content-Type': 'application/json' })
+        request.res.end(JSON.stringify({
+          timestamp: Date.now(),
+          status: 500,
+          error: 'Worker Error',
+          message: reason,
+          path: request.req.url
+        }))
+      } else {
+        request.res.end()
+      }
+    }
+
+    for (const streamId of streamIds) {
+      this._cleanupStreamRequest(streamId, false)
+    }
+  }
+
+  _sendStreamCommand(worker, msg) {
+    if (!worker?.isConnected()) return false
+    if (this.workerReady.has(worker.id)) {
+      worker.send(msg)
+      return true
+    }
+
+    let attempts = 0
+    const checkReady = setInterval(() => {
+      attempts++
+      if (!worker.isConnected()) {
+        clearInterval(checkReady)
+        return
+      }
+      if (this.workerReady.has(worker.id)) {
+        clearInterval(checkReady)
+        worker.send(msg)
+      } else if (attempts > 50) {
+        clearInterval(checkReady)
+      }
+    }, 100)
+    return true
   }
 
   forkWorker() {
@@ -430,6 +563,8 @@ export default class WorkerManager {
   removeWorker(workerId) {
     const worker = this.workersById.get(workerId)
     if (!worker) return
+
+    this._failStreamsForWorker(workerId)
 
     const index = this.workers.indexOf(worker)
     if (index !== -1) this.workers.splice(index, 1)
@@ -786,11 +921,74 @@ export default class WorkerManager {
       }
     }
 
+    const streamIds = []
+    for (const [streamId, request] of this.streamRequests) {
+      streamIds.push(streamId)
+      if (!request.res.headersSent) {
+        request.res.writeHead(503, { 'Content-Type': 'application/json' })
+        request.res.end(JSON.stringify({
+          timestamp: Date.now(),
+          status: 503,
+          error: 'Service Unavailable',
+          message: 'Server shutting down.',
+          path: request.req.url
+        }))
+      } else {
+        request.res.end()
+      }
+    }
+
+    for (const streamId of streamIds) {
+      this._cleanupStreamRequest(streamId, false)
+    }
+
     logger(
       'info',
       'Cluster',
       'WorkerManager destroyed. All workers terminated.'
     )
+  }
+
+  delegateStream(req, res, payload, options = {}) {
+    const worker = this.getBestWorker()
+    if (!worker) return false
+
+    const streamId = crypto.randomBytes(16).toString('hex')
+    const request = {
+      id: streamId,
+      req,
+      res,
+      workerId: worker.id,
+      options,
+      timeout: null,
+      cleaned: false
+    }
+
+    request.timeout = setTimeout(() => {
+      const activeRequest = this.streamRequests.get(streamId)
+      if (activeRequest) {
+        res.writeHead(504, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: 'Gateway Timeout', message: 'Stream worker timed out' }))
+        this._cleanupStreamRequest(streamId, true)
+      }
+    }, 60000)
+
+    this.streamRequests.set(streamId, request)
+
+    res.on('close', () => {
+      this._cleanupStreamRequest(streamId, true)
+    })
+
+    this._sendStreamCommand(worker, {
+      type: 'loadStream',
+      requestId: streamId,
+      payload: {
+        ...payload,
+        streamId
+      }
+    })
+
+    return true
   }
 
   execute(worker, type, payload, options = {}) {

@@ -49,6 +49,16 @@ if (isMainThread) {
         
         worker.load = Math.max(0, worker.load - 1)
         processNextTask()
+      } else if (msg.type === 'stream') {
+        sendStreamChunk(msg.socketPath, msg.id, msg.chunk)
+      } else if (msg.type === 'end') {
+        sendStreamEnd(msg.socketPath, msg.id)
+        worker.load = Math.max(0, worker.load - 1)
+        processNextTask()
+      } else if (msg.type === 'error') {
+        sendStreamError(msg.socketPath, msg.id, msg.error)
+        worker.load = Math.max(0, worker.load - 1)
+        processNextTask()
       }
     })
 
@@ -69,6 +79,19 @@ if (isMainThread) {
     })
   }
 
+  function withSocket(path, handler) {
+    const socket = sockets.get(path)
+    if (socket) {
+      handler(socket)
+      return
+    }
+    getSocket(path)
+      .then(handler)
+      .catch((e) => {
+        utils.logger('error', 'SourceWorker', `Failed to send data back: ${e.message}`)
+      })
+  }
+
   function finishTask(socketPath, id, result, error) {
     getSocket(socketPath).then((socket) => {
       if (error) {
@@ -81,6 +104,20 @@ if (isMainThread) {
     }).catch(e => {
       utils.logger('error', 'SourceWorker', `Failed to send result back: ${e.message}`)
     })
+  }
+
+  function sendStreamChunk(socketPath, id, chunk) {
+    const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    withSocket(socketPath, (socket) => sendFrame(socket, id, 0, payload))
+  }
+
+  function sendStreamEnd(socketPath, id) {
+    withSocket(socketPath, (socket) => sendFrame(socket, id, 1, Buffer.alloc(0)))
+  }
+
+  function sendStreamError(socketPath, id, error) {
+    const errorBuf = Buffer.from(String(error || 'Unknown error'), 'utf8')
+    withSocket(socketPath, (socket) => sendFrame(socket, id, 2, errorBuf))
   }
 
   function sendFrame(socket, id, type, payloadBuf) {
@@ -138,12 +175,14 @@ if (isMainThread) {
   }
 
   const [
+    { createPCMStream },
     { default: SourceManager },
     { default: LyricsManager },
     { default: CredentialManager },
     { default: RoutePlannerManager },
     { default: StatsManager }
   ] = await Promise.all([
+    import('./playback/streamProcessor.js'),
     import('./managers/sourceManager.js'),
     import('./managers/lyricsManager.js'),
     import('./managers/credentialManager.js'),
@@ -163,9 +202,103 @@ if (isMainThread) {
 
   parentPort.postMessage({ type: 'ready' })
 
+  const sendStreamChunkFromWorker = (id, socketPath, chunk) => {
+    parentPort.postMessage({ type: 'stream', id, socketPath, chunk })
+  }
+
+  const sendStreamEndFromWorker = (id, socketPath) => {
+    parentPort.postMessage({ type: 'end', id, socketPath })
+  }
+
+  const sendStreamErrorFromWorker = (id, socketPath, error) => {
+    parentPort.postMessage({
+      type: 'error',
+      id,
+      socketPath,
+      error: String(error || 'Unknown error')
+    })
+  }
+
+  const handleLoadStream = async (id, socketPath, payload) => {
+    let fetched = null
+    let pcmStream = null
+    let finished = false
+
+    const cleanup = () => {
+      if (pcmStream && !pcmStream.destroyed) pcmStream.destroy()
+      if (fetched?.stream && !fetched.stream.destroyed) fetched.stream.destroy()
+    }
+
+    const finish = (err) => {
+      if (finished) return
+      finished = true
+      if (err) {
+        sendStreamErrorFromWorker(id, socketPath, err.message || err)
+      } else {
+        sendStreamEndFromWorker(id, socketPath)
+      }
+      cleanup()
+    }
+
+    try {
+      const trackInfo = payload?.decodedTrackInfo
+      if (!trackInfo) {
+        throw new Error('Invalid encoded track')
+      }
+
+      const urlResult = await nodelink.sources.getTrackUrl(trackInfo)
+      if (urlResult.exception) {
+        throw new Error(urlResult.exception.message || 'Failed to get track URL')
+      }
+
+      const additionalData = {
+        ...(urlResult.additionalData || {}),
+        startTime: payload?.position || 0
+      }
+
+      fetched = await nodelink.sources.getTrackStream(
+        urlResult.newTrack?.info || trackInfo,
+        urlResult.url,
+        urlResult.protocol,
+        additionalData
+      )
+
+      if (fetched.exception) {
+        throw new Error(fetched.exception.message || 'Failed to load stream')
+      }
+
+      pcmStream = createPCMStream(
+        fetched.stream,
+        fetched.type || urlResult.format,
+        nodelink,
+        (payload?.volume ?? 100) / 100,
+        payload?.filters || {}
+      )
+
+      pcmStream.on('data', (chunk) => {
+        if (!finished) sendStreamChunkFromWorker(id, socketPath, chunk)
+      })
+
+      pcmStream.once('end', () => finish())
+      pcmStream.once('error', (err) => finish(err))
+      pcmStream.once('close', () => finish())
+    } catch (err) {
+      finish(err)
+    }
+  }
+
   parentPort.on('message', async (taskData) => {
     const { id, task, payload, socketPath } = taskData
     
+    if (task === 'loadStream') {
+      try {
+        await handleLoadStream(id, socketPath, payload)
+      } catch (e) {
+        sendStreamErrorFromWorker(id, socketPath, e.message || e)
+      }
+      return
+    }
+
     try {
       let result
       switch (task) {

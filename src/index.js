@@ -210,7 +210,7 @@ class NodelinkServer extends EventEmitter {
   }
 
   async _initSources(isClusterPrimary, options) {
-    if (!isClusterPrimary || (options.enableLoadStreamEndpoint && !options.cluster?.specializedSourceWorker?.enabled)) {
+    if (!isClusterPrimary) {
       const [{ default: sourceMan }, { default: lyricsMan }] = await Promise.all([
         import('./managers/sourceManager.js'),
         import('./managers/lyricsManager.js')

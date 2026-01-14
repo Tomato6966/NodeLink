@@ -11,6 +11,7 @@ import RoutePlannerManager from './managers/routePlannerManager.js'
 import SourceManager from './managers/sourceManager.js'
 import StatsManager from './managers/statsManager.js'
 import { bufferPool } from './playback/BufferPool.js'
+import { createPCMStream } from './playback/streamProcessor.js'
 import { Player } from './playback/player.js'
 import { cleanupHttpAgents, initLogger, logger } from './utils.js'
 
@@ -46,6 +47,7 @@ initLogger(config)
 
 const players = new Map()
 const guildQueues = new Map() // guildId -> { queue: [], processing: false }
+const activeStreams = new Map()
 
 let eventSocket = null
 const eventSocketPath = process.env.EVENT_SOCKET_PATH
@@ -80,6 +82,32 @@ function sendEventFrame(type, data) {
   header.writeUInt32BE(payloadBuf.length, 2)
   
   return eventSocket.write(Buffer.concat([header, payloadBuf]))
+}
+
+function sendStreamFrame(streamId, type, payloadBuf) {
+  if (!eventSocket || eventSocket.destroyed) return false
+
+  const idBuf = Buffer.from(streamId, 'utf8')
+  const header = Buffer.alloc(6)
+  header.writeUInt8(idBuf.length, 0)
+  header.writeUInt8(type, 1)
+  header.writeUInt32BE(payloadBuf.length, 2)
+
+  return eventSocket.write(Buffer.concat([header, idBuf, payloadBuf]))
+}
+
+function sendStreamChunk(streamId, chunk) {
+  const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+  sendStreamFrame(streamId, 5, payload)
+}
+
+function sendStreamEnd(streamId) {
+  sendStreamFrame(streamId, 6, Buffer.alloc(0))
+}
+
+function sendStreamError(streamId, error) {
+  const payload = Buffer.from(String(error || 'Unknown error'), 'utf8')
+  sendStreamFrame(streamId, 7, payload)
 }
 
 const nodelink = {
@@ -378,6 +406,91 @@ process.on('unhandledRejection', (reason, promise) => {
   )
 })
 
+function cleanupActiveStream(streamId, entry) {
+  const current = entry || activeStreams.get(streamId)
+  if (!current) return
+
+  if (current.pcmStream && !current.pcmStream.destroyed) {
+    current.pcmStream.destroy()
+  }
+  if (current.fetched?.stream && !current.fetched.stream.destroyed) {
+    current.fetched.stream.destroy()
+  }
+
+  activeStreams.delete(streamId)
+}
+
+async function startLoadStream(streamId, payload) {
+  if (!eventSocket || eventSocket.destroyed) {
+    throw new Error('Event socket unavailable')
+  }
+
+  const trackInfo = payload?.decodedTrackInfo
+  if (!trackInfo) {
+    throw new Error('Invalid encoded track')
+  }
+
+  const urlResult = await nodelink.sources.getTrackUrl(trackInfo)
+  if (urlResult.exception) {
+    throw new Error(urlResult.exception.message || 'Failed to get track URL')
+  }
+
+  const additionalData = {
+    ...(urlResult.additionalData || {}),
+    startTime: payload?.position || 0
+  }
+
+  const fetched = await nodelink.sources.getTrackStream(
+    urlResult.newTrack?.info || trackInfo,
+    urlResult.url,
+    urlResult.protocol,
+    additionalData
+  )
+
+  if (fetched.exception) {
+    throw new Error(fetched.exception.message || 'Failed to load stream')
+  }
+
+  const pcmStream = createPCMStream(
+    fetched.stream,
+    fetched.type || urlResult.format,
+    nodelink,
+    (payload?.volume ?? 100) / 100,
+    payload?.filters || {}
+  )
+
+  const entry = { pcmStream, fetched, cancelled: false }
+  activeStreams.set(streamId, entry)
+
+  const finish = (err) => {
+    if (entry.cancelled) {
+      cleanupActiveStream(streamId, entry)
+      return
+    }
+
+    if (err) sendStreamError(streamId, err.message || err)
+    else sendStreamEnd(streamId)
+
+    cleanupActiveStream(streamId, entry)
+  }
+
+  pcmStream.on('data', (chunk) => {
+    if (!entry.cancelled) sendStreamChunk(streamId, chunk)
+  })
+
+  pcmStream.once('end', () => finish())
+  pcmStream.once('error', (err) => finish(err))
+  pcmStream.once('close', () => finish())
+}
+
+function cancelStream(streamId) {
+  const entry = activeStreams.get(streamId)
+  if (!entry) return false
+  entry.cancelled = true
+  cleanupActiveStream(streamId, entry)
+  return true
+}
+
 async function processQueue(queueKey) {
   const queueEntry = guildQueues.get(queueKey)
   if (!queueEntry || queueEntry.queue.length === 0) {
@@ -619,6 +732,24 @@ async function processQueue(queueKey) {
       case 'getTrackUrl': {
         const { decodedTrackInfo, itag } = payload
         result = await nodelink.sources.getTrackUrl(decodedTrackInfo, itag)
+        break
+      }
+
+      case 'loadStream': {
+        const streamId = payload?.streamId || requestId
+        try {
+          await startLoadStream(streamId, payload)
+          result = { streaming: true, streamId }
+        } catch (e) {
+          sendStreamError(streamId, e.message || e)
+          result = { streaming: false, error: e.message || String(e) }
+        }
+        break
+      }
+
+      case 'cancelStream': {
+        const streamId = payload?.streamId || requestId
+        result = { cancelled: cancelStream(streamId) }
         break
       }
 
