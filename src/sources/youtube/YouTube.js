@@ -33,14 +33,14 @@ async function _manageYoutubeHlsStream(
   let playlistEnded = false
   const MAX_LIVE_QUEUE_SIZE = 15
 
-  const rememberSegment = (url) => {
-    if (processedSegments.has(url)) return false
+  const rememberSegment = (key) => {
+    if (processedSegments.has(key)) return false
 
     const old = processedOrder[processedIndex]
-    if (old) processedSegments.delete(old)
+    if (old !== undefined) processedSegments.delete(old)
 
-    processedSegments.add(url)
-    processedOrder[processedIndex] = url
+    processedSegments.add(key)
+    processedOrder[processedIndex] = key
     processedIndex = (processedIndex + 1) % MAX_PROCESSED_TRACK
 
     return true
@@ -118,11 +118,14 @@ async function _manageYoutubeHlsStream(
         }
 
         const currentSegments = []
+        let segIdx = 0
         for (let i = 0; i < lines.length; i++) {
           if (lines[i].startsWith('#EXTINF:')) {
             const segmentUrl = lines[i + 1]
             if (segmentUrl && !segmentUrl.startsWith('#')) {
-              currentSegments.push(new URL(segmentUrl, playlistUrl).toString())
+              const url = new URL(segmentUrl, playlistUrl).toString()
+              const seq = mediaSequence + segIdx++
+              currentSegments.push({ url, seq })
             }
           }
         }
@@ -145,24 +148,24 @@ async function _manageYoutubeHlsStream(
           const segmentsToTake = isLive ? 3 : PLAYLIST_FALLBACK_SEGMENTS
           const startIdx = Math.max(0, currentSegments.length - segmentsToTake)
           for (let i = startIdx; i < currentSegments.length; i++) {
-            const url = currentSegments[i]
-            if (rememberSegment(url)) {
-              segmentQueue.push(url)
+            const seg = currentSegments[i]
+            const key = isLive ? seg.seq : seg.url
+            if (rememberSegment(key)) {
+              segmentQueue.push(seg)
             }
           }
           isFirstFetch = false
         } else {
-          for (const url of currentSegments) {
-            if (!processedSegments.has(url)) {
+          for (const seg of currentSegments) {
+            const key = isLive ? seg.seq : seg.url
+
+            if (!processedSegments.has(key)) {
               if (isLive && segmentQueue.length >= MAX_LIVE_QUEUE_SIZE) {
-                const oldUrl = segmentQueue.shift()
-                if (oldUrl) {
-                  processedSegments.delete(oldUrl)
-                }
+                segmentQueue.shift()
               }
 
-              if (rememberSegment(url)) {
-                segmentQueue.push(url)
+              if (rememberSegment(key)) {
+                segmentQueue.push(seg)
               }
             }
           }
@@ -187,7 +190,7 @@ async function _manageYoutubeHlsStream(
   }
 
   const segmentDownloader = async () => {
-    let nextSegmentPromise = null
+    let nextSegmentPromise = null // { url, promise }
 
     while (true) {
       if (
@@ -205,15 +208,17 @@ async function _manageYoutubeHlsStream(
       }
 
       try {
+        let segmentUrl = null
+
         let res
         if (nextSegmentPromise) {
-          res = await nextSegmentPromise
+          segmentUrl = nextSegmentPromise.url
+          res = await nextSegmentPromise.promise
           nextSegmentPromise = null
         } else {
-          const segmentUrl = segmentQueue.shift()
-          if (processedSegments.has(segmentUrl)) {
-            processedSegments.delete(segmentUrl)
-          }
+          const seg = segmentQueue.shift()
+          if (!seg) continue
+          segmentUrl = seg.url
           res = await http1makeRequest(segmentUrl, { streamOnly: true })
         }
 
@@ -222,21 +227,23 @@ async function _manageYoutubeHlsStream(
           !nextSegmentPromise &&
           !cancelSignal.aborted
         ) {
-          const nextUrl = segmentQueue.shift()
-          if (processedSegments.has(nextUrl)) {
-            processedSegments.delete(nextUrl)
+          const nextSeg = segmentQueue.shift()
+          if (nextSeg) {
+            nextSegmentPromise = {
+              url: nextSeg.url,
+              promise: http1makeRequest(nextSeg.url, { streamOnly: true })
+            }
           }
-          nextSegmentPromise = http1makeRequest(nextUrl, { streamOnly: true })
         }
 
         if (res.error || res.statusCode !== 200) {
           if (res.stream) res.stream.destroy()
-          
+
           let retryCount = 0
           let success = false
           while (retryCount < 3 && !cancelSignal.aborted) {
              retryCount++
-             const retryRes = await http1makeRequest(res.url || segmentQueue[0], { streamOnly: true })
+             const retryRes = await http1makeRequest(segmentUrl, { streamOnly: true })
              if (!retryRes.error && retryRes.statusCode === 200) {
                 res = retryRes
                 success = true
