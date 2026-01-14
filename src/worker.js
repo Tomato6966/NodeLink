@@ -70,6 +70,57 @@ if (eventSocketPath) {
   connect()
 }
 
+let commandSocket = null
+const commandSocketPath = process.env.COMMAND_SOCKET_PATH
+
+if (commandSocketPath) {
+  const connect = () => {
+    const socket = net.createConnection(commandSocketPath, () => {
+      commandSocket = socket
+      sendCommandHello()
+      logger('info', 'Worker', 'Connected to Master command socket')
+    })
+
+    let buffer = Buffer.alloc(0)
+
+    socket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk])
+
+      while (buffer.length >= 6) {
+        const idSize = buffer.readUInt8(0)
+        const type = buffer.readUInt8(1)
+        const payloadSize = buffer.readUInt32BE(2)
+        const totalSize = 6 + idSize + payloadSize
+
+        if (buffer.length < totalSize) break
+
+        const id = buffer.toString('utf8', 6, 6 + idSize)
+        const payload = buffer.subarray(6 + idSize, totalSize)
+        buffer = buffer.subarray(totalSize)
+
+        if (type === 1) {
+          try {
+            const data = v8.deserialize(payload)
+            enqueueCommand(data?.type, id, data?.payload)
+          } catch (e) {
+            logger('error', 'Worker', `Command socket parse error: ${e.message}`)
+          }
+        }
+      }
+    })
+
+    socket.on('error', () => {
+      commandSocket = null
+      setTimeout(connect, 1000)
+    })
+    socket.on('close', () => {
+      commandSocket = null
+      setTimeout(connect, 1000)
+    })
+  }
+  connect()
+}
+
 function sendEventFrame(type, data) {
   if (!eventSocket || eventSocket.destroyed) return false
   
@@ -108,6 +159,62 @@ function sendStreamEnd(streamId) {
 function sendStreamError(streamId, error) {
   const payload = Buffer.from(String(error || 'Unknown error'), 'utf8')
   sendStreamFrame(streamId, 7, payload)
+}
+
+function sendCommandFrame(type, requestId, payloadBuf) {
+  if (!commandSocket || commandSocket.destroyed) return false
+
+  const idBuf = Buffer.from(requestId || '', 'utf8')
+  const header = Buffer.alloc(6)
+  header.writeUInt8(idBuf.length, 0)
+  header.writeUInt8(type, 1)
+  header.writeUInt32BE(payloadBuf.length, 2)
+
+  return commandSocket.write(Buffer.concat([header, idBuf, payloadBuf]))
+}
+
+function sendCommandHello() {
+  if (!commandSocket || commandSocket.destroyed) return false
+  const payload = Buffer.from(JSON.stringify({ pid: process.pid }), 'utf8')
+  return sendCommandFrame(0, '', payload)
+}
+
+function sendCommandResult(requestId, payload) {
+  const payloadBuf = v8.serialize(payload)
+  if (sendCommandFrame(2, requestId, payloadBuf)) return true
+
+  if (process.connected) {
+    try {
+      process.send({ type: 'commandResult', requestId, payload })
+      return true
+    } catch (e) {
+      logger(
+        'error',
+        'Worker-IPC',
+        `Failed to send commandResult for ${requestId}: ${e.message}`
+      )
+    }
+  }
+  return false
+}
+
+function sendCommandError(requestId, error) {
+  const payloadBuf = v8.serialize(String(error || 'Unknown error'))
+  if (sendCommandFrame(3, requestId, payloadBuf)) return true
+
+  if (process.connected) {
+    try {
+      process.send({ type: 'commandResult', requestId, error: String(error) })
+      return true
+    } catch (e) {
+      logger(
+        'error',
+        'Worker-IPC',
+        `Failed to send commandResult (error) for ${requestId}: ${e.message}`
+      )
+    }
+  }
+  return false
 }
 
 const nodelink = {
@@ -517,13 +624,7 @@ async function processQueue(queueKey) {
       try {
         const shouldBlock = await interceptor(type, payload)
         if (shouldBlock === true) {
-          if (process.connected && requestId) {
-            process.send({
-              type: 'commandResult',
-              requestId,
-              payload: { intercepted: true }
-            })
-          }
+          if (requestId) sendCommandResult(requestId, { intercepted: true })
           setImmediate(processQueue)
           return
         }
@@ -814,29 +915,9 @@ async function processQueue(queueKey) {
         throw new Error(`Unknown command type: ${type}`)
     }
 
-    if (process.connected) {
-      try {
-        process.send({ type: 'commandResult', requestId, payload: result })
-      } catch (e) {
-        logger(
-          'error',
-          'Worker-IPC',
-          `Failed to send commandResult for ${requestId}: ${e.message}`
-        )
-      }
-    }
+    if (requestId) sendCommandResult(requestId, result)
   } catch (e) {
-    if (process.connected) {
-      try {
-        process.send({ type: 'commandResult', requestId, error: e.message })
-      } catch (e) {
-        logger(
-          'error',
-          'Worker-IPC',
-          `Failed to send commandResult (error) for ${requestId}: ${e.message}`
-        )
-      }
-    }
+    if (requestId) sendCommandError(requestId, e.message)
   } finally {
     const queueEntry = guildQueues.get(queueKey)
     if (queueEntry && queueEntry.queue.length > 0) {
@@ -844,6 +925,22 @@ async function processQueue(queueKey) {
     } else {
       if (queueEntry) queueEntry.processing = false
     }
+  }
+}
+
+function enqueueCommand(type, requestId, payload) {
+  if (!type || !requestId) return
+
+  const guildId = payload?.guildId || 'global'
+  if (!guildQueues.has(guildId)) {
+    guildQueues.set(guildId, { queue: [], processing: false })
+  }
+
+  const queueEntry = guildQueues.get(guildId)
+  queueEntry.queue.push({ type, requestId, payload })
+
+  if (!queueEntry.processing) {
+    setImmediate(() => processQueue(guildId))
   }
 }
 
@@ -861,17 +958,7 @@ process.on('message', (msg) => {
 
   if (!msg.type || !msg.requestId) return
 
-  const guildId = msg.payload?.guildId || 'global'
-  if (!guildQueues.has(guildId)) {
-    guildQueues.set(guildId, { queue: [], processing: false })
-  }
-
-  const queueEntry = guildQueues.get(guildId)
-  queueEntry.queue.push(msg)
-
-  if (!queueEntry.processing) {
-    setImmediate(() => processQueue(guildId))
-  }
+  enqueueCommand(msg.type, msg.requestId, msg.payload)
 })
 
 setTimeout(() => {
