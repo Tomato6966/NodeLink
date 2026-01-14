@@ -176,13 +176,43 @@ export default class Music extends BaseClient {
       }
 
       case YOUTUBE_CONSTANTS.PLAYLIST: {
-        return {
-          exception: {
-            message: 'Music client does not support playlists',
-            severity: 'common',
-            cause: 'UpstreamPlayability'
-          }
+        const listIdMatch = url.match(/[?&]list=([\w-]+)/)
+        if (!listIdMatch || !listIdMatch[1]) {
+          return { loadType: 'empty', data: {} }
         }
+        const playlistId = listIdMatch[1]
+
+        const body = {
+          context: this.getClient(context),
+          playlistId,
+          enablePersistentPlaylistPanel: true,
+          isAudioOnly: true
+        }
+
+        const { body: res, statusCode } = await makeRequest(
+          'https://music.youtube.com/youtubei/v1/next',
+          {
+            method: 'POST',
+            body,
+            headers: {
+              'User-Agent': this.getClient(context).client.userAgent,
+              'X-Goog-Api-Format-Version': '2'
+            },
+            disableBodyCompression: true
+          }
+        )
+
+        if (statusCode !== 200 || !res) {
+          return { loadType: 'empty', data: {} }
+        }
+
+        return await this._handlePlaylistResponse(
+          playlistId,
+          null,
+          res,
+          sourceName,
+          context
+        )
       }
 
       default:

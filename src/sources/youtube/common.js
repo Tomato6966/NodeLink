@@ -956,13 +956,21 @@ export async function buildTrack(
 
   if (itemType === 'ytmusic') {
     title = safeString(
-      getRunsText(getItemValue(renderer, ['title.runs'])),
+      getRunsText(getItemValue(renderer, ['title.runs'])) ||
+      getItemValue(renderer, ['title.simpleText']),
       FALLBACK_TITLE
     )
 
     const subtitleRuns = getItemValue(renderer, ['subtitle.runs'])
+    const longBylineRuns = getItemValue(renderer, ['longBylineText.runs'])
+    const shortBylineRuns = getItemValue(renderer, ['shortBylineText.runs'])
+
     if (Array.isArray(subtitleRuns) && subtitleRuns.length > 0) {
       author = safeString(subtitleRuns[0]?.text, FALLBACK_AUTHOR)
+    } else if (Array.isArray(longBylineRuns) && longBylineRuns.length > 0) {
+      author = safeString(longBylineRuns[0]?.text, FALLBACK_AUTHOR)
+    } else if (Array.isArray(shortBylineRuns) && shortBylineRuns.length > 0) {
+      author = safeString(shortBylineRuns[0]?.text, FALLBACK_AUTHOR)
     }
 
     let lengthText = null
@@ -971,6 +979,10 @@ export async function buildTrack(
         (run) => run.text && /^\d{1,2}:\d{2}(:\d{2})?$/.test(run.text)
       )
       lengthText = lengthRun?.text
+    }
+
+    if (!lengthText) {
+      lengthText = getItemValue(renderer, ['lengthText.simpleText']) || getRunsText(getItemValue(renderer, ['lengthText.runs']))
     }
 
     const parsed = parseLengthAndStream(

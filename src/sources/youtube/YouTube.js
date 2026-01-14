@@ -378,6 +378,7 @@ export default class YouTubeSource {
     this.config = nodelink.options.sources.youtube
     this.additionalsSourceName = ['ytmusic']
     this.searchTerms = ['ytsearch', 'ytmsearch']
+    this.recommendationTerm = ['ytrec']
     this.patterns = [
       /^https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?v=[\w-]+(?:&list=[\w-]+)?|playlist\?list=[\w-]+|live\/[\w-]+)|youtu\.be\/[\w-]+)/,
       /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+/,
@@ -539,6 +540,10 @@ export default class YouTubeSource {
   }
 
   async search(query, type, searchType = 'track') {
+    if (type === 'ytrec') {
+      return this.getRecommendations(query)
+    }
+
     let clientList = this.config.clients.search
 
     if (type === 'ytmsearch') {
@@ -598,6 +603,55 @@ export default class YouTubeSource {
         cause: 'All clients failed.',
         errors: clientErrors
       }
+    }
+  }
+
+  async getRecommendations(query) {
+    let videoId = query
+    if (!/^[a-zA-Z0-9_-]{11}$/.test(query)) {
+      const searchRes = await this.search(query, 'ytmsearch')
+      if (searchRes.loadType !== 'search' || !searchRes.data.length) {
+        return { loadType: 'empty', data: {} }
+      }
+      videoId = searchRes.data[0].info.identifier
+    }
+
+    try {
+      const automixId = `RD${videoId}`
+      let automixRes = null
+
+      if (this.clients.Music) {
+        try {
+          automixRes = await this.clients.Music.resolve(`https://music.youtube.com/playlist?list=${automixId}`, 'ytmusic', this.ytContext, this.cipherManager)
+        } catch (e) {
+          logger('debug', 'YouTube', `Music client failed for recommendations: ${e.message}`)
+        }
+      }
+
+      if ((!automixRes || automixRes.loadType !== 'playlist') && this.clients.TV) {
+        try {
+          automixRes = await this.clients.TV.resolve(`https://www.youtube.com/playlist?list=${automixId}`, 'youtube', this.ytContext, this.cipherManager)
+        } catch (e) {
+          logger('debug', 'YouTube', `TV client failed for recommendations: ${e.message}`)
+        }
+      }
+      
+      if (automixRes && automixRes.loadType === 'playlist' && automixRes.data.tracks.length > 0) {
+          const tracks = automixRes.data.tracks.filter(t => t.info.identifier !== videoId)
+          return {
+            loadType: 'playlist',
+            data: {
+              info: { name: 'YouTube Recommendations', selectedTrack: 0 },
+              pluginInfo: { type: 'recommendations' },
+              tracks
+            }
+          }
+      }
+
+      return { loadType: 'empty', data: {} }
+    } catch (e) {
+      logger('error', 'YouTube', `Recommendations failed: ${e.message}`)
+      return { exception: { message: e.message, severity: 'fault' } }
     }
   }
 
