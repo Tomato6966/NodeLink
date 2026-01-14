@@ -23,6 +23,7 @@ export default class TidalSource {
     this.nodelink = nodelink
     this.config = nodelink.options.sources.tidal
     this.searchTerms = ['tdsearch']
+    this.recommendationTerm = ['tdrec']
     this.patterns = [
       /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9\-]+)/
     ]
@@ -89,7 +90,11 @@ export default class TidalSource {
     return body
   }
 
-  async search(query) {
+  async search(query, sourceTerm) {
+    if (this.recommendationTerm.includes(sourceTerm)) {
+      return this.getRecommendations(query)
+    }
+
     try {
       const limit = this.nodelink.options.maxSearchResults || 10
       const data = await this._getJson('search', {
@@ -140,6 +145,8 @@ export default class TidalSource {
             data: { info: { name: albumData.title, selectedTrack: 0 }, tracks }
           }
         }
+        case 'mix':
+          return this.getMix(id)
         case 'playlist': {
           const playlistData = await this._getJson(`playlists/${id}`)
           const totalTracks = playlistData.numberOfTracks
@@ -221,6 +228,46 @@ export default class TidalSource {
     }
   }
 
+  async getRecommendations(query) {
+    let trackId = query
+    if (!/^[0-9]+$/.test(query)) {
+      const searchRes = await this.search(query, 'tdsearch')
+      if (searchRes.loadType === 'search' && searchRes.data.length > 0) {
+        trackId = searchRes.data[0].info.identifier
+      } else {
+        return { loadType: 'empty', data: {} }
+      }
+    }
+
+    try {
+      const data = await this._getJson(`tracks/${trackId}`)
+      if (!data?.mixes?.TRACK_MIX) return { loadType: 'empty', data: {} }
+
+      return this.getMix(data.mixes.TRACK_MIX)
+    } catch (e) {
+      return { exception: { message: e.message, severity: 'fault' } }
+    }
+  }
+
+  async getMix(mixId) {
+    try {
+      const data = await this._getJson(`mixes/${mixId}/items`, { limit: 100 })
+      if (!data?.items?.length) return { loadType: 'empty', data: {} }
+
+      const tracks = data.items.map(item => this._parseTrack(item.item || item)).filter(Boolean)
+      return {
+        loadType: 'playlist',
+        data: {
+          info: { name: `Mix: ${mixId}`, selectedTrack: 0 },
+          pluginInfo: { type: 'recommendations' },
+          tracks
+        }
+      }
+    } catch (e) {
+      return { exception: { message: e.message, severity: 'fault' } }
+    }
+  }
+
   _parseTrack(item) {
     if (!item || !item.id) return null
     const trackInfo = {
@@ -248,7 +295,19 @@ export default class TidalSource {
     const query = `${decodedTrack.title} ${decodedTrack.author}`
 
     try {
-      let searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
+      let searchResult
+
+      if (decodedTrack.isrc) {
+        searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch')
+        if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+          searchResult = null
+        }
+      }
+
+      if (!searchResult) {
+        searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
+      }
+
       if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
         searchResult = await this.nodelink.sources.searchWithDefault(query)
       }

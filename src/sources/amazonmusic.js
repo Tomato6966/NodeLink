@@ -275,7 +275,19 @@ export default class AmazonMusicSource {
     const query = `${decodedTrack.title} ${decodedTrack.author} official audio`
 
     try {
-      let searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
+      let searchResult
+
+      if (decodedTrack.isrc) {
+        searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch')
+        if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+          searchResult = null
+        }
+      }
+
+      if (!searchResult) {
+        searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
+      }
+
       if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
         searchResult = await this.nodelink.sources.searchWithDefault(query)
       }

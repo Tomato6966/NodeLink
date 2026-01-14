@@ -15,6 +15,7 @@ export default class JioSaavnSource {
     this.nodelink = nodelink
     this.config = nodelink.options.sources?.jiosaavn || {}
     this.searchTerms = ['jssearch']
+    this.recommendationTerm = ['jsrec']
     this.patterns = [
       /https?:\/\/(?:www\.)?jiosaavn\.com\/(?:(?<type>album|featured|song|s\/playlist|artist)\/)(?:[^/]+\/)(?<id>[A-Za-z0-9_,\-]+)/
     ]
@@ -29,7 +30,11 @@ export default class JioSaavnSource {
     return true
   }
 
-  async search(query) {
+  async search(query, sourceTerm) {
+    if (this.recommendationTerm.includes(sourceTerm)) {
+      return this.getRecommendations(query)
+    }
+
     try {
       logger('debug', 'JioSaavn', `Searching for: ${query}`)
 
@@ -50,6 +55,87 @@ export default class JioSaavnSource {
       }
     } catch (e) {
       logger('error', 'JioSaavn', `Search error: ${e.message}`)
+      return { exception: { message: e.message, severity: 'fault' } }
+    }
+  }
+
+  async getRecommendations(query) {
+    let id = query
+    if (!/^[A-Za-z0-9_,\-]+$/.test(query)) {
+      const searchRes = await this.search(query, 'jssearch')
+      if (searchRes.loadType === 'search' && searchRes.data.length > 0) {
+        id = searchRes.data[0].info.identifier
+      } else {
+        return { loadType: 'empty', data: {} }
+      }
+    }
+
+    try {
+      const encodedId = encodeURIComponent(`["${id}"]`)
+      let json = await this._getJson({
+        __call: 'webradio.createEntityStation',
+        api_version: '4',
+        ctx: 'android',
+        entity_id: encodedId,
+        entity_type: 'queue'
+      })
+
+      if (json?.stationid) {
+        const stationId = json.stationid
+        json = await this._getJson({
+          __call: 'webradio.getSong',
+          api_version: '4',
+          ctx: 'android',
+          stationid: encodeURIComponent(stationId),
+          k: '20'
+        })
+
+        if (json && !json.error) {
+          const tracks = Object.values(json)
+            .filter(item => item && typeof item === 'object' && item.song)
+            .map(item => this._parseTrack(item.song, true))
+
+          if (tracks.length > 0) {
+            return {
+              loadType: 'playlist',
+              data: {
+                info: { name: 'JioSaavn Recommendations', selectedTrack: 0 },
+                pluginInfo: { type: 'recommendations' },
+                tracks
+              }
+            }
+          }
+        }
+      }
+
+      const metadata = await this._fetchSongMetadata(id)
+      if (metadata?.primary_artists_id) {
+        const artistIdsJoined = metadata.primary_artists_id
+        json = await this._getJson({
+          __call: 'search.artistOtherTopSongs',
+          api_version: '4',
+          ctx: 'wap6dot0',
+          artist_ids: encodeURIComponent(artistIdsJoined),
+          song_id: encodeURIComponent(id),
+          language: 'unknown'
+        })
+
+        if (json && Array.isArray(json) && json.length > 0) {
+          const tracks = json.map(item => this._parseTrack(item, true))
+          return {
+            loadType: 'playlist',
+            data: {
+              info: { name: 'JioSaavn Recommendations', selectedTrack: 0 },
+              pluginInfo: { type: 'recommendations' },
+              tracks
+            }
+          }
+        }
+      }
+
+      return { loadType: 'empty', data: {} }
+    } catch (e) {
+      logger('error', 'JioSaavn', `Recommendations error: ${e.message}`)
       return { exception: { message: e.message, severity: 'fault' } }
     }
   }

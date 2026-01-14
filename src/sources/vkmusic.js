@@ -143,6 +143,7 @@ export default class VKMusicSource {
     this.nodelink = nodelink
     this.config = nodelink.options.sources?.vkmusic || {}
     this.searchTerms = ['vksearch']
+    this.recommendationTerm = ['vkrec']
     this.patterns = [
       /vk\.(?:com|ru)\/.*?[?&]z=audio_playlist(?<owner>-?\d+)_(?<id>\d+)(?:(?:%2F|_|\/|(?:\?|&)access_hash=)(?<hash>[a-z0-9]+))?/i,
       /vk\.(?:com|ru)\/(?:music\/(?:playlist|album)\/)(?<owner>-?\d+)_(?<id>\d+)(?:(?:%2F|_|\/|(?:\?|&)access_hash=)(?<hash>[a-z0-9]+))?/i,
@@ -218,7 +219,11 @@ export default class VKMusicSource {
         throw new Error(`Invalid act=web_token response: ${JSON.stringify(body)}`)
       }
     
-      async search(query) {
+      async search(query, sourceTerm) {
+        if (this.recommendationTerm.includes(sourceTerm)) {
+          return this.getRecommendations(query)
+        }
+
         if (!this.hasToken) return { exception: { message: 'VKMusic search requires valid auth.', severity: 'common' } }
         try {
           const res = await this._apiRequest('audio.search', {
@@ -230,6 +235,39 @@ export default class VKMusicSource {
           if (!res || !res.items || res.items.length === 0) return { loadType: 'empty', data: {} }
           const tracks = res.items.map(item => this.buildTrack(item))
           return { loadType: 'search', data: tracks }
+        } catch (e) {
+          return { exception: { message: e.message, severity: 'fault' } }
+        }
+      }
+
+      async getRecommendations(query) {
+        if (!this.hasToken) return { exception: { message: 'VKMusic recommendations require valid auth.', severity: 'common' } }
+        
+        let audioId = query
+        if (!/^-?\d+_\d+$/.test(query)) {
+          const searchRes = await this.search(query, 'vksearch')
+          if (searchRes.loadType === 'search' && searchRes.data.length > 0) {
+            audioId = searchRes.data[0].info.identifier
+          } else {
+             return { loadType: 'empty', data: {} }
+          }
+        }
+
+        try {
+          const res = await this._apiRequest('audio.getRecommendations', {
+            target_audio: audioId,
+            count: this.config.recommendationsLoadLimit || 10
+          })
+          if (!res || !res.items || res.items.length === 0) return { loadType: 'empty', data: {} }
+          const tracks = res.items.map(item => this.buildTrack(item))
+          return {
+            loadType: 'playlist',
+            data: {
+              info: { name: 'VK Music Recommendations', selectedTrack: 0 },
+              pluginInfo: { type: 'recommendations' },
+              tracks
+            }
+          }
         } catch (e) {
           return { exception: { message: e.message, severity: 'fault' } }
         }

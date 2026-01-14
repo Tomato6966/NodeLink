@@ -6,6 +6,7 @@ import {
 } from '../utils.js'
 
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1'
+const SPOTIFY_CLIENT_API_URL = 'https://spclient.wg.spotify.com'
 const SPOTIFY_INTERNAL_API_URL =
   'https://api-partner.spotify.com/pathfinder/v2/query'
 const TOKEN_REFRESH_MARGIN = 300000
@@ -39,6 +40,7 @@ export default class SpotifySource {
     this.nodelink = nodelink
     this.config = nodelink.options
     this.searchTerms = ['spsearch']
+    this.recommendationTerm = ['sprec']
     this.patterns = [
       /https?:\/\/(?:open\.)?spotify\.com\/(?:intl-[a-zA-Z]{2}\/)?(track|album|playlist|artist|episode|show)\/([a-zA-Z0-9]+)/
     ]
@@ -56,19 +58,25 @@ export default class SpotifySource {
     this.market = 'US'
     this.tokenInitialized = false
     this.allowExplicit = true
+    this.anonymousToken = null
   }
 
   async setup() {
-    const cachedToken = this.nodelink.credentialManager.get(
-      'spotify_access_token'
-    )
-    if (cachedToken) {
-      this.accessToken = cachedToken
-      this.tokenInitialized = true
-      return true
-    }
+    this.accessToken = this.nodelink.credentialManager.get('spotify_access_token')
+    this.anonymousToken = this.nodelink.credentialManager.get('spotify_anonymous_token')
 
-    if (this.tokenInitialized && this._isTokenValid()) return true
+    const hasOfficialConfig = this.config.sources.spotify?.clientId && this.config.sources.spotify?.clientSecret
+    const hasAnonymousConfig = this.config.sources.spotify?.externalAuthUrl
+
+    const missingOfficial = hasOfficialConfig && !this.accessToken
+    const missingAnonymous = hasAnonymousConfig && !this.anonymousToken
+
+    if (!missingOfficial && !missingAnonymous) {
+      if (this.accessToken || this.anonymousToken) {
+        this.tokenInitialized = true
+        return true
+      }
+    }
 
     try {
       this.clientId = this.config.sources.spotify?.clientId
@@ -100,7 +108,7 @@ export default class SpotifySource {
         logger(
           'info',
           'Spotify',
-          `Tokens initialized successfully (${this.externalAuthUrl ? 'Anonymous' : 'OAuth'}, playlistLoadLimit: ${this._formatLimit(this.playlistLoadLimit, 100)}, albumLoadLimit: ${this._formatLimit(this.albumLoadLimit, 50)})`
+          `Tokens initialized successfully. Official: ${!!this.accessToken}, Anonymous: ${!!this.anonymousToken}`
         )
       }
       return success
@@ -125,93 +133,93 @@ export default class SpotifySource {
   }
 
   async _refreshToken() {
-    try {
-      if (this.externalAuthUrl) {
+    let success = false
+
+    if (this.externalAuthUrl && !this.anonymousToken) {
+      try {
         const response = await http1makeRequest(this.externalAuthUrl, {
           headers: { Accept: 'application/json' },
           disableBodyCompression: true
-        }).catch((err) => {
-          return { error: err }
         })
 
         const { body: tokenData, error, statusCode } = response
 
-        if (error || statusCode !== 200 || !tokenData?.accessToken) {
-          const errorMsg =
-            error?.message ||
-            (typeof error === 'string'
-              ? error
-              : JSON.stringify(error || tokenData)) ||
-            'Unknown error'
-          logger(
-            'error',
-            'Spotify',
-            `Error fetching anonymous token from external server: ${statusCode || 'No status'} - ${errorMsg}`
+        if (!error && statusCode === 200 && tokenData?.accessToken) {
+          this.anonymousToken = tokenData.accessToken
+          const expiresMs = tokenData.accessTokenExpirationTimestampMs
+            ? tokenData.accessTokenExpirationTimestampMs - Date.now()
+            : 3600000
+          
+          if (!this.accessToken) {
+             this.tokenExpiry = Date.now() + Math.max(expiresMs, 60000)
+          }
+
+          this.nodelink.credentialManager.set(
+            'spotify_anonymous_token',
+            this.anonymousToken,
+            Math.max(expiresMs, 60000)
           )
-          return false
+          success = true
+        } else {
+           logger('warn', 'Spotify', `Failed to fetch anonymous token: ${statusCode}`)
         }
-
-        this.accessToken = tokenData.accessToken
-        const expiresMs = tokenData.accessTokenExpirationTimestampMs
-          ? tokenData.accessTokenExpirationTimestampMs - Date.now()
-          : 3600000
-        this.tokenExpiry = Date.now() + Math.max(expiresMs, 60000)
-        this.nodelink.credentialManager.set(
-          'spotify_access_token',
-          this.accessToken,
-          Math.max(expiresMs, 60000)
-        )
-        this.tokenInitialized = true
-        return true
+      } catch (e) {
+        logger('error', 'Spotify', `Anonymous token refresh failed: ${e.message}`)
       }
-
-      const auth = Buffer.from(
-        `${this.clientId}:${this.clientSecret}`
-      ).toString('base64')
-
-      const {
-        body: tokenData,
-        error,
-        statusCode
-      } = await http1makeRequest('https://accounts.spotify.com/api/token', {
-        method: 'POST',
-        headers: {
-          Authorization: `Basic ${auth}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: 'grant_type=client_credentials',
-        disableBodyCompression: true
-      })
-
-      if (error || statusCode !== 200) {
-        logger(
-          'error',
-          'Spotify',
-          `Error refreshing token: ${statusCode} - ${error?.message || 'Unknown error'}`
-        )
-        return false
-      }
-
-      this.accessToken = tokenData.access_token
-      this.tokenExpiry = Date.now() + tokenData.expires_in * 1000
-      this.nodelink.credentialManager.set(
-        'spotify_access_token',
-        this.accessToken,
-        tokenData.expires_in * 1000
-      )
-      this.tokenInitialized = true
-      return true
-    } catch (e) {
-      logger('error', 'Spotify', `Token refresh failed: ${e.message || e}`)
-      return false
+    } else if (this.anonymousToken) {
+      success = true
     }
+
+    if (this.clientId && this.clientSecret && !this.accessToken) {
+      try {
+        const auth = Buffer.from(
+          `${this.clientId}:${this.clientSecret}`
+        ).toString('base64')
+
+        const {
+          body: tokenData,
+          error,
+          statusCode
+        } = await http1makeRequest('https://accounts.spotify.com/api/token', {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          body: 'grant_type=client_credentials',
+          disableBodyCompression: true
+        })
+
+        if (!error && statusCode === 200) {
+          this.accessToken = tokenData.access_token
+          this.tokenExpiry = Date.now() + tokenData.expires_in * 1000
+          this.nodelink.credentialManager.set(
+            'spotify_access_token',
+            this.accessToken,
+            tokenData.expires_in * 1000
+          )
+          success = true
+        } else {
+           logger('error', 'Spotify', `Failed to refresh official token: ${statusCode}`)
+        }
+      } catch (e) {
+        logger('error', 'Spotify', `Official token refresh failed: ${e.message}`)
+      }
+    } else if (this.accessToken) {
+      success = true
+    }
+
+    if (!this.accessToken && this.anonymousToken) {
+      this.accessToken = this.anonymousToken
+    }
+
+    this.tokenInitialized = success
+    return success
   }
 
   async _apiRequest(path) {
     if (!this.tokenInitialized || !this._isTokenValid()) {
-      const success = await this.setup()
-      if (!success)
-        throw new Error('Failed to initialize Spotify for API request.')
+      await this.setup()
     }
 
     try {
@@ -257,11 +265,13 @@ export default class SpotifySource {
 
   async _internalApiRequest(operation, variables) {
     if (!this.tokenInitialized || !this._isTokenValid()) {
-      const success = await this.setup()
-      if (!success)
-        throw new Error(
-          'Failed to initialize Spotify for Internal API request.'
-        )
+      await this.setup()
+    }
+
+    const token = this.anonymousToken || this.accessToken
+
+    if (!token) {
+        throw new Error('No token available for internal API request.')
     }
 
     try {
@@ -270,7 +280,7 @@ export default class SpotifySource {
         {
           method: 'POST',
           headers: {
-            Authorization: `Bearer ${this.accessToken}`,
+            Authorization: `Bearer ${token}`,
             'App-Platform': 'WebPlayer',
             'Spotify-App-Version': '1.2.81.104.g225ec0e6',
             'Content-Type': 'application/json; charset=utf-8'
@@ -357,25 +367,30 @@ export default class SpotifySource {
 
     for (let i = 0; i < requests.length; i += concurrency) {
       const batch = requests.slice(i, i + concurrency)
-      try {
-        this.nodelink.sendHeartbeat?.()
-        const results = await Promise.all(
-          batch.map((vars) => this._internalApiRequest(operation, vars))
-        )
-        for (const data of results) {
-          const items =
-            data?.playlistV2?.content?.items ||
-            data?.albumUnion?.tracksV2?.items
-          if (items) {
-            allItems.push(...items)
+      let attempts = 0
+      while (attempts < 3) {
+        try {
+          this.nodelink.sendHeartbeat?.()
+          const results = await Promise.all(
+            batch.map((vars) => this._internalApiRequest(operation, vars))
+          )
+          for (const data of results) {
+            const items =
+              data?.playlistV2?.content?.items ||
+              data?.albumUnion?.tracksV2?.items
+            if (items) {
+              allItems.push(...items)
+            }
+          }
+          break
+        } catch (e) {
+          attempts++
+          if (attempts >= 3) {
+            logger('warn', 'Spotify', `Failed to fetch a batch of internal pages after 3 attempts: ${e.message}`)
+          } else {
+            await new Promise(r => setTimeout(r, 1500))
           }
         }
-      } catch (e) {
-        logger(
-          'warn',
-          'Spotify',
-          `Failed to fetch a batch of internal pages: ${e.message}`
-        )
       }
     }
 
@@ -475,19 +490,24 @@ export default class SpotifySource {
     const batchSize = concurrency
     for (let i = 0; i < promises.length; i += batchSize) {
       const batch = promises.slice(i, i + batchSize)
-      try {
-        const results = await Promise.all(batch)
-        for (const page of results) {
-          if (page?.items) {
-            allItems.push(...page.items)
+      let attempts = 0
+      while (attempts < 3) {
+        try {
+          const results = await Promise.all(batch)
+          for (const page of results) {
+            if (page?.items) {
+              allItems.push(...page.items)
+            }
+          }
+          break
+        } catch (e) {
+          attempts++
+          if (attempts >= 3) {
+            logger('warn', 'Spotify', `Failed to fetch a batch of pages after 3 attempts: ${e.message}`)
+          } else {
+            await new Promise(r => setTimeout(r, 1500))
           }
         }
-      } catch (e) {
-        logger(
-          'warn',
-          'Spotify',
-          `Failed to fetch a batch of pages: ${e.message}`
-        )
       }
     }
 
@@ -495,6 +515,10 @@ export default class SpotifySource {
   }
 
   async search(query, sourceTerm, searchType = 'track') {
+    if (this.recommendationTerm.includes(sourceTerm)) {
+      return this.getRecommendations(query)
+    }
+
     try {
       const limit = this.config.maxSearchResults || 10
 
@@ -548,6 +572,68 @@ export default class SpotifySource {
       return {
         exception: { message: e.message, severity: 'fault' }
       }
+    }
+  }
+
+  async getRecommendations(query) {
+    try {
+      if (query.startsWith('mix:') || !query.includes('=')) {
+        let seedType = 'track'
+        let seed = query
+
+        if (query.startsWith('mix:')) {
+          const mixMatch = query.match(/^mix:(track|artist|album|isrc):([^:]+)$/)
+          if (mixMatch) {
+            seedType = mixMatch[1]
+            seed = mixMatch[2]
+          }
+        }
+
+        if (seedType === 'isrc' || (seedType === 'track' && (seed.includes(' ') || !/^[a-zA-Z0-9]{22}$/.test(seed)))) {
+          const searchResult = await this.search(seedType === 'isrc' ? `isrc:${seed}` : seed, 'spsearch', 'track')
+          if (searchResult.loadType === 'search' && searchResult.data.length > 0) {
+            seed = searchResult.data[0].info.identifier
+            seedType = 'track'
+          } else {
+            return { loadType: 'empty', data: {} }
+          }
+        }
+
+        const token = this.anonymousToken || this.accessToken
+        if (!token) throw new Error('No token available for mix request')
+
+        const { body: rjson, statusCode } = await http1makeRequest(
+          `${SPOTIFY_CLIENT_API_URL}/inspiredby-mix/v2/seed_to_playlist/spotify:${seedType}:${seed}?response-format=json`,
+          {
+            headers: { Authorization: `Bearer ${token}` },
+            disableBodyCompression: true
+          }
+        )
+
+        if (statusCode === 200 && rjson?.mediaItems?.length > 0) {
+          const playlistId = rjson.mediaItems[0].uri.split(':')[2]
+          return this._resolvePlaylist(playlistId)
+        }
+
+        if (query.startsWith('mix:')) return { loadType: 'empty', data: {} }
+      }
+
+      const data = await this._apiRequest(`/recommendations?${query.includes('=') ? query : `seed_tracks=${query}`}`)
+      if (!data || !data.tracks || data.tracks.length === 0) {
+        return { loadType: 'empty', data: {} }
+      }
+
+      const tracks = data.tracks.map((item) => this._buildTrack(item)).filter(Boolean)
+      return {
+        loadType: 'playlist',
+        data: {
+          info: { name: 'Spotify Recommendations', selectedTrack: 0 },
+          pluginInfo: { type: 'recommendations' },
+          tracks
+        }
+      }
+    } catch (e) {
+      return { exception: { message: e.message, severity: 'fault' } }
     }
   }
 
@@ -1021,6 +1107,17 @@ export default class SpotifySource {
   }
 
   async getTrackUrl(decodedTrack) {
+    if (!decodedTrack.isrc && this.accessToken) {
+      try {
+        const trackData = await this._apiRequest(`/tracks/${decodedTrack.identifier}?market=${this.market}`)
+        if (trackData?.external_ids?.isrc) {
+          decodedTrack.isrc = trackData.external_ids.isrc
+        }
+      } catch (e) {
+        logger('debug', 'Spotify', `Failed to fetch ISRC for ${decodedTrack.identifier} via API: ${e.message}`)
+      }
+    }
+
     let isExplicit = false
     if (decodedTrack.uri) {
       try {
@@ -1031,19 +1128,24 @@ export default class SpotifySource {
       }
     }
 
-    const query = this._buildSearchQuery(decodedTrack, isExplicit)
+    const searchQuery = this._buildSearchQuery(decodedTrack, isExplicit)
 
     try {
-      let searchResult = await this.nodelink.sources.search(
-        'youtube',
-        query,
-        'ytmsearch'
-      )
+      let searchResult
+      if (decodedTrack.isrc) {
+        searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch')
+        if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+          searchResult = await this.nodelink.sources.search('youtube', searchQuery, 'ytmsearch')
+        }
+      } else {
+        searchResult = await this.nodelink.sources.search('youtube', searchQuery, 'ytmsearch')
+      }
+
       if (
         searchResult.loadType !== 'search' ||
         searchResult.data.length === 0
       ) {
-        searchResult = await this.nodelink.sources.searchWithDefault(query)
+        searchResult = await this.nodelink.sources.searchWithDefault(searchQuery)
       }
 
       if (
@@ -1074,7 +1176,7 @@ export default class SpotifySource {
       const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
       return { newTrack: bestMatch, ...streamInfo }
     } catch (e) {
-      logger('warn', 'Spotify', `Search for "${query}" failed: ${e.message}`)
+      logger('warn', 'Spotify', `Search for "${searchQuery}" failed: ${e.message}`)
       return { exception: { message: e.message, severity: 'fault' } }
     }
   }

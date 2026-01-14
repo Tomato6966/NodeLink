@@ -57,6 +57,12 @@ export default class SourcesManager {
           }
         }
 
+        if (Array.isArray(instance.recommendationTerm)) {
+          for (const term of instance.recommendationTerm) {
+            this.searchAliasMap.set(term, instance)
+          }
+        }
+
         if (Array.isArray(instance.patterns)) {
           for (const regex of instance.patterns) {
             if (regex instanceof RegExp) {
