@@ -79,10 +79,6 @@ export default {
   enableHoloTracks: false,
   enableTrackStreamEndpoint: false,
   enableLoadStreamEndpoint: false,
-  voiceReceive: {
-    enabled: false,
-    format: 'opus'
-  },
   resolveExternalLinks: false,
   fetchChannelInfo: false,
   filters: {
@@ -275,6 +271,10 @@ export default {
     quality: 'high', // high, medium, low, lowest
     encryption: 'aead_aes256_gcm_rtpsize',
     resamplingQuality: 'best' // best, medium, fastest, zero order holder, linear
+  },
+  voiceReceive: {
+    enabled: false,
+    format: 'opus' // pcm_s16le, opus
   },
   routePlanner: {
     strategy: 'RotateOnBan', // RotateOnBan, RoundRobin, LoadBalance
