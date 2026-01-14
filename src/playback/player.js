@@ -164,6 +164,10 @@ export class Player {
         this._lastStreamDataTime = Date.now()
       })
     })
+
+    if (this.nodelink.voiceRelay?.attach) {
+      this.nodelink.voiceRelay.attach(this.connection, this.guildId)
+    }
   }
 
   _onConn(state) {

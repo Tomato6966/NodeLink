@@ -375,6 +375,14 @@ export default class WorkerManager {
             this._handleStreamError(id, payload.toString('utf8'))
             continue
           }
+          if (type === 8) {
+            if (global.nodelink?.handleVoiceFrame) {
+              try {
+                global.nodelink.handleVoiceFrame(payload)
+              } catch {}
+            }
+            continue
+          }
 
           try {
             const data = JSON.parse(payload.toString('utf8'))

@@ -32,6 +32,8 @@ import PlayerManager from './managers/playerManager.js'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
 import SourceWorkerManager from './managers/sourceWorkerManager.js'
+import { createVoiceRelay } from './voice/voiceRelay.js'
+import { parseVoiceFrameHeader } from './voice/voiceFrames.js'
 
 let config
 
@@ -190,6 +192,14 @@ class NodelinkServer extends EventEmitter {
       playerInterceptors: []
     }
 
+    this.voiceSockets = new Map()
+    this.voiceRelay = createVoiceRelay({
+      enabled: options.voiceReceive?.enabled,
+      format: options.voiceReceive?.format,
+      sendFrame: (frame) => this.handleVoiceFrame(frame),
+      logger
+    })
+
     this._globalUpdater = null
     this._statsUpdater = null
     this.supportedSourcesCache = null
@@ -253,6 +263,42 @@ class NodelinkServer extends EventEmitter {
       clearInterval(this._heartbeatInterval)
       this._heartbeatInterval = null
     }
+  }
+
+  handleVoiceFrame(frame) {
+    const header = parseVoiceFrameHeader(frame)
+    if (!header?.guildId) return
+
+    const sockets = this.voiceSockets.get(header.guildId)
+    if (!sockets || sockets.size === 0) return
+
+    for (const socket of sockets) {
+      try {
+        socket.send(frame)
+      } catch {}
+    }
+  }
+
+  registerVoiceSocket(guildId, socket) {
+    if (!guildId || !socket) return
+
+    let sockets = this.voiceSockets.get(guildId)
+    if (!sockets) {
+      sockets = new Set()
+      this.voiceSockets.set(guildId, sockets)
+    }
+
+    sockets.add(socket)
+
+    const cleanup = () => {
+      const set = this.voiceSockets.get(guildId)
+      if (!set) return
+      set.delete(socket)
+      if (set.size === 0) this.voiceSockets.delete(guildId)
+    }
+
+    socket.on('close', cleanup)
+    socket.on('error', cleanup)
   }
 
   async getSourcesFromWorker() {
@@ -861,12 +907,32 @@ class NodelinkServer extends EventEmitter {
             } connected from [External] (${ws.data.remoteAddress}) | \x1b[33mURL:\x1b[0m ${ws.data.url}`
           )
 
+          let eventName = '/v4/websocket'
+          let guildId = null
+          try {
+            const url = new URL(ws.data.url)
+            const voiceMatch = url.pathname.match(
+              /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
+            )
+            if (voiceMatch) {
+              if (!self.options.voiceReceive?.enabled) {
+                try {
+                  wrapper.close(1008, 'Voice receive disabled')
+                } catch {}
+                return
+              }
+              eventName = '/v4/websocket/voice'
+              guildId = voiceMatch[1]
+            }
+          } catch {}
+
           self.socket.emit(
-            '/v4/websocket',
+            eventName,
             wrapper,
             reqShim,
             clientInfo,
-            sessionId
+            sessionId,
+            guildId
           )
         },
         message(ws, message) {
@@ -961,7 +1027,11 @@ class NodelinkServer extends EventEmitter {
         request.url,
         `http://${request.headers.host}`
       )
-      if (pathname === '/v4/websocket') {
+      const voiceMatch = pathname.match(
+        /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
+      )
+
+      if (pathname === '/v4/websocket' || voiceMatch) {
         if (!headers['user-id']) {
           logger(
             'warn',
@@ -978,6 +1048,15 @@ class NodelinkServer extends EventEmitter {
           )
           return rejectUpgrade(400, 'Bad Request', 'Invalid User-Id header.')
         }
+
+        if (voiceMatch && !this.options.voiceReceive?.enabled) {
+          return rejectUpgrade(
+            404,
+            'Not Found',
+            'Voice websocket endpoint is disabled.'
+          )
+        }
+
         request.headers = headers
 
         logger(
@@ -988,24 +1067,29 @@ class NodelinkServer extends EventEmitter {
           } connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
         )
 
+        const eventName = voiceMatch ? '/v4/websocket/voice' : '/v4/websocket'
+        const guildId = voiceMatch ? voiceMatch[1] : null
+
         if (isBun && !this._usingBunServer) {
           this.socket.handleUpgrade(request, socket, head, (ws) => {
             this.socket.emit(
-              '/v4/websocket',
+              eventName,
               ws,
               request,
               clientInfo,
-              sessionId
+              sessionId,
+              guildId
             )
           })
         } else {
           this.socket.handleUpgrade(request, socket, head, {}, (ws) =>
             this.socket.emit(
-              '/v4/websocket',
+              eventName,
               ws,
               request,
               clientInfo,
-              sessionId
+              sessionId,
+              guildId
             )
           )
         }
@@ -1022,6 +1106,26 @@ class NodelinkServer extends EventEmitter {
         )
       }
     })
+
+    this.socket.on(
+      '/v4/websocket/voice',
+      (socket, request, clientInfo, _sessionId, guildId) => {
+        if (!this.options.voiceReceive?.enabled) {
+          try {
+            socket.close(1008, 'Voice receive disabled')
+          } catch {}
+          return
+        }
+
+        logger(
+          'info',
+          'Voice',
+          `Voice websocket connected from ${request.socket?.remoteAddress || 'unknown'} | guild ${guildId}`
+        )
+
+        this.registerVoiceSocket(guildId, socket)
+      }
+    )
   }
 
   _listen() {

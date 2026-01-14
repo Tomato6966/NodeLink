@@ -14,6 +14,7 @@ import { bufferPool } from './playback/BufferPool.js'
 import { createPCMStream } from './playback/streamProcessor.js'
 import { Player } from './playback/player.js'
 import { cleanupHttpAgents, initLogger, logger } from './utils.js'
+import { createVoiceRelay } from './voice/voiceRelay.js'
 
 let lastCpuUsage = process.cpuUsage()
 let lastCpuTime = Date.now()
@@ -135,6 +136,17 @@ function sendEventFrame(type, data) {
   return eventSocket.write(Buffer.concat([header, payloadBuf]))
 }
 
+function sendEventBinaryFrame(type, payloadBuf) {
+  if (!eventSocket || eventSocket.destroyed) return false
+
+  const header = Buffer.alloc(6)
+  header.writeUInt8(0, 0)
+  header.writeUInt8(type, 1)
+  header.writeUInt32BE(payloadBuf.length, 2)
+
+  return eventSocket.write(Buffer.concat([header, payloadBuf]))
+}
+
 function sendStreamFrame(streamId, type, payloadBuf) {
   if (!eventSocket || eventSocket.destroyed) return false
 
@@ -221,6 +233,13 @@ const nodelink = {
   options: config,
   logger
 }
+
+nodelink.voiceRelay = createVoiceRelay({
+  enabled: config.voiceReceive?.enabled,
+  format: config.voiceReceive?.format,
+  sendFrame: (frame) => sendEventBinaryFrame(8, frame),
+  logger
+})
 
 nodelink.statsManager = new StatsManager(nodelink)
 nodelink.credentialManager = new CredentialManager(nodelink)

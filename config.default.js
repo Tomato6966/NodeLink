@@ -79,6 +79,10 @@ export default {
   enableHoloTracks: false,
   enableTrackStreamEndpoint: false,
   enableLoadStreamEndpoint: false,
+  voiceReceive: {
+    enabled: false,
+    format: 'opus'
+  },
   resolveExternalLinks: false,
   fetchChannelInfo: false,
   filters: {
