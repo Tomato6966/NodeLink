@@ -83,7 +83,9 @@ export default class LocalSource {
     const basePath = path.resolve(
       this.nodelink.options.sources.local.basePath || './'
     )
-    const filePath = isAbsolute ? path.resolve(query) : path.resolve(basePath, query)
+    const filePath = isAbsolute
+      ? path.resolve(query)
+      : path.resolve(basePath, query)
 
     logger('debug', 'Sources', `Searching local file: ${filePath}`)
 

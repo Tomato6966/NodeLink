@@ -10,9 +10,10 @@ class SourceWorkerManager {
     this.workers = []
     this.requests = new Map()
     this.workerLoads = new Map() // worker.id -> pending count
-    this.socketPath = os.platform() === 'win32'
-      ? `\\\\.\\pipe\\nodelink-source-${crypto.randomBytes(8).toString('hex')}`
-      : `/tmp/nodelink-source-${crypto.randomBytes(8).toString('hex')}.sock`
+    this.socketPath =
+      os.platform() === 'win32'
+        ? `\\\\.\\pipe\\nodelink-source-${crypto.randomBytes(8).toString('hex')}`
+        : `/tmp/nodelink-source-${crypto.randomBytes(8).toString('hex')}.sock`
     this.server = null
   }
 
@@ -54,20 +55,24 @@ class SourceWorkerManager {
                 request.res.writeHead(request.options?.statusCode || 200)
               }
               request.res.write(payload)
-            } else if (type === 1) { 
+            } else if (type === 1) {
               request.res.end()
               this._cleanupRequest(id, request)
-            } else if (type === 2) { 
+            } else if (type === 2) {
               const errorMsg = payload.toString('utf8')
               if (!request.res.headersSent) {
-                request.res.writeHead(500, { 'Content-Type': 'application/json' })
-                request.res.end(JSON.stringify({
-                  timestamp: Date.now(),
-                  status: 500,
-                  error: 'Worker Error',
-                  message: errorMsg,
-                  path: request.req.url
-                }))
+                request.res.writeHead(500, {
+                  'Content-Type': 'application/json'
+                })
+                request.res.end(
+                  JSON.stringify({
+                    timestamp: Date.now(),
+                    status: 500,
+                    error: 'Worker Error',
+                    message: errorMsg,
+                    path: request.req.url
+                  })
+                )
               } else {
                 request.res.end()
               }
@@ -84,14 +89,19 @@ class SourceWorkerManager {
         reject(err)
       })
       this.server.listen(this.socketPath, () => {
-        logger('info', 'SourceCluster', `Source server listening at ${this.socketPath}`)
+        logger(
+          'info',
+          'SourceCluster',
+          `Source server listening at ${this.socketPath}`
+        )
         resolve()
       })
     })
 
-    const processCount = this.nodelink.options.cluster?.specializedSourceWorker?.count || 1
+    const processCount =
+      this.nodelink.options.cluster?.specializedSourceWorker?.count || 1
     cluster.setupPrimary({ exec: './src/sourceWorker.js' })
-    
+
     for (let i = 0; i < processCount; i++) {
       this._forkWorker()
     }
@@ -100,12 +110,16 @@ class SourceWorkerManager {
 
     cluster.on('exit', (worker, code, signal) => {
       if (worker.workerType !== 'source') return
-      
-      logger('warn', 'SourceCluster', `Source worker manager ${worker.process.pid} exited. Respawning...`)
+
+      logger(
+        'warn',
+        'SourceCluster',
+        `Source worker manager ${worker.process.pid} exited. Respawning...`
+      )
       const index = this.workers.indexOf(worker)
       if (index !== -1) this.workers.splice(index, 1)
       this.workerLoads.delete(worker.id)
-      
+
       cluster.setupPrimary({ exec: './src/sourceWorker.js' })
       this._forkWorker()
       cluster.setupPrimary({ exec: './src/index.js' })
@@ -116,7 +130,12 @@ class SourceWorkerManager {
     const worker = cluster.fork()
     worker.workerType = 'source'
     worker.on('message', (msg) => {
-      if (msg.type === 'ready') logger('info', 'SourceCluster', `Source worker manager ${msg.pid} ready`)
+      if (msg.type === 'ready')
+        logger(
+          'info',
+          'SourceCluster',
+          `Source worker manager ${msg.pid} ready`
+        )
     })
     this.workers.push(worker)
     this.workerLoads.set(worker.id, 0)
@@ -137,7 +156,7 @@ class SourceWorkerManager {
 
   delegate(req, res, task, payload, options = {}) {
     const id = crypto.randomBytes(16).toString('hex')
-    
+
     let bestWorker = null
     let minLoad = Number.POSITIVE_INFINITY
 
@@ -151,12 +170,24 @@ class SourceWorkerManager {
 
     if (!bestWorker) return false
 
-    const request = { req, res, timeout: null, workerId: bestWorker.id, options, cleaned: false }
+    const request = {
+      req,
+      res,
+      timeout: null,
+      workerId: bestWorker.id,
+      options,
+      cleaned: false
+    }
     request.timeout = setTimeout(() => {
       const activeRequest = this.requests.get(id)
       if (activeRequest) {
         res.writeHead(504, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Gateway Timeout', message: 'Source worker timed out' }))
+        res.end(
+          JSON.stringify({
+            error: 'Gateway Timeout',
+            message: 'Source worker timed out'
+          })
+        )
         this._cleanupRequest(id, activeRequest)
       }
     }, 60000)

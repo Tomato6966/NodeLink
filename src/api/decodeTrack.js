@@ -35,11 +35,11 @@ function handler(nodelink, req, res, sendResponse, parsedUrl) {
     logger('debug', 'Tracks', `Decoding track: ${encodedTrack}`)
     const decodedTrack = decodeTrack(encodedTrack)
     if (decodedTrack.details) {
-      decodedTrack.pluginInfo = { 
+      decodedTrack.pluginInfo = {
         ...decodedTrack.pluginInfo,
         details: decodedTrack.details
       }
-      
+
       delete decodedTrack.details
     }
     sendResponse(req, res, decodedTrack, 200)

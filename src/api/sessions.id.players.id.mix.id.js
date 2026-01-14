@@ -67,11 +67,7 @@ async function handleUpdateMix(req, res, sessionId, guildId, mixId, nodelink) {
       return sendErrorResponse(req, res, 500, 'Player manager not initialized')
     }
 
-    const updated = await session.players.updateMix(
-      guildId,
-      mixId,
-      body.volume
-    )
+    const updated = await session.players.updateMix(guildId, mixId, body.volume)
 
     if (!updated) {
       return sendErrorResponse(req, res, 404, 'Mix not found')

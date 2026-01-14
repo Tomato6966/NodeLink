@@ -27,10 +27,16 @@ export default class InstagramSource {
   async setup() {
     logger('info', 'Sources', 'Checking Instagram API parameters...')
 
-    const cachedConfig = this.nodelink.credentialManager.get('instagram_api_config')
+    const cachedConfig = this.nodelink.credentialManager.get(
+      'instagram_api_config'
+    )
     if (cachedConfig) {
       this.apiConfig = { ...this.apiConfig, ...cachedConfig }
-      logger('info', 'Sources', 'Loaded Instagram parameters from CredentialManager.')
+      logger(
+        'info',
+        'Sources',
+        'Loaded Instagram parameters from CredentialManager.'
+      )
       return true
     }
 
@@ -72,12 +78,16 @@ export default class InstagramSource {
       this.apiConfig.fbLsd = fbLsd
       if (docIdPost) this.apiConfig.docId_post = docIdPost
 
-      this.nodelink.credentialManager.set('instagram_api_config', {
-        csrfToken: this.apiConfig.csrfToken,
-        igAppId: this.apiConfig.igAppId,
-        fbLsd: this.apiConfig.fbLsd,
-        docId_post: this.apiConfig.docId_post
-      }, 24 * 60 * 60 * 1000)
+      this.nodelink.credentialManager.set(
+        'instagram_api_config',
+        {
+          csrfToken: this.apiConfig.csrfToken,
+          igAppId: this.apiConfig.igAppId,
+          fbLsd: this.apiConfig.fbLsd,
+          docId_post: this.apiConfig.docId_post
+        },
+        24 * 60 * 60 * 1000
+      )
 
       logger('info', 'Sources', 'Loaded Instagram source.')
       return true
@@ -298,7 +308,8 @@ export default class InstagramSource {
       return {
         data: null,
         exception: {
-          message: 'Invalid data structure in Audio API JSON response (no payload or metadata)',
+          message:
+            'Invalid data structure in Audio API JSON response (no payload or metadata)',
           severity: 'fault'
         }
       }
@@ -341,14 +352,16 @@ export default class InstagramSource {
       audioUrl = musicAsset?.progressive_download_url
 
       if (!audioUrl && musicConsumption?.dash_manifest) {
-        const urlMatch = musicConsumption.dash_manifest.match(/<BaseURL>(.*?)<\/BaseURL>/)
+        const urlMatch = musicConsumption.dash_manifest.match(
+          /<BaseURL>(.*?)<\/BaseURL>/
+        )
         if (urlMatch && urlMatch[1]) {
           audioUrl = urlMatch[1].replace(/&amp;/g, '&')
         }
       }
 
       if (!audioUrl) {
-         audioUrl = audioInfo.progressive_download_url
+        audioUrl = audioInfo.progressive_download_url
       }
 
       artist = musicAsset?.artist_name || 'User Unknown'

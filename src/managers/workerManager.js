@@ -53,13 +53,15 @@ export default class WorkerManager {
       cpuPenaltyLimit: config.cluster.scaling?.cpuPenaltyLimit || 0.85
     }
 
-    this.socketPath = os.platform() === 'win32'
-      ? `\\\\.\\pipe\\nodelink-events-${crypto.randomBytes(8).toString('hex')}`
-      : `/tmp/nodelink-events-${crypto.randomBytes(8).toString('hex')}.sock`
+    this.socketPath =
+      os.platform() === 'win32'
+        ? `\\\\.\\pipe\\nodelink-events-${crypto.randomBytes(8).toString('hex')}`
+        : `/tmp/nodelink-events-${crypto.randomBytes(8).toString('hex')}.sock`
     this.server = null
-    this.commandSocketPath = os.platform() === 'win32'
-      ? `\\\\.\\pipe\\nodelink-commands-${crypto.randomBytes(8).toString('hex')}`
-      : `/tmp/nodelink-commands-${crypto.randomBytes(8).toString('hex')}.sock`
+    this.commandSocketPath =
+      os.platform() === 'win32'
+        ? `\\\\.\\pipe\\nodelink-commands-${crypto.randomBytes(8).toString('hex')}`
+        : `/tmp/nodelink-commands-${crypto.randomBytes(8).toString('hex')}.sock`
     this.commandServer = null
     this.commandSockets = new Map()
 
@@ -78,7 +80,11 @@ export default class WorkerManager {
     cluster.on('exit', (worker, code, signal) => {
       if (worker.workerType !== 'playback') return
 
-      const isSystemSignal = signal === 'SIGINT' || signal === 'SIGTERM' || code === 130 || code === 143
+      const isSystemSignal =
+        signal === 'SIGINT' ||
+        signal === 'SIGTERM' ||
+        code === 130 ||
+        code === 143
       if (this.isDestroying || isSystemSignal) {
         const index = this.workers.indexOf(worker)
         if (index !== -1) this.workers.splice(index, 1)
@@ -109,7 +115,7 @@ export default class WorkerManager {
         logger('info', 'Cluster', 'Respawning worker...')
         const history = this.workerFailureHistory.get(worker.id)
         const delay = history ? Math.min(history.count * 1000, 30000) : 500
-        
+
         setTimeout(() => {
           this.forkWorker()
           if (global.nodelink?.statsManager) {
@@ -386,14 +392,23 @@ export default class WorkerManager {
 
           try {
             const data = JSON.parse(payload.toString('utf8'))
-            if (type === 3) { // playerEvent
-              if (global.nodelink) global.nodelink.handleIPCMessage({ type: 'playerEvent', payload: data })
-            } else if (type === 4) { // workerStats
+            if (type === 3) {
+              // playerEvent
+              if (global.nodelink)
+                global.nodelink.handleIPCMessage({
+                  type: 'playerEvent',
+                  payload: data
+                })
+            } else if (type === 4) {
+              // workerStats
               const workerId = data.workerId
               delete data.workerId
               this.statsUpdateBatch.set(workerId, data)
               if (!this.statsUpdateTimer) {
-                this.statsUpdateTimer = setTimeout(() => this._flushStatsUpdates(), 100)
+                this.statsUpdateTimer = setTimeout(
+                  () => this._flushStatsUpdates(),
+                  100
+                )
               }
             }
           } catch (e) {
@@ -408,7 +423,11 @@ export default class WorkerManager {
     })
 
     this.server.listen(this.socketPath, () => {
-      logger('info', 'Cluster', `Event socket server listening at ${this.socketPath}`)
+      logger(
+        'info',
+        'Cluster',
+        `Event socket server listening at ${this.socketPath}`
+      )
     })
   }
 
@@ -437,7 +456,11 @@ export default class WorkerManager {
               const pid = data?.pid
               if (pid) this._registerCommandSocket(pid, socket)
             } catch (e) {
-              logger('error', 'Cluster', `Command socket hello parse error: ${e.message}`)
+              logger(
+                'error',
+                'Cluster',
+                `Command socket hello parse error: ${e.message}`
+              )
             }
             continue
           }
@@ -474,7 +497,11 @@ export default class WorkerManager {
     })
 
     this.commandServer.listen(this.commandSocketPath, () => {
-      logger('info', 'Cluster', `Command socket server listening at ${this.commandSocketPath}`)
+      logger(
+        'info',
+        'Cluster',
+        `Command socket server listening at ${this.commandSocketPath}`
+      )
     })
   }
 
@@ -550,13 +577,15 @@ export default class WorkerManager {
 
     if (!request.res.headersSent) {
       request.res.writeHead(500, { 'Content-Type': 'application/json' })
-      request.res.end(JSON.stringify({
-        timestamp: Date.now(),
-        status: 500,
-        error: 'Worker Error',
-        message: errorMsg,
-        path: request.req.url
-      }))
+      request.res.end(
+        JSON.stringify({
+          timestamp: Date.now(),
+          status: 500,
+          error: 'Worker Error',
+          message: errorMsg,
+          path: request.req.url
+        })
+      )
     } else {
       request.res.end()
     }
@@ -592,13 +621,15 @@ export default class WorkerManager {
 
       if (!request.res.headersSent) {
         request.res.writeHead(500, { 'Content-Type': 'application/json' })
-        request.res.end(JSON.stringify({
-          timestamp: Date.now(),
-          status: 500,
-          error: 'Worker Error',
-          message: reason,
-          path: request.req.url
-        }))
+        request.res.end(
+          JSON.stringify({
+            timestamp: Date.now(),
+            status: 500,
+            error: 'Worker Error',
+            message: reason,
+            path: request.req.url
+          })
+        )
       } else {
         request.res.end()
       }
@@ -620,9 +651,15 @@ export default class WorkerManager {
   }
 
   _sendStreamCommand(worker, msg) {
-    if (!worker?.isConnected() && !this.commandSockets.has(worker.id)) return false
+    if (!worker?.isConnected() && !this.commandSockets.has(worker.id))
+      return false
     if (this.workerReady.has(worker.id)) {
-      return this._sendWorkerCommand(worker, msg.type, msg.requestId, msg.payload)
+      return this._sendWorkerCommand(
+        worker,
+        msg.type,
+        msg.requestId,
+        msg.payload
+      )
     }
 
     let attempts = 0
@@ -811,8 +848,8 @@ export default class WorkerManager {
         )
       }
     } else if (msg.type === 'ready' && worker.onSourceReady) {
-       // This part might be handled by SourceWorkerManager if integrated deeper, 
-       // but for now we keep WorkerManager clean of SourceWorker logic.
+      // This part might be handled by SourceWorkerManager if integrated deeper,
+      // but for now we keep WorkerManager clean of SourceWorker logic.
     } else if (global.nodelink) {
       global.nodelink.handleIPCMessage(msg)
     }
@@ -1069,13 +1106,15 @@ export default class WorkerManager {
       streamIds.push(streamId)
       if (!request.res.headersSent) {
         request.res.writeHead(503, { 'Content-Type': 'application/json' })
-        request.res.end(JSON.stringify({
-          timestamp: Date.now(),
-          status: 503,
-          error: 'Service Unavailable',
-          message: 'Server shutting down.',
-          path: request.req.url
-        }))
+        request.res.end(
+          JSON.stringify({
+            timestamp: Date.now(),
+            status: 503,
+            error: 'Service Unavailable',
+            message: 'Server shutting down.',
+            path: request.req.url
+          })
+        )
       } else {
         request.res.end()
       }
@@ -1124,7 +1163,12 @@ export default class WorkerManager {
       const activeRequest = this.streamRequests.get(streamId)
       if (activeRequest) {
         res.writeHead(504, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: 'Gateway Timeout', message: 'Stream worker timed out' }))
+        res.end(
+          JSON.stringify({
+            error: 'Gateway Timeout',
+            message: 'Stream worker timed out'
+          })
+        )
         this._cleanupStreamRequest(streamId, true)
       }
     }, 60000)
@@ -1256,23 +1300,29 @@ export default class WorkerManager {
         return
       }
 
-    if (!this.workerReady.has(worker.id)) {
-      logger(
-        'debug',
-        'Cluster',
-        `Waiting for worker ${worker.id} to be ready before sending ${type}`
-      )
-      let attempts = 0
-      const checkReady = setInterval(() => {
-        attempts++
-        if (this.workerReady.has(worker.id) || (!worker.isConnected() && !this.commandSockets.has(worker.id))) {
-          clearInterval(checkReady)
-          if (this.workerReady.has(worker.id) && (worker.isConnected() || this.commandSockets.has(worker.id))) {
-            if (!this._sendWorkerCommand(worker, type, requestId, payload)) {
-              clearTimeout(timeout)
-              this.pendingRequests.delete(requestId)
-              reject(new Error('No transport available for worker command'))
-            }
+      if (!this.workerReady.has(worker.id)) {
+        logger(
+          'debug',
+          'Cluster',
+          `Waiting for worker ${worker.id} to be ready before sending ${type}`
+        )
+        let attempts = 0
+        const checkReady = setInterval(() => {
+          attempts++
+          if (
+            this.workerReady.has(worker.id) ||
+            (!worker.isConnected() && !this.commandSockets.has(worker.id))
+          ) {
+            clearInterval(checkReady)
+            if (
+              this.workerReady.has(worker.id) &&
+              (worker.isConnected() || this.commandSockets.has(worker.id))
+            ) {
+              if (!this._sendWorkerCommand(worker, type, requestId, payload)) {
+                clearTimeout(timeout)
+                this.pendingRequests.delete(requestId)
+                reject(new Error('No transport available for worker command'))
+              }
             }
           } else if (attempts > 50) {
             clearInterval(checkReady)

@@ -28,13 +28,17 @@ export default class TelegramSource {
     embedUrl.searchParams.set('embed', '1')
 
     try {
-      const { body, error, statusCode } = await http1makeRequest(embedUrl.toString(), {
-        method: 'GET',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept-Encoding': 'identity'
+      const { body, error, statusCode } = await http1makeRequest(
+        embedUrl.toString(),
+        {
+          method: 'GET',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Encoding': 'identity'
+          }
         }
-      })
+      )
 
       if (error || statusCode !== 200) {
         return {
@@ -45,14 +49,24 @@ export default class TelegramSource {
         }
       }
 
-      const authorMatch = body.match(/class="tgme_widget_message_author[^>]*>[\s\S]*?<span dir="auto">([^<]+)<\/span>/)
+      const authorMatch = body.match(
+        /class="tgme_widget_message_author[^>]*>[\s\S]*?<span dir="auto">([^<]+)<\/span>/
+      )
       const author = authorMatch ? authorMatch[1].trim() : 'Telegram Channel'
 
-      const textMatch = body.match(/class="tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/)
-      const description = textMatch ? textMatch[1].replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '').trim() : ''
+      const textMatch = body.match(
+        /class="tgme_widget_message_text[^>]*>([\s\S]*?)<\/div>/
+      )
+      const description = textMatch
+        ? textMatch[1]
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<[^>]*>/g, '')
+            .trim()
+        : ''
       const title = description.split('\n')[0] || `Telegram Video ${msgId}`
 
-      const videoRegex = /<a class="tgme_widget_message_video_player([\s\S]*?)<\/time>/g
+      const videoRegex =
+        /<a class="tgme_widget_message_video_player([\s\S]*?)<\/time>/g
       const videoBlocks = [...body.matchAll(videoRegex)]
 
       if (videoBlocks.length === 0) {
@@ -62,22 +76,34 @@ export default class TelegramSource {
       const tracks = []
       for (const block of videoBlocks) {
         const content = block[0]
-        const videoUrlMatch = content.match(/<video[^>]+src="([^"]+)"/) 
+        const videoUrlMatch = content.match(/<video[^>]+src="([^"]+)"/)
         if (!videoUrlMatch) continue
 
         const videoUrl = videoUrlMatch[1]
-        
+
         let durationMs = 0
-        const durationMatch = content.match(/<time[^>]+duration[^>]*>([\d:]+)<\/time>/) || content.match(/class="tgme_widget_message_video_duration">([\d:]+)<\/time>/)
-        
+        const durationMatch =
+          content.match(/<time[^>]+duration[^>]*>([\d:]+)<\/time>/) ||
+          content.match(
+            /class="tgme_widget_message_video_duration">([\d:]+)<\/time>/
+          )
+
         if (durationMatch) {
           const durationStr = durationMatch[1]
           const durationParts = durationStr.split(':').map(Number)
-          if (durationParts.length === 2) durationMs = (durationParts[0] * 60 + durationParts[1]) * 1000
-          else if (durationParts.length === 3) durationMs = (durationParts[0] * 3600 + durationParts[1] * 60 + durationParts[2]) * 1000
+          if (durationParts.length === 2)
+            durationMs = (durationParts[0] * 60 + durationParts[1]) * 1000
+          else if (durationParts.length === 3)
+            durationMs =
+              (durationParts[0] * 3600 +
+                durationParts[1] * 60 +
+                durationParts[2]) *
+              1000
         }
 
-        const thumbMatch = content.match(/tgme_widget_message_video_thumb"[^>]+background-image:url\('([^']+)'\)/)
+        const thumbMatch = content.match(
+          /tgme_widget_message_video_thumb"[^>]+background-image:url\('([^']+)'\)/
+        )
         const artworkUrl = thumbMatch ? thumbMatch[1] : null
 
         const trackInfo = {
@@ -87,7 +113,10 @@ export default class TelegramSource {
           length: durationMs,
           isStream: false,
           position: 0,
-          title: tracks.length === 0 ? title : `${title} (Video ${tracks.length + 1})`,
+          title:
+            tracks.length === 0
+              ? title
+              : `${title} (Video ${tracks.length + 1})`,
           uri: url,
           artworkUrl,
           isrc: null,
@@ -104,7 +133,7 @@ export default class TelegramSource {
       }
 
       if (tracks.length === 0) return { loadType: 'empty', data: {} }
-      
+
       const isSingle = url.includes('?single') || url.includes('&single')
       if (isSingle && tracks.length > 0) {
         return { loadType: 'track', data: tracks[0] }
@@ -164,7 +193,7 @@ export default class TelegramSource {
       }
 
       const stream = new PassThrough()
-      
+
       response.stream.on('data', (chunk) => stream.write(chunk))
       response.stream.on('end', () => stream.emit('finishBuffering'))
       response.stream.on('error', (err) => stream.destroy(err))

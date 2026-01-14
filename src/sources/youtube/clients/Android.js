@@ -102,14 +102,17 @@ export default class Android extends BaseClient {
       }
 
       const tracks = []
-      const allSections = searchResult.contents?.sectionListRenderer?.contents || []
+      const allSections =
+        searchResult.contents?.sectionListRenderer?.contents || []
       let items = []
 
       for (const section of allSections) {
         let contents = section.itemSectionRenderer?.contents
         if (!contents) {
           const shelf = section.shelfRenderer || section.richShelfRenderer
-          contents = shelf?.content?.verticalListRenderer?.items || shelf?.content?.richGridRenderer?.contents
+          contents =
+            shelf?.content?.verticalListRenderer?.items ||
+            shelf?.content?.richGridRenderer?.contents
         }
 
         if (Array.isArray(contents)) {
@@ -131,9 +134,13 @@ export default class Android extends BaseClient {
       const maxResults = this.config.maxSearchResults || 10
       let count = 0
       const filteredItems = items.filter((item) => {
-        const isValid = item.videoRenderer || item.compactVideoRenderer ||
-                        item.playlistRenderer || item.compactPlaylistRenderer ||
-                        item.channelRenderer || item.elementRenderer
+        const isValid =
+          item.videoRenderer ||
+          item.compactVideoRenderer ||
+          item.playlistRenderer ||
+          item.compactPlaylistRenderer ||
+          item.channelRenderer ||
+          item.elementRenderer
         if (isValid && count < maxResults) {
           count++
           return true

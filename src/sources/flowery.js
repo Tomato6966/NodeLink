@@ -25,15 +25,25 @@ export default class FlowerySource {
       if (cachedVoices) {
         this.voiceMap = new Map(Object.entries(cachedVoices.voiceMap))
         this.defaultVoiceId = cachedVoices.defaultVoiceId
-        logger('debug', 'Flowery', `Loaded ${this.voiceMap.size} voices from CredentialManager.`)
+        logger(
+          'debug',
+          'Flowery',
+          `Loaded ${this.voiceMap.size} voices from CredentialManager.`
+        )
         return
       }
 
       const voicesEndpoint = 'https://api.flowery.pw/v1/tts/voices'
-      const { body, error, statusCode } = await makeRequest(voicesEndpoint, { method: 'GET' })
+      const { body, error, statusCode } = await makeRequest(voicesEndpoint, {
+        method: 'GET'
+      })
 
       if (error || statusCode !== 200 || !body || !Array.isArray(body.voices)) {
-        logger('error', 'Flowery', `Failed to fetch voices from ${voicesEndpoint}: ${error?.message || `Status ${statusCode}`}`)
+        logger(
+          'error',
+          'Flowery',
+          `Failed to fetch voices from ${voicesEndpoint}: ${error?.message || `Status ${statusCode}`}`
+        )
         return
       }
 
@@ -44,16 +54,28 @@ export default class FlowerySource {
 
       if (body.default?.id) {
         this.defaultVoiceId = body.default.id
-        logger('info', 'Flowery', `Default voice set to: ${body.default.name} (${body.default.id})`)
+        logger(
+          'info',
+          'Flowery',
+          `Default voice set to: ${body.default.name} (${body.default.id})`
+        )
       } else if (body.voices.length > 0) {
         this.defaultVoiceId = body.voices[0].id
-        logger('info', 'Flowery', `Using first available voice as default: ${body.voices[0].name} (${body.voices[0].id})`)
+        logger(
+          'info',
+          'Flowery',
+          `Using first available voice as default: ${body.voices[0].name} (${body.voices[0].id})`
+        )
       }
 
-      this.nodelink.credentialManager.set('flowery_voices', {
-        voiceMap: Object.fromEntries(this.voiceMap),
-        defaultVoiceId: this.defaultVoiceId
-      }, 24 * 60 * 60 * 1000)
+      this.nodelink.credentialManager.set(
+        'flowery_voices',
+        {
+          voiceMap: Object.fromEntries(this.voiceMap),
+          defaultVoiceId: this.defaultVoiceId
+        },
+        24 * 60 * 60 * 1000
+      )
 
       logger('debug', 'Flowery', `Fetched ${this.voiceMap.size} voices.`)
     } catch (e) {
@@ -94,7 +116,7 @@ export default class FlowerySource {
       if (url.startsWith('ftts://')) {
         const pathAndQuery = url.slice(7)
         const splitIdx = pathAndQuery.indexOf('?')
-        
+
         if (splitIdx !== -1) {
           text = decodeURIComponent(pathAndQuery.substring(0, splitIdx))
           const queryStr = pathAndQuery.substring(splitIdx + 1)
@@ -112,7 +134,7 @@ export default class FlowerySource {
       if (!text) return { loadType: 'empty', data: {} }
 
       const apiUrl = this._buildUrl(text, params)
-      
+
       const track = this.buildTrack({
         title: text.length > 50 ? `${text.substring(0, 47)}...` : text,
         author: 'Flowery TTS',
@@ -121,7 +143,6 @@ export default class FlowerySource {
       })
 
       return { loadType: 'track', data: track }
-
     } catch (e) {
       return {
         exception: { message: e.message, severity: 'fault', cause: 'Exception' }
@@ -144,23 +165,38 @@ export default class FlowerySource {
       if (overrides.silence !== undefined) silence = overrides.silence
       if (overrides.speed !== undefined) speed = overrides.speed
     }
-    
-    let voiceId = this.voiceMap.get(voiceName.toLowerCase()) || this.defaultVoiceId
+
+    let voiceId =
+      this.voiceMap.get(voiceName.toLowerCase()) || this.defaultVoiceId
 
     if (!voiceId) {
-      logger('warn', 'Flowery', `Voice "${voiceName}" not found and no default voice available. Using a fallback empty voice ID.`)
+      logger(
+        'warn',
+        'Flowery',
+        `Voice "${voiceName}" not found and no default voice available. Using a fallback empty voice ID.`
+      )
       voiceId = 'default' // Fallback to a generic 'default' if no ID is found
     }
 
     let audioFormat = 'mp3'
     const quality = this.nodelink.options.audio?.quality || 'high'
-    
+
     switch (quality) {
-      case 'high': audioFormat = 'wav'; break
-      case 'medium': audioFormat = 'flac'; break
-      case 'low': audioFormat = 'ogg_opus'; break
-      case 'lowest': audioFormat = 'mp3'; break
-      default: audioFormat = 'wav'; break
+      case 'high':
+        audioFormat = 'wav'
+        break
+      case 'medium':
+        audioFormat = 'flac'
+        break
+      case 'low':
+        audioFormat = 'ogg_opus'
+        break
+      case 'lowest':
+        audioFormat = 'mp3'
+        break
+      default:
+        audioFormat = 'wav'
+        break
     }
 
     const baseUrl = 'https://api.flowery.pw/v1/tts'

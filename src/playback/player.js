@@ -37,7 +37,12 @@ export class Player {
     this.position = 0
     this.connStatus = 'idle'
     this.connection = null
-    this.voice = { sessionId: null, token: null, endpoint: null, channelId: null }
+    this.voice = {
+      sessionId: null,
+      token: null,
+      endpoint: null,
+      channelId: null
+    }
     this.streamInfo = null
     this.lastManualReconnect = 0
     this.audioMixer = null

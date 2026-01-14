@@ -62,10 +62,16 @@ export default class SpotifySource {
   }
 
   async setup() {
-    this.accessToken = this.nodelink.credentialManager.get('spotify_access_token')
-    this.anonymousToken = this.nodelink.credentialManager.get('spotify_anonymous_token')
+    this.accessToken = this.nodelink.credentialManager.get(
+      'spotify_access_token'
+    )
+    this.anonymousToken = this.nodelink.credentialManager.get(
+      'spotify_anonymous_token'
+    )
 
-    const hasOfficialConfig = this.config.sources.spotify?.clientId && this.config.sources.spotify?.clientSecret
+    const hasOfficialConfig =
+      this.config.sources.spotify?.clientId &&
+      this.config.sources.spotify?.clientSecret
     const hasAnonymousConfig = this.config.sources.spotify?.externalAuthUrl
 
     const missingOfficial = hasOfficialConfig && !this.accessToken
@@ -149,9 +155,9 @@ export default class SpotifySource {
           const expiresMs = tokenData.accessTokenExpirationTimestampMs
             ? tokenData.accessTokenExpirationTimestampMs - Date.now()
             : 3600000
-          
+
           if (!this.accessToken) {
-             this.tokenExpiry = Date.now() + Math.max(expiresMs, 60000)
+            this.tokenExpiry = Date.now() + Math.max(expiresMs, 60000)
           }
 
           this.nodelink.credentialManager.set(
@@ -161,10 +167,18 @@ export default class SpotifySource {
           )
           success = true
         } else {
-           logger('warn', 'Spotify', `Failed to fetch anonymous token: ${statusCode}`)
+          logger(
+            'warn',
+            'Spotify',
+            `Failed to fetch anonymous token: ${statusCode}`
+          )
         }
       } catch (e) {
-        logger('error', 'Spotify', `Anonymous token refresh failed: ${e.message}`)
+        logger(
+          'error',
+          'Spotify',
+          `Anonymous token refresh failed: ${e.message}`
+        )
       }
     } else if (this.anonymousToken) {
       success = true
@@ -200,10 +214,18 @@ export default class SpotifySource {
           )
           success = true
         } else {
-           logger('error', 'Spotify', `Failed to refresh official token: ${statusCode}`)
+          logger(
+            'error',
+            'Spotify',
+            `Failed to refresh official token: ${statusCode}`
+          )
         }
       } catch (e) {
-        logger('error', 'Spotify', `Official token refresh failed: ${e.message}`)
+        logger(
+          'error',
+          'Spotify',
+          `Official token refresh failed: ${e.message}`
+        )
       }
     } else if (this.accessToken) {
       success = true
@@ -271,7 +293,7 @@ export default class SpotifySource {
     const token = this.anonymousToken || this.accessToken
 
     if (!token) {
-        throw new Error('No token available for internal API request.')
+      throw new Error('No token available for internal API request.')
     }
 
     try {
@@ -386,9 +408,13 @@ export default class SpotifySource {
         } catch (e) {
           attempts++
           if (attempts >= 3) {
-            logger('warn', 'Spotify', `Failed to fetch a batch of internal pages after 3 attempts: ${e.message}`)
+            logger(
+              'warn',
+              'Spotify',
+              `Failed to fetch a batch of internal pages after 3 attempts: ${e.message}`
+            )
           } else {
-            await new Promise(r => setTimeout(r, 1500))
+            await new Promise((r) => setTimeout(r, 1500))
           }
         }
       }
@@ -503,9 +529,13 @@ export default class SpotifySource {
         } catch (e) {
           attempts++
           if (attempts >= 3) {
-            logger('warn', 'Spotify', `Failed to fetch a batch of pages after 3 attempts: ${e.message}`)
+            logger(
+              'warn',
+              'Spotify',
+              `Failed to fetch a batch of pages after 3 attempts: ${e.message}`
+            )
           } else {
-            await new Promise(r => setTimeout(r, 1500))
+            await new Promise((r) => setTimeout(r, 1500))
           }
         }
       }
@@ -537,7 +567,10 @@ export default class SpotifySource {
           return { loadType: 'empty', data: {} }
         }
 
-        const results = this._processInternalSearchResults(data.searchV2, searchType)
+        const results = this._processInternalSearchResults(
+          data.searchV2,
+          searchType
+        )
         return results.length === 0
           ? { loadType: 'empty', data: {} }
           : { loadType: 'search', data: results }
@@ -582,16 +615,29 @@ export default class SpotifySource {
         let seed = query
 
         if (query.startsWith('mix:')) {
-          const mixMatch = query.match(/^mix:(track|artist|album|isrc):([^:]+)$/)
+          const mixMatch = query.match(
+            /^mix:(track|artist|album|isrc):([^:]+)$/
+          )
           if (mixMatch) {
             seedType = mixMatch[1]
             seed = mixMatch[2]
           }
         }
 
-        if (seedType === 'isrc' || (seedType === 'track' && (seed.includes(' ') || !/^[a-zA-Z0-9]{22}$/.test(seed)))) {
-          const searchResult = await this.search(seedType === 'isrc' ? `isrc:${seed}` : seed, 'spsearch', 'track')
-          if (searchResult.loadType === 'search' && searchResult.data.length > 0) {
+        if (
+          seedType === 'isrc' ||
+          (seedType === 'track' &&
+            (seed.includes(' ') || !/^[a-zA-Z0-9]{22}$/.test(seed)))
+        ) {
+          const searchResult = await this.search(
+            seedType === 'isrc' ? `isrc:${seed}` : seed,
+            'spsearch',
+            'track'
+          )
+          if (
+            searchResult.loadType === 'search' &&
+            searchResult.data.length > 0
+          ) {
             seed = searchResult.data[0].info.identifier
             seedType = 'track'
           } else {
@@ -618,12 +664,16 @@ export default class SpotifySource {
         if (query.startsWith('mix:')) return { loadType: 'empty', data: {} }
       }
 
-      const data = await this._apiRequest(`/recommendations?${query.includes('=') ? query : `seed_tracks=${query}`}`)
+      const data = await this._apiRequest(
+        `/recommendations?${query.includes('=') ? query : `seed_tracks=${query}`}`
+      )
       if (!data || !data.tracks || data.tracks.length === 0) {
         return { loadType: 'empty', data: {} }
       }
 
-      const tracks = data.tracks.map((item) => this._buildTrack(item)).filter(Boolean)
+      const tracks = data.tracks
+        .map((item) => this._buildTrack(item))
+        .filter(Boolean)
       return {
         loadType: 'playlist',
         data: {
@@ -734,7 +784,9 @@ export default class SpotifySource {
           identifier: item.id,
           isSeekable: true,
           isStream: false,
-          uri: item.external_urls?.spotify || `https://open.spotify.com/album/${item.id}`,
+          uri:
+            item.external_urls?.spotify ||
+            `https://open.spotify.com/album/${item.id}`,
           artworkUrl: item.images?.[0]?.url || null,
           isrc: null,
           sourceName: 'spotify',
@@ -756,7 +808,9 @@ export default class SpotifySource {
           identifier: item.id,
           isSeekable: true,
           isStream: false,
-          uri: item.external_urls?.spotify || `https://open.spotify.com/playlist/${item.id}`,
+          uri:
+            item.external_urls?.spotify ||
+            `https://open.spotify.com/playlist/${item.id}`,
           artworkUrl: item.images?.[0]?.url || null,
           isrc: null,
           sourceName: 'spotify',
@@ -778,7 +832,9 @@ export default class SpotifySource {
           identifier: item.id,
           isSeekable: false,
           isStream: false,
-          uri: item.external_urls?.spotify || `https://open.spotify.com/artist/${item.id}`,
+          uri:
+            item.external_urls?.spotify ||
+            `https://open.spotify.com/artist/${item.id}`,
           artworkUrl: item.images?.[0]?.url || null,
           isrc: null,
           sourceName: 'spotify',
@@ -1109,12 +1165,18 @@ export default class SpotifySource {
   async getTrackUrl(decodedTrack) {
     if (!decodedTrack.isrc && this.accessToken) {
       try {
-        const trackData = await this._apiRequest(`/tracks/${decodedTrack.identifier}?market=${this.market}`)
+        const trackData = await this._apiRequest(
+          `/tracks/${decodedTrack.identifier}?market=${this.market}`
+        )
         if (trackData?.external_ids?.isrc) {
           decodedTrack.isrc = trackData.external_ids.isrc
         }
       } catch (e) {
-        logger('debug', 'Spotify', `Failed to fetch ISRC for ${decodedTrack.identifier} via API: ${e.message}`)
+        logger(
+          'debug',
+          'Spotify',
+          `Failed to fetch ISRC for ${decodedTrack.identifier} via API: ${e.message}`
+        )
       }
     }
 
@@ -1133,19 +1195,35 @@ export default class SpotifySource {
     try {
       let searchResult
       if (decodedTrack.isrc) {
-        searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch')
-        if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
-          searchResult = await this.nodelink.sources.search('youtube', searchQuery, 'ytmsearch')
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          `"${decodedTrack.isrc}"`,
+          'ytmsearch'
+        )
+        if (
+          searchResult.loadType !== 'search' ||
+          searchResult.data.length === 0
+        ) {
+          searchResult = await this.nodelink.sources.search(
+            'youtube',
+            searchQuery,
+            'ytmsearch'
+          )
         }
       } else {
-        searchResult = await this.nodelink.sources.search('youtube', searchQuery, 'ytmsearch')
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          searchQuery,
+          'ytmsearch'
+        )
       }
 
       if (
         searchResult.loadType !== 'search' ||
         searchResult.data.length === 0
       ) {
-        searchResult = await this.nodelink.sources.searchWithDefault(searchQuery)
+        searchResult =
+          await this.nodelink.sources.searchWithDefault(searchQuery)
       }
 
       if (
@@ -1176,7 +1254,11 @@ export default class SpotifySource {
       const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
       return { newTrack: bestMatch, ...streamInfo }
     } catch (e) {
-      logger('warn', 'Spotify', `Search for "${searchQuery}" failed: ${e.message}`)
+      logger(
+        'warn',
+        'Spotify',
+        `Search for "${searchQuery}" failed: ${e.message}`
+      )
       return { exception: { message: e.message, severity: 'fault' } }
     }
   }

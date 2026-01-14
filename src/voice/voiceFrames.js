@@ -48,15 +48,7 @@ function buildVoiceFrame(
 
   const payloadBuf = payload && payload.length ? payload : EMPTY_BUFFER
   const totalLength =
-    1 +
-    1 +
-    1 +
-    guildBuf.length +
-    1 +
-    userBuf.length +
-    4 +
-    4 +
-    payloadBuf.length
+    1 + 1 + 1 + guildBuf.length + 1 + userBuf.length + 4 + 4 + payloadBuf.length
 
   const buf = Buffer.allocUnsafe(totalLength)
   let offset = 0

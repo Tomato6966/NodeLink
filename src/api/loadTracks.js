@@ -27,7 +27,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const identifier = result.identifier
   logger('debug', 'Tracks', `Loading tracks with identifier: "${identifier}"`)
 
-  const re = /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>(?![A-Z]:\\)[A-Za-z0-9]+):(?<query>(?!\/\/).+)|(?<local>(?:\/|[A-Z]:\\|\\).+))$/i
+  const re =
+    /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>(?![A-Z]:\\)[A-Za-z0-9]+):(?<query>(?!\/\/).+)|(?<local>(?:\/|[A-Z]:\\|\\).+))$/i
   const match = re.exec(identifier)
 
   let url, source, query
@@ -64,7 +65,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         payload = { source, query }
       }
 
-      const delegated = nodelink.sourceWorkerManager.delegate(req, res, task, payload)
+      const delegated = nodelink.sourceWorkerManager.delegate(
+        req,
+        res,
+        task,
+        payload
+      )
       if (delegated) return
     }
 

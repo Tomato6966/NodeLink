@@ -162,7 +162,7 @@ class NodelinkServer extends EventEmitter {
     this.sessions = new sessionManager(this, PlayerManagerClass)
     this.sources = null
     this.lyrics = null
-    
+
     this._sourceInitPromise = this._initSources(isClusterPrimary, options)
 
     this.routePlanner = new routePlannerManager(this)
@@ -172,7 +172,10 @@ class NodelinkServer extends EventEmitter {
     this.rateLimitManager = new RateLimitManager(this)
     this.dosProtectionManager = new DosProtectionManager(this)
     this.pluginManager = new PluginManager(this)
-    this.sourceWorkerManager = (isClusterPrimary && options.cluster?.specializedSourceWorker?.enabled) ? new SourceWorkerManager(this) : null
+    this.sourceWorkerManager =
+      isClusterPrimary && options.cluster?.specializedSourceWorker?.enabled
+        ? new SourceWorkerManager(this)
+        : null
     this.registry = registry
     this.version = getVersion()
     this.gitInfo = getGitInfo()
@@ -221,10 +224,11 @@ class NodelinkServer extends EventEmitter {
 
   async _initSources(isClusterPrimary, options) {
     if (!isClusterPrimary) {
-      const [{ default: sourceMan }, { default: lyricsMan }] = await Promise.all([
-        import('./managers/sourceManager.js'),
-        import('./managers/lyricsManager.js')
-      ])
+      const [{ default: sourceMan }, { default: lyricsMan }] =
+        await Promise.all([
+          import('./managers/sourceManager.js'),
+          import('./managers/lyricsManager.js')
+        ])
       this.sources = new sourceMan(this)
       this.lyrics = new lyricsMan(this)
     }
@@ -402,7 +406,10 @@ class NodelinkServer extends EventEmitter {
       'key or array of keys of enabled sources in config.sources',
       (v) => {
         const sources = Array.isArray(v) ? v : [v]
-        return sources.every((s) => typeof s === 'string' && Boolean(this.options.sources?.[s]?.enabled))
+        return sources.every(
+          (s) =>
+            typeof s === 'string' && Boolean(this.options.sources?.[s]?.enabled)
+        )
       }
     )
 
@@ -1402,7 +1409,7 @@ class NodelinkServer extends EventEmitter {
 
     await this.credentialManager.load()
     await this.statsManager.initialize()
-    
+
     // Ensure sources are initialized before proceeding
     if (this._sourceInitPromise) await this._sourceInitPromise
 

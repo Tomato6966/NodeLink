@@ -242,24 +242,26 @@ async function _manageYoutubeHlsStream(
           let retryCount = 0
           let success = false
           while (retryCount < 3 && !cancelSignal.aborted) {
-             retryCount++
-             const retryRes = await http1makeRequest(segmentUrl, { streamOnly: true })
-             if (!retryRes.error && retryRes.statusCode === 200) {
-                res = retryRes
-                success = true
-                break
-             }
-             if (retryRes.stream) retryRes.stream.destroy()
-             await new Promise(r => setTimeout(r, 500 * retryCount))
+            retryCount++
+            const retryRes = await http1makeRequest(segmentUrl, {
+              streamOnly: true
+            })
+            if (!retryRes.error && retryRes.statusCode === 200) {
+              res = retryRes
+              success = true
+              break
+            }
+            if (retryRes.stream) retryRes.stream.destroy()
+            await new Promise((r) => setTimeout(r, 500 * retryCount))
           }
 
           if (!success) {
-             logger(
-               'warn',
-               'YouTube-HLS-Downloader',
-               `Failed segment after retries: ${res.statusCode}`
-             )
-             continue
+            logger(
+              'warn',
+              'YouTube-HLS-Downloader',
+              `Failed segment after retries: ${res.statusCode}`
+            )
+            continue
           }
         }
 
@@ -466,13 +468,20 @@ export default class YouTubeSource {
   }
 
   async _fetchVisitorData() {
-    const cachedVisitorData = this.nodelink.credentialManager.get('yt_visitor_data')
-    const cachedPlayerScript = this.nodelink.credentialManager.get('yt_player_script_url')
+    const cachedVisitorData =
+      this.nodelink.credentialManager.get('yt_visitor_data')
+    const cachedPlayerScript = this.nodelink.credentialManager.get(
+      'yt_player_script_url'
+    )
 
     if (cachedVisitorData && cachedPlayerScript) {
       this.ytContext.client.visitorData = cachedVisitorData
       this.cipherManager.setPlayerScriptUrl(cachedPlayerScript)
-      logger('debug', 'YouTube', 'Context and player script loaded from cache. Skipping network request.')
+      logger(
+        'debug',
+        'YouTube',
+        'Context and player script loaded from cache. Skipping network request.'
+      )
       return
     }
 
@@ -491,7 +500,11 @@ export default class YouTubeSource {
         const visitorMatch = data?.match(/"VISITOR_DATA":"([^"]+)"/)
         if (visitorMatch?.[1]) {
           this.ytContext.client.visitorData = visitorMatch[1]
-          this.nodelink.credentialManager.set('yt_visitor_data', visitorMatch[1], 24 * 60 * 60 * 1000)
+          this.nodelink.credentialManager.set(
+            'yt_visitor_data',
+            visitorMatch[1],
+            24 * 60 * 60 * 1000
+          )
           visitorFound = true
         }
 
@@ -501,7 +514,11 @@ export default class YouTubeSource {
             /\/[a-z]{2}_[A-Z]{2}\//,
             '/en_US/'
           )
-          this.nodelink.credentialManager.set('yt_player_script_url', playerScriptUrl, 12 * 60 * 60 * 1000)
+          this.nodelink.credentialManager.set(
+            'yt_player_script_url',
+            playerScriptUrl,
+            12 * 60 * 60 * 1000
+          )
           logger('debug', 'YouTube', `Player script URL: ${playerScriptUrl}`)
         }
       }
@@ -622,30 +639,57 @@ export default class YouTubeSource {
 
       if (this.clients.Music) {
         try {
-          automixRes = await this.clients.Music.resolve(`https://music.youtube.com/playlist?list=${automixId}`, 'ytmusic', this.ytContext, this.cipherManager)
+          automixRes = await this.clients.Music.resolve(
+            `https://music.youtube.com/playlist?list=${automixId}`,
+            'ytmusic',
+            this.ytContext,
+            this.cipherManager
+          )
         } catch (e) {
-          logger('debug', 'YouTube', `Music client failed for recommendations: ${e.message}`)
+          logger(
+            'debug',
+            'YouTube',
+            `Music client failed for recommendations: ${e.message}`
+          )
         }
       }
 
-      if ((!automixRes || automixRes.loadType !== 'playlist') && this.clients.TV) {
+      if (
+        (!automixRes || automixRes.loadType !== 'playlist') &&
+        this.clients.TV
+      ) {
         try {
-          automixRes = await this.clients.TV.resolve(`https://www.youtube.com/playlist?list=${automixId}`, 'youtube', this.ytContext, this.cipherManager)
+          automixRes = await this.clients.TV.resolve(
+            `https://www.youtube.com/playlist?list=${automixId}`,
+            'youtube',
+            this.ytContext,
+            this.cipherManager
+          )
         } catch (e) {
-          logger('debug', 'YouTube', `TV client failed for recommendations: ${e.message}`)
+          logger(
+            'debug',
+            'YouTube',
+            `TV client failed for recommendations: ${e.message}`
+          )
         }
       }
-      
-      if (automixRes && automixRes.loadType === 'playlist' && automixRes.data.tracks.length > 0) {
-          const tracks = automixRes.data.tracks.filter(t => t.info.identifier !== videoId)
-          return {
-            loadType: 'playlist',
-            data: {
-              info: { name: 'YouTube Recommendations', selectedTrack: 0 },
-              pluginInfo: { type: 'recommendations' },
-              tracks
-            }
+
+      if (
+        automixRes &&
+        automixRes.loadType === 'playlist' &&
+        automixRes.data.tracks.length > 0
+      ) {
+        const tracks = automixRes.data.tracks.filter(
+          (t) => t.info.identifier !== videoId
+        )
+        return {
+          loadType: 'playlist',
+          data: {
+            info: { name: 'YouTube Recommendations', selectedTrack: 0 },
+            pluginInfo: { type: 'recommendations' },
+            tracks
           }
+        }
       }
 
       return { loadType: 'empty', data: {} }

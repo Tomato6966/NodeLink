@@ -15,7 +15,7 @@ export default class RoutePlannerManager {
   }
 
   _ipToBigInt(ip) {
-    if (ip.includes(':')) { 
+    if (ip.includes(':')) {
       const parts = ip.split(':')
       let fullParts = []
       for (let i = 0; i < parts.length; i++) {
@@ -27,8 +27,10 @@ export default class RoutePlannerManager {
         }
       }
       return BigInt('0x' + fullParts.join(''))
-    } else { 
-      return BigInt(ip.split('.').reduce((acc, oct) => (acc << 8n) + BigInt(oct), 0n))
+    } else {
+      return BigInt(
+        ip.split('.').reduce((acc, oct) => (acc << 8n) + BigInt(oct), 0n)
+      )
     }
   }
 
@@ -57,9 +59,10 @@ export default class RoutePlannerManager {
         const maskLength = parseInt(maskLengthStr, 10)
         const isIpv6 = baseIp.includes(':')
         const totalBits = isIpv6 ? 128n : 32n
-        
+
         const baseInt = this._ipToBigInt(baseIp)
-        const mask = ((1n << BigInt(maskLength)) - 1n) << (totalBits - BigInt(maskLength))
+        const mask =
+          ((1n << BigInt(maskLength)) - 1n) << (totalBits - BigInt(maskLength))
         const networkInt = baseInt & mask
         const size = 1n << (totalBits - BigInt(maskLength))
 
@@ -71,10 +74,18 @@ export default class RoutePlannerManager {
           isIpv6
         })
       } catch (e) {
-        logger('error', 'RoutePlanner', `Failed to parse block ${blockConfig.cidr}: ${e.message}`)
+        logger(
+          'error',
+          'RoutePlanner',
+          `Failed to parse block ${blockConfig.cidr}: ${e.message}`
+        )
       }
     }
-    logger('info', 'RoutePlanner', `Initialized with ${this.blocks.length} IP blocks.`)
+    logger(
+      'info',
+      'RoutePlanner',
+      `Initialized with ${this.blocks.length} IP blocks.`
+    )
   }
 
   getIP() {
@@ -97,10 +108,15 @@ export default class RoutePlannerManager {
     const startBlockIdx = this.lastUsedBlockIndex
 
     for (let i = 0; i < this.blocks.length; i++) {
-      this.lastUsedBlockIndex = (this.lastUsedBlockIndex + 1) % this.blocks.length
+      this.lastUsedBlockIndex =
+        (this.lastUsedBlockIndex + 1) % this.blocks.length
       const block = this.blocks[this.lastUsedBlockIndex]
 
-      if (this.bannedBlocks.has(block.cidr) && now < this.bannedBlocks.get(block.cidr)) continue
+      if (
+        this.bannedBlocks.has(block.cidr) &&
+        now < this.bannedBlocks.get(block.cidr)
+      )
+        continue
 
       for (let attempt = 0; attempt < 10; attempt++) {
         block.lastUsedOffset = (block.lastUsedOffset + 1n) % block.size
@@ -118,13 +134,26 @@ export default class RoutePlannerManager {
 
   _getRandomIp() {
     const now = Date.now()
-    const availableBlocks = this.blocks.filter(b => !this.bannedBlocks.has(b.cidr) || now > this.bannedBlocks.get(b.cidr))
-    
+    const availableBlocks = this.blocks.filter(
+      (b) =>
+        !this.bannedBlocks.has(b.cidr) || now > this.bannedBlocks.get(b.cidr)
+    )
+
     if (availableBlocks.length === 0) return null
 
-    const block = availableBlocks[Math.floor(Math.random() * availableBlocks.length)]
-    
-    const randomOffset = BigInt(Math.floor(Math.random() * Number(block.size > BigInt(Number.MAX_SAFE_INTEGER) ? Number.MAX_SAFE_INTEGER : block.size)))
+    const block =
+      availableBlocks[Math.floor(Math.random() * availableBlocks.length)]
+
+    const randomOffset = BigInt(
+      Math.floor(
+        Math.random() *
+          Number(
+            block.size > BigInt(Number.MAX_SAFE_INTEGER)
+              ? Number.MAX_SAFE_INTEGER
+              : block.size
+          )
+      )
+    )
     const ipInt = block.networkInt + randomOffset
     return this._bigIntToIp(ipInt, block.isIpv6)
   }
@@ -134,9 +163,9 @@ export default class RoutePlannerManager {
     const cooldown = this.config.bannedIpCooldown || 600000
     const now = Date.now()
     this.bannedIps.set(ip, now + cooldown)
-    
+
     // Check if we should ban the whole block (if many IPs are failing)
-    const block = this.blocks.find(b => {
+    const block = this.blocks.find((b) => {
       const ipInt = this._ipToBigInt(ip)
       return ipInt >= b.networkInt && ipInt < b.networkInt + b.size
     })
@@ -145,14 +174,21 @@ export default class RoutePlannerManager {
       let failedInBlock = 0
       for (const bannedIp of this.bannedIps.keys()) {
         const bIpInt = this._ipToBigInt(bannedIp)
-        if (bIpInt >= block.networkInt && bIpInt < block.networkInt + block.size) {
+        if (
+          bIpInt >= block.networkInt &&
+          bIpInt < block.networkInt + block.size
+        ) {
           failedInBlock++
         }
       }
 
       if (failedInBlock >= 5) {
         this.bannedBlocks.set(block.cidr, now + cooldown * 2)
-        logger('warn', 'RoutePlanner', `Banning Block: ${block.cidr} due to multiple failures.`)
+        logger(
+          'warn',
+          'RoutePlanner',
+          `Banning Block: ${block.cidr} due to multiple failures.`
+        )
       }
     }
 

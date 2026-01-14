@@ -191,7 +191,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         await session.players.create(guildId)
 
         if (payload.voice) {
-          const { endpoint, token, sessionId: voiceSessionId, channelId } = payload.voice
+          const {
+            endpoint,
+            token,
+            sessionId: voiceSessionId,
+            channelId
+          } = payload.voice
           const currentPlayer = session.players.get(guildId)
           if (
             currentPlayer &&
@@ -256,7 +261,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               trackToPlay = {
                 encoded: trackPayload.encoded,
                 info: decodedTrack.info,
-                audioTrackId: trackPayload.language || trackPayload.audioTrackId || null
+                audioTrackId:
+                  trackPayload.language || trackPayload.audioTrackId || null
               }
             }
           } else if (trackPayload.identifier) {
@@ -288,7 +294,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               trackToPlay = {
                 encoded: loadResult.data.encoded,
                 info: loadResult.data.info,
-                audioTrackId: trackPayload.language || trackPayload.audioTrackId || null
+                audioTrackId:
+                  trackPayload.language || trackPayload.audioTrackId || null
               }
             } else {
               const message =

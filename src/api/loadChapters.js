@@ -43,7 +43,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       )
     }
 
-    if (decodedTrack.info.sourceName !== 'youtube' && decodedTrack.info.sourceName !== 'ytmusic') {
+    if (
+      decodedTrack.info.sourceName !== 'youtube' &&
+      decodedTrack.info.sourceName !== 'ytmusic'
+    ) {
       return sendResponse(req, res, [], 200)
     }
 
@@ -56,9 +59,13 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     let chaptersData
     if (nodelink.workerManager) {
       const worker = nodelink.workerManager.getBestWorker()
-      chaptersData = await nodelink.workerManager.execute(worker, 'loadChapters', {
-        decodedTrack
-      })
+      chaptersData = await nodelink.workerManager.execute(
+        worker,
+        'loadChapters',
+        {
+          decodedTrack
+        }
+      )
     } else {
       chaptersData = await nodelink.sources.getChapters(decodedTrack)
     }

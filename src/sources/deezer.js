@@ -26,14 +26,20 @@ export default class DeezerSource {
     logger('info', 'Sources', 'Initializing Deezer source...')
 
     const cachedCsrf = this.nodelink.credentialManager.get('deezer_csrf_token')
-    const cachedLicense = this.nodelink.credentialManager.get('deezer_license_token')
+    const cachedLicense = this.nodelink.credentialManager.get(
+      'deezer_license_token'
+    )
     const cachedCookie = this.nodelink.credentialManager.get('deezer_cookie')
 
     if (cachedCsrf && cachedLicense && cachedCookie) {
       this.csrfToken = cachedCsrf
       this.licenseToken = cachedLicense
       this.cookie = cachedCookie
-      logger('info', 'Sources', 'Loaded Deezer credentials from CredentialManager.')
+      logger(
+        'info',
+        'Sources',
+        'Loaded Deezer credentials from CredentialManager.'
+      )
       return true
     }
 
@@ -71,9 +77,21 @@ export default class DeezerSource {
       this.csrfToken = userDataRes.body.results.checkForm
       this.licenseToken = userDataRes.body.results.USER.OPTIONS.license_token
 
-      this.nodelink.credentialManager.set('deezer_csrf_token', this.csrfToken, 24 * 60 * 60 * 1000)
-      this.nodelink.credentialManager.set('deezer_license_token', this.licenseToken, 24 * 60 * 60 * 1000)
-      this.nodelink.credentialManager.set('deezer_cookie', this.cookie, 24 * 60 * 60 * 1000)
+      this.nodelink.credentialManager.set(
+        'deezer_csrf_token',
+        this.csrfToken,
+        24 * 60 * 60 * 1000
+      )
+      this.nodelink.credentialManager.set(
+        'deezer_license_token',
+        this.licenseToken,
+        24 * 60 * 60 * 1000
+      )
+      this.nodelink.credentialManager.set(
+        'deezer_cookie',
+        this.cookie,
+        24 * 60 * 60 * 1000
+      )
 
       if (!this.csrfToken || !this.licenseToken) {
         throw new Error('CSRF Token or License Token not found in response.')
@@ -333,13 +351,28 @@ export default class DeezerSource {
   async getTrackUrl(decodedTrack) {
     let searchResult
     if (decodedTrack.isrc) {
-      searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch')
-      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
-        searchResult = await this.nodelink.sources.search('youtube', `${decodedTrack.title} ${decodedTrack.author}`, 'ytmsearch')
+      searchResult = await this.nodelink.sources.search(
+        'youtube',
+        `"${decodedTrack.isrc}"`,
+        'ytmsearch'
+      )
+      if (
+        searchResult.loadType !== 'search' ||
+        searchResult.data.length === 0
+      ) {
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          `${decodedTrack.title} ${decodedTrack.author}`,
+          'ytmsearch'
+        )
       }
     }
 
-    if (!searchResult || searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+    if (
+      !searchResult ||
+      searchResult.loadType !== 'search' ||
+      searchResult.data.length === 0
+    ) {
       const { body: trackData } = await makeRequest(
         `https://www.deezer.com/ajax/gw-light.php?method=song.getListData&input=3&api_version=1.0&api_token=${this.csrfToken}`,
         {
@@ -382,7 +415,10 @@ export default class DeezerSource {
 
       if (streamData.error || !streamData?.data[0]?.media[0]?.sources[0]?.url) {
         return {
-          exception: { message: 'Could not get stream URL.', severity: 'common' }
+          exception: {
+            message: 'Could not get stream URL.',
+            severity: 'common'
+          }
         }
       }
 
@@ -396,7 +432,13 @@ export default class DeezerSource {
     }
 
     const bestMatch = getBestMatch(searchResult.data, decodedTrack)
-    if (!bestMatch) return { exception: { message: 'No suitable alternative found.', severity: 'fault' } }
+    if (!bestMatch)
+      return {
+        exception: {
+          message: 'No suitable alternative found.',
+          severity: 'fault'
+        }
+      }
 
     const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
     return { newTrack: bestMatch, ...streamInfo }

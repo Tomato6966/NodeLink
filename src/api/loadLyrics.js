@@ -58,10 +58,15 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
 
     if (nodelink.sourceWorkerManager) {
-      const delegated = nodelink.sourceWorkerManager.delegate(req, res, 'loadLyrics', {
-        encodedTrack,
-        language
-      })
+      const delegated = nodelink.sourceWorkerManager.delegate(
+        req,
+        res,
+        'loadLyrics',
+        {
+          encodedTrack,
+          language
+        }
+      )
       if (delegated) return
     }
 

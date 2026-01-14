@@ -1,4 +1,9 @@
-import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.js'
+import {
+  encodeTrack,
+  http1makeRequest,
+  logger,
+  getBestMatch
+} from '../utils.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -55,7 +60,11 @@ export default class TidalSource {
       if (token) {
         this.token = token
         logger('info', 'Tidal', 'Fetched new token.')
-        this.nodelink.credentialManager.set('tidal_token', token, CACHE_VALIDITY_DAYS * 24 * 60 * 60 * 1000)
+        this.nodelink.credentialManager.set(
+          'tidal_token',
+          token,
+          CACHE_VALIDITY_DAYS * 24 * 60 * 60 * 1000
+        )
       } else {
         logger('warn', 'Tidal', 'No clientId found in remote asset')
       }
@@ -254,7 +263,9 @@ export default class TidalSource {
       const data = await this._getJson(`mixes/${mixId}/items`, { limit: 100 })
       if (!data?.items?.length) return { loadType: 'empty', data: {} }
 
-      const tracks = data.items.map(item => this._parseTrack(item.item || item)).filter(Boolean)
+      const tracks = data.items
+        .map((item) => this._parseTrack(item.item || item))
+        .filter(Boolean)
       return {
         loadType: 'playlist',
         data: {
@@ -298,17 +309,31 @@ export default class TidalSource {
       let searchResult
 
       if (decodedTrack.isrc) {
-        searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch')
-        if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          `"${decodedTrack.isrc}"`,
+          'ytmsearch'
+        )
+        if (
+          searchResult.loadType !== 'search' ||
+          searchResult.data.length === 0
+        ) {
           searchResult = null
         }
       }
 
       if (!searchResult) {
-        searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          query,
+          'ytmsearch'
+        )
       }
 
-      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+      if (
+        searchResult.loadType !== 'search' ||
+        searchResult.data.length === 0
+      ) {
         searchResult = await this.nodelink.sources.searchWithDefault(query)
       }
 

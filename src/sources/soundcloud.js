@@ -11,7 +11,8 @@ import {
 const BASE_URL = 'https://api-v2.soundcloud.com'
 const SOUNDCLOUD_URL = 'https://soundcloud.com'
 const ASSET_PATTERN = /https:\/\/a-v2\.sndcdn\.com\/assets\/[a-zA-Z0-9-]+\.js/g
-const CLIENT_ID_PATTERN = /(?:[?&/]?(?:client_id)[\s:=&]*"?|"data":{"id":")([A-Za-z0-9]{32})"?/
+const CLIENT_ID_PATTERN =
+  /(?:[?&/]?(?:client_id)[\s:=&]*"?|"data":{"id":")([A-Za-z0-9]{32})"?/
 const TRACK_PATTERN =
   /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:sets\/)?[^/\s]+$/
 const SEARCH_URL_PATTERN =
@@ -73,11 +74,15 @@ export default class SoundCloudSource {
       /**
        * @type {string | undefined}
        */
-      let clientId;
+      let clientId
 
-      if(mainPage.body?.match(CLIENT_ID_PATTERN)) {
+      if (mainPage.body?.match(CLIENT_ID_PATTERN)) {
         clientId = mainPage.body.match(CLIENT_ID_PATTERN)[1]
-        logger('debug', 'Sources', `SoundCloud client_id (${clientId}) Found from main page`)
+        logger(
+          'debug',
+          'Sources',
+          `SoundCloud client_id (${clientId}) Found from main page`
+        )
       }
 
       try {
@@ -94,7 +99,7 @@ export default class SoundCloudSource {
             assetMatches.map(async (match) => {
               const assetUrl = match[0]
               const asset = await http1makeRequest(assetUrl)
-              
+
               if (asset && !asset.error) {
                 const idMatch = asset.body.match(CLIENT_ID_PATTERN)
                 if (idMatch?.[1]) {

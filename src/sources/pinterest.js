@@ -21,12 +21,14 @@ export default class PinterestSource {
 
     const videoId = match[1]
     try {
-      const apiUrl = `https://www.pinterest.com/resource/PinResource/get/?data=${encodeURIComponent(JSON.stringify({
-        options: {
-          field_set_key: 'unauth_react_main_pin',
-          id: videoId
-        }
-      }))}`
+      const apiUrl = `https://www.pinterest.com/resource/PinResource/get/?data=${encodeURIComponent(
+        JSON.stringify({
+          options: {
+            field_set_key: 'unauth_react_main_pin',
+            id: videoId
+          }
+        })
+      )}`
 
       const { body, statusCode } = await http1makeRequest(apiUrl, {
         headers: { 'X-Pinterest-PWS-Handler': 'www/[username].js' }
@@ -37,17 +39,29 @@ export default class PinterestSource {
       }
 
       const data = body.resource_response.data
-      const videoList = data.videos?.video_list || (data.story_pin_data?.pages?.[0]?.blocks?.find(b => b.video?.video_list)?.video?.video_list)
+      const videoList =
+        data.videos?.video_list ||
+        data.story_pin_data?.pages?.[0]?.blocks?.find(
+          (b) => b.video?.video_list
+        )?.video?.video_list
 
       if (!videoList) return { loadType: 'empty', data: {} }
 
-      const bestFormat = videoList.V_720P || videoList.V_540P || videoList.V_360P || Object.values(videoList)[0]
-      const artwork = data.images?.orig?.url || Object.values(data.images || {})[0]?.url
+      const bestFormat =
+        videoList.V_720P ||
+        videoList.V_540P ||
+        videoList.V_360P ||
+        Object.values(videoList)[0]
+      const artwork =
+        data.images?.orig?.url || Object.values(data.images || {})[0]?.url
 
       const trackInfo = {
         identifier: videoId,
         isSeekable: true,
-        author: data.closeup_attribution?.full_name || data.pinner?.full_name || 'Unknown Artist',
+        author:
+          data.closeup_attribution?.full_name ||
+          data.pinner?.full_name ||
+          'Unknown Artist',
         length: Math.round(bestFormat.duration) || 0,
         isStream: false,
         position: 0,
@@ -64,19 +78,24 @@ export default class PinterestSource {
       }
     } catch (e) {
       logger('error', 'Pinterest', `Resolution failed: ${e.message}`)
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 
   async getTrackUrl(decodedTrack) {
     const videoId = decodedTrack.identifier
     try {
-      const apiUrl = `https://www.pinterest.com/resource/PinResource/get/?data=${encodeURIComponent(JSON.stringify({
-        options: {
-          field_set_key: 'unauth_react_main_pin',
-          id: videoId
-        }
-      }))}`
+      const apiUrl = `https://www.pinterest.com/resource/PinResource/get/?data=${encodeURIComponent(
+        JSON.stringify({
+          options: {
+            field_set_key: 'unauth_react_main_pin',
+            id: videoId
+          }
+        })
+      )}`
 
       const { body, statusCode } = await http1makeRequest(apiUrl, {
         headers: { 'X-Pinterest-PWS-Handler': 'www/[username].js' }
@@ -87,11 +106,20 @@ export default class PinterestSource {
       }
 
       const data = body.resource_response.data
-      const videoList = data.videos?.video_list || (data.story_pin_data?.pages?.[0]?.blocks?.find(b => b.video?.video_list)?.video?.video_list)
-      
-      const format = videoList?.V_720P || videoList?.V_540P || videoList?.V_360P || Object.values(videoList || {}).find(v => v.url?.endsWith('.mp4'))
+      const videoList =
+        data.videos?.video_list ||
+        data.story_pin_data?.pages?.[0]?.blocks?.find(
+          (b) => b.video?.video_list
+        )?.video?.video_list
 
-      if (!format?.url) throw new Error('No MP4 format found for Pinterest video')
+      const format =
+        videoList?.V_720P ||
+        videoList?.V_540P ||
+        videoList?.V_360P ||
+        Object.values(videoList || {}).find((v) => v.url?.endsWith('.mp4'))
+
+      if (!format?.url)
+        throw new Error('No MP4 format found for Pinterest video')
 
       return { url: format.url, protocol: 'http', format: 'mp4' }
     } catch (e) {
@@ -106,7 +134,8 @@ export default class PinterestSource {
         method: 'GET',
         streamOnly: true,
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3',
           Accept: '*/*'
         }
       }
@@ -114,7 +143,10 @@ export default class PinterestSource {
       const response = await http1makeRequest(url, options)
 
       if (response.error || !response.stream) {
-        throw response.error || new Error('Failed to get stream, no stream object returned.')
+        throw (
+          response.error ||
+          new Error('Failed to get stream, no stream object returned.')
+        )
       }
 
       const stream = new PassThrough()

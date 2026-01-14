@@ -837,14 +837,17 @@ function getRendererFromItemData(itemData, itemType) {
   }
 
   if (itemData.elementRenderer) {
-    const model = getItemValue(itemData.elementRenderer, ['newElement.type.componentType.model'])
-    const data = model?.compactChannelModel?.compactChannelData || 
-                 model?.compactPlaylistModel?.compactPlaylistData
+    const model = getItemValue(itemData.elementRenderer, [
+      'newElement.type.componentType.model'
+    ])
+    const data =
+      model?.compactChannelModel?.compactChannelData ||
+      model?.compactPlaylistModel?.compactPlaylistData
 
     if (data) {
-      return { 
+      return {
         _type: model.compactChannelModel ? 'channel' : 'playlist',
-        ...data 
+        ...data
       }
     }
   }
@@ -869,9 +872,18 @@ export async function buildTrack(
 
   if (renderer?._type === 'channel') {
     const ch = renderer.channelRenderer || renderer
-    const channelId = ch.channelId || getItemValue(ch, ['onTap.innertubeCommand.browseEndpoint.browseId']) || getItemValue(ch, ['endpoint.innertubeCommand.browseEndpoint.browseId'])
-    const title = ch.attributedTitle?.content || (typeof ch.title === 'string' ? ch.title : getRunsText(ch.title?.runs) || ch.title?.simpleText) || getRunsText(ch.displayName?.runs) || FALLBACK_TITLE
-    
+    const channelId =
+      ch.channelId ||
+      getItemValue(ch, ['onTap.innertubeCommand.browseEndpoint.browseId']) ||
+      getItemValue(ch, ['endpoint.innertubeCommand.browseEndpoint.browseId'])
+    const title =
+      ch.attributedTitle?.content ||
+      (typeof ch.title === 'string'
+        ? ch.title
+        : getRunsText(ch.title?.runs) || ch.title?.simpleText) ||
+      getRunsText(ch.displayName?.runs) ||
+      FALLBACK_TITLE
+
     if (!channelId) return null
 
     const trackInfo = {
@@ -893,8 +905,10 @@ export async function buildTrack(
       info: trackInfo,
       pluginInfo: {
         type: 'channel_result',
-        videoCount: getRunsText(ch.videoCountText?.runs) || ch.videoCount || '0',
-        subscriberCount: getRunsText(ch.subscriberCountText?.runs) || ch.subscriberCount,
+        videoCount:
+          getRunsText(ch.videoCountText?.runs) || ch.videoCount || '0',
+        subscriberCount:
+          getRunsText(ch.subscriberCountText?.runs) || ch.subscriberCount,
         handle: ch.handle
       }
     }
@@ -903,10 +917,20 @@ export async function buildTrack(
   if (renderer?._type === 'playlist') {
     const pl = renderer
     const playlistId = pl.playlistId
-    const title = pl.attributedTitle?.content || (typeof pl.title === 'string' ? pl.title : getRunsText(pl.title?.runs) || pl.title?.simpleText) || FALLBACK_TITLE
-    const author = (typeof pl.authorName === 'string' ? pl.authorName : getRunsText(pl.longBylineText?.runs) || getRunsText(pl.shortBylineText?.runs)) || FALLBACK_AUTHOR
-    const videoCount = getRunsText(pl.videoCountText?.runs) || pl.videoCount || '0'
-    
+    const title =
+      pl.attributedTitle?.content ||
+      (typeof pl.title === 'string'
+        ? pl.title
+        : getRunsText(pl.title?.runs) || pl.title?.simpleText) ||
+      FALLBACK_TITLE
+    const author =
+      (typeof pl.authorName === 'string'
+        ? pl.authorName
+        : getRunsText(pl.longBylineText?.runs) ||
+          getRunsText(pl.shortBylineText?.runs)) || FALLBACK_AUTHOR
+    const videoCount =
+      getRunsText(pl.videoCountText?.runs) || pl.videoCount || '0'
+
     if (!playlistId) return null
 
     const trackInfo = {
@@ -957,7 +981,7 @@ export async function buildTrack(
   if (itemType === 'ytmusic') {
     title = safeString(
       getRunsText(getItemValue(renderer, ['title.runs'])) ||
-      getItemValue(renderer, ['title.simpleText']),
+        getItemValue(renderer, ['title.simpleText']),
       FALLBACK_TITLE
     )
 
@@ -982,7 +1006,9 @@ export async function buildTrack(
     }
 
     if (!lengthText) {
-      lengthText = getItemValue(renderer, ['lengthText.simpleText']) || getRunsText(getItemValue(renderer, ['lengthText.runs']))
+      lengthText =
+        getItemValue(renderer, ['lengthText.simpleText']) ||
+        getRunsText(getItemValue(renderer, ['lengthText.runs']))
     }
 
     const parsed = parseLengthAndStream(

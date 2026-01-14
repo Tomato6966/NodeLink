@@ -12,7 +12,7 @@ export class AudioMixer extends EventEmitter {
     this.defaultVolume = config.defaultVolume || 0.8
     this.autoCleanup = config.autoCleanup !== false
     this.enabled = config.enabled !== false
-    this.outputBuffer = Buffer.allocUnsafe(3840) 
+    this.outputBuffer = Buffer.allocUnsafe(3840)
   }
 
   mixBuffers(mainPCM, layersPCM) {
@@ -23,21 +23,21 @@ export class AudioMixer extends EventEmitter {
     if (this.outputBuffer.length < mainPCM.length) {
       this.outputBuffer = Buffer.allocUnsafe(mainPCM.length)
     }
-    
+
     for (let i = 0; i < mainPCM.length; i += 2) {
       let mainSample = mainPCM.readInt16LE(i)
-      
+
       for (const layer of layersPCM.values()) {
         if (i < layer.buffer.length) {
           const layerSample = layer.buffer.readInt16LE(i)
           mainSample += Math.floor(layerSample * layer.volume)
         }
       }
-      
+
       mainSample = Math.max(-32768, Math.min(32767, mainSample))
       this.outputBuffer.writeInt16LE(mainSample, i)
     }
-    
+
     return this.outputBuffer.subarray(0, mainPCM.length)
   }
 
@@ -92,7 +92,7 @@ export class AudioMixer extends EventEmitter {
     for (const [id, layer] of this.mixLayers.entries()) {
       if (layer.ringBuffer.length === 0) {
         layer.emptyReads++
-        
+
         if (layer.emptyReads >= 3 && layer.receivedBytes > 0) {
           this.removeLayer(id, 'FINISHED')
         }
@@ -107,7 +107,7 @@ export class AudioMixer extends EventEmitter {
       if (!chunk) continue
 
       layer.emptyReads = 0
-      
+
       layerChunks.set(id, {
         buffer: chunk,
         volume: layer.volume
@@ -119,11 +119,9 @@ export class AudioMixer extends EventEmitter {
     return layerChunks
   }
 
-
   hasActiveLayers() {
     return this.mixLayers.size > 0
   }
-
 
   removeLayer(id, reason = 'REMOVED') {
     const layer = this.mixLayers.get(id)
@@ -131,9 +129,8 @@ export class AudioMixer extends EventEmitter {
       return false
     }
 
-
     layer.active = false
-    
+
     if (layer.stream && !layer.stream.destroyed) {
       layer.stream.destroy()
     }
@@ -142,13 +139,10 @@ export class AudioMixer extends EventEmitter {
 
     this.mixLayers.delete(id)
 
-
     this.emit('mixEnded', { id, reason })
-
 
     return true
   }
-
 
   updateLayerVolume(id, volume) {
     const layer = this.mixLayers.get(id)
@@ -156,18 +150,15 @@ export class AudioMixer extends EventEmitter {
       return false
     }
 
-
     layer.volume = Math.max(0, Math.min(1, volume))
     return true
   }
-
 
   getLayer(id) {
     const layer = this.mixLayers.get(id)
     if (!layer) {
       return null
     }
-
 
     return {
       id: layer.id,
@@ -178,9 +169,8 @@ export class AudioMixer extends EventEmitter {
     }
   }
 
-
   getLayers() {
-    return Array.from(this.mixLayers.values()).map(layer => ({
+    return Array.from(this.mixLayers.values()).map((layer) => ({
       id: layer.id,
       track: layer.track,
       volume: layer.volume,
@@ -189,14 +179,12 @@ export class AudioMixer extends EventEmitter {
     }))
   }
 
-
   clearLayers(reason = 'CLEARED') {
     const ids = Array.from(this.mixLayers.keys())
-    
+
     for (const id of ids) {
       this.removeLayer(id, reason)
     }
-
 
     return ids.length
   }

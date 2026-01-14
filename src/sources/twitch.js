@@ -125,7 +125,11 @@ export default class TwitchSource {
     if (cachedId && cachedDevice) {
       this.clientId = cachedId
       this.deviceId = cachedDevice
-      logger('info', 'Sources', 'Loaded Twitch parameters from CredentialManager.')
+      logger(
+        'info',
+        'Sources',
+        'Loaded Twitch parameters from CredentialManager.'
+      )
       return true
     }
 
@@ -184,10 +188,18 @@ export default class TwitchSource {
       }
 
       if (this.deviceId) {
-        this.nodelink.credentialManager.set('twitch_device_id', this.deviceId, 7 * 24 * 60 * 60 * 1000)
+        this.nodelink.credentialManager.set(
+          'twitch_device_id',
+          this.deviceId,
+          7 * 24 * 60 * 60 * 1000
+        )
       }
 
-      this.nodelink.credentialManager.set('twitch_client_id', this.clientId, 7 * 24 * 60 * 60 * 1000)
+      this.nodelink.credentialManager.set(
+        'twitch_client_id',
+        this.clientId,
+        7 * 24 * 60 * 60 * 1000
+      )
 
       logger(
         'info',

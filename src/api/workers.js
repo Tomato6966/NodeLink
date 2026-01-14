@@ -153,8 +153,7 @@ function handlePatch(nodelink, req, res, parsedUrl) {
 
 function handler(nodelink, req, res, sendResponse, parsedUrl) {
   if (req.method === 'GET') return handleGet(nodelink, req, res)
-  if (req.method === 'PATCH')
-    return handlePatch(nodelink, req, res, parsedUrl)
+  if (req.method === 'PATCH') return handlePatch(nodelink, req, res, parsedUrl)
 
   return sendErrorResponse(
     req,

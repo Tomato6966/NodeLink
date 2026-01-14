@@ -1,4 +1,9 @@
-import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.js'
+import {
+  encodeTrack,
+  http1makeRequest,
+  logger,
+  getBestMatch
+} from '../utils.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
@@ -59,12 +64,18 @@ export default class AppleMusicSource {
         return true
       }
 
-      const cachedToken = this.nodelink.credentialManager.get('apple_media_api_token')
+      const cachedToken = this.nodelink.credentialManager.get(
+        'apple_media_api_token'
+      )
       if (cachedToken) {
         this.mediaApiToken = cachedToken
         this._parseToken(this.mediaApiToken)
         if (this._isTokenValid()) {
-          logger('info', 'AppleMusic', 'Loaded valid token from CredentialManager.')
+          logger(
+            'info',
+            'AppleMusic',
+            'Loaded valid token from CredentialManager.'
+          )
           this.tokenInitialized = true
           return true
         }
@@ -76,7 +87,11 @@ export default class AppleMusicSource {
         this._parseToken(this.mediaApiToken)
         if (this._isTokenValid()) {
           logger('info', 'AppleMusic', 'Loaded valid token from config file.')
-          this.nodelink.credentialManager.set('apple_media_api_token', this.mediaApiToken, this.tokenExpiry - Date.now())
+          this.nodelink.credentialManager.set(
+            'apple_media_api_token',
+            this.mediaApiToken,
+            this.tokenExpiry - Date.now()
+          )
           this.tokenInitialized = true
           return true
         }
@@ -94,7 +109,11 @@ export default class AppleMusicSource {
         }
         this.mediaApiToken = newToken
         this._parseToken(this.mediaApiToken)
-        this.nodelink.credentialManager.set('apple_media_api_token', this.mediaApiToken, this.tokenExpiry - Date.now())
+        this.nodelink.credentialManager.set(
+          'apple_media_api_token',
+          this.mediaApiToken,
+          this.tokenExpiry - Date.now()
+        )
         this.tokenInitialized = true
         return true
       }
@@ -465,7 +484,11 @@ export default class AppleMusicSource {
           if (page?.data) results.push(...page.data)
         }
       } catch (e) {
-        logger('warn', 'AppleMusic', `Failed to fetch a batch of pages: ${e.message}`)
+        logger(
+          'warn',
+          'AppleMusic',
+          `Failed to fetch a batch of pages: ${e.message}`
+        )
       }
     }
 
@@ -487,19 +510,33 @@ export default class AppleMusicSource {
 
     try {
       let searchResult
-      
+
       if (decodedTrack.isrc) {
-        searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch')
-        if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          `"${decodedTrack.isrc}"`,
+          'ytmsearch'
+        )
+        if (
+          searchResult.loadType !== 'search' ||
+          searchResult.data.length === 0
+        ) {
           searchResult = null
         }
       }
 
       if (!searchResult) {
-        searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          query,
+          'ytmsearch'
+        )
       }
 
-      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+      if (
+        searchResult.loadType !== 'search' ||
+        searchResult.data.length === 0
+      ) {
         searchResult = await this.nodelink.sources.searchWithDefault(query)
       }
 

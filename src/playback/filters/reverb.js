@@ -148,8 +148,7 @@ export default class Reverb {
 
   processAllpass(input, delayLine, state) {
     const delayed = delayLine.read(0)
-    const output =
-      -input + delayed + this.allpassCoeff * (input - state.y1)
+    const output = -input + delayed + this.allpassCoeff * (input - state.y1)
 
     delayLine.write(clamp16Bit(input))
     state.y1 = output

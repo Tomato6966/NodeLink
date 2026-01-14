@@ -4,8 +4,9 @@ import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 const API_BASE = 'https://www.jiosaavn.com/api.php'
 const J_BUFFER = Buffer.from('38346591')
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-  'Accept': 'application/json'
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+  Accept: 'application/json'
 }
 const HTML_ENTITY_REGEX = /&(?:quot|amp);/g
 const ENTITY_MAP = { '&quot;': '"', '&amp;': '&' }
@@ -92,8 +93,8 @@ export default class JioSaavnSource {
 
         if (json && !json.error) {
           const tracks = Object.values(json)
-            .filter(item => item && typeof item === 'object' && item.song)
-            .map(item => this._parseTrack(item.song, true))
+            .filter((item) => item && typeof item === 'object' && item.song)
+            .map((item) => this._parseTrack(item.song, true))
 
           if (tracks.length > 0) {
             return {
@@ -121,7 +122,7 @@ export default class JioSaavnSource {
         })
 
         if (json && Array.isArray(json) && json.length > 0) {
-          const tracks = json.map(item => this._parseTrack(item, true))
+          const tracks = json.map((item) => this._parseTrack(item, true))
           return {
             loadType: 'playlist',
             data: {
@@ -151,7 +152,11 @@ export default class JioSaavnSource {
       if (type === 'song') {
         const trackData = await this._fetchSongMetadata(id)
         if (!trackData) {
-          logger('error', 'JioSaavn', `All resolution methods failed for song ${id}`)
+          logger(
+            'error',
+            'JioSaavn',
+            `All resolution methods failed for song ${id}`
+          )
           return { loadType: 'empty', data: {} }
         }
         return { loadType: 'track', data: this._parseTrack(trackData) }
@@ -166,16 +171,27 @@ export default class JioSaavnSource {
 
   async getTrackUrl(decodedTrack) {
     try {
-      logger('debug', 'JioSaavn', `Fetching stream for: ${decodedTrack.identifier}`)
+      logger(
+        'debug',
+        'JioSaavn',
+        `Fetching stream for: ${decodedTrack.identifier}`
+      )
 
       const trackData = await this._fetchSongMetadata(decodedTrack.identifier)
 
       if (!trackData) {
-        return { exception: { message: 'Track metadata not found', severity: 'common' } }
+        return {
+          exception: { message: 'Track metadata not found', severity: 'common' }
+        }
       }
 
       if (!trackData.encrypted_media_url) {
-        return { exception: { message: 'No encrypted_media_url found', severity: 'fault' } }
+        return {
+          exception: {
+            message: 'No encrypted_media_url found',
+            severity: 'fault'
+          }
+        }
       }
 
       let playbackUrl = this._decryptUrl(trackData.encrypted_media_url)
@@ -224,7 +240,6 @@ export default class JioSaavnSource {
       ...params
     }).toString()
 
-
     const { body, error, statusCode } = await http1makeRequest(url.toString(), {
       method: 'GET',
       headers: HEADERS
@@ -247,7 +262,11 @@ export default class JioSaavnSource {
       return data[id] || data.songs[0]
     }
 
-    logger('warn', 'JioSaavn', `song.getDetails failed for ${id}. Retrying with webapi.get...`)
+    logger(
+      'warn',
+      'JioSaavn',
+      `song.getDetails failed for ${id}. Retrying with webapi.get...`
+    )
 
     data = await this._getJson({
       __call: 'webapi.get',
@@ -275,7 +294,7 @@ export default class JioSaavnSource {
 
     if (!list?.length) return { loadType: 'empty', data: {} }
 
-    const tracks = list.map(item => this._parseTrack(item))
+    const tracks = list.map((item) => this._parseTrack(item))
     let name = data.title || data.name || ''
     if (type === 'artist') name = `${name}'s Top Tracks`
 
@@ -294,7 +313,9 @@ export default class JioSaavnSource {
   _decryptUrl(encryptedUrl) {
     const decipher = crypto.createDecipheriv('des-ecb', J_BUFFER, null)
     decipher.setAutoPadding(true)
-    return decipher.update(encryptedUrl, 'base64', 'utf8') + decipher.final('utf8')
+    return (
+      decipher.update(encryptedUrl, 'base64', 'utf8') + decipher.final('utf8')
+    )
   }
 
   _cleanString(str) {
@@ -308,19 +329,27 @@ export default class JioSaavnSource {
     const id = json.id
     const title = this._cleanString(json.title || json.song)
     const uri = json.perma_url
-    const duration = (parseInt(json.more_info?.duration || json.duration || '0', 10)) * 1000
+    const duration =
+      parseInt(json.more_info?.duration || json.duration || '0', 10) * 1000
 
     const primaryArtists = json.more_info?.artistMap?.primary_artists
     const artistList = json.more_info?.artistMap?.artists
-    const metaArtist = Array.isArray(primaryArtists) && primaryArtists.length
-      ? primaryArtists
-      : (Array.isArray(artistList) ? artistList : null)
+    const metaArtist =
+      Array.isArray(primaryArtists) && primaryArtists.length
+        ? primaryArtists
+        : Array.isArray(artistList)
+          ? artistList
+          : null
 
     let author
     if (metaArtist) {
-      author = metaArtist.map(a => a.name).join(', ')
+      author = metaArtist.map((a) => a.name).join(', ')
     } else {
-      author = json.more_info?.music || json.primary_artists || json.singers || 'Unknown Artist'
+      author =
+        json.more_info?.music ||
+        json.primary_artists ||
+        json.singers ||
+        'Unknown Artist'
     }
 
     const artworkUrl = (json.image || '').replace('150x150', '500x500')

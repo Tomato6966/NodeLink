@@ -1,5 +1,10 @@
 import { URLSearchParams } from 'node:url'
-import { http1makeRequest, logger, makeRequest, getVersion } from '../../utils.js'
+import {
+  http1makeRequest,
+  logger,
+  makeRequest,
+  getVersion
+} from '../../utils.js'
 
 const CACHE_DURATION_MS = 12 * 60 * 60 * 1000
 const VERSION = getVersion()
@@ -23,11 +28,14 @@ export default class CipherManager {
     this.explicitPlayerScriptUrl = null
     this.userAgent = `nodelink/${VERSION} (https://github.com/PerformanC/NodeLink)`
     this.stsCache = new Map()
-    
-     setInterval(() => {
-      this.stsCache.clear()
-      logger('debug', 'YouTube-Cipher', 'Cleared STS cache (12h interval)')
-    }, 12 * 60 * 60 * 1000).unref()
+
+    setInterval(
+      () => {
+        this.stsCache.clear()
+        logger('debug', 'YouTube-Cipher', 'Cleared STS cache (12h interval)')
+      },
+      12 * 60 * 60 * 1000
+    ).unref()
   }
 
   setPlayerScriptUrl(url) {
@@ -45,7 +53,9 @@ export default class CipherManager {
       return this.getCachedPlayerScript()
     }
 
-    const cachedUrl = this.nodelink.credentialManager.get('yt_player_script_url')
+    const cachedUrl = this.nodelink.credentialManager.get(
+      'yt_player_script_url'
+    )
     if (cachedUrl && !this.explicitPlayerScriptUrl) {
       this.cachedPlayerScript = new CachedPlayerScript(cachedUrl)
       return this.cachedPlayerScript
@@ -157,7 +167,11 @@ export default class CipherManager {
       )
 
       this.stsCache.set(playerUrl, sts)
-      this.nodelink.credentialManager.set(`yt_sts_${playerUrl}`, sts, 12 * 60 * 60 * 1000)
+      this.nodelink.credentialManager.set(
+        `yt_sts_${playerUrl}`,
+        sts,
+        12 * 60 * 60 * 1000
+      )
       return sts
     }
 

@@ -1727,7 +1727,13 @@ export const createSeekeableAudioResource = async (
   }
 }
 
-export const createPCMStream = (stream, type, nodelink, volume = 1.0, filters = {}) => {
+export const createPCMStream = (
+  stream,
+  type,
+  nodelink,
+  volume = 1.0,
+  filters = {}
+) => {
   const resamplingQuality =
     nodelink.options.audio.resamplingQuality || 'fastest'
   const normalizedType = normalizeFormat(type)
@@ -1783,13 +1789,23 @@ export const createPCMStream = (stream, type, nodelink, volume = 1.0, filters = 
 
   for (const s of streams) {
     if (s !== stream) {
-      s.on('error', (err) => logger('error', 'PCMStream', `Component error (${s.constructor.name}): ${err.message} (${err.code})`))
+      s.on('error', (err) =>
+        logger(
+          'error',
+          'PCMStream',
+          `Component error (${s.constructor.name}): ${err.message} (${err.code})`
+        )
+      )
     }
   }
 
   pipeline(streams, (err) => {
     if (err && err.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
-      logger('error', 'PCMStream', `Internal processing pipeline failed: ${err.message}`)
+      logger(
+        'error',
+        'PCMStream',
+        `Internal processing pipeline failed: ${err.message}`
+      )
     }
   })
 

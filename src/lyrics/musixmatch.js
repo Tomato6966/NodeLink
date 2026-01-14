@@ -90,10 +90,15 @@ export default class MusixmatchLyrics {
     )
 
     if (!this.useManualToken) {
-      const cachedToken = this.nodelink.credentialManager.get('musixmatch_token')
+      const cachedToken =
+        this.nodelink.credentialManager.get('musixmatch_token')
       if (cachedToken) {
         this.tokenData = cachedToken
-        logger('info', 'Lyrics', 'Loaded Musixmatch token from CredentialManager')
+        logger(
+          'info',
+          'Lyrics',
+          'Loaded Musixmatch token from CredentialManager'
+        )
       }
     }
 
@@ -226,7 +231,11 @@ export default class MusixmatchLyrics {
       const token = await this._fetchToken()
       const expires = Date.now() + TOKEN_TTL
       this.tokenData = { value: token, expires }
-      this.nodelink.credentialManager.set('musixmatch_token', this.tokenData, TOKEN_TTL)
+      this.nodelink.credentialManager.set(
+        'musixmatch_token',
+        this.tokenData,
+        TOKEN_TTL
+      )
       return token
     } catch (err) {
       const isCaptcha = err.message?.toLowerCase().includes('captcha')
@@ -238,7 +247,11 @@ export default class MusixmatchLyrics {
         const token = await this._fetchToken()
         const expires = Date.now() + TOKEN_TTL
         this.tokenData = { value: token, expires }
-        this.nodelink.credentialManager.set('musixmatch_token', this.tokenData, TOKEN_TTL)
+        this.nodelink.credentialManager.set(
+          'musixmatch_token',
+          this.tokenData,
+          TOKEN_TTL
+        )
         return token
       }
 

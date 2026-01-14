@@ -31,7 +31,7 @@ export default class SourcesManager {
     const processSource = async (name, mod) => {
       const isYouTube = name === 'youtube' || name.includes('YouTube.js')
       const sourceKey = isYouTube ? 'youtube' : name
-      
+
       const enabled = isYouTube
         ? this.nodelink.options.sources.youtube?.enabled
         : !!this.nodelink.options.sources[sourceKey]?.enabled
@@ -80,13 +80,17 @@ export default class SourcesManager {
 
     if (sourceRegistry && Object.keys(sourceRegistry).length > 0) {
       await Promise.all(
-        Object.entries(sourceRegistry).map(([name, mod]) => processSource(name, mod))
+        Object.entries(sourceRegistry).map(([name, mod]) =>
+          processSource(name, mod)
+        )
       )
     } else {
       try {
         await fs.access(sourcesDir)
         const files = await fs.readdir(sourcesDir, { recursive: true })
-        const jsFiles = files.filter((f) => f.endsWith('.js') && !f.includes('clients/'))
+        const jsFiles = files.filter(
+          (f) => f.endsWith('.js') && !f.includes('clients/')
+        )
 
         await Promise.all(
           jsFiles.map(async (file) => {
@@ -155,12 +159,24 @@ export default class SourcesManager {
     }
 
     const name = instance.constructor.name.replace('Source', '').toLowerCase()
-    logger('debug', 'Sources', `Searching on ${name} (${searchType}) for: "${searchQuery}"`)
-    return this._instrumentedSourceCall(name, 'search', searchQuery, sourceName, searchType)
+    logger(
+      'debug',
+      'Sources',
+      `Searching on ${name} (${searchType}) for: "${searchQuery}"`
+    )
+    return this._instrumentedSourceCall(
+      name,
+      'search',
+      searchQuery,
+      sourceName,
+      searchType
+    )
   }
 
   async searchWithDefault(query) {
-    const defaultSources = Array.isArray(this.nodelink.options.defaultSearchSource)
+    const defaultSources = Array.isArray(
+      this.nodelink.options.defaultSearchSource
+    )
       ? this.nodelink.options.defaultSearchSource
       : [this.nodelink.options.defaultSearchSource]
 
@@ -171,7 +187,11 @@ export default class SourcesManager {
           return result
         }
       } catch (e) {
-        logger('warn', 'Sources', `Default source search failed for ${source}: ${e.message}`)
+        logger(
+          'warn',
+          'Sources',
+          `Default source search failed for ${source}: ${e.message}`
+        )
       }
     }
 
@@ -235,7 +255,10 @@ export default class SourcesManager {
       }
     }
 
-    if (!sourceName && (url.startsWith('https://') || url.startsWith('http://'))) {
+    if (
+      !sourceName &&
+      (url.startsWith('https://') || url.startsWith('http://'))
+    ) {
       sourceName = 'http'
     }
 

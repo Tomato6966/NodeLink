@@ -1,5 +1,10 @@
 import net from 'node:net'
-import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads'
+import {
+  Worker,
+  isMainThread,
+  parentPort,
+  workerData
+} from 'node:worker_threads'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import * as utils from './utils.js'
@@ -15,7 +20,7 @@ if (isMainThread) {
   }
 
   const specConfig = config.cluster?.specializedSourceWorker || {}
-  
+
   utils.initLogger(config)
 
   const nodelink = {
@@ -28,25 +33,33 @@ if (isMainThread) {
   const workerPool = []
   const taskQueue = []
 
-  nodelink.logger('info', 'SourceWorker', `Spawning ${threadCount} micro-workers for API tasks...`)
+  nodelink.logger(
+    'info',
+    'SourceWorker',
+    `Spawning ${threadCount} micro-workers for API tasks...`
+  )
 
   for (let i = 0; i < threadCount; i++) {
     const worker = new Worker(__filename, {
       workerData: { config, silentLogs: specConfig.silentLogs, threadId: i + 1 }
     })
-    
+
     worker.ready = false
     worker.load = 0
 
     worker.on('message', (msg) => {
       if (msg.type === 'ready') {
         worker.ready = true
-        nodelink.logger('info', 'SourceWorker', `Micro-worker ${i + 1} is ready.`)
+        nodelink.logger(
+          'info',
+          'SourceWorker',
+          `Micro-worker ${i + 1} is ready.`
+        )
         processNextTask()
       } else if (msg.type === 'result') {
         const { socketPath, id, result, error } = msg
         finishTask(socketPath, id, result, error)
-        
+
         worker.load = Math.max(0, worker.load - 1)
         processNextTask()
       } else if (msg.type === 'stream') {
@@ -88,22 +101,32 @@ if (isMainThread) {
     getSocket(path)
       .then(handler)
       .catch((e) => {
-        utils.logger('error', 'SourceWorker', `Failed to send data back: ${e.message}`)
+        utils.logger(
+          'error',
+          'SourceWorker',
+          `Failed to send data back: ${e.message}`
+        )
       })
   }
 
   function finishTask(socketPath, id, result, error) {
-    getSocket(socketPath).then((socket) => {
-      if (error) {
-        sendFrame(socket, id, 2, Buffer.from(error, 'utf8'))
-      } else {
-        // result is already a string
-        sendFrame(socket, id, 0, Buffer.from(result, 'utf8'))
-        sendFrame(socket, id, 1, Buffer.alloc(0))
-      }
-    }).catch(e => {
-      utils.logger('error', 'SourceWorker', `Failed to send result back: ${e.message}`)
-    })
+    getSocket(socketPath)
+      .then((socket) => {
+        if (error) {
+          sendFrame(socket, id, 2, Buffer.from(error, 'utf8'))
+        } else {
+          // result is already a string
+          sendFrame(socket, id, 0, Buffer.from(result, 'utf8'))
+          sendFrame(socket, id, 1, Buffer.alloc(0))
+        }
+      })
+      .catch((e) => {
+        utils.logger(
+          'error',
+          'SourceWorker',
+          `Failed to send result back: ${e.message}`
+        )
+      })
   }
 
   function sendStreamChunk(socketPath, id, chunk) {
@@ -112,7 +135,9 @@ if (isMainThread) {
   }
 
   function sendStreamEnd(socketPath, id) {
-    withSocket(socketPath, (socket) => sendFrame(socket, id, 1, Buffer.alloc(0)))
+    withSocket(socketPath, (socket) =>
+      sendFrame(socket, id, 1, Buffer.alloc(0))
+    )
   }
 
   function sendStreamError(socketPath, id, error) {
@@ -122,33 +147,37 @@ if (isMainThread) {
 
   function sendFrame(socket, id, type, payloadBuf) {
     const idBuf = Buffer.from(id, 'utf8')
-    
+
     const header = Buffer.alloc(6)
     header.writeUInt8(idBuf.length, 0)
     header.writeUInt8(type, 1)
     header.writeUInt32BE(payloadBuf.length, 2)
-    
+
     socket.write(Buffer.concat([header, idBuf, payloadBuf]))
   }
 
   function processNextTask() {
     if (taskQueue.length === 0) return
-    
+
     let bestWorker = null
     let minLoad = Infinity
 
     for (const worker of workerPool) {
-      if (worker.ready && worker.load < TASKS_PER_WORKER && worker.load < minLoad) {
+      if (
+        worker.ready &&
+        worker.load < TASKS_PER_WORKER &&
+        worker.load < minLoad
+      ) {
         bestWorker = worker
         minLoad = worker.load
       }
     }
-    
+
     if (bestWorker) {
       const task = taskQueue.shift()
       bestWorker.load++
       bestWorker.postMessage(task)
-      
+
       if (taskQueue.length > 0) setImmediate(processNextTask)
     }
   }
@@ -160,10 +189,9 @@ if (isMainThread) {
   })
 
   process.send({ type: 'ready', pid: process.pid })
-
 } else {
   const { config, silentLogs, threadId } = workerData
-  
+
   if (silentLogs) {
     config.logging = { ...config.logging, level: 'warn' }
   }
@@ -248,7 +276,9 @@ if (isMainThread) {
 
       const urlResult = await nodelink.sources.getTrackUrl(trackInfo)
       if (urlResult.exception) {
-        throw new Error(urlResult.exception.message || 'Failed to get track URL')
+        throw new Error(
+          urlResult.exception.message || 'Failed to get track URL'
+        )
       }
 
       const additionalData = {
@@ -289,7 +319,7 @@ if (isMainThread) {
 
   parentPort.on('message', async (taskData) => {
     const { id, task, payload, socketPath } = taskData
-    
+
     if (task === 'loadStream') {
       try {
         await handleLoadStream(id, socketPath, payload)
@@ -311,14 +341,26 @@ if (isMainThread) {
         case 'unifiedSearch':
           result = await nodelink.sources.unifiedSearch(payload.query)
           break
-                  case 'loadLyrics':
-                  result = await nodelink.lyrics.loadLyrics(payload.decodedTrack, payload.language)
-                  break
-              }
-              parentPort.postMessage({ type: 'result', id, socketPath, result: JSON.stringify(result) })
-        
+        case 'loadLyrics':
+          result = await nodelink.lyrics.loadLyrics(
+            payload.decodedTrack,
+            payload.language
+          )
+          break
+      }
+      parentPort.postMessage({
+        type: 'result',
+        id,
+        socketPath,
+        result: JSON.stringify(result)
+      })
     } catch (e) {
-      parentPort.postMessage({ type: 'result', id, socketPath, error: e.message })
+      parentPort.postMessage({
+        type: 'result',
+        id,
+        socketPath,
+        error: e.message
+      })
     }
   })
 }

@@ -5,7 +5,11 @@ import { logger } from '../utils.js'
 export default class CredentialManager {
   constructor(nodelink) {
     this.nodelink = nodelink
-    this.key = crypto.scryptSync(nodelink.options.server.password, 'nodelink-salt', 32)
+    this.key = crypto.scryptSync(
+      nodelink.options.server.password,
+      'nodelink-salt',
+      32
+    )
     this.filePath = './.cache/credentials.bin'
     this.credentials = new Map()
     this._saveTimeout = null
@@ -22,15 +26,20 @@ export default class CredentialManager {
 
       const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, iv)
       decipher.setAuthTag(tag)
-      
-      const decrypted = decipher.update(encrypted, 'binary', 'utf8') + decipher.final('utf8')
+
+      const decrypted =
+        decipher.update(encrypted, 'binary', 'utf8') + decipher.final('utf8')
       const obj = JSON.parse(decrypted)
-      
+
       this.credentials = new Map(Object.entries(obj))
       logger('debug', 'Credentials', 'Loaded encrypted credentials from disk.')
     } catch (e) {
       if (e.code !== 'ENOENT') {
-        logger('error', 'Credentials', `Failed to decrypt credentials: ${e.message}`)
+        logger(
+          'error',
+          'Credentials',
+          `Failed to decrypt credentials: ${e.message}`
+        )
       }
       this.credentials = new Map()
     }
@@ -38,21 +47,28 @@ export default class CredentialManager {
 
   async save() {
     if (this._saveTimeout) return
-    
+
     this._saveTimeout = setTimeout(async () => {
       this._saveTimeout = null
       try {
         const plainText = JSON.stringify(Object.fromEntries(this.credentials))
         const iv = crypto.randomBytes(16)
         const cipher = crypto.createCipheriv('aes-256-gcm', this.key, iv)
-        
-        const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()])
+
+        const encrypted = Buffer.concat([
+          cipher.update(plainText, 'utf8'),
+          cipher.final()
+        ])
         const tag = cipher.getAuthTag()
-        
+
         await fs.mkdir('./.cache', { recursive: true })
         await fs.writeFile(this.filePath, Buffer.concat([iv, tag, encrypted]))
       } catch (e) {
-        logger('error', 'Credentials', `Failed to save credentials: ${e.message}`)
+        logger(
+          'error',
+          'Credentials',
+          `Failed to save credentials: ${e.message}`
+        )
       }
     }, 1000)
   }
@@ -67,15 +83,22 @@ export default class CredentialManager {
       const plainText = JSON.stringify(Object.fromEntries(this.credentials))
       const iv = crypto.randomBytes(16)
       const cipher = crypto.createCipheriv('aes-256-gcm', this.key, iv)
-      
-      const encrypted = Buffer.concat([cipher.update(plainText, 'utf8'), cipher.final()])
+
+      const encrypted = Buffer.concat([
+        cipher.update(plainText, 'utf8'),
+        cipher.final()
+      ])
       const tag = cipher.getAuthTag()
-      
+
       await fs.mkdir('./.cache', { recursive: true })
       await fs.writeFile(this.filePath, Buffer.concat([iv, tag, encrypted]))
       logger('debug', 'Credentials', 'Force saved credentials to disk.')
     } catch (e) {
-      logger('error', 'Credentials', `Failed to force save credentials: ${e.message}`)
+      logger(
+        'error',
+        'Credentials',
+        `Failed to force save credentials: ${e.message}`
+      )
     }
   }
 

@@ -83,8 +83,10 @@ export default class Music extends BaseClient {
       }
     }
 
-    const tabContent = searchResult.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content
-    
+    const tabContent =
+      searchResult.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer
+        ?.content
+
     let loggedVideoData = false
     const tracks = []
     let videos = null
@@ -103,10 +105,16 @@ export default class Music extends BaseClient {
       videos = findShelf(tabContent.sectionListRenderer.contents)
     }
 
-    if (!videos && tabContent?.musicSplitViewRenderer?.mainContent?.sectionListRenderer) {
-      videos = findShelf(tabContent.musicSplitViewRenderer.mainContent.sectionListRenderer.contents)
+    if (
+      !videos &&
+      tabContent?.musicSplitViewRenderer?.mainContent?.sectionListRenderer
+    ) {
+      videos = findShelf(
+        tabContent.musicSplitViewRenderer.mainContent.sectionListRenderer
+          .contents
+      )
     }
-    
+
     if (!videos || videos.length === 0) {
       logger(
         'debug',
@@ -117,7 +125,9 @@ export default class Music extends BaseClient {
     }
 
     for (const video of videos) {
-      const renderer = video.musicResponsiveListItemRenderer || video.musicTwoColumnItemRenderer
+      const renderer =
+        video.musicResponsiveListItemRenderer ||
+        video.musicTwoColumnItemRenderer
       if (!renderer) {
         continue
       }
@@ -167,7 +177,7 @@ export default class Music extends BaseClient {
             exception: { message, severity: 'common', cause: 'Upstream' }
           }
         }
-        
+
         return await this._handlePlayerResponse(
           playerResponse,
           sourceName,

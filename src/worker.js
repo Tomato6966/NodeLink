@@ -104,7 +104,11 @@ if (commandSocketPath) {
             const data = v8.deserialize(payload)
             enqueueCommand(data?.type, id, data?.payload)
           } catch (e) {
-            logger('error', 'Worker', `Command socket parse error: ${e.message}`)
+            logger(
+              'error',
+              'Worker',
+              `Command socket parse error: ${e.message}`
+            )
           }
         }
       }
@@ -124,15 +128,15 @@ if (commandSocketPath) {
 
 function sendEventFrame(type, data) {
   if (!eventSocket || eventSocket.destroyed) return false
-  
+
   const payload = JSON.stringify(data)
   const payloadBuf = Buffer.from(payload, 'utf8')
-  
+
   const header = Buffer.alloc(6)
   header.writeUInt8(0, 0) // No ID needed for these events
   header.writeUInt8(type, 1)
   header.writeUInt32BE(payloadBuf.length, 2)
-  
+
   return eventSocket.write(Buffer.concat([header, payloadBuf]))
 }
 
@@ -266,7 +270,9 @@ function setEfficiencyMode(enabled) {
   try {
     os.setPriority(
       process.pid,
-      enabled ? os.constants.priority.PRIORITY_LOW : os.constants.priority.PRIORITY_HIGH
+      enabled
+        ? os.constants.priority.PRIORITY_LOW
+        : os.constants.priority.PRIORITY_HIGH
     )
     if (enabled) {
       v8.setFlagsFromString('--optimize-for-size')
@@ -411,7 +417,10 @@ function startTimers(hibernating = false) {
         isHibernating,
         players: localPlayers,
         playingPlayers: localPlayingPlayers,
-        commandQueueLength: Array.from(guildQueues.values()).reduce((acc, curr) => acc + curr.queue.length, 0),
+        commandQueueLength: Array.from(guildQueues.values()).reduce(
+          (acc, curr) => acc + curr.queue.length,
+          0
+        ),
         cpu: { nodelinkLoad },
         eventLoopLag: hndl.mean / 1e6,
         memory: {
@@ -492,9 +501,9 @@ async function initialize() {
   await nodelink.lyrics.loadFolder()
   await nodelink.statsManager.initialize()
   await nodelink.pluginManager.load('worker')
-  
+
   lastActivityTime = Date.now()
-  
+
   logger(
     'info',
     'Worker',

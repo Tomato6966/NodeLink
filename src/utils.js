@@ -203,19 +203,19 @@ function validateProperty(value, path, expected, validator) {
   if (value === undefined || value === null) {
     throw new Error(
       `Configuration error:\n` +
-      `- Property: ${path}\n` +
-      `- Problem: missing required value\n` +
-      `- Expected: ${expected}\n\n` +
-      `Please define ${path} in your config.js file.`
+        `- Property: ${path}\n` +
+        `- Problem: missing required value\n` +
+        `- Expected: ${expected}\n\n` +
+        `Please define ${path} in your config.js file.`
     )
   }
 
   if (!validator(value)) {
     throw new Error(
       `Configuration error:\n` +
-      `- Property: ${path}\n` +
-      `- Received: ${JSON.stringify(value)} (${typeof value})\n` +
-      `- Expected: ${expected}`
+        `- Property: ${path}\n` +
+        `- Received: ${JSON.stringify(value)} (${typeof value})\n` +
+        `- Expected: ${expected}`
     )
   }
 }
@@ -510,14 +510,17 @@ function decodeTrack(encoded) {
   let step = 'init'
 
   const ensure = (n) => {
-    if (position + n > buffer.length) throw new Error(`Unexpected end of buffer (need ${n} bytes)`)
+    if (position + n > buffer.length)
+      throw new Error(`Unexpected end of buffer (need ${n} bytes)`)
   }
 
   const readModifiedUTF8From = (buf, pRef) => {
-    if (pRef.value + 2 > buf.length) throw new Error('Unexpected end of buffer (need 2 bytes)')
+    if (pRef.value + 2 > buf.length)
+      throw new Error('Unexpected end of buffer (need 2 bytes)')
     const utflen = buf.readUInt16BE(pRef.value)
     pRef.value += 2
-    if (pRef.value + utflen > buf.length) throw new Error(`Unexpected end of buffer (need ${utflen} bytes)`)
+    if (pRef.value + utflen > buf.length)
+      throw new Error(`Unexpected end of buffer (need ${utflen} bytes)`)
 
     const end = pRef.value + utflen
     const chars = []
@@ -546,7 +549,8 @@ function decodeTrack(encoded) {
         if (i + 2 >= end) throw new Error('Malformed utf')
         const c2 = buf[i + 1] & 0xff
         const c3 = buf[i + 2] & 0xff
-        if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80) throw new Error('Malformed utf')
+        if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80)
+          throw new Error('Malformed utf')
         const ch = ((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f)
         i += 3
         chars.push(String.fromCharCode(ch))
@@ -561,7 +565,8 @@ function decodeTrack(encoded) {
   }
 
   const readNullableTextFrom = (buf, pRef) => {
-    if (pRef.value + 1 > buf.length) throw new Error('Unexpected end of buffer (need 1 byte)')
+    if (pRef.value + 1 > buf.length)
+      throw new Error('Unexpected end of buffer (need 1 byte)')
     const present = buf[pRef.value++] !== 0
     return present ? readModifiedUTF8From(buf, pRef) : null
   }
@@ -569,7 +574,8 @@ function decodeTrack(encoded) {
   const decodeDetailsAsList = (detailsBuf) => {
     let p = 0
     const ensure2 = (n) => {
-      if (p + n > detailsBuf.length) throw new Error('Unexpected end of details')
+      if (p + n > detailsBuf.length)
+        throw new Error('Unexpected end of details')
     }
 
     const readUTF2 = () => {
@@ -605,7 +611,8 @@ function decodeTrack(encoded) {
           if (i + 2 >= end) throw new Error('Malformed utf')
           const c2 = detailsBuf[i + 1] & 0xff
           const c3 = detailsBuf[i + 2] & 0xff
-          if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80) throw new Error('Malformed utf')
+          if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80)
+            throw new Error('Malformed utf')
           const ch = ((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f)
           i += 3
           chars.push(String.fromCharCode(ch))
@@ -680,28 +687,33 @@ function decodeTrack(encoded) {
     step = 'payload'
     const pRef = { value: 0 }
 
-    if (pRef.value + 1 > messageBuf.length) throw new Error('Unexpected end of message (need 1 byte)')
+    if (pRef.value + 1 > messageBuf.length)
+      throw new Error('Unexpected end of message (need 1 byte)')
     const version = messageBuf[pRef.value++] & 0xff
 
     const title = readModifiedUTF8From(messageBuf, pRef)
     const author = readModifiedUTF8From(messageBuf, pRef)
 
-    if (pRef.value + 8 > messageBuf.length) throw new Error('Unexpected end of message (need 8 bytes)')
+    if (pRef.value + 8 > messageBuf.length)
+      throw new Error('Unexpected end of message (need 8 bytes)')
     const length = Number(messageBuf.readBigInt64BE(pRef.value))
     pRef.value += 8
 
     const identifier = readModifiedUTF8From(messageBuf, pRef)
 
-    if (pRef.value + 1 > messageBuf.length) throw new Error('Unexpected end of message (need 1 byte)')
+    if (pRef.value + 1 > messageBuf.length)
+      throw new Error('Unexpected end of message (need 1 byte)')
     const isStream = messageBuf[pRef.value++] !== 0
 
     const uri = version >= 2 ? readNullableTextFrom(messageBuf, pRef) : null
-    const artworkUrl = version >= 3 ? readNullableTextFrom(messageBuf, pRef) : null
+    const artworkUrl =
+      version >= 3 ? readNullableTextFrom(messageBuf, pRef) : null
     const isrc = version >= 3 ? readNullableTextFrom(messageBuf, pRef) : null
 
     const sourceName = readModifiedUTF8From(messageBuf, pRef)
 
-    if (messageBuf.length - pRef.value < 8) throw new Error('Unexpected end of message (need 8 bytes for position)')
+    if (messageBuf.length - pRef.value < 8)
+      throw new Error('Unexpected end of message (need 8 bytes for position)')
     const positionOffset = messageBuf.length - 8
 
     const detailsBuf = messageBuf.subarray(pRef.value, positionOffset)
@@ -737,9 +749,10 @@ function decodeTrack(encoded) {
       userData: {},
       messageFlags: flags
     }
-
   } catch (err) {
-    throw new Error(`Decode Error at [${step}]: ${err.message} (Buffer pos: ${position}/${buffer.length})`)
+    throw new Error(
+      `Decode Error at [${step}]: ${err.message} (Buffer pos: ${position}/${buffer.length})`
+    )
   }
 }
 
@@ -767,7 +780,8 @@ function encodeTrack(track) {
       }
     }
 
-    if (bytes.length > 65535) throw new Error('Encode Error: UTF string too long')
+    if (bytes.length > 65535)
+      throw new Error('Encode Error: UTF string too long')
 
     const lenBuf = Buffer.alloc(2)
     lenBuf.writeUInt16BE(bytes.length)
@@ -793,7 +807,7 @@ function encodeTrack(track) {
     }
   }
 
-  const version = (track.artworkUrl || track.isrc) ? 3 : (track.uri ? 2 : 1)
+  const version = track.artworkUrl || track.isrc ? 3 : track.uri ? 2 : 1
   const flags = 1
 
   const seekable =
@@ -862,25 +876,28 @@ function parseClient(agent) {
   return info
 }
 
-const httpAgent = new http.Agent({ 
-  keepAlive: true, 
-  maxFreeSockets: 32, 
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  maxFreeSockets: 32,
   maxSockets: Infinity,
-  timeout: 60000 
+  timeout: 60000
 })
-const httpsAgent = new https.Agent({ 
-  keepAlive: true, 
-  maxFreeSockets: 32, 
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxFreeSockets: 32,
   maxSockets: Infinity,
-  timeout: 60000 
+  timeout: 60000
 })
 const http2FailedHosts = new Set()
 
-setInterval(() => {
-  if (http2FailedHosts.size > 0) {
-    http2FailedHosts.clear()
-  }
-}, 6 * 60 * 60 * 1000).unref()
+setInterval(
+  () => {
+    if (http2FailedHosts.size > 0) {
+      http2FailedHosts.clear()
+    }
+  },
+  6 * 60 * 60 * 1000
+).unref()
 
 async function _internalHttp1Request(urlString, options = {}) {
   const {
@@ -896,7 +913,8 @@ async function _internalHttp1Request(urlString, options = {}) {
     _redirectsFollowed = 0
   } = options
 
-  const actualLocalAddress = localAddress || global.nodelink?.routePlanner?.getIP()
+  const actualLocalAddress =
+    localAddress || global.nodelink?.routePlanner?.getIP()
 
   if (_redirectsFollowed >= maxRedirects) {
     throw new Error(`Too many redirects (${maxRedirects}) for ${urlString}`)
@@ -1119,10 +1137,18 @@ async function makeRequest(urlString, options, nodelink) {
   try {
     const url = new URL(urlString)
     if (http2FailedHosts.has(url.host)) {
-      return http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
+      return http1makeRequest(
+        urlString,
+        { ...options, localAddress },
+        finalNodeLink
+      )
     }
   } catch (e) {
-    return http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
+    return http1makeRequest(
+      urlString,
+      { ...options, localAddress },
+      finalNodeLink
+    )
   }
 
   return new Promise((resolve, reject) => {
@@ -1531,21 +1557,25 @@ export function cleanupHttpAgents() {
 function applyEnvOverrides(config, prefix = 'NODELINK') {
   for (const key in config) {
     if (Object.prototype.hasOwnProperty.call(config, key)) {
-      const envVarName = `${prefix}_${key.toUpperCase()}`;
-      const envValue = process.env[envVarName];
+      const envVarName = `${prefix}_${key.toUpperCase()}`
+      const envValue = process.env[envVarName]
 
       if (envValue !== undefined) {
         if (typeof config[key] === 'boolean') {
-          config[key] = envValue.toLowerCase() === 'true';
+          config[key] = envValue.toLowerCase() === 'true'
         } else if (typeof config[key] === 'number') {
-          const numValue = Number(envValue);
+          const numValue = Number(envValue)
           if (!isNaN(numValue)) {
-            config[key] = numValue;
+            config[key] = numValue
           } else {
-            logger('warn', 'Config', `Environment variable ${envVarName} has non-numeric value "${envValue}"; expected a number, keeping default.`)
+            logger(
+              'warn',
+              'Config',
+              `Environment variable ${envVarName} has non-numeric value "${envValue}"; expected a number, keeping default.`
+            )
           }
         } else if (typeof config[key] === 'string') {
-          config[key] = envValue;
+          config[key] = envValue
         } else if (Array.isArray(config[key])) {
           let newValue = null
           try {
@@ -1554,18 +1584,29 @@ function applyEnvOverrides(config, prefix = 'NODELINK') {
           } catch (e) {}
 
           if (!newValue) {
-            const splitValue = envValue.split(',').map((s) => s.trim()).filter(Boolean)
+            const splitValue = envValue
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
             if (splitValue.length > 0) newValue = splitValue
           }
 
           if (newValue) {
             config[key] = newValue
           } else {
-            logger('warn', 'Config', `Environment variable ${envVarName} has invalid array value "${envValue}"; keeping default.`)
+            logger(
+              'warn',
+              'Config',
+              `Environment variable ${envVarName} has invalid array value "${envValue}"; keeping default.`
+            )
           }
         }
-      } else if (typeof config[key] === 'object' && config[key] !== null && !Array.isArray(config[key])) {
-        applyEnvOverrides(config[key], envVarName);
+      } else if (
+        typeof config[key] === 'object' &&
+        config[key] !== null &&
+        !Array.isArray(config[key])
+      ) {
+        applyEnvOverrides(config[key], envVarName)
       }
     }
   }
@@ -1580,77 +1621,113 @@ function getBestMatch(list, original, options = {}) {
       .toLowerCase()
       .replace(/feat\.?/g, '')
       .replace(/ft\.?/g, '')
-      .replace(/\s*\([^)]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^)]*\)/gi, '')
-      .replace(/\s*\[[^\]]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^\]]*\]/gi, '')
+      .replace(
+        /\s*\([^)]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^)]*\)/gi,
+        ''
+      )
+      .replace(
+        /\s*\[[^\]]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^\]]*\]/gi,
+        ''
+      )
       .replace(/[^\w\s]/g, '')
       .trim()
   }
 
-  const specKeywords = ['remix', 'orchestral', 'live', 'cover', 'acoustic', 'instrumental', 'karaoke', 'radio', 'edit', 'extended', 'slowed', 'reverb']
-  const findSpec = (str) => specKeywords.filter(k => str.toLowerCase().includes(k))
-  
+  const specKeywords = [
+    'remix',
+    'orchestral',
+    'live',
+    'cover',
+    'acoustic',
+    'instrumental',
+    'karaoke',
+    'radio',
+    'edit',
+    'extended',
+    'slowed',
+    'reverb'
+  ]
+  const findSpec = (str) =>
+    specKeywords.filter((k) => str.toLowerCase().includes(k))
+
   const originalTitle = original.title.toLowerCase()
   const originalSpec = findSpec(originalTitle)
-  const isOriginalExplicit = original.uri?.includes('explicit=true') || originalTitle.includes('explicit')
-  
+  const isOriginalExplicit =
+    original.uri?.includes('explicit=true') ||
+    originalTitle.includes('explicit')
+
   const targetDuration = original.length
   const allowedDiff = targetDuration * durationTolerance
   const normOriginalAuthor = normalize(original.author)
-  const originalWords = new Set(normalize(original.title).split(' ').filter((w) => w.length > 1))
+  const originalWords = new Set(
+    normalize(original.title)
+      .split(' ')
+      .filter((w) => w.length > 1)
+  )
 
-  const scored = list
-    .map((item) => {
-      const itemTitle = item.info.title.toLowerCase()
-      const normItemTitle = normalize(itemTitle)
-      const normItemAuthor = normalize(item.info.author)
-      const itemSpec = findSpec(itemTitle)
-      const isItemClean = itemTitle.includes('clean') || itemTitle.includes('radio edit')
-      let score = 0
+  const scored = list.map((item) => {
+    const itemTitle = item.info.title.toLowerCase()
+    const normItemTitle = normalize(itemTitle)
+    const normItemAuthor = normalize(item.info.author)
+    const itemSpec = findSpec(itemTitle)
+    const isItemClean =
+      itemTitle.includes('clean') || itemTitle.includes('radio edit')
+    let score = 0
 
-      const itemWords = normItemTitle.split(' ').filter((w) => w.length > 1)
-      const itemWordsSet = new Set(itemWords)
-      
-      let overlap = 0
-      for (const word of originalWords) {
-        if (itemWordsSet.has(word)) overlap++
-      }
-      score += (overlap / Math.max(originalWords.size, 1)) * 300
+    const itemWords = normItemTitle.split(' ').filter((w) => w.length > 1)
+    const itemWordsSet = new Set(itemWords)
 
-      for (const spec of specKeywords) {
-        const inOriginal = originalSpec.includes(spec)
-        const inItem = itemSpec.includes(spec)
-        if (inOriginal && inItem) score += 200
-        if (inOriginal !== inItem) score -= 300
-      }
+    let overlap = 0
+    for (const word of originalWords) {
+      if (itemWordsSet.has(word)) overlap++
+    }
+    score += (overlap / Math.max(originalWords.size, 1)) * 300
 
-      if (isOriginalExplicit && !allowExplicit) {
-        if (isItemClean) score += 500
-      }
+    for (const spec of specKeywords) {
+      const inOriginal = originalSpec.includes(spec)
+      const inItem = itemSpec.includes(spec)
+      if (inOriginal && inItem) score += 200
+      if (inOriginal !== inItem) score -= 300
+    }
 
-      if (normItemAuthor.includes(normOriginalAuthor) || normOriginalAuthor.includes(normItemAuthor)) {
-        score += 150
+    if (isOriginalExplicit && !allowExplicit) {
+      if (isItemClean) score += 500
+    }
+
+    if (
+      normItemAuthor.includes(normOriginalAuthor) ||
+      normOriginalAuthor.includes(normItemAuthor)
+    ) {
+      score += 150
+    } else {
+      const longer =
+        normOriginalAuthor.length > normItemAuthor.length
+          ? normOriginalAuthor
+          : normItemAuthor
+      const shorter =
+        normOriginalAuthor.length > normItemAuthor.length
+          ? normItemAuthor
+          : normOriginalAuthor
+      if (shorter.length > 2 && longer.includes(shorter)) score += 100
+    }
+
+    if (targetDuration > 0) {
+      const diff = Math.abs(item.info.length - targetDuration)
+      if (diff <= allowedDiff) {
+        score += (1 - diff / allowedDiff) * 100
       } else {
-        const longer = normOriginalAuthor.length > normItemAuthor.length ? normOriginalAuthor : normItemAuthor
-        const shorter = normOriginalAuthor.length > normItemAuthor.length ? normItemAuthor : normOriginalAuthor
-        if (shorter.length > 2 && longer.includes(shorter)) score += 100
+        score -= 100
       }
+    }
 
-      if (targetDuration > 0) {
-        const diff = Math.abs(item.info.length - targetDuration)
-        if (diff <= allowedDiff) {
-          score += (1 - diff / allowedDiff) * 100
-        } else {
-          score -= 100
-        }
-      }
+    if (itemTitle.includes('official audio') || itemTitle.includes('topic'))
+      score += 50
 
-      if (itemTitle.includes('official audio') || itemTitle.includes('topic')) score += 50
-
-      return { item, score }
-    })
+    return { item, score }
+  })
 
   scored.sort((a, b) => b.score - a.score)
-  
+
   return scored[0]?.item || list[0] || null
 }
 

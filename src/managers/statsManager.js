@@ -17,7 +17,7 @@ export default class StatsManager {
         events: {} // { TrackStartEvent: 10, ... }
       }
     }
-      
+
     logger('info', 'StatsManager', 'Initialized.')
   }
 
@@ -454,11 +454,16 @@ export default class StatsManager {
 
   incrementApiRequest(endpoint) {
     const sanitized = this._sanitizeEndpoint(endpoint)
-    
-    if (Object.keys(this.stats.api.requests).length > 500 && !this.stats.api.requests[sanitized]) {
-      this.stats.api.requests['others'] = (this.stats.api.requests['others'] || 0) + 1
+
+    if (
+      Object.keys(this.stats.api.requests).length > 500 &&
+      !this.stats.api.requests[sanitized]
+    ) {
+      this.stats.api.requests['others'] =
+        (this.stats.api.requests['others'] || 0) + 1
     } else {
-      this.stats.api.requests[sanitized] = (this.stats.api.requests[sanitized] || 0) + 1
+      this.stats.api.requests[sanitized] =
+        (this.stats.api.requests[sanitized] || 0) + 1
     }
 
     if (this.promApiRequests) {
@@ -468,11 +473,16 @@ export default class StatsManager {
 
   incrementApiError(endpoint) {
     const sanitized = this._sanitizeEndpoint(endpoint)
-    
-    if (Object.keys(this.stats.api.errors).length > 500 && !this.stats.api.errors[sanitized]) {
-      this.stats.api.errors['others'] = (this.stats.api.errors['others'] || 0) + 1
+
+    if (
+      Object.keys(this.stats.api.errors).length > 500 &&
+      !this.stats.api.errors[sanitized]
+    ) {
+      this.stats.api.errors['others'] =
+        (this.stats.api.errors['others'] || 0) + 1
     } else {
-      this.stats.api.errors[sanitized] = (this.stats.api.errors[sanitized] || 0) + 1
+      this.stats.api.errors[sanitized] =
+        (this.stats.api.errors[sanitized] || 0) + 1
     }
 
     if (this.promApiErrors) {
@@ -568,16 +578,24 @@ export default class StatsManager {
         this.promTotalWorkers.set(Object.keys(workerMetrics).length)
       }
 
-      for (const [uniqueWorkerId, workerData] of Object.entries(workerMetrics)) {
+      for (const [uniqueWorkerId, workerData] of Object.entries(
+        workerMetrics
+      )) {
         const { pid, stats, health, uptime } = workerData
-        const labels = { worker_id: String(uniqueWorkerId), worker_pid: String(pid) }
+        const labels = {
+          worker_id: String(uniqueWorkerId),
+          worker_pid: String(pid)
+        }
 
         this.promWorkerPlayers.set(labels, stats.players || 0)
         this.promWorkerPlayingPlayers.set(labels, stats.playingPlayers || 0)
 
         if (stats.memory) {
           this.promWorkerMemoryUsed.set(labels, stats.memory.used || 0)
-          this.promWorkerMemoryAllocated.set(labels, stats.memory.allocated || 0)
+          this.promWorkerMemoryAllocated.set(
+            labels,
+            stats.memory.allocated || 0
+          )
         }
 
         if (stats.cpu) {
@@ -589,14 +607,23 @@ export default class StatsManager {
         }
 
         if (stats.commandQueueLength !== undefined) {
-          this.promWorkerCommandQueueLength.set(labels, stats.commandQueueLength || 0)
+          this.promWorkerCommandQueueLength.set(
+            labels,
+            stats.commandQueueLength || 0
+          )
         }
 
         if (stats.frameStats) {
           this.promWorkerFramesSent.set(labels, stats.frameStats.sent || 0)
           this.promWorkerFramesNulled.set(labels, stats.frameStats.nulled || 0)
-          this.promWorkerFramesDeficit.set(labels, stats.frameStats.deficit || 0)
-          this.promWorkerFramesExpected.set(labels, stats.frameStats.expected || 0)
+          this.promWorkerFramesDeficit.set(
+            labels,
+            stats.frameStats.deficit || 0
+          )
+          this.promWorkerFramesExpected.set(
+            labels,
+            stats.frameStats.expected || 0
+          )
         }
 
         if (uptime !== undefined) {
@@ -632,7 +659,12 @@ export default class StatsManager {
   }
 
   recordCommandExecutionTime(commandType, workerId, durationMs) {
-    if (this.promCommandExecutionTime && commandType && workerId && typeof durationMs === 'number') {
+    if (
+      this.promCommandExecutionTime &&
+      commandType &&
+      workerId &&
+      typeof durationMs === 'number'
+    ) {
       this.promCommandExecutionTime.set(
         { command_type: commandType, worker_id: String(workerId) },
         durationMs
@@ -675,7 +707,11 @@ export default class StatsManager {
   }
 
   recordTrackLoadDuration(source, durationMs) {
-    if (this.promTrackLoadDuration && source && typeof durationMs === 'number') {
+    if (
+      this.promTrackLoadDuration &&
+      source &&
+      typeof durationMs === 'number'
+    ) {
       this.promTrackLoadDuration.set({ source }, durationMs)
     }
   }
@@ -748,7 +784,13 @@ export default class StatsManager {
   }
 
   recordHttpRequestDuration(endpoint, method, statusCode, durationMs) {
-    if (this.promHttpRequestDuration && endpoint && method && statusCode && typeof durationMs === 'number') {
+    if (
+      this.promHttpRequestDuration &&
+      endpoint &&
+      method &&
+      statusCode &&
+      typeof durationMs === 'number'
+    ) {
       const sanitized = this._sanitizeEndpoint(endpoint)
       this.promHttpRequestDuration.set(
         { endpoint: sanitized, method, status_code: String(statusCode) },
@@ -760,14 +802,18 @@ export default class StatsManager {
   incrementRateLimitHit(endpoint, ip) {
     if (this.promRateLimitHits && endpoint && ip) {
       const sanitized = this._sanitizeEndpoint(endpoint)
-      const sanitizedIp = ip.includes(':') ? '[IPv6]' : ip.split('.').slice(0, 2).join('.') + '.xxx.xxx'
+      const sanitizedIp = ip.includes(':')
+        ? '[IPv6]'
+        : ip.split('.').slice(0, 2).join('.') + '.xxx.xxx'
       this.promRateLimitHits.inc({ endpoint: sanitized, ip: sanitizedIp })
     }
   }
 
   incrementDosProtectionBlock(ip, reason) {
     if (this.promDosProtectionBlocks && ip && reason) {
-      const sanitizedIp = ip.includes(':') ? '[IPv6]' : ip.split('.').slice(0, 2).join('.') + '.xxx.xxx'
+      const sanitizedIp = ip.includes(':')
+        ? '[IPv6]'
+        : ip.split('.').slice(0, 2).join('.') + '.xxx.xxx'
       this.promDosProtectionBlocks.inc({ ip: sanitizedIp, reason })
     }
   }

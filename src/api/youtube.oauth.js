@@ -1,7 +1,13 @@
 import myzod from 'myzod'
-import { logger, sendResponse, sendErrorResponse, makeRequest } from '../utils.js'
+import {
+  logger,
+  sendResponse,
+  sendErrorResponse,
+  makeRequest
+} from '../utils.js'
 
-const CLIENT_ID = '861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com'
+const CLIENT_ID =
+  '861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com'
 const CLIENT_SECRET = 'SboVhoG9s0rNafixCSGGKXAT'
 
 const schema = myzod.object({
@@ -46,8 +52,16 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
 
     if (error || statusCode !== 200) {
-      const msg = error?.message || body?.error_description || 'Failed to refresh token'
-      return sendErrorResponse(req, res, 500, 'Internal Server Error', msg, parsedUrl.pathname)
+      const msg =
+        error?.message || body?.error_description || 'Failed to refresh token'
+      return sendErrorResponse(
+        req,
+        res,
+        500,
+        'Internal Server Error',
+        msg,
+        parsedUrl.pathname
+      )
     }
 
     if (body.error) {

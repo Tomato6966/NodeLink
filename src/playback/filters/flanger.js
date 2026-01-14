@@ -34,15 +34,9 @@ export default class Flanger {
 
     this.depth = Math.max(0, Math.min(settings.depth || 0, 1.0))
 
-    this.delay = Math.max(
-      1,
-      Math.min(settings.delay || 5, MAX_DELAY_MS - 5)
-    )
+    this.delay = Math.max(1, Math.min(settings.delay || 5, MAX_DELAY_MS - 5))
 
-    this.feedback = Math.max(
-      -0.95,
-      Math.min(settings.feedback || 0, 0.95)
-    )
+    this.feedback = Math.max(-0.95, Math.min(settings.feedback || 0, 0.95))
 
     this.mix = Math.max(0, Math.min(settings.mix || 0.5, 1.0))
 
