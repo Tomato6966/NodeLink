@@ -194,7 +194,7 @@ class SourceWorkerManager {
     this.requests.set(id, request)
     this.workerLoads.set(bestWorker.id, minLoad + 1)
 
-    res.on('close', () => {
+    res.on?.('close', () => {
       this._cleanupRequest(id, request)
     })
 
