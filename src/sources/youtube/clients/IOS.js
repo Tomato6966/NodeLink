@@ -10,9 +10,9 @@ export default class IOS extends BaseClient {
     return {
       client: {
         clientName: 'IOS',
-        clientVersion: '20.51.39',
+        clientVersion: '21.02.1',
         userAgent:
-          'com.google.ios.youtube/20.51.39 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)',
+          'com.google.ios.youtube/21.02.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)',
         deviceMake: 'Apple',
         deviceModel: 'iPhone16,2',
         osName: 'iPhone',

@@ -15,9 +15,9 @@ export default class Android extends BaseClient {
     return {
       client: {
         clientName: 'ANDROID',
-        clientVersion: '20.51.39',
+        clientVersion: '21.02.35',
         userAgent:
-          'com.google.android.youtube/20.51.39 (Linux; U; Android 14) identity',
+          'com.google.android.youtube/21.02.35 (Linux; U; Android 14) identity',
         deviceMake: 'Google',
         deviceModel: 'Pixel 6',
         osName: 'Android',
