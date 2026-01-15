@@ -356,9 +356,6 @@ export default class AudioMackSource {
       out.once('error', () => src.destroy())
       out.once('end', () => out.emit('finishBuffering'))
 
-      // CRITICAL FIX:
-      // Prefer the format/type that came from getTrackUrl() (usually additionalData.format),
-      // otherwise sniff from URL. This prevents MP4Box from trying to parse MP3.
       const streamType = coerceStreamType(
         additionalData?.type || additionalData?.format || decodedTrack?.format,
         url
