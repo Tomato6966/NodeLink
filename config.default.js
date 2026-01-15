@@ -113,6 +113,9 @@ export default {
     mixcloud: {
       enabled: true
     },
+    audiomack: {
+      enabled: true
+    },
     deezer: {
       // arl: '',
       // decryptionKey: '',
