@@ -1,3 +1,7 @@
+/*
+* Credits: https://github.com/southctrl; adapted for NodeLink
+*/
+
 import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
