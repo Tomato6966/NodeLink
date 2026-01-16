@@ -85,7 +85,9 @@ export default class ShazamSource {
       }
 
       const extractArtworkFromImgAlt = () => {
-        const ogImage = html.match(/<meta property="og:image" content="([^"]+)"/)
+        const ogImage = html.match(
+          /<meta property="og:image" content="([^"]+)"/
+        )
         if (ogImage) return ogImage[1]
 
         let altIdx = html.indexOf('alt="album cover"')
@@ -114,6 +116,76 @@ export default class ShazamSource {
         'href="https://www.shazam.com/applemusic/song/'
       )
 
+      const durationMs = (() => {
+        const findIso = () => {
+          const needles = [
+            '"duration":"PT',
+            '"duration": "PT',
+            '\\"duration\\":\\"PT'
+          ]
+          for (let i = 0; i < needles.length; i++) {
+            const n = needles[i]
+            const at = html.indexOf(n)
+            if (at === -1) continue
+
+            const start = at + n.length - 2
+            const end =
+              n[0] === '\\'
+                ? html.indexOf('\\"', start)
+                : html.indexOf('"', start)
+            return end === -1 ? null : html.slice(start, end)
+          }
+          return null
+        }
+
+        const parseIsoMs = (iso) => {
+          if (!iso) return 0
+          const t = iso.indexOf('T')
+          if (t === -1) return 0
+
+          let ms = 0
+          let num = 0
+          let frac = 0
+          let fracDiv = 1
+          let inFrac = false
+
+          for (let i = t + 1; i < iso.length; i++) {
+            const c = iso.charCodeAt(i)
+
+            if (c >= 48 && c <= 57) {
+              const d = c - 48
+              if (inFrac) {
+                frac = frac * 10 + d
+                fracDiv *= 10
+              } else {
+                num = num * 10 + d
+              }
+              continue
+            }
+
+            if (c === 46) {
+              inFrac = true
+              continue
+            }
+
+            const val = inFrac ? num + frac / fracDiv : num
+            if (c === 72) ms += val * 3600000
+            else if (c === 77) ms += val * 60000
+            else if (c === 83) ms += val * 1000
+            else break
+
+            num = 0
+            frac = 0
+            fracDiv = 1
+            inFrac = false
+          }
+
+          return ms ? Math.round(ms) : 0
+        }
+
+        return parseIsoMs(findIso())
+      })()
+
       const title =
         extractTextAfterClass('NewTrackPageHeader_trackTitle__') || 'Unknown'
       const artist =
@@ -132,7 +204,7 @@ export default class ShazamSource {
         identifier,
         isSeekable: true,
         author: artist,
-        length: 0,
+        length: durationMs || 0,
         isStream: false,
         position: 0,
         title,
