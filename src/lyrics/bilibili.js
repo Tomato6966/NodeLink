@@ -90,13 +90,16 @@ export default class BilibiliLyrics {
   }
 
   async getLyrics(track) {
-    if (track.info.sourceName !== 'bilibili')
+    const info = track.info || track
+    const pluginInfo = track.pluginInfo || {}
+
+    if (info.sourceName !== 'bilibili')
       return { loadType: 'empty', data: {} }
 
     try {
-      let bvid = track.info.identifier
-      let aid = track.pluginInfo?.aid
-      let cid = track.pluginInfo?.cid
+      let bvid = info.identifier
+      let aid = pluginInfo?.aid
+      let cid = pluginInfo?.cid
 
       if (!aid || !cid) {
         if (bvid.includes('?p=')) bvid = bvid.split('?p=')[0]
