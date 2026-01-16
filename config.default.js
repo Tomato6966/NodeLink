@@ -142,6 +142,10 @@ export default {
     telegram: {
       enabled: true
     },
+    shazam: {
+      enabled: true,
+      allowExplicit: true
+    },
     bilibili: {
       enabled: true,
       sessdata: '' // Optional, improves access to some videos (premium and 4k+)
