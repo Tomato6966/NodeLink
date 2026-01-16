@@ -1,3 +1,7 @@
+/*
+* Credits: https://github.com/southctrl; adapted for NodeLink
+*/
+
 import { http1makeRequest, logger } from '../utils.js'
 
 const LASTFM_PATTERN =
