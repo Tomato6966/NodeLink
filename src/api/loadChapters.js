@@ -51,6 +51,20 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       `Request to load chapters for: ${decodedTrack.info.title}`
     )
 
+    let delegated = false
+    if (nodelink.sourceWorkerManager) {
+      delegated = nodelink.sourceWorkerManager.delegate(
+        req,
+        res,
+        'loadChapters',
+        {
+          decodedTrackInfo: decodedTrack.info
+        }
+      )
+    }
+
+    if (delegated) return
+
     let chaptersData
     if (nodelink.workerManager) {
       const worker = nodelink.workerManager.getBestWorker()
@@ -58,7 +72,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         worker,
         'loadChapters',
         {
-          decodedTrack
+          decodedTrackInfo: decodedTrack.info
         }
       )
     } else {

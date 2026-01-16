@@ -343,9 +343,14 @@ if (isMainThread) {
           break
         case 'loadLyrics':
           result = await nodelink.lyrics.loadLyrics(
-            payload.decodedTrack,
+            { info: payload.decodedTrackInfo },
             payload.language
           )
+          break
+        case 'loadChapters':
+          result = await nodelink.sources.getChapters({
+            info: payload.decodedTrackInfo
+          })
           break
       }
       parentPort.postMessage({

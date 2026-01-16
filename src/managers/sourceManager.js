@@ -293,7 +293,10 @@ export default class SourcesManager {
   }
 
   async getChapters(track) {
-    const instance = this.sourceMap.get(track.info.sourceName)
+    const sourceName = track.info?.sourceName
+    if (!sourceName) return []
+
+    const instance = this.sourceMap.get(sourceName)
     if (!instance || typeof instance.getChapters !== 'function') {
       return []
     }

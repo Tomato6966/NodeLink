@@ -844,14 +844,14 @@ async function processQueue(queueKey) {
       }
 
       case 'loadLyrics': {
-        const { decodedTrack, language } = payload
-        result = await nodelink.lyrics.loadLyrics(decodedTrack, language)
+        const { decodedTrackInfo, language } = payload
+        result = await nodelink.lyrics.loadLyrics({ info: decodedTrackInfo }, language)
         break
       }
 
       case 'loadChapters': {
-        const { decodedTrack } = payload
-        result = await nodelink.sources.getChapters(decodedTrack)
+        const { decodedTrackInfo } = payload
+        result = await nodelink.sources.getChapters({ info: decodedTrackInfo })
         break
       }
       case 'getSources': {
