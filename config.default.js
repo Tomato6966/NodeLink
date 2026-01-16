@@ -166,6 +166,14 @@ export default {
       artistLoadLimit: 20
       // "secretKey": "38346591" // Optional, defaults to standard key
     },
+    gaana: {
+      enabled: true,
+      apiUrl: 'https://gaana.1lucas1apk.fun/api', // own server https://github.com/notdeltaxd/Gaana-API
+      streamQuality: 'high',
+      playlistLoadLimit: 100,
+      albumLoadLimit: 100,
+      artistLoadLimit: 100
+    },
     "google-tts": {
       enabled: true,
       language: 'en-US'
