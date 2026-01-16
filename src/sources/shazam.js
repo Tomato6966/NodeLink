@@ -85,6 +85,9 @@ export default class ShazamSource {
       }
 
       const extractArtworkFromImgAlt = () => {
+        const ogImage = html.match(/<meta property="og:image" content="([^"]+)"/)
+        if (ogImage) return ogImage[1]
+
         let altIdx = html.indexOf('alt="album cover"')
         if (altIdx === -1) altIdx = html.indexOf('alt="song thumbnail"')
         if (altIdx === -1) return null
