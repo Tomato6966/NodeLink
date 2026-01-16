@@ -62,7 +62,7 @@ export default class AudiusSource {
       const { body, statusCode } = await http1makeRequest(urlObj.toString(), {
         headers: {
           Accept: 'application/json',
-          'User-Agent': 'LavaPlayer-Audius/1.0'
+          'User-Agent': 'NodeLink/3.5'
         }
       })
 
