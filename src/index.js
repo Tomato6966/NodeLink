@@ -485,6 +485,7 @@ class NodelinkServer extends EventEmitter {
     const applemusic = this.options.sources?.applemusic
     const tidal = this.options.sources?.tidal
     const jiosaavn = this.options.sources?.jiosaavn
+    const audius = this.options.sources?.audius
 
     if (spotify?.enabled) {
       validateNonNegativeInt(
@@ -559,6 +560,30 @@ class NodelinkServer extends EventEmitter {
           (v) => typeof v === 'string' && (v === '' || v.trim().length > 0)
         )
       }
+
+      if (audius?.enabled) {
+        if (audius.appName !== undefined && typeof audius.appName !== 'string') {
+          throw new Error('sources.audius.appName must be a string')
+        }
+      }
+
+      if (audius.apiKey !== undefined && typeof audius.apiKey !== 'string') {
+        throw new Error('sources.audius.apiKey must be a string')
+      }
+
+      if (audius.apiSecret !== undefined && typeof audius.apiSecret !== 'string') {
+        throw new Error('sources.audius.apiSecret must be a string')
+      }
+
+      validateNonNegativeInt(
+        audius.playlistLoadLimit,
+        'sources.audius.playlistLoadLimit'
+      )
+
+      validateNonNegativeInt(
+        audius.albumLoadLimit,
+        'sources.audius.albumLoadLimit'
+      )
     }
 
     if (jiosaavn?.enabled) {
