@@ -1,9 +1,9 @@
 import { logger, makeRequest } from '../../../utils.js'
 import {
   BaseClient,
-  YOUTUBE_CONSTANTS,
   buildTrack,
-  checkURLType
+  checkURLType,
+  YOUTUBE_CONSTANTS
 } from '../common.js'
 
 export default class Android extends BaseClient {
@@ -15,9 +15,9 @@ export default class Android extends BaseClient {
     return {
       client: {
         clientName: 'ANDROID',
-        clientVersion: '20.38.37',
+        clientVersion: '21.02.35',
         userAgent:
-          'com.google.android.youtube/20.38.37 (Linux; U; Android 14) gzip',
+          'com.google.android.youtube/21.02.35 (Linux; U; Android 14) identity',
         deviceMake: 'Google',
         deviceModel: 'Pixel 6',
         osName: 'Android',
@@ -39,10 +39,14 @@ export default class Android extends BaseClient {
   async search(query, type, context) {
     const sourceName = 'youtube'
 
+    let params = 'EgIQAQ%3D%3D' // Default to track (video)
+    if (type === 'playlist' || type === 'album') params = 'EgIQAw%3D%3D'
+    if (type === 'artist' || type === 'channel') params = 'EgIQAg%3D%3D'
+
     const requestBody = {
       context: this.getClient(context),
       query: query,
-      params: 'EgIQAQ%3D%3D'
+      params
     }
 
     try {
@@ -98,11 +102,27 @@ export default class Android extends BaseClient {
       }
 
       const tracks = []
-      const allSections = searchResult.contents?.sectionListRenderer?.contents
-      const lastIdx = allSections?.length - 1
-      let videos = allSections?.[lastIdx]?.itemSectionRenderer?.contents
+      const allSections =
+        searchResult.contents?.sectionListRenderer?.contents || []
+      const items = []
 
-      if (!videos || videos.length === 0) {
+      for (const section of allSections) {
+        let contents = section.itemSectionRenderer?.contents
+        if (!contents) {
+          const shelf = section.shelfRenderer || section.richShelfRenderer
+          contents =
+            shelf?.content?.verticalListRenderer?.items ||
+            shelf?.content?.richGridRenderer?.contents
+        }
+
+        if (Array.isArray(contents)) {
+          for (const item of contents) {
+            items.push(item.richItemRenderer?.content || item)
+          }
+        }
+      }
+
+      if (items.length === 0) {
         logger(
           'debug',
           'YouTube-Android',
@@ -112,21 +132,25 @@ export default class Android extends BaseClient {
       }
 
       const maxResults = this.config.maxSearchResults || 10
-      if (videos.length > maxResults) {
-        let count = 0
-        videos = videos.filter((video) => {
-          const isValid = video.videoRenderer || video.compactVideoRenderer
-          if (isValid && count < maxResults) {
-            count++
-            return true
-          }
-          return false
-        })
-      }
+      let count = 0
+      const filteredItems = items.filter((item) => {
+        const isValid =
+          item.videoRenderer ||
+          item.compactVideoRenderer ||
+          item.playlistRenderer ||
+          item.compactPlaylistRenderer ||
+          item.channelRenderer ||
+          item.elementRenderer
+        if (isValid && count < maxResults) {
+          count++
+          return true
+        }
+        return false
+      })
 
-      for (const videoData of videos) {
+      for (const itemData of filteredItems) {
         const track = await buildTrack(
-          videoData,
+          itemData,
           sourceName,
           null,
           null,
@@ -159,7 +183,7 @@ export default class Android extends BaseClient {
     }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = 'https://youtubei.googleapis.com'

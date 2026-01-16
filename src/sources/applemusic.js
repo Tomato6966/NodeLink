@@ -1,12 +1,15 @@
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
-import fs from 'node:fs/promises'
 import path from 'node:path'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger
+} from '../utils.js'
 
 const API_BASE = 'https://api.music.apple.com/v1'
 const MAX_PAGE_ITEMS = 300
-const DURATION_TOLERANCE = 0.15
 const BATCH_SIZE_DEFAULT = 5
-const CACHE_VALIDITY_DAYS = 7
+const _CACHE_VALIDITY_DAYS = 7
 
 export default class AppleMusicSource {
   constructor(nodelink) {
@@ -60,12 +63,18 @@ export default class AppleMusicSource {
         return true
       }
 
-      const cachedToken = await this._loadTokenFromCache()
+      const cachedToken = this.nodelink.credentialManager.get(
+        'apple_media_api_token'
+      )
       if (cachedToken) {
         this.mediaApiToken = cachedToken
         this._parseToken(this.mediaApiToken)
         if (this._isTokenValid()) {
-          logger('info', 'AppleMusic', 'Loaded valid token from cache.')
+          logger(
+            'info',
+            'AppleMusic',
+            'Loaded valid token from CredentialManager.'
+          )
           this.tokenInitialized = true
           return true
         }
@@ -77,7 +86,11 @@ export default class AppleMusicSource {
         this._parseToken(this.mediaApiToken)
         if (this._isTokenValid()) {
           logger('info', 'AppleMusic', 'Loaded valid token from config file.')
-          await this._saveTokenToCache(this.mediaApiToken)
+          this.nodelink.credentialManager.set(
+            'apple_media_api_token',
+            this.mediaApiToken,
+            this.tokenExpiry - Date.now()
+          )
           this.tokenInitialized = true
           return true
         }
@@ -95,7 +108,11 @@ export default class AppleMusicSource {
         }
         this.mediaApiToken = newToken
         this._parseToken(this.mediaApiToken)
-        await this._saveTokenToCache(this.mediaApiToken)
+        this.nodelink.credentialManager.set(
+          'apple_media_api_token',
+          this.mediaApiToken,
+          this.tokenExpiry - Date.now()
+        )
         this.tokenInitialized = true
         return true
       }
@@ -119,57 +136,6 @@ export default class AppleMusicSource {
     }
   }
 
-  async _loadTokenFromCache() {
-    try {
-      await fs.mkdir(path.dirname(this.tokenCachePath), { recursive: true })
-      const data = await fs.readFile(this.tokenCachePath, 'utf-8')
-      const { token, timestamp } = JSON.parse(data)
-
-      if (!token || !timestamp) return null
-
-      const cacheAge = Date.now() - timestamp
-      const maxAge = CACHE_VALIDITY_DAYS * 24 * 60 * 60 * 1000
-
-      if (cacheAge > maxAge) {
-        logger('info', 'AppleMusic', 'Cached token has expired.')
-        return null
-      }
-
-      return token
-    } catch (error) {
-      if (error.code !== 'ENOENT') {
-        logger(
-          'warn',
-          'AppleMusic',
-          `Could not read token cache: ${error.message}`
-        )
-      }
-      return null
-    }
-  }
-
-  async _saveTokenToCache(token) {
-    try {
-      await fs.mkdir(path.dirname(this.tokenCachePath), { recursive: true })
-      const dataToCache = {
-        token: token,
-        timestamp: Date.now()
-      }
-      await fs.writeFile(
-        this.tokenCachePath,
-        JSON.stringify(dataToCache),
-        'utf-8'
-      )
-      logger('info', 'AppleMusic', 'Saved new token to cache file.')
-    } catch (error) {
-      logger(
-        'error',
-        'AppleMusic',
-        `Failed to save token to cache: ${error.message}`
-      )
-    }
-  }
-
   async _fetchNewToken() {
     try {
       logger(
@@ -187,7 +153,7 @@ export default class AppleMusicSource {
       const scriptTagMatch = html.match(
         /<script\s+type="module"\s+crossorigin\s+src="([^"]+)"/
       )
-      const scriptTag = scriptTagMatch && scriptTagMatch[1]
+      const scriptTag = scriptTagMatch?.[1]
 
       if (!scriptTag) {
         throw new Error('Module script tag not found in Apple Music HTML.')
@@ -289,8 +255,7 @@ export default class AppleMusicSource {
     const isExplicit = attributes.contentRating === 'explicit'
     let trackUri = attributes.url || ''
     if (trackUri) {
-      trackUri +=
-        (trackUri.includes('?') ? '&' : '?') + `explicit=${isExplicit}`
+      trackUri += `${trackUri.includes('?') ? '&' : '?'}explicit=${isExplicit}`
     }
 
     const trackInfo = {
@@ -499,12 +464,30 @@ export default class AppleMusicSource {
     let allowed = pages
     if (maxPages > 0) allowed = Math.min(pages, maxPages)
 
+    const promises = []
     for (let index = 1; index < allowed; index++) {
       const offset = index * MAX_PAGE_ITEMS
       const path = `${basePath}${basePath.includes('?') ? '&' : '?'}limit=${MAX_PAGE_ITEMS}&offset=${offset}`
+      promises.push(this._apiRequest(path))
+    }
 
-      const page = await this._apiRequest(path)
-      if (page?.data) results.push(...page.data)
+    if (promises.length === 0) return results
+
+    const batchSize = this.playlistPageLoadConcurrency
+    for (let i = 0; i < promises.length; i += batchSize) {
+      const batch = promises.slice(i, i + batchSize)
+      try {
+        const pageResults = await Promise.all(batch)
+        for (const page of pageResults) {
+          if (page?.data) results.push(...page.data)
+        }
+      } catch (e) {
+        logger(
+          'warn',
+          'AppleMusic',
+          `Failed to fetch a batch of pages: ${e.message}`
+        )
+      }
     }
 
     return results
@@ -516,16 +499,45 @@ export default class AppleMusicSource {
       try {
         const url = new URL(decodedTrack.uri)
         isExplicit = url.searchParams.get('explicit') === 'true'
-      } catch (error) {
+      } catch (_error) {
         // Ignore malformed URI
       }
     }
-    const duration = decodedTrack.length
 
     const query = this._buildSearchQuery(decodedTrack, isExplicit)
 
     try {
-      const searchResult = await this.nodelink.sources.searchWithDefault(query)
+      let searchResult
+
+      if (decodedTrack.isrc) {
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          `"${decodedTrack.isrc}"`,
+          'ytmsearch'
+        )
+        if (
+          searchResult.loadType !== 'search' ||
+          searchResult.data.length === 0
+        ) {
+          searchResult = null
+        }
+      }
+
+      if (!searchResult) {
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          query,
+          'ytmsearch'
+        )
+      }
+
+      if (
+        searchResult.loadType !== 'search' ||
+        searchResult.data.length === 0
+      ) {
+        searchResult = await this.nodelink.sources.searchWithDefault(query)
+      }
+
       if (
         searchResult.loadType !== 'search' ||
         searchResult.data.length === 0
@@ -535,14 +547,10 @@ export default class AppleMusicSource {
         }
       }
 
-      const bestMatch = await this._findBestMatch(
-        searchResult.data,
-        duration,
-        decodedTrack,
-        isExplicit,
-        this.allowExplicit,
-        false
-      )
+      const bestMatch = getBestMatch(searchResult.data, decodedTrack, {
+        allowExplicit: this.allowExplicit
+      })
+
       if (!bestMatch) {
         return {
           exception: { message: 'No suitable match.', severity: 'fault' }
@@ -562,144 +570,5 @@ export default class AppleMusicSource {
       searchQuery += this.allowExplicit ? ' official video' : ' clean version'
     }
     return searchQuery
-  }
-
-  async _findBestMatch(
-    list,
-    target,
-    original,
-    isExplicit,
-    allowExplicit,
-    retried = false
-  ) {
-    const allowedDurationDiff = target * DURATION_TOLERANCE
-    const normalizedOriginalTitle = this._normalize(original.title)
-    const normalizedOriginalAuthor = this._normalize(original.author)
-
-    const scoredCandidates = list
-      .filter(
-        (item) => Math.abs(item.info.length - target) <= allowedDurationDiff
-      )
-      .map((item) => {
-        const normalizedItemTitle = this._normalize(item.info.title)
-        const normalizedItemAuthor = this._normalize(item.info.author)
-        let score = 0
-
-        const originalTitleWords = new Set(
-          normalizedOriginalTitle.split(' ').filter((w) => w.length > 0)
-        )
-        const itemTitleWords = new Set(
-          normalizedItemTitle.split(' ').filter((w) => w.length > 0)
-        )
-
-        let titleScore = 0
-        for (const word of originalTitleWords) {
-          if (itemTitleWords.has(word)) {
-            titleScore++
-          }
-        }
-        score += titleScore * 100
-
-        const authorSimilarity = this._calculateSimilarity(
-          normalizedOriginalAuthor,
-          normalizedItemAuthor
-        )
-        score += authorSimilarity * 100
-
-        const titleWords = new Set(normalizedItemTitle.split(' '))
-        const originalTitleWordsSet = new Set(
-          normalizedOriginalTitle.split(' ')
-        )
-        const extraWords = [...titleWords].filter(
-          (word) => !originalTitleWordsSet.has(word)
-        )
-        score -= extraWords.length * 5
-
-        const isCleanOrRadio =
-          normalizedItemTitle.includes('clean') ||
-          normalizedItemTitle.includes('radio')
-
-        if (isExplicit && !allowExplicit) {
-          if (isCleanOrRadio) {
-            score += 500
-          }
-        } else if (!isExplicit) {
-          if (isCleanOrRadio) {
-            score -= 200
-          }
-        } else {
-          if (isCleanOrRadio) {
-            score -= 200
-          }
-        }
-
-        return { item, score }
-      })
-      .filter((c) => c.score >= 0)
-
-    if (scoredCandidates.length === 0 && !retried) {
-      const newSearch = await this.nodelink.sources.searchWithDefault(
-        `${original.title} ${original.author} official video`
-      )
-      if (newSearch.loadType !== 'search' || newSearch.data.length === 0) {
-        return null
-      }
-
-      return await this._findBestMatch(
-        newSearch.data,
-        target,
-        original,
-        isExplicit,
-        allowExplicit,
-        true
-      )
-    }
-
-    if (scoredCandidates.length === 0) {
-      return null
-    }
-
-    scoredCandidates.sort((a, b) => b.score - a.score)
-
-    return scoredCandidates[0].item
-  }
-
-  _normalize(text) {
-    if (!text) return ''
-    return text
-      .toLowerCase()
-      .replace(/feat\.?/g, '')
-      .replace(/ft\.?/g, '')
-      .replace(/[^\w\s]/g, '')
-      .trim()
-  }
-
-  _calculateSimilarity(string1, string2) {
-    if (!string1.length && !string2.length) return 1
-    const longerString = string1.length > string2.length ? string1 : string2
-    const shorterString = string1.length > string2.length ? string2 : string1
-    const distance = this._levenshteinDistance(string1, string2)
-    return (longerString.length - distance) / longerString.length
-  }
-
-  _levenshteinDistance(string1, string2) {
-    const matrix = []
-    for (let i = 0; i <= string2.length; i++) matrix[i] = [i]
-    for (let j = 0; j <= string1.length; j++) matrix[0][j] = j
-
-    for (let i = 1; i <= string2.length; i++) {
-      for (let j = 1; j <= string1.length; j++) {
-        matrix[i][j] =
-          string1[j - 1] === string2[i - 1]
-            ? matrix[i - 1][j - 1]
-            : Math.min(
-                matrix[i - 1][j - 1] + 1,
-                matrix[i][j - 1] + 1,
-                matrix[i - 1][j] + 1
-              )
-      }
-    }
-
-    return matrix[string2.length][string1.length]
   }
 }

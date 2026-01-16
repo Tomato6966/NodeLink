@@ -1,10 +1,5 @@
 import { logger, makeRequest } from '../../../utils.js'
-import {
-  BaseClient,
-  YOUTUBE_CONSTANTS,
-  buildTrack,
-  checkURLType
-} from '../common.js'
+import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.js'
 
 export default class TVEmbedded extends BaseClient {
   constructor(nodelink, oauth) {
@@ -16,13 +11,14 @@ export default class TVEmbedded extends BaseClient {
       client: {
         clientName: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
         clientVersion: '2.0',
-        userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+        userAgent:
+          'Mozilla/5.0 (Linux armeabi-v7a; Android 7.1.2; Fire OS 6.0) Cobalt/22.lts.3.306369-gold (unlike Gecko) v8/8.8.278.8-jit gles Starboard/13, Amazon_ATV_mediatek8695_2019/NS6294 (Amazon, AFTMM, Wireless) com.amazon.firetv.youtube/22.3.r2.v66.0',
         hl: context.client.hl,
         gl: context.client.gl
       },
       user: { lockedSafetyMode: false },
       request: { useSsl: true },
-      thirdParty: { embedUrl: 'https://www.youtube.com' }
+      thirdParty: { embedUrl: 'https://www.youtube.com/tv' }
     }
   }
 
@@ -60,7 +56,7 @@ export default class TVEmbedded extends BaseClient {
     return {}
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()

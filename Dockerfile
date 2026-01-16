@@ -1,5 +1,5 @@
 # Stage 1: Builder - Install dependencies
-FROM node:20-alpine AS builder
+FROM node:25-alpine AS builder
 
 # Install git (required for npm to install dependencies from GitHub)
 RUN apk add --no-cache git
@@ -9,7 +9,7 @@ WORKDIR /app
 
 # Copy package.json and package-lock.json (if available) to leverage Docker cache
 # Use wildcards to ensure both package.json and package-lock.json (or yarn.lock/pnpm-lock.yaml) are copied
-COPY package*.json ./
+COPY package.json ./
 
 # Install production dependencies
 # This command automatically handles package-lock.json if it exists, otherwise it creates one.
@@ -17,7 +17,7 @@ COPY package*.json ./
 RUN npm install
 
 # Stage 2: Runner - Copy application code and run
-FROM node:20-alpine
+FROM node:25-alpine
 
 # Set working directory
 WORKDIR /app
@@ -30,10 +30,6 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY src/ ./src/
 COPY config.default.js ./config.default.js
 COPY package.json ./package.json
-COPY biome.json ./biome.json
-COPY commitlint.config.mjs ./commitlint.config.mjs
-COPY LICENSE ./LICENSE
-COPY README.md ./README.md
 
 # Expose the port the application listens on (default is 3000 from config.default.js)
 EXPOSE 3000

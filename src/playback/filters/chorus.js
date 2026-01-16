@@ -98,4 +98,14 @@ export default class Chorus {
 
     return chunk
   }
+
+  clear() {
+    for (const delay of this.delays) {
+      delay.clear()
+    }
+    this.lfos[0].phase = 0
+    this.lfos[1].phase = Math.PI / 2
+    this.lfos[2].phase = Math.PI
+    this.lfos[3].phase = (3 * Math.PI) / 2
+  }
 }

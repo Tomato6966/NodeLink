@@ -1,5 +1,5 @@
 import myzod from 'myzod'
-import { logger, sendResponse, sendErrorResponse } from '../utils.js'
+import { logger, sendErrorResponse } from '../utils.js'
 
 const loadTracksSchema = myzod.object({
   identifier: myzod.string()
@@ -27,32 +27,60 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const identifier = result.identifier
   logger('debug', 'Tracks', `Loading tracks with identifier: "${identifier}"`)
 
+  const re =
+    /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>(?![A-Z]:\\)[A-Za-z0-9]+):(?<query>(?!\/\/).+)|(?<local>(?:\/|[A-Z]:\\|\\).+))$/i
+  const match = re.exec(identifier)
+
+  let url, source, query
+
+  if (match) {
+    url = match.groups.url
+    source = match.groups.source
+    query = match.groups.query
+
+    if (match.groups.local) {
+      source = 'local'
+      query = match.groups.local
+    }
+  } else {
+    source = Array.isArray(nodelink.options.defaultSearchSource)
+      ? nodelink.options.defaultSearchSource[0]
+      : nodelink.options.defaultSearchSource
+    query = identifier
+  }
+
   try {
+    if (nodelink.sourceWorkerManager) {
+      let task = ''
+      let payload = {}
+
+      if (url) {
+        task = 'resolve'
+        payload = { url }
+      } else if (source === 'search') {
+        task = 'unifiedSearch'
+        payload = { query }
+      } else {
+        task = 'search'
+        payload = { source, query }
+      }
+
+      const delegated = nodelink.sourceWorkerManager.delegate(
+        req,
+        res,
+        task,
+        payload
+      )
+      if (delegated) return
+    }
+
     let result
-    if (nodelink.workerManager) {
+    if (nodelink.workerManager && !nodelink.sourceWorkerManager) {
       const worker = nodelink.workerManager.getBestWorker()
       result = await nodelink.workerManager.execute(worker, 'loadTracks', {
         identifier
       })
     } else {
-      const re =
-        /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>[A-Za-z0-9]+):(?<query>[^/\s].*))$/i
-      const match = re.exec(identifier)
-      if (!match) {
-        logger('warn', 'Tracks', `Invalid identifier: "${identifier}"`)
-        return sendErrorResponse(
-          req,
-          res,
-          400,
-          'invalid identifier parameter',
-          'identifier parameter is invalid',
-          parsedUrl.pathname,
-          true
-        )
-      }
-
-      const { url, source, query } = match.groups
-
       if (url) {
         result = await nodelink.sources.resolve(url)
       } else if (source === 'search') {
@@ -61,6 +89,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         result = await nodelink.sources.search(source, query)
       }
     }
+
     return sendResponse(req, res, result, 200)
   } catch (err) {
     logger(

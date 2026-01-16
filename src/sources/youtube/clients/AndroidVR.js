@@ -1,9 +1,9 @@
 import { logger, makeRequest } from '../../../utils.js'
 import {
   BaseClient,
-  YOUTUBE_CONSTANTS,
   buildTrack,
-  checkURLType
+  checkURLType,
+  YOUTUBE_CONSTANTS
 } from '../common.js'
 
 export default class AndroidVR extends BaseClient {
@@ -15,12 +15,13 @@ export default class AndroidVR extends BaseClient {
     return {
       client: {
         clientName: 'ANDROID_VR',
-        clientVersion: '1.65.10',
+        clientVersion: '1.71.26',
         userAgent:
-          'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+          'com.google.android.apps.youtube.vr.oculus/1.71.26 (Linux; U; Android 15; eureka-user Build/AP4A.250205.002) gzip',
+        deviceMake: 'Google',
         osName: 'Android',
-        osVersion: '12L',
-        androidSdkVersion: '32',
+        osVersion: '15',
+        androidSdkVersion: '35',
         hl: context.client.hl,
         gl: context.client.gl,
         visitorData: context.client.visitorData
@@ -34,7 +35,7 @@ export default class AndroidVR extends BaseClient {
     return false
   }
 
-  async search(query, type, context) {
+  async search(query, _type, context) {
     const sourceName = 'youtube'
 
     const requestBody = {
@@ -157,7 +158,7 @@ export default class AndroidVR extends BaseClient {
     }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = 'https://youtubei.googleapis.com'

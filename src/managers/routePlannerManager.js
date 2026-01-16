@@ -4,127 +4,194 @@ export default class RoutePlannerManager {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.config = nodelink.options.routePlanner
-    this.ipBlocks = []
+    this.blocks = []
     this.bannedIps = new Map()
-    this.lastUsedIndex = -1
+    this.bannedBlocks = new Map()
+    this.lastUsedBlockIndex = -1
 
     if (this.config?.ipBlocks?.length > 0) {
       this._loadIpBlocks()
     }
   }
 
-  _ipToInt(ip) {
-    return (
-      ip.split('.').reduce((acc, oct) => (acc << 8) + parseInt(oct, 10), 0) >>>
-      0
-    )
-  }
-
-  _intToIp(int) {
-    return [
-      (int >>> 24) & 0xff,
-      (int >>> 16) & 0xff,
-      (int >>> 8) & 0xff,
-      int & 0xff
-    ].join('.')
-  }
-
-  _generateIpsFromCidr(cidr) {
-    const [baseIp, maskLength] = cidr.split('/')
-    if (!baseIp || !maskLength) throw new Error(`Invalid CIDR: ${cidr}`)
-
-    const mask = ~(2 ** (32 - parseInt(maskLength)) - 1) >>> 0
-    const baseInt = this._ipToInt(baseIp) & mask
-    const numberOfIps = 2 ** (32 - parseInt(maskLength))
-    const ips = []
-
-    for (let i = 0; i < numberOfIps; i++) {
-      ips.push(this._intToIp(baseInt + i))
+  _ipToBigInt(ip) {
+    if (ip.includes(':')) {
+      const parts = ip.split(':')
+      const fullParts = []
+      for (let i = 0; i < parts.length; i++) {
+        if (parts[i] === '') {
+          const missing = 8 - (parts.length - 1)
+          fullParts.push(...Array(missing).fill('0000'))
+        } else {
+          fullParts.push(parts[i].padStart(4, '0'))
+        }
+      }
+      return BigInt(`0x${fullParts.join('')}`)
+    } else {
+      return BigInt(
+        ip.split('.').reduce((acc, oct) => (acc << 8n) + BigInt(oct), 0n)
+      )
     }
-    return ips
+  }
+
+  _bigIntToIp(bigint, isIpv6) {
+    if (isIpv6) {
+      const hex = bigint.toString(16).padStart(32, '0')
+      const parts = []
+      for (let i = 0; i < 8; i++) {
+        parts.push(hex.substring(i * 4, i * 4 + 4))
+      }
+      return parts.join(':').replace(/\b0{1,3}/g, '')
+    } else {
+      const parts = []
+      for (let i = 0; i < 4; i++) {
+        parts.unshift(Number(bigint & 255n))
+        bigint >>= 8n
+      }
+      return parts.join('.')
+    }
   }
 
   _loadIpBlocks() {
-    for (const block of this.config.ipBlocks) {
+    for (const blockConfig of this.config.ipBlocks) {
       try {
-        const ips = this._generateIpsFromCidr(block.cidr)
-        this.ipBlocks.push(...ips)
+        const [baseIp, maskLengthStr] = blockConfig.cidr.split('/')
+        const maskLength = parseInt(maskLengthStr, 10)
+        const isIpv6 = baseIp.includes(':')
+        const totalBits = isIpv6 ? 128n : 32n
+
+        const baseInt = this._ipToBigInt(baseIp)
+        const mask =
+          ((1n << BigInt(maskLength)) - 1n) << (totalBits - BigInt(maskLength))
+        const networkInt = baseInt & mask
+        const size = 1n << (totalBits - BigInt(maskLength))
+
+        this.blocks.push({
+          cidr: blockConfig.cidr,
+          networkInt,
+          size,
+          lastUsedOffset: -1n,
+          isIpv6
+        })
       } catch (e) {
         logger(
           'error',
           'RoutePlanner',
-          `Failed to parse IP block ${block.cidr}: ${e.message}`
+          `Failed to parse block ${blockConfig.cidr}: ${e.message}`
         )
       }
     }
     logger(
       'info',
       'RoutePlanner',
-      `Loaded ${this.ipBlocks.length} IPs from ${this.config.ipBlocks.length} blocks.`
+      `Initialized with ${this.blocks.length} IP blocks.`
     )
   }
 
   getIP() {
-    if (this.ipBlocks.length === 0) return null
+    if (this.blocks.length === 0) return null
 
-    const strategy = this.config.strategy || 'RoundRobin'
-
+    const strategy = this.config.strategy || 'RotateOnBan'
     switch (strategy) {
       case 'RoundRobin':
-        return this._getRoundRobinIp()
       case 'RotateOnBan':
-        return this._getRotateOnBanIp()
+        return this._getNextIp()
       case 'LoadBalance':
         return this._getRandomIp()
       default:
-        return this._getRoundRobinIp()
+        return this._getNextIp()
     }
   }
 
-  _getRoundRobinIp() {
-    if (this.ipBlocks.length === 0) return null
-    this.lastUsedIndex = (this.lastUsedIndex + 1) % this.ipBlocks.length
-    return this.ipBlocks[this.lastUsedIndex]
-  }
-
-  _getRotateOnBanIp() {
-    if (this.ipBlocks.length === 0) return null
-
+  _getNextIp() {
     const now = Date.now()
-    for (let i = 0; i < this.ipBlocks.length; i++) {
-      this.lastUsedIndex = (this.lastUsedIndex + 1) % this.ipBlocks.length
-      const ip = this.ipBlocks[this.lastUsedIndex]
-      const bannedUntil = this.bannedIps.get(ip)
+    const _startBlockIdx = this.lastUsedBlockIndex
 
-      if (!bannedUntil || now > bannedUntil) {
-        return ip
+    for (let i = 0; i < this.blocks.length; i++) {
+      this.lastUsedBlockIndex =
+        (this.lastUsedBlockIndex + 1) % this.blocks.length
+      const block = this.blocks[this.lastUsedBlockIndex]
+
+      if (
+        this.bannedBlocks.has(block.cidr) &&
+        now < this.bannedBlocks.get(block.cidr)
+      )
+        continue
+
+      for (let attempt = 0; attempt < 10; attempt++) {
+        block.lastUsedOffset = (block.lastUsedOffset + 1n) % block.size
+        const ipInt = block.networkInt + block.lastUsedOffset
+        const ip = this._bigIntToIp(ipInt, block.isIpv6)
+
+        if (!this.bannedIps.has(ip) || now > this.bannedIps.get(ip)) {
+          return ip
+        }
       }
     }
 
-    logger('warn', 'RoutePlanner', 'All IPs are currently banned.')
     return null
   }
 
   _getRandomIp() {
     const now = Date.now()
-    const availableIps = this.ipBlocks.filter((ip) => {
-      const bannedUntil = this.bannedIps.get(ip)
-      return !bannedUntil || now > bannedUntil
-    })
+    const availableBlocks = this.blocks.filter(
+      (b) =>
+        !this.bannedBlocks.has(b.cidr) || now > this.bannedBlocks.get(b.cidr)
+    )
 
-    if (availableIps.length === 0) {
-      logger('warn', 'RoutePlanner', 'All IPs are currently banned.')
-      return null
-    }
+    if (availableBlocks.length === 0) return null
 
-    const ip = availableIps[Math.floor(Math.random() * availableIps.length)]
-    return ip
+    const block =
+      availableBlocks[Math.floor(Math.random() * availableBlocks.length)]
+
+    const randomOffset = BigInt(
+      Math.floor(
+        Math.random() *
+          Number(
+            block.size > BigInt(Number.MAX_SAFE_INTEGER)
+              ? Number.MAX_SAFE_INTEGER
+              : block.size
+          )
+      )
+    )
+    const ipInt = block.networkInt + randomOffset
+    return this._bigIntToIp(ipInt, block.isIpv6)
   }
 
   banIP(ip) {
     if (!ip) return
     const cooldown = this.config.bannedIpCooldown || 600000
-    this.bannedIps.set(ip, Date.now() + cooldown)
+    const now = Date.now()
+    this.bannedIps.set(ip, now + cooldown)
+
+    // Check if we should ban the whole block (if many IPs are failing)
+    const block = this.blocks.find((b) => {
+      const ipInt = this._ipToBigInt(ip)
+      return ipInt >= b.networkInt && ipInt < b.networkInt + b.size
+    })
+
+    if (block) {
+      let failedInBlock = 0
+      for (const bannedIp of this.bannedIps.keys()) {
+        const bIpInt = this._ipToBigInt(bannedIp)
+        if (
+          bIpInt >= block.networkInt &&
+          bIpInt < block.networkInt + block.size
+        ) {
+          failedInBlock++
+        }
+      }
+
+      if (failedInBlock >= 5) {
+        this.bannedBlocks.set(block.cidr, now + cooldown * 2)
+        logger(
+          'warn',
+          'RoutePlanner',
+          `Banning Block: ${block.cidr} due to multiple failures.`
+        )
+      }
+    }
+
     logger('warn', 'RoutePlanner', `Banning IP: ${ip} for ${cooldown}ms`)
   }
 
@@ -137,6 +204,7 @@ export default class RoutePlannerManager {
 
   freeAll() {
     this.bannedIps.clear()
-    logger('info', 'RoutePlanner', 'Freed all banned IPs.')
+    this.bannedBlocks.clear()
+    logger('info', 'RoutePlanner', 'Freed all banned IPs and blocks.')
   }
 }

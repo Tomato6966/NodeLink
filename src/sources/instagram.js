@@ -25,7 +25,21 @@ export default class InstagramSource {
   }
 
   async setup() {
-    logger('info', 'Sources', 'Fetching Instagram API parameters...')
+    logger('info', 'Sources', 'Checking Instagram API parameters...')
+
+    const cachedConfig = this.nodelink.credentialManager.get(
+      'instagram_api_config'
+    )
+    if (cachedConfig) {
+      this.apiConfig = { ...this.apiConfig, ...cachedConfig }
+      logger(
+        'info',
+        'Sources',
+        'Loaded Instagram parameters from CredentialManager.'
+      )
+      return true
+    }
+
     try {
       const response = await makeRequest('https://www.instagram.com/', {
         method: 'GET',
@@ -64,6 +78,17 @@ export default class InstagramSource {
       this.apiConfig.fbLsd = fbLsd
       if (docIdPost) this.apiConfig.docId_post = docIdPost
 
+      this.nodelink.credentialManager.set(
+        'instagram_api_config',
+        {
+          csrfToken: this.apiConfig.csrfToken,
+          igAppId: this.apiConfig.igAppId,
+          fbLsd: this.apiConfig.fbLsd,
+          docId_post: this.apiConfig.docId_post
+        },
+        24 * 60 * 60 * 1000
+      )
+
       logger('info', 'Sources', 'Loaded Instagram source.')
       return true
     } catch (e) {
@@ -90,7 +115,7 @@ export default class InstagramSource {
     }
     for (const [index, pattern] of this.patterns.entries()) {
       const match = url.match(pattern)
-      if (match && match[1]) {
+      if (match?.[1]) {
         if (index === 0) {
           return { id: match[1], error: null, type: 'audio' }
         }
@@ -253,7 +278,7 @@ export default class InstagramSource {
       }
       try {
         responseData = JSON.parse(responseData)
-      } catch (e) {
+      } catch (_e) {
         return {
           data: null,
           exception: {
@@ -283,7 +308,8 @@ export default class InstagramSource {
       return {
         data: null,
         exception: {
-          message: 'Invalid data structure in Audio API JSON response (no payload or metadata)',
+          message:
+            'Invalid data structure in Audio API JSON response (no payload or metadata)',
           severity: 'fault'
         }
       }
@@ -326,14 +352,16 @@ export default class InstagramSource {
       audioUrl = musicAsset?.progressive_download_url
 
       if (!audioUrl && musicConsumption?.dash_manifest) {
-        const urlMatch = musicConsumption.dash_manifest.match(/<BaseURL>(.*?)<\/BaseURL>/)
-        if (urlMatch && urlMatch[1]) {
+        const urlMatch = musicConsumption.dash_manifest.match(
+          /<BaseURL>(.*?)<\/BaseURL>/
+        )
+        if (urlMatch?.[1]) {
           audioUrl = urlMatch[1].replace(/&amp;/g, '&')
         }
       }
 
       if (!audioUrl) {
-         audioUrl = audioInfo.progressive_download_url
+        audioUrl = audioInfo.progressive_download_url
       }
 
       artist = musicAsset?.artist_name || 'User Unknown'
@@ -433,7 +461,7 @@ export default class InstagramSource {
     if (typeof responseData === 'string') {
       try {
         responseData = JSON.parse(responseData)
-      } catch (e) {
+      } catch (_e) {
         return {
           data: null,
           exception: {
@@ -635,7 +663,7 @@ export default class InstagramSource {
     }
   }
 
-  async loadStream(decodedTrack, url, protocol, additionalData) {
+  async loadStream(decodedTrack, url, _protocol, _additionalData) {
     try {
       const options = {
         method: 'GET',
@@ -678,7 +706,7 @@ export default class InstagramSource {
     }
   }
 
-  async search(query, type) {
+  async search(query, _type) {
     if (this.isLinkMatch(query)) {
       return this.resolve(query)
     }

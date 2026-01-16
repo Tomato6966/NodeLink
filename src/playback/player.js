@@ -37,7 +37,12 @@ export class Player {
     this.position = 0
     this.connStatus = 'idle'
     this.connection = null
-    this.voice = { sessionId: null, token: null, endpoint: null }
+    this.voice = {
+      sessionId: null,
+      token: null,
+      endpoint: null,
+      channelId: null
+    }
     this.streamInfo = null
     this.lastManualReconnect = 0
     this.audioMixer = null
@@ -138,6 +143,7 @@ export class Player {
     this.connection = discordVoice.joinVoiceChannel({
       guildId: this.guildId,
       userId: this.session.userId,
+      channelId: this.voice.channelId || this.guildId, // dave somehow accepted guildId lol
       encryption: this.nodelink.options?.audio.encryption
     })
     this.connection.on('stateChange', (_, s) => {
@@ -163,6 +169,10 @@ export class Player {
         this._lastStreamDataTime = Date.now()
       })
     })
+
+    if (this.nodelink.voiceRelay?.attach) {
+      this.nodelink.voiceRelay.attach(this.connection, this.guildId)
+    }
   }
 
   _onConn(state) {
@@ -375,7 +385,7 @@ export class Player {
       reason: reason
     })
 
-    if (this.audioMixer && this.audioMixer.autoCleanup) {
+    if (this.audioMixer?.autoCleanup) {
       this.audioMixer.clearLayers('MAIN_ENDED')
     }
   }
@@ -1097,7 +1107,7 @@ export class Player {
   updateVoice(voicePayload = {}, force = false) {
     if (this.destroying) return
 
-    const { sessionId, token, endpoint } = voicePayload
+    const { sessionId, token, endpoint, channelId } = voicePayload
 
     let changed = false
     if (sessionId !== undefined && this.voice.sessionId !== sessionId) {
@@ -1110,6 +1120,10 @@ export class Player {
     }
     if (endpoint !== undefined && this.voice.endpoint !== endpoint) {
       this.voice.endpoint = endpoint
+      changed = true
+    }
+    if (channelId !== undefined && this.voice.channelId !== channelId) {
+      this.voice.channelId = channelId
       changed = true
     }
 
@@ -1129,6 +1143,9 @@ export class Player {
         `Updating voice state for guild ${this.guildId}`
       )
       if (!this.connection) this._initConnection()
+      if (this.voice.channelId) {
+        this.connection.channelId = this.voice.channelId
+      }
       this.connection.voiceStateUpdate({ session_id: this.voice.sessionId })
       this.connection.voiceServerUpdate({
         token: this.voice.token,
@@ -1230,7 +1247,7 @@ export class Player {
     }
 
     const fetched = await this.nodelink.sources.getTrackStream(
-      trackPayload.info,
+      urlData.newTrack?.info || trackPayload.info,
       urlData.url,
       urlData.protocol,
       urlData.additionalData

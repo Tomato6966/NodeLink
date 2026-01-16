@@ -26,21 +26,23 @@ async function _manageYoutubeHlsStream(
 ) {
   const segmentQueue = []
   const processedSegments = new Set()
-  const processedOrder = []
+  const MAX_PROCESSED_TRACK = 100
+  const processedOrder = new Array(MAX_PROCESSED_TRACK)
+  let processedIndex = 0
   let cleanedUp = false
   let playlistEnded = false
   const MAX_LIVE_QUEUE_SIZE = 15
-  const MAX_PROCESSED_TRACK = 100
 
-  const rememberSegment = (url) => {
-    if (processedSegments.has(url)) return false
-    processedSegments.add(url)
-    processedOrder.push(url)
+  const rememberSegment = (key) => {
+    if (processedSegments.has(key)) return false
 
-    if (processedOrder.length > MAX_PROCESSED_TRACK) {
-      const old = processedOrder.shift()
-      if (old) processedSegments.delete(old)
-    }
+    const old = processedOrder[processedIndex]
+    if (old !== undefined) processedSegments.delete(old)
+
+    processedSegments.add(key)
+    processedOrder[processedIndex] = key
+    processedIndex = (processedIndex + 1) % MAX_PROCESSED_TRACK
+
     return true
   }
 
@@ -116,11 +118,14 @@ async function _manageYoutubeHlsStream(
         }
 
         const currentSegments = []
+        let segIdx = 0
         for (let i = 0; i < lines.length; i++) {
           if (lines[i].startsWith('#EXTINF:')) {
             const segmentUrl = lines[i + 1]
             if (segmentUrl && !segmentUrl.startsWith('#')) {
-              currentSegments.push(new URL(segmentUrl, playlistUrl).toString())
+              const url = new URL(segmentUrl, playlistUrl).toString()
+              const seq = mediaSequence + segIdx++
+              currentSegments.push({ url, seq })
             }
           }
         }
@@ -143,24 +148,24 @@ async function _manageYoutubeHlsStream(
           const segmentsToTake = isLive ? 3 : PLAYLIST_FALLBACK_SEGMENTS
           const startIdx = Math.max(0, currentSegments.length - segmentsToTake)
           for (let i = startIdx; i < currentSegments.length; i++) {
-            const url = currentSegments[i]
-            if (rememberSegment(url)) {
-              segmentQueue.push(url)
+            const seg = currentSegments[i]
+            const key = isLive ? seg.seq : seg.url
+            if (rememberSegment(key)) {
+              segmentQueue.push(seg)
             }
           }
           isFirstFetch = false
         } else {
-          for (const url of currentSegments) {
-            if (!processedSegments.has(url)) {
+          for (const seg of currentSegments) {
+            const key = isLive ? seg.seq : seg.url
+
+            if (!processedSegments.has(key)) {
               if (isLive && segmentQueue.length >= MAX_LIVE_QUEUE_SIZE) {
-                const oldUrl = segmentQueue.shift()
-                if (oldUrl) {
-                  processedSegments.delete(oldUrl)
-                }
+                segmentQueue.shift()
               }
 
-              if (rememberSegment(url)) {
-                segmentQueue.push(url)
+              if (rememberSegment(key)) {
+                segmentQueue.push(seg)
               }
             }
           }
@@ -185,11 +190,16 @@ async function _manageYoutubeHlsStream(
   }
 
   const segmentDownloader = async () => {
+    let nextSegmentPromise = null // { url, promise }
+
     while (true) {
-      if (cancelSignal.aborted || (playlistEnded && segmentQueue.length === 0))
+      if (
+        cancelSignal.aborted ||
+        (playlistEnded && segmentQueue.length === 0 && !nextSegmentPromise)
+      )
         break
 
-      if (segmentQueue.length === 0) {
+      if (segmentQueue.length === 0 && !nextSegmentPromise) {
         await new Promise((resolve) => {
           const timeout = setTimeout(resolve, 50)
           if (typeof timeout.unref === 'function') timeout.unref()
@@ -197,24 +207,62 @@ async function _manageYoutubeHlsStream(
         continue
       }
 
-      const segmentUrl = segmentQueue.shift()
-      if (processedSegments.has(segmentUrl)) {
-        processedSegments.delete(segmentUrl)
-      }
-
-      if (cancelSignal.aborted) break
-
       try {
-        const res = await http1makeRequest(segmentUrl, { streamOnly: true })
+        let segmentUrl = null
+
+        let res
+        if (nextSegmentPromise) {
+          segmentUrl = nextSegmentPromise.url
+          res = await nextSegmentPromise.promise
+          nextSegmentPromise = null
+        } else {
+          const seg = segmentQueue.shift()
+          if (!seg) continue
+          segmentUrl = seg.url
+          res = await http1makeRequest(segmentUrl, { streamOnly: true })
+        }
+
+        if (
+          segmentQueue.length > 0 &&
+          !nextSegmentPromise &&
+          !cancelSignal.aborted
+        ) {
+          const nextSeg = segmentQueue.shift()
+          if (nextSeg) {
+            nextSegmentPromise = {
+              url: nextSeg.url,
+              promise: http1makeRequest(nextSeg.url, { streamOnly: true })
+            }
+          }
+        }
 
         if (res.error || res.statusCode !== 200) {
-          logger(
-            'warn',
-            'YouTube-HLS-Downloader',
-            `Failed segment ${segmentUrl}: ${res.statusCode}`
-          )
           if (res.stream) res.stream.destroy()
-          continue
+
+          let retryCount = 0
+          let success = false
+          while (retryCount < 3 && !cancelSignal.aborted) {
+            retryCount++
+            const retryRes = await http1makeRequest(segmentUrl, {
+              streamOnly: true
+            })
+            if (!retryRes.error && retryRes.statusCode === 200) {
+              res = retryRes
+              success = true
+              break
+            }
+            if (retryRes.stream) retryRes.stream.destroy()
+            await new Promise((r) => setTimeout(r, 500 * retryCount))
+          }
+
+          if (!success) {
+            logger(
+              'warn',
+              'YouTube-HLS-Downloader',
+              `Failed segment after retries: ${res.statusCode}`
+            )
+            continue
+          }
         }
 
         if (outputStream.destroyed || cancelSignal.aborted) {
@@ -238,7 +286,7 @@ async function _manageYoutubeHlsStream(
           logger(
             'error',
             'YouTube-HLS-Downloader',
-            `Error processing segment ${segmentUrl}: ${e.message}`
+            `Error processing segment: ${e.message}`
           )
         }
       }
@@ -268,7 +316,7 @@ async function _manageYoutubeHlsStream(
     let bestAudioOnlyUrl = null
     let bestBandwidth = 0
     let bestAudioOnlyBandwidth = 0
-    let isLive =
+    const isLive =
       masterPlaylistContent.includes('yt_live_broadcast') ||
       masterPlaylistContent.includes('live/1')
 
@@ -330,7 +378,9 @@ export default class YouTubeSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.config = nodelink.options.sources.youtube
-    this.searchTerms = ['youtube', 'ytsearch', 'ytmsearch', 'ytmusic']
+    this.additionalsSourceName = ['ytmusic']
+    this.searchTerms = ['ytsearch', 'ytmsearch']
+    this.recommendationTerm = ['ytrec']
     this.patterns = [
       /^https?:\/\/(?:www\.)?(?:youtube\.com\/(?:watch\?v=[\w-]+(?:&list=[\w-]+)?|playlist\?list=[\w-]+|live\/[\w-]+)|youtu\.be\/[\w-]+)/,
       /^https?:\/\/(?:www\.)?youtube\.com\/shorts\/[\w-]+/,
@@ -418,6 +468,23 @@ export default class YouTubeSource {
   }
 
   async _fetchVisitorData() {
+    const cachedVisitorData =
+      this.nodelink.credentialManager.get('yt_visitor_data')
+    const cachedPlayerScript = this.nodelink.credentialManager.get(
+      'yt_player_script_url'
+    )
+
+    if (cachedVisitorData && cachedPlayerScript) {
+      this.ytContext.client.visitorData = cachedVisitorData
+      this.cipherManager.setPlayerScriptUrl(cachedPlayerScript)
+      logger(
+        'debug',
+        'YouTube',
+        'Context and player script loaded from cache. Skipping network request.'
+      )
+      return
+    }
+
     logger('debug', 'YouTube', 'Fetching visitor data...')
     let playerScriptUrl = null
 
@@ -433,6 +500,11 @@ export default class YouTubeSource {
         const visitorMatch = data?.match(/"VISITOR_DATA":"([^"]+)"/)
         if (visitorMatch?.[1]) {
           this.ytContext.client.visitorData = visitorMatch[1]
+          this.nodelink.credentialManager.set(
+            'yt_visitor_data',
+            visitorMatch[1],
+            24 * 60 * 60 * 1000
+          )
           visitorFound = true
         }
 
@@ -441,6 +513,11 @@ export default class YouTubeSource {
           playerScriptUrl = playerScriptMatch[1].replace(
             /\/[a-z]{2}_[A-Z]{2}\//,
             '/en_US/'
+          )
+          this.nodelink.credentialManager.set(
+            'yt_player_script_url',
+            playerScriptUrl,
+            12 * 60 * 60 * 1000
           )
           logger('debug', 'YouTube', `Player script URL: ${playerScriptUrl}`)
         }
@@ -479,7 +556,11 @@ export default class YouTubeSource {
     if (playerScriptUrl) this.cipherManager.setPlayerScriptUrl(playerScriptUrl)
   }
 
-  async search(query, type) {
+  async search(query, type, searchType = 'track') {
+    if (type === 'ytrec') {
+      return this.getRecommendations(query)
+    }
+
     let clientList = this.config.clients.search
 
     if (type === 'ytmsearch') {
@@ -496,9 +577,9 @@ export default class YouTubeSource {
         logger(
           'debug',
           'YouTube',
-          `Attempting search with client: ${clientName}`
+          `Attempting ${searchType} search with client: ${clientName}`
         )
-        const result = await client.search(query, type, this.ytContext)
+        const result = await client.search(query, searchType, this.ytContext)
 
         if (result && result.loadType === 'search') {
           logger(
@@ -539,6 +620,82 @@ export default class YouTubeSource {
         cause: 'All clients failed.',
         errors: clientErrors
       }
+    }
+  }
+
+  async getRecommendations(query) {
+    let videoId = query
+    if (!/^[a-zA-Z0-9_-]{11}$/.test(query)) {
+      const searchRes = await this.search(query, 'ytmsearch')
+      if (searchRes.loadType !== 'search' || !searchRes.data.length) {
+        return { loadType: 'empty', data: {} }
+      }
+      videoId = searchRes.data[0].info.identifier
+    }
+
+    try {
+      const automixId = `RD${videoId}`
+      let automixRes = null
+
+      if (this.clients.Music) {
+        try {
+          automixRes = await this.clients.Music.resolve(
+            `https://music.youtube.com/playlist?list=${automixId}`,
+            'ytmusic',
+            this.ytContext,
+            this.cipherManager
+          )
+        } catch (e) {
+          logger(
+            'debug',
+            'YouTube',
+            `Music client failed for recommendations: ${e.message}`
+          )
+        }
+      }
+
+      if (
+        (!automixRes || automixRes.loadType !== 'playlist') &&
+        this.clients.TV
+      ) {
+        try {
+          automixRes = await this.clients.TV.resolve(
+            `https://www.youtube.com/playlist?list=${automixId}`,
+            'youtube',
+            this.ytContext,
+            this.cipherManager
+          )
+        } catch (e) {
+          logger(
+            'debug',
+            'YouTube',
+            `TV client failed for recommendations: ${e.message}`
+          )
+        }
+      }
+
+      if (
+        automixRes &&
+        automixRes.loadType === 'playlist' &&
+        automixRes.data.tracks.length > 0
+      ) {
+        const tracks = automixRes.data.tracks.filter(
+          (t) => t.info.identifier !== videoId
+        )
+        return {
+          loadType: 'playlist',
+          data: {
+            info: { name: 'YouTube Recommendations', selectedTrack: 0 },
+            pluginInfo: { type: 'recommendations' },
+            tracks
+          }
+        }
+      }
+
+      return { loadType: 'empty', data: {} }
+    } catch (e) {
+      logger('error', 'YouTube', `Recommendations failed: ${e.message}`)
+      return { exception: { message: e.message, severity: 'fault' } }
     }
   }
 
@@ -1389,13 +1546,25 @@ export default class YouTubeSource {
           activeRequest = null
           fetching = false
           if (!destroyed) {
-            logger('warn', 'YouTube', `Range request error at pos ${position}: ${err.message}`)
-            if (++errors >= MAX_RETRIES) {
+            logger(
+              'warn',
+              'YouTube',
+              `Range request error at pos ${position}: ${err.message}`
+            )
+            const isAborted =
+              err.message === 'aborted' || err.code === 'ECONNRESET'
+            if (++errors >= MAX_RETRIES || isAborted) {
+              if (isAborted)
+                logger(
+                  'warn',
+                  'YouTube',
+                  'Connection aborted, forcing immediate recovery with new URL.'
+                )
               recover(err)
             } else {
               const timeout = setTimeout(
                 fetchNext,
-                Math.min(1000 * Math.pow(2, errors - 1), 5000)
+                Math.min(1000 * 2 ** (errors - 1), 5000)
               )
               if (typeof timeout.unref === 'function') timeout.unref()
             }
@@ -1415,13 +1584,25 @@ export default class YouTubeSource {
         activeRequest = null
         fetching = false
         if (!destroyed) {
-          logger('warn', 'YouTube', `Range request exception at pos ${position}: ${err.message}`)
-          if (++errors >= MAX_RETRIES) {
+          logger(
+            'warn',
+            'YouTube',
+            `Range request exception at pos ${position}: ${err.message}`
+          )
+          const isAborted =
+            err.message === 'aborted' || err.code === 'ECONNRESET'
+          if (++errors >= MAX_RETRIES || isAborted) {
+            if (isAborted)
+              logger(
+                'warn',
+                'YouTube',
+                'Connection aborted, forcing immediate recovery with new URL.'
+              )
             recover(err)
           } else {
             const timeout = setTimeout(
               fetchNext,
-              Math.min(1000 * Math.pow(2, errors - 1), 5000)
+              Math.min(1000 * 2 ** (errors - 1), 5000)
             )
             if (typeof timeout.unref === 'function') timeout.unref()
           }
@@ -1432,15 +1613,22 @@ export default class YouTubeSource {
     const recover = async (causeError) => {
       if (destroyed || cancelSignal.aborted) return
 
-      const isForbidden = causeError?.message?.includes('403') || causeError?.statusCode === 403
+      const isForbidden =
+        causeError?.message?.includes('403') || causeError?.statusCode === 403
+      const isAborted =
+        causeError?.message === 'aborted' || causeError?.code === 'ECONNRESET'
 
-      if (!isForbidden && refreshes === 0) {
-         logger('debug', 'YouTube', `Retrying same URL for recovery first (cause: ${causeError?.message})...`)
-         errors = 0
-         fetching = false
-         fetchNext()
-         refreshes++
-         return
+      if (!isForbidden && !isAborted && refreshes === 0) {
+        logger(
+          'debug',
+          'YouTube',
+          `Retrying same URL for recovery first (cause: ${causeError?.message})...`
+        )
+        errors = 0
+        fetching = false
+        fetchNext()
+        refreshes++
+        return
       }
 
       if (++refreshes > MAX_URL_REFRESH) {
@@ -1481,7 +1669,10 @@ export default class YouTubeSource {
           `Recovery failed (attempt ${refreshes}): ${error.message}`
         )
         if (!destroyed && !cancelSignal.aborted) {
-          recoverTimeout = setTimeout(() => recover(causeError), 4000 + refreshes * 1000)
+          recoverTimeout = setTimeout(
+            () => recover(causeError),
+            4000 + refreshes * 1000
+          )
           if (typeof recoverTimeout.unref === 'function') {
             recoverTimeout.unref()
           }

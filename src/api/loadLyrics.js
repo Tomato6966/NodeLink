@@ -1,10 +1,5 @@
 import myzod from 'myzod'
-import {
-  decodeTrack,
-  logger,
-  sendResponse,
-  sendErrorResponse
-} from '../utils.js'
+import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const loadLyricsSchema = myzod.object({
   encodedTrack: myzod.string(),
@@ -57,11 +52,26 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       `Request to load lyrics for: ${decodedTrack.info.title}${language ? ` (Lang: ${language})` : ''}`
     )
 
+    let delegated = false
+    if (nodelink.sourceWorkerManager) {
+      delegated = nodelink.sourceWorkerManager.delegate(
+        req,
+        res,
+        'loadLyrics',
+        {
+          decodedTrackInfo: decodedTrack.info,
+          language
+        }
+      )
+    }
+
+    if (delegated) return
+
     let lyricsData
     if (nodelink.workerManager) {
       const worker = nodelink.workerManager.getBestWorker()
       lyricsData = await nodelink.workerManager.execute(worker, 'loadLyrics', {
-        decodedTrack,
+        decodedTrackInfo: decodedTrack.info,
         language
       })
     } else {

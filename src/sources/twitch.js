@@ -119,6 +119,20 @@ export default class TwitchSource {
   }
 
   async setup() {
+    const cachedId = this.nodelink.credentialManager.get('twitch_client_id')
+    const cachedDevice = this.nodelink.credentialManager.get('twitch_device_id')
+
+    if (cachedId && cachedDevice) {
+      this.clientId = cachedId
+      this.deviceId = cachedDevice
+      logger(
+        'info',
+        'Sources',
+        'Loaded Twitch parameters from CredentialManager.'
+      )
+      return true
+    }
+
     try {
       const { body, headers, error, statusCode } = await http1makeRequest(
         'https://www.twitch.tv/',
@@ -172,6 +186,20 @@ export default class TwitchSource {
           'Failed to extract device ID from Twitch page.'
         )
       }
+
+      if (this.deviceId) {
+        this.nodelink.credentialManager.set(
+          'twitch_device_id',
+          this.deviceId,
+          7 * 24 * 60 * 60 * 1000
+        )
+      }
+
+      this.nodelink.credentialManager.set(
+        'twitch_client_id',
+        this.clientId,
+        7 * 24 * 60 * 60 * 1000
+      )
 
       logger(
         'info',
@@ -517,8 +545,8 @@ export default class TwitchSource {
       for (const quality of clipData.videoQualities) {
         if (
           !bestQuality ||
-          Number.parseInt(quality.quality) >
-            Number.parseInt(bestQuality.quality)
+          Number.parseInt(quality.quality, 10) >
+            Number.parseInt(bestQuality.quality, 10)
         ) {
           bestQuality = quality
         }
@@ -626,7 +654,7 @@ export default class TwitchSource {
     return bestUrl ? { url: bestUrl } : null
   }
 
-  async loadStream(track, url, protocol) {
+  async loadStream(_track, url, protocol) {
     if (protocol === 'hls') {
       const stream = new PassThrough()
       manageHlsStream(url, stream)
@@ -647,7 +675,7 @@ export default class TwitchSource {
     return { stream, type: 'mp4' }
   }
 
-  search(query) {
+  search(_query) {
     return {
       exception: {
         message: 'Search is not supported for Twitch',

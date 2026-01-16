@@ -1,23 +1,34 @@
 import { Transform } from 'node:stream'
+import { logger } from '../../utils.js'
+import { RingBuffer } from '../RingBuffer.js'
 
 const TOO_SHORT = Symbol('TOO_SHORT')
+const INVALID_VINT = Symbol('INVALID_VINT')
+const BUFFER_SIZE = 2 * 1024 * 1024
 
 const TAGS = Object.freeze({
   '1a45dfa3': true,
   18538067: true,
   '1f43b675': true,
   '1654ae6b': true,
+  '1c53bb6b': false,
+  '1254c367': false,
   ae: true,
   d7: false,
   83: false,
   a3: false,
-  '63a2': false
+  '63a2': false,
+  e7: false,
+  a0: true,
+  a1: false
 })
 
 const OPUS_HEAD = Buffer.from([0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64])
+const MAX_TAG_SIZE = 10 * 1024 * 1024
 
 const readVintLength = (buf, i) => {
   if (i < 0 || i >= buf.length) return TOO_SHORT
+  if (buf[i] === 0) return INVALID_VINT
   let n = 0
   for (; n < 8; n++) if ((1 << (7 - n)) & buf[i]) break
   n++
@@ -26,19 +37,27 @@ const readVintLength = (buf, i) => {
 
 const readVint = (buf, start, end) => {
   const len = readVintLength(buf, start)
-  if (len === TOO_SHORT || end > buf.length) return TOO_SHORT
-  let mask = (1 << (8 - len)) - 1
-  let value = buf[start] & mask
-  for (let i = start + 1; i < end; i++) value = (value << 8) | buf[i]
+  if (len === TOO_SHORT || len === INVALID_VINT || end > buf.length)
+    return TOO_SHORT
+  const mask = (1 << (8 - len)) - 1
+  let value = BigInt(buf[start] & mask)
+  for (let i = start + 1; i < end; i++) value = (value << 8n) | BigInt(buf[i])
   return value
 }
 
 class WebmBaseDemuxer extends Transform {
   constructor(options = {}) {
     super({ readableObjectMode: true, ...options })
-    this.remainder = null
-    this.total = 0
-    this.processed = 0
+    this.on('error', (err) =>
+      logger(
+        'error',
+        'WebmDemuxer',
+        `Stream error: ${err.message} (${err.code})`
+      )
+    )
+    this.ringBuffer = new RingBuffer(BUFFER_SIZE)
+    this.total = 0n
+    this.processed = 0n
     this.skipUntil = null
     this.currentTrack = null
     this.pendingTrack = {}
@@ -48,44 +67,63 @@ class WebmBaseDemuxer extends Transform {
   _transform(chunk, _, done) {
     if (!chunk?.length) return done()
 
-    this.total += chunk.length
-    if (this.remainder) {
-      chunk = Buffer.concat([this.remainder, chunk])
-      this.remainder = null
-    }
+    this.ringBuffer.write(chunk)
+    this.total += BigInt(chunk.length)
 
-    let offset = 0
-    if (this.skipUntil && this.total > this.skipUntil) {
-      offset = this.skipUntil - this.processed
+    if (this.skipUntil !== null) {
+      const remainingToSkip = this.skipUntil - this.processed
+      const bufferLen = BigInt(this.ringBuffer.length)
+      const toSkip = remainingToSkip < bufferLen ? remainingToSkip : bufferLen
+
+      if (toSkip > 0n) {
+        const skipNum =
+          toSkip > BigInt(Number.MAX_SAFE_INTEGER)
+            ? Number.MAX_SAFE_INTEGER
+            : Number(toSkip)
+        this.ringBuffer.skip(skipNum)
+        this.processed += BigInt(skipNum)
+      }
+      if (this.processed < this.skipUntil) return done()
       this.skipUntil = null
-    } else if (this.skipUntil) {
-      this.processed += chunk.length
-      done()
-      return
     }
 
-    let res
-    while (res !== TOO_SHORT) {
+    while (true) {
+      const currentData = this.ringBuffer.getContiguous(this.ringBuffer.length)
+      if (!currentData) break
+
+      let res
       try {
-        res = this._readTag(chunk, offset)
+        res = this._readTag(currentData, 0)
       } catch (err) {
+        logger('error', 'WebmDemuxer', `Error in _readTag: ${err.message}`)
         done(err)
         return
       }
+
       if (res === TOO_SHORT) break
+
       if (res._skipUntil) {
         this.skipUntil = res._skipUntil
+        this.ringBuffer.skip(this.ringBuffer.length)
+        this.processed += BigInt(this.ringBuffer.length)
         break
       }
-      if (res.offset) offset = res.offset
-      else break
+
+      if (res.offset) {
+        const offset = BigInt(res.offset)
+        const skipNum =
+          offset > BigInt(Number.MAX_SAFE_INTEGER)
+            ? Number.MAX_SAFE_INTEGER
+            : Number(offset)
+        this.ringBuffer.skip(skipNum)
+        this.processed += BigInt(skipNum)
+      } else {
+        break
+      }
     }
 
-    this.processed += offset
-    this.remainder = offset < chunk.length ? chunk.subarray(offset) : null
-
-    if (this.total > 1e9 && !this.skipUntil) {
-      this.total = this.processed = 0
+    if (this.total > 1000000000n && !this.skipUntil) {
+      this.total = this.processed = 0n
     }
 
     done()
@@ -94,43 +132,75 @@ class WebmBaseDemuxer extends Transform {
   _readEBMLId(chunk, offset) {
     const len = readVintLength(chunk, offset)
     if (len === TOO_SHORT) return TOO_SHORT
+    if (len === INVALID_VINT) return INVALID_VINT
     return { id: chunk.subarray(offset, offset + len), offset: offset + len }
   }
 
   _readTagSize(chunk, offset) {
     const len = readVintLength(chunk, offset)
     if (len === TOO_SHORT) return TOO_SHORT
+    if (len === INVALID_VINT) return INVALID_VINT
     const dataLen = readVint(chunk, offset, offset + len)
-    return { offset: offset + len, dataLen }
+    return { offset: offset + len, dataLen, vintLen: len }
   }
 
   _readTag(chunk, offset) {
     const idData = this._readEBMLId(chunk, offset)
     if (idData === TOO_SHORT) return TOO_SHORT
+    if (idData === INVALID_VINT) {
+      return { offset: 1 }
+    }
 
     const tag = idData.id.toString('hex')
     if (!this.ebmlFound) {
-      if (tag === '1a45dfa3') this.ebmlFound = true
-      else throw new Error('Invalid WebM: missing EBML header')
+      if (tag === '1a45dfa3' || tag === '1f43b675') {
+        logger('debug', 'WebmDemuxer', `Header found: ${tag}`)
+        this.ebmlFound = true
+      } else {
+        return { offset: 1 }
+      }
     }
 
-    offset = idData.offset
-    const sizeData = this._readTagSize(chunk, offset)
+    let currentOffset = idData.offset
+    const sizeData = this._readTagSize(chunk, currentOffset)
     if (sizeData === TOO_SHORT) return TOO_SHORT
+    if (sizeData === INVALID_VINT) {
+      return { offset: 1 }
+    }
 
-    const { dataLen } = sizeData
-    offset = sizeData.offset
+    const { dataLen, vintLen } = sizeData
+
+    if (tag !== '18538067' && dataLen > BigInt(MAX_TAG_SIZE)) {
+      const isUnknownSize = dataLen === 2n ** BigInt(7 * vintLen) - 1n
+      if (!isUnknownSize) {
+        return { offset: 1 }
+      }
+    }
+
+    currentOffset = sizeData.offset
 
     if (!(tag in TAGS)) {
-      if (chunk.length > offset + dataLen) return { offset: offset + dataLen }
-      return { offset, _skipUntil: this.processed + offset + dataLen }
+      const isUnknownSize = dataLen === 2n ** BigInt(7 * vintLen) - 1n
+      const numDataLen = Number(dataLen)
+
+      if (isUnknownSize) {
+        return { offset: 1 }
+      }
+
+      if (chunk.length > currentOffset + numDataLen)
+        return { offset: currentOffset + numDataLen }
+      return {
+        offset: currentOffset,
+        _skipUntil: this.processed + BigInt(currentOffset + numDataLen)
+      }
     }
 
     const hasChildren = TAGS[tag]
-    if (hasChildren) return { offset }
+    if (hasChildren) return { offset: currentOffset }
 
-    if (offset + dataLen > chunk.length) return TOO_SHORT
-    const data = chunk.subarray(offset, offset + dataLen)
+    const numDataLen = Number(dataLen)
+    if (currentOffset + numDataLen > chunk.length) return TOO_SHORT
+    const data = chunk.subarray(currentOffset, currentOffset + numDataLen)
 
     if (!this.currentTrack) {
       if (tag === 'ae') this.pendingTrack = {}
@@ -144,20 +214,21 @@ class WebmBaseDemuxer extends Transform {
     }
 
     if (tag === '63a2') {
-      this._checkHead(data)
-      this.emit('head', data)
+      try {
+        this._checkHead(data)
+        this.emit('head', data)
+      } catch (_e) {}
     } else if (tag === 'a3') {
-      if (!this.currentTrack) throw new Error('No valid audio track found')
-      if ((data[0] & 0xf) === this.currentTrack.number)
+      if (this.currentTrack && (data[0] & 0xf) === this.currentTrack.number) {
         this.push(data.subarray(4))
+      }
     }
 
-    return { offset: offset + dataLen }
+    return { offset: currentOffset + numDataLen }
   }
 
   _destroy(err, cb) {
     this._cleanup()
-    this.removeAllListeners()
     cb?.(err)
   }
 
@@ -167,7 +238,7 @@ class WebmBaseDemuxer extends Transform {
   }
 
   _cleanup() {
-    this.remainder = null
+    this.ringBuffer.dispose()
     this.pendingTrack = {}
     this.currentTrack = null
     this.ebmlFound = false

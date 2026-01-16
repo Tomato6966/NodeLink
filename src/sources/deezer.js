@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
-import { encodeTrack, logger, makeRequest, http1makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
 
 const IV = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])
 
@@ -10,6 +10,7 @@ export default class DeezerSource {
     this.nodelink = nodelink
     this.config = nodelink.options
     this.searchTerms = ['dzsearch']
+    this.recommendationTerm = ['dzrec']
     this.patterns = [
       /^https?:\/\/(?:www\.)?deezer\.com\/(?:[a-z]+(?:-[a-z]+)?\/)?(track|album|playlist|artist)\/(\d+)$/,
       /^https?:\/\/link\.deezer\.com\/s\/([a-zA-Z0-9]+)/
@@ -23,6 +24,24 @@ export default class DeezerSource {
 
   async setup() {
     logger('info', 'Sources', 'Initializing Deezer source...')
+
+    const cachedCsrf = this.nodelink.credentialManager.get('deezer_csrf_token')
+    const cachedLicense = this.nodelink.credentialManager.get(
+      'deezer_license_token'
+    )
+    const cachedCookie = this.nodelink.credentialManager.get('deezer_cookie')
+
+    if (cachedCsrf && cachedLicense && cachedCookie) {
+      this.csrfToken = cachedCsrf
+      this.licenseToken = cachedLicense
+      this.cookie = cachedCookie
+      logger(
+        'info',
+        'Sources',
+        'Loaded Deezer credentials from CredentialManager.'
+      )
+      return true
+    }
 
     try {
       let initialCookie = ''
@@ -58,6 +77,22 @@ export default class DeezerSource {
       this.csrfToken = userDataRes.body.results.checkForm
       this.licenseToken = userDataRes.body.results.USER.OPTIONS.license_token
 
+      this.nodelink.credentialManager.set(
+        'deezer_csrf_token',
+        this.csrfToken,
+        24 * 60 * 60 * 1000
+      )
+      this.nodelink.credentialManager.set(
+        'deezer_license_token',
+        this.licenseToken,
+        24 * 60 * 60 * 1000
+      )
+      this.nodelink.credentialManager.set(
+        'deezer_cookie',
+        this.cookie,
+        24 * 60 * 60 * 1000
+      )
+
       if (!this.csrfToken || !this.licenseToken) {
         throw new Error('CSRF Token or License Token not found in response.')
       }
@@ -70,7 +105,11 @@ export default class DeezerSource {
     }
   }
 
-  async search(query) {
+  async search(query, sourceTerm) {
+    if (this.recommendationTerm.includes(sourceTerm)) {
+      return this.getRecommendations(query)
+    }
+
     logger('debug', 'Sources', `Searching Deezer for: "${query}"`)
 
     const { body, error } = await makeRequest(
@@ -97,6 +136,73 @@ export default class DeezerSource {
       .map((item) => this.buildTrack(item))
 
     return { loadType: 'search', data: tracks }
+  }
+
+  async getRecommendations(query) {
+    try {
+      let method = 'song.getSearchTrackMix'
+      let payload = { sng_id: query, start_with_input_track: 'true' }
+
+      if (query.startsWith('artist=')) {
+        method = 'song.getSmartRadio'
+        payload = { art_id: query.split('=')[1] }
+      } else if (query.startsWith('track=')) {
+        payload.sng_id = query.split('=')[1]
+      } else if (!/^\d+$/.test(query)) {
+        const searchRes = await this.search(query, 'dzsearch')
+        if (searchRes.loadType === 'search' && searchRes.data.length > 0) {
+          payload.sng_id = searchRes.data[0].info.identifier
+        } else {
+          return { loadType: 'empty', data: {} }
+        }
+      }
+
+      const { body: result, error } = await makeRequest(
+        `https://www.deezer.com/ajax/gw-light.php?method=${method}&input=3&api_version=1.0&api_token=${this.csrfToken}`,
+        {
+          method: 'POST',
+          headers: { Cookie: this.cookie },
+          body: payload,
+          disableBodyCompression: true
+        }
+      )
+
+      if (error || !result?.results?.data) {
+        return { loadType: 'empty', data: {} }
+      }
+
+      const tracks = result.results.data.map((item) => {
+        const trackInfo = {
+          identifier: item.SNG_ID.toString(),
+          isSeekable: true,
+          author: item.ART_NAME,
+          length: item.DURATION * 1000,
+          isStream: false,
+          position: 0,
+          title: item.SNG_TITLE,
+          uri: `https://www.deezer.com/track/${item.SNG_ID}`,
+          artworkUrl: `https://e-cdns-images.dzcdn.net/images/cover/${item.ALB_PICTURE}/1000x1000-000000-80-0-0.jpg`,
+          isrc: item.ISRC || null,
+          sourceName: 'deezer'
+        }
+        return {
+          encoded: encodeTrack(trackInfo),
+          info: trackInfo,
+          pluginInfo: {}
+        }
+      })
+
+      return {
+        loadType: 'playlist',
+        data: {
+          info: { name: 'Deezer Recommendations', selectedTrack: 0 },
+          pluginInfo: { type: 'recommendations' },
+          tracks
+        }
+      }
+    } catch (e) {
+      return { exception: { message: e.message, severity: 'fault' } }
+    }
   }
 
   async resolve(url) {
@@ -207,7 +313,7 @@ export default class DeezerSource {
           loadType: 'artist',
           data: {
             info: {
-              name: `${artistData.name}\'s Top Tracks`,
+              name: `${artistData.name}'s Top Tracks`,
               selectedTrack: 0
             },
             pluginInfo: {},
@@ -243,62 +349,102 @@ export default class DeezerSource {
   }
 
   async getTrackUrl(decodedTrack) {
-    const { body: trackData } = await makeRequest(
-      `https://www.deezer.com/ajax/gw-light.php?method=song.getListData&input=3&api_version=1.0&api_token=${this.csrfToken}`,
-      {
-        method: 'POST',
-        headers: { Cookie: this.cookie },
-        body: { sng_ids: [decodedTrack.identifier] },
-        disableBodyCompression: true
+    let searchResult
+    if (decodedTrack.isrc) {
+      searchResult = await this.nodelink.sources.search(
+        'youtube',
+        `"${decodedTrack.isrc}"`,
+        'ytmsearch'
+      )
+      if (
+        searchResult.loadType !== 'search' ||
+        searchResult.data.length === 0
+      ) {
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          `${decodedTrack.title} ${decodedTrack.author}`,
+          'ytmsearch'
+        )
       }
-    )
-
-    if (trackData.error.length) {
-      const message = Object.values(trackData.error).join('; ')
-      return { exception: { message, severity: 'fault' } }
     }
 
-    const trackInfo = trackData.results.data[0]
+    if (
+      !searchResult ||
+      searchResult.loadType !== 'search' ||
+      searchResult.data.length === 0
+    ) {
+      const { body: trackData } = await makeRequest(
+        `https://www.deezer.com/ajax/gw-light.php?method=song.getListData&input=3&api_version=1.0&api_token=${this.csrfToken}`,
+        {
+          method: 'POST',
+          headers: { Cookie: this.cookie },
+          body: { sng_ids: [decodedTrack.identifier] },
+          disableBodyCompression: true
+        }
+      )
 
-    const { body: streamData } = await makeRequest(
-      'https://media.deezer.com/v1/get_url',
-      {
-        method: 'POST',
-        body: {
-          license_token: this.licenseToken,
-          media: [
-            {
-              type: 'FULL',
-              formats: [
-                { cipher: 'BF_CBC_STRIPE', format: 'FLAC' },
-                { cipher: 'BF_CBC_STRIPE', format: 'MP3_256' },
-                { cipher: 'BF_CBC_STRIPE', format: 'MP3_128' },
-                { cipher: 'BF_CBC_STRIPE', format: 'MP3_MISC' }
-              ]
-            }
-          ],
-          track_tokens: [trackInfo.TRACK_TOKEN]
-        },
-        disableBodyCompression: true
+      if (trackData.error.length) {
+        const message = Object.values(trackData.error).join('; ')
+        return { exception: { message, severity: 'fault' } }
       }
-    )
 
-    if (streamData.error || !streamData?.data[0]?.media[0]?.sources[0]?.url) {
+      const trackInfo = trackData.results.data[0]
+
+      const { body: streamData } = await makeRequest(
+        'https://media.deezer.com/v1/get_url',
+        {
+          method: 'POST',
+          body: {
+            license_token: this.licenseToken,
+            media: [
+              {
+                type: 'FULL',
+                formats: [
+                  { cipher: 'BF_CBC_STRIPE', format: 'FLAC' },
+                  { cipher: 'BF_CBC_STRIPE', format: 'MP3_256' },
+                  { cipher: 'BF_CBC_STRIPE', format: 'MP3_128' },
+                  { cipher: 'BF_CBC_STRIPE', format: 'MP3_MISC' }
+                ]
+              }
+            ],
+            track_tokens: [trackInfo.TRACK_TOKEN]
+          },
+          disableBodyCompression: true
+        }
+      )
+
+      if (streamData.error || !streamData?.data[0]?.media[0]?.sources[0]?.url) {
+        return {
+          exception: {
+            message: 'Could not get stream URL.',
+            severity: 'common'
+          }
+        }
+      }
+
+      const streamInfo = streamData.data[0].media[0]
       return {
-        exception: { message: 'Could not get stream URL.', severity: 'common' }
+        url: streamInfo.sources[0].url,
+        protocol: 'https',
+        format: streamInfo.format.startsWith('MP3') ? 'mp3' : 'flac',
+        additionalData: trackInfo
       }
     }
 
-    const streamInfo = streamData.data[0].media[0]
-    return {
-      url: streamInfo.sources[0].url,
-      protocol: 'https',
-      format: streamInfo.format.startsWith('MP3') ? 'mp3' : 'flac',
-      additionalData: trackInfo
-    }
+    const bestMatch = getBestMatch(searchResult.data, decodedTrack)
+    if (!bestMatch)
+      return {
+        exception: {
+          message: 'No suitable alternative found.',
+          severity: 'fault'
+        }
+      }
+
+    const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+    return { newTrack: bestMatch, ...streamInfo }
   }
 
-  loadStream(decodedTrack, url, format, additionalData) {
+  loadStream(decodedTrack, url, _format, additionalData) {
     return new Promise(async (resolve) => {
       try {
         const outputStream = new PassThrough()

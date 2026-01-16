@@ -29,19 +29,40 @@ export default async function(nodelink, config, context) {
     await install(bin)
   }
 
+  logger(`Starting tunnel on port ${port}...`)
+
   const tunnel = spawn(
     bin,
     ["tunnel", "run", "--token", token, "--url", `http://127.0.0.1:${port}`],
-    { stdio: "inherit", env: process.env }
+    { stdio: ["ignore", "pipe", "pipe"], env: process.env }
   )
 
-  const stopAll = () => {
-    try { tunnel.kill("SIGTERM") } catch {}
-  }
+  tunnel.stdout.on('data', (data) => {
+    const msg = data.toString().trim()
+    if (msg) logger(msg, 'debug')
+  })
 
-  process.on("SIGINT", stopAll)
-  process.on("SIGTERM", stopAll)
-  process.on("beforeExit", stopAll)
+  tunnel.stderr.on('data', (data) => {
+    const msg = data.toString().trim()
+    if (msg.includes('Registered tunnel connection')) {
+      logger('Tunnel connection established successfully.')
+    }
+  })
 
-  logger(`Tunnel started on port ${port}`)
+  tunnel.on('error', (err) => {
+    logger(`Failed to start cloudflared: ${err.message}`, 'error')
+  })
+
+  tunnel.on('close', (code) => {
+    if (code !== null && code !== 0 && code !== 1) {
+      logger(`Cloudflared exited with code ${code}`, 'warn')
+    }
+  })
+
+  nodelink.once('shutdown', () => {
+    if (tunnel && !tunnel.killed) {
+      logger('Closing tunnel...')
+      tunnel.kill("SIGKILL")
+    }
+  })
 }

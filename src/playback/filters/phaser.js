@@ -88,4 +88,15 @@ export default class Phaser {
 
     return chunk
   }
+
+  clear() {
+    for (const filter of [...this.leftFilters, ...this.rightFilters]) {
+      filter.x1 = 0
+      filter.y1 = 0
+    }
+    this.lastLeftFeedback = 0
+    this.lastRightFeedback = 0
+    this.leftLfo.phase = 0
+    this.rightLfo.phase = Math.PI / 2
+  }
 }

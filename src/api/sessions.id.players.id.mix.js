@@ -1,5 +1,5 @@
 import myzod from 'myzod'
-import { decodeTrack, logger, sendErrorResponse, sendResponse } from '../utils.js'
+import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const mixTrackSchema = myzod
   .object({
@@ -52,7 +52,14 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   return sendErrorResponse(req, res, 405, 'Method Not Allowed')
 }
 
-async function handleCreateMix(req, res, sessionId, guildId, nodelink, sendResponse) {
+async function handleCreateMix(
+  req,
+  res,
+  sessionId,
+  guildId,
+  nodelink,
+  sendResponse
+) {
   try {
     let body = req.body
     if (typeof body === 'string') {
@@ -74,8 +81,13 @@ async function handleCreateMix(req, res, sessionId, guildId, nodelink, sendRespo
       return sendErrorResponse(req, res, 500, 'Player manager not initialized')
     }
 
-    const mixConfig = nodelink.options?.mix ?? { enabled: true, defaultVolume: 0.8, maxLayersMix: 5, autoCleanup: true }
-    
+    const mixConfig = nodelink.options?.mix ?? {
+      enabled: true,
+      defaultVolume: 0.8,
+      maxLayersMix: 5,
+      autoCleanup: true
+    }
+
     if (!mixConfig.enabled) {
       return sendErrorResponse(req, res, 403, 'Mix feature is disabled')
     }
@@ -93,29 +105,27 @@ async function handleCreateMix(req, res, sessionId, guildId, nodelink, sendRespo
       }
     } else {
       return sendErrorResponse(
-        req, res,
+        req,
+        res,
         400,
         'Track must have either encoded or identifier'
       )
     }
 
-    const result = await session.players.addMix(
-      guildId,
-      trackData,
-      body.volume
-    )
+    const result = await session.players.addMix(guildId, trackData, body.volume)
 
-    logger(
-      'debug',
-      'MixAPI',
-      `Created mix ${result.id} for guild ${guildId}`
-    )
+    logger('debug', 'MixAPI', `Created mix ${result.id} for guild ${guildId}`)
 
-    return sendResponse(req, res, {
-      id: result.id,
-      track: result.track,
-      volume: result.volume
-    }, 201)
+    return sendResponse(
+      req,
+      res,
+      {
+        id: result.id,
+        track: result.track,
+        volume: result.volume
+      },
+      201
+    )
   } catch (error) {
     if (error instanceof myzod.ValidationError) {
       return sendErrorResponse(req, res, 400, error.message)
@@ -125,7 +135,14 @@ async function handleCreateMix(req, res, sessionId, guildId, nodelink, sendRespo
   }
 }
 
-async function handleGetMixes(req, res, sessionId, guildId, nodelink, sendResponse) {
+async function handleGetMixes(
+  req,
+  res,
+  sessionId,
+  guildId,
+  nodelink,
+  sendResponse
+) {
   try {
     const session = nodelink.sessions.get(sessionId)
     if (!session) {

@@ -1,10 +1,5 @@
 import { logger, makeRequest } from '../../../utils.js'
-import {
-  BaseClient,
-  YOUTUBE_CONSTANTS,
-  buildTrack,
-  checkURLType
-} from '../common.js'
+import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.js'
 
 export default class TV extends BaseClient {
   constructor(nodelink, oauth) {
@@ -15,8 +10,9 @@ export default class TV extends BaseClient {
     return {
       client: {
         clientName: 'TVHTML5',
-        clientVersion: '7.20250923.13.00',
-        userAgent: 'Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version',
+        clientVersion: '7.20260113.16.00',
+        userAgent:
+          'Mozilla/5.0(SMART-TV; Linux; Tizen 4.0.0.2) AppleWebkit/605.1.15 (KHTML, like Gecko) SamsungBrowser/9.2 TV Safari/605.1.15',
         hl: context.client.hl,
         gl: context.client.gl
       },
@@ -51,7 +47,7 @@ export default class TV extends BaseClient {
     return {}
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()

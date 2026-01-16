@@ -128,14 +128,12 @@ export default class LyricsManager {
       }
     }
 
-    const sourceName = reliableTrackData.data.info.sourceName
+    const trackInfo = reliableTrackData.data?.info || reliableTrackData.data
+    const sourceName = trackInfo?.sourceName
     const lyricsSource = this.lyricsSources.get(sourceName)
 
     if (lyricsSource) {
-      const lyrics = await lyricsSource.getLyrics(
-        reliableTrackData.data.info,
-        language
-      )
+      const lyrics = await lyricsSource.getLyrics(trackInfo, language)
       if (lyrics && lyrics.loadType !== 'empty') {
         return lyrics
       }
@@ -146,12 +144,9 @@ export default class LyricsManager {
         logger(
           'debug',
           'Lyrics',
-          `Trying lyrics source ${name} for ${reliableTrackData.data.info.title}.`
+          `Trying lyrics source ${name} for ${trackInfo?.title || 'Unknown Title'}.`
         )
-        const lyrics = await source.getLyrics(
-          reliableTrackData.data.info,
-          language
-        )
+        const lyrics = await source.getLyrics(trackInfo, language)
         if (lyrics && lyrics.loadType !== 'empty') {
           return lyrics
         }
@@ -161,7 +156,7 @@ export default class LyricsManager {
     logger(
       'debug',
       'Lyrics',
-      `No lyrics found for ${reliableTrackData.data.info.title}`
+      `No lyrics found for ${trackInfo?.title || 'Unknown Track'}`
     )
     return { loadType: 'empty', data: {} }
   }

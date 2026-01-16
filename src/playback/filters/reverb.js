@@ -1,6 +1,5 @@
 import { SAMPLE_RATE } from '../../constants.js'
 import { clamp16Bit } from './dsp/clamp16Bit.js'
-import Allpass from './dsp/allpass.js'
 import DelayLine from './dsp/delay.js'
 
 const COMB_DELAYS = [1116, 1188, 1277, 1356, 1422, 1491, 1557, 1617]
@@ -148,12 +147,26 @@ export default class Reverb {
 
   processAllpass(input, delayLine, state) {
     const delayed = delayLine.read(0)
-    const output =
-      -input + delayed + this.allpassCoeff * (input - state.y1)
+    const output = -input + delayed + this.allpassCoeff * (input - state.y1)
 
     delayLine.write(clamp16Bit(input))
     state.y1 = output
 
     return output
+  }
+
+  clear() {
+    for (const comb of [...this.combFiltersL, ...this.combFiltersR]) {
+      comb.clear()
+    }
+
+    for (const allpass of [...this.allpassFiltersL, ...this.allpassFiltersR]) {
+      allpass.clear()
+    }
+
+    for (const state of [...this.allpassStateL, ...this.allpassStateR]) {
+      state.x1 = 0
+      state.y1 = 0
+    }
   }
 }

@@ -1,10 +1,5 @@
 import myzod from 'myzod'
-import {
-  decodeTrack,
-  logger,
-  sendResponse,
-  sendErrorResponse
-} from '../utils.js'
+import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const loadChaptersSchema = myzod.object({
   encodedTrack: myzod.string()
@@ -43,7 +38,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       )
     }
 
-    if (decodedTrack.info.sourceName !== 'youtube' && decodedTrack.info.sourceName !== 'ytmusic') {
+    if (
+      decodedTrack.info.sourceName !== 'youtube' &&
+      decodedTrack.info.sourceName !== 'ytmusic'
+    ) {
       return sendResponse(req, res, [], 200)
     }
 
@@ -53,12 +51,30 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       `Request to load chapters for: ${decodedTrack.info.title}`
     )
 
+    let delegated = false
+    if (nodelink.sourceWorkerManager) {
+      delegated = nodelink.sourceWorkerManager.delegate(
+        req,
+        res,
+        'loadChapters',
+        {
+          decodedTrackInfo: decodedTrack.info
+        }
+      )
+    }
+
+    if (delegated) return
+
     let chaptersData
     if (nodelink.workerManager) {
       const worker = nodelink.workerManager.getBestWorker()
-      chaptersData = await nodelink.workerManager.execute(worker, 'loadChapters', {
-        decodedTrack
-      })
+      chaptersData = await nodelink.workerManager.execute(
+        worker,
+        'loadChapters',
+        {
+          decodedTrackInfo: decodedTrack.info
+        }
+      )
     } else {
       chaptersData = await nodelink.sources.getChapters(decodedTrack)
     }

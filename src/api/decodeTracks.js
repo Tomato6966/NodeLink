@@ -1,14 +1,9 @@
 import myzod from 'myzod'
-import {
-  decodeTrack,
-  logger,
-  sendResponse,
-  sendErrorResponse
-} from '../utils.js'
+import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const decodeTracksSchema = myzod.array(myzod.string()).min(1)
 
-function handler(nodelink, req, res, sendResponse, parsedUrl) {
+function handler(_nodelink, req, res, sendResponse, parsedUrl) {
   const result = decodeTracksSchema.try(req.body)
 
   if (result instanceof myzod.ValidationError) {

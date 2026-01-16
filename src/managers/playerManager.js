@@ -19,7 +19,11 @@ export default class PlayerManager {
           return { handled: true, result }
         }
       } catch (e) {
-        logger('error', 'PlayerManager', `Interceptor error for ${action}: ${e.message}`)
+        logger(
+          'error',
+          'PlayerManager',
+          `Interceptor error for ${action}: ${e.message}`
+        )
       }
     }
     return null
@@ -43,26 +47,37 @@ export default class PlayerManager {
       if (!worker) {
         throw new Error('No workers available to create a player.')
       }
-      this.nodelink.workerManager.assignGuildToWorker(playerKey, worker)
 
-      logger(
-        'debug',
-        'PlayerManager',
-        `Creating player for guild ${guildId} (session: ${this.sessionId}) on worker ${worker.id}`
-      )
-      await this.nodelink.workerManager.execute(worker, 'createPlayer', {
-        sessionId: this.sessionId,
-        guildId,
-        userId: session.userId,
-        voice
-      })
+      let created = false
+      try {
+        logger(
+          'debug',
+          'PlayerManager',
+          `Creating player for guild ${guildId} (session: ${this.sessionId}) on worker ${worker.id}`
+        )
+        await this.nodelink.workerManager.execute(worker, 'createPlayer', {
+          sessionId: this.sessionId,
+          guildId,
+          userId: session.userId,
+          voice
+        })
 
-      this.players.set(playerKey, {
-        guildId,
-        userId: session.userId,
-        sessionId: this.sessionId
-      })
-      return this.players.get(playerKey)
+        this.nodelink.workerManager.assignGuildToWorker(playerKey, worker)
+        created = true
+
+        this.players.set(playerKey, {
+          guildId,
+          userId: session.userId,
+          sessionId: this.sessionId
+        })
+        return this.players.get(playerKey)
+      } catch (e) {
+        if (!created) {
+          this.nodelink.workerManager.unassignGuild(playerKey)
+          throw new Error('The player could not be created.', e)
+        }
+        throw e
+      }
     }
     const { Player } = await import('../playback/player.js')
     logger(
@@ -124,7 +139,11 @@ export default class PlayerManager {
   }
 
   async play(guildId, trackPayload) {
-    const interception = await this._runInterceptors('play', guildId, trackPayload)
+    const interception = await this._runInterceptors(
+      'play',
+      guildId,
+      trackPayload
+    )
     if (interception?.handled) return interception.result
 
     const session = this.nodelink.sessions.get(this.sessionId)
@@ -144,7 +163,7 @@ export default class PlayerManager {
           args: [trackPayload]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -175,7 +194,7 @@ export default class PlayerManager {
           args: []
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -186,7 +205,11 @@ export default class PlayerManager {
   }
 
   async pause(guildId, shouldPause) {
-    const interception = await this._runInterceptors('pause', guildId, shouldPause)
+    const interception = await this._runInterceptors(
+      'pause',
+      guildId,
+      shouldPause
+    )
     if (interception?.handled) return interception.result
 
     const session = this.nodelink.sessions.get(this.sessionId)
@@ -206,7 +229,7 @@ export default class PlayerManager {
           args: [shouldPause]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -217,7 +240,12 @@ export default class PlayerManager {
   }
 
   async seek(guildId, position, endTime) {
-    const interception = await this._runInterceptors('seek', guildId, position, endTime)
+    const interception = await this._runInterceptors(
+      'seek',
+      guildId,
+      position,
+      endTime
+    )
     if (interception?.handled) return interception.result
 
     const session = this.nodelink.sessions.get(this.sessionId)
@@ -237,7 +265,7 @@ export default class PlayerManager {
           args: [position, endTime]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -268,7 +296,7 @@ export default class PlayerManager {
           args: [level]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -279,7 +307,11 @@ export default class PlayerManager {
   }
 
   async setFilters(guildId, filtersPayload) {
-    const interception = await this._runInterceptors('setFilters', guildId, filtersPayload)
+    const interception = await this._runInterceptors(
+      'setFilters',
+      guildId,
+      filtersPayload
+    )
     if (interception?.handled) return interception.result
 
     const session = this.nodelink.sessions.get(this.sessionId)
@@ -299,7 +331,7 @@ export default class PlayerManager {
           args: [filtersPayload]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -310,7 +342,11 @@ export default class PlayerManager {
   }
 
   async updateVoice(guildId, voicePayload) {
-    const interception = await this._runInterceptors('updateVoice', guildId, voicePayload)
+    const interception = await this._runInterceptors(
+      'updateVoice',
+      guildId,
+      voicePayload
+    )
     if (interception?.handled) return interception.result
 
     const session = this.nodelink.sessions.get(this.sessionId)
@@ -330,7 +366,7 @@ export default class PlayerManager {
           args: [voicePayload]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -358,7 +394,7 @@ export default class PlayerManager {
           args: []
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -386,7 +422,7 @@ export default class PlayerManager {
           args: [trackPayload, volume]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -414,7 +450,7 @@ export default class PlayerManager {
           args: [mixId]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -442,7 +478,7 @@ export default class PlayerManager {
           args: [mixId, volume]
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result
@@ -470,7 +506,7 @@ export default class PlayerManager {
           args: []
         }
       )
-      if (result && result.playerNotFound) {
+      if (result?.playerNotFound) {
         throw new Error('Player not found.')
       }
       return result

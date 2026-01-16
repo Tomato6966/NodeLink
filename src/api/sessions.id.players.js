@@ -8,7 +8,8 @@ const voiceStateSchema = myzod
   .object({
     token: myzod.string(),
     endpoint: myzod.string(),
-    sessionId: myzod.string()
+    sessionId: myzod.string(),
+    channelId: myzod.string().optional()
   })
   .allowUnknownKeys()
 
@@ -190,7 +191,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         await session.players.create(guildId)
 
         if (payload.voice) {
-          const { endpoint, token, sessionId: voiceSessionId } = payload.voice
+          const {
+            endpoint,
+            token,
+            sessionId: voiceSessionId,
+            channelId
+          } = payload.voice
           const currentPlayer = session.players.get(guildId)
           if (
             currentPlayer &&
@@ -215,7 +221,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
         let trackToPlay = null
         let stopPlayer = false
-        let userData = payload.track?.userData
+        const userData = payload.track?.userData
 
         const trackPayload = payload.track
         const legacyEncodedTrack = payload.encodedTrack
@@ -255,7 +261,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               trackToPlay = {
                 encoded: trackPayload.encoded,
                 info: decodedTrack.info,
-                audioTrackId: trackPayload.language || trackPayload.audioTrackId || null
+                audioTrackId:
+                  trackPayload.language || trackPayload.audioTrackId || null
               }
             }
           } else if (trackPayload.identifier) {
@@ -287,7 +294,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               trackToPlay = {
                 encoded: loadResult.data.encoded,
                 info: loadResult.data.info,
-                audioTrackId: trackPayload.language || trackPayload.audioTrackId || null
+                audioTrackId:
+                  trackPayload.language || trackPayload.audioTrackId || null
               }
             } else {
               const message =
@@ -328,7 +336,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
         if (stopPlayer) {
           const player = session.players.get(guildId)
-          if (player && player.isUpdatingTrack) {
+          if (player?.isUpdatingTrack) {
             logger(
               'debug',
               'PlayerUpdate',

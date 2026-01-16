@@ -1,9 +1,9 @@
-import { readFile, unlink, writeFile } from 'node:fs/promises'
+import crypto from 'node:crypto'
+import { unlink } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import crypto from 'node:crypto'
 
-import { logger, http1makeRequest } from '../utils.js'
+import { http1makeRequest, logger } from '../utils.js'
 
 const APP_ID = 'web-desktop-app-v1.0'
 const TOKEN_TTL = 55000
@@ -25,8 +25,7 @@ const CLEAN_PATTERNS = [
   /VEVO$/i
 ]
 
-const FEAT_PATTERN =
-  /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
+const FEAT_PATTERN = /\s*[([]\s*(?:ft\.?|feat\.?|featuring)\s+[^)\]]+[)\]]/gi
 
 const SEPARATORS = [' - ', ' – ', ' — ']
 
@@ -90,8 +89,16 @@ export default class MusixmatchLyrics {
     )
 
     if (!this.useManualToken) {
-      this.tokenData = await this._readToken()
-      if (this.tokenData) logger('info', 'Lyrics', 'Loaded existing token')
+      const cachedToken =
+        this.nodelink.credentialManager.get('musixmatch_token')
+      if (cachedToken) {
+        this.tokenData = cachedToken
+        logger(
+          'info',
+          'Lyrics',
+          'Loaded Musixmatch token from CredentialManager'
+        )
+      }
     }
 
     // Start cache cleanup interval
@@ -146,31 +153,6 @@ export default class MusixmatchLyrics {
     return this.cookies.size === 0
       ? ''
       : Array.from(this.cookies, ([k, v]) => `${k}=${v}`).join('; ')
-  }
-
-  async _readToken() {
-    try {
-      const data = await readFile(this.tokenFile, 'utf-8')
-      const parsed = JSON.parse(data)
-      if (
-        parsed?.value &&
-        typeof parsed.expires === 'number' &&
-        parsed.expires > Date.now()
-      ) {
-        return parsed
-      }
-    } catch {}
-    return null
-  }
-
-  async _saveToken(token, expires) {
-    try {
-      await writeFile(
-        this.tokenFile,
-        JSON.stringify({ value: token, expires }),
-        'utf-8'
-      )
-    } catch {}
   }
 
   async _fetchToken() {
@@ -248,7 +230,11 @@ export default class MusixmatchLyrics {
       const token = await this._fetchToken()
       const expires = Date.now() + TOKEN_TTL
       this.tokenData = { value: token, expires }
-      await this._saveToken(token, expires)
+      this.nodelink.credentialManager.set(
+        'musixmatch_token',
+        this.tokenData,
+        TOKEN_TTL
+      )
       return token
     } catch (err) {
       const isCaptcha = err.message?.toLowerCase().includes('captcha')
@@ -260,7 +246,11 @@ export default class MusixmatchLyrics {
         const token = await this._fetchToken()
         const expires = Date.now() + TOKEN_TTL
         this.tokenData = { value: token, expires }
-        await this._saveToken(token, expires)
+        this.nodelink.credentialManager.set(
+          'musixmatch_token',
+          this.tokenData,
+          TOKEN_TTL
+        )
         return token
       }
 

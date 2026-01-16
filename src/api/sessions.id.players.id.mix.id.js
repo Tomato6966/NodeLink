@@ -18,7 +18,7 @@ const pathSchema = myzod.object({
   mixId: myzod.string()
 })
 
-async function handler(nodelink, req, res, sendResponse, parsedUrl) {
+async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
   const method = req.method
   const pathParts = parsedUrl.pathname.split('/')
   const sessionId = pathParts[3]
@@ -67,11 +67,7 @@ async function handleUpdateMix(req, res, sessionId, guildId, mixId, nodelink) {
       return sendErrorResponse(req, res, 500, 'Player manager not initialized')
     }
 
-    const updated = await session.players.updateMix(
-      guildId,
-      mixId,
-      body.volume
-    )
+    const updated = await session.players.updateMix(guildId, mixId, body.volume)
 
     if (!updated) {
       return sendErrorResponse(req, res, 404, 'Mix not found')

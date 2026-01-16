@@ -1,16 +1,11 @@
 import myzod from 'myzod'
-import {
-  decodeTrack,
-  logger,
-  sendResponse,
-  sendErrorResponse
-} from '../utils.js'
+import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const decodeTrackSchema = myzod.object({
   encodedTrack: myzod.string()
 })
 
-function handler(nodelink, req, res, sendResponse, parsedUrl) {
+function handler(_nodelink, req, res, sendResponse, parsedUrl) {
   const result = decodeTrackSchema.try({
     encodedTrack: parsedUrl.searchParams.get('encodedTrack')
   })
@@ -34,6 +29,14 @@ function handler(nodelink, req, res, sendResponse, parsedUrl) {
   try {
     logger('debug', 'Tracks', `Decoding track: ${encodedTrack}`)
     const decodedTrack = decodeTrack(encodedTrack)
+    if (decodedTrack.details) {
+      decodedTrack.pluginInfo = {
+        ...decodedTrack.pluginInfo,
+        details: decodedTrack.details
+      }
+
+      delete decodedTrack.details
+    }
     sendResponse(req, res, decodedTrack, 200)
   } catch (err) {
     logger('error', 'Tracks', `Failed to decode track ${encodedTrack}:`, err)

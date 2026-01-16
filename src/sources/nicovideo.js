@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+
 async function manageEncryptedHls(url, stream, headers) {
   try {
     const {
@@ -396,7 +397,7 @@ export default class NicoVideoSource {
       additionalData: { cookie }
     }
   }
-  async loadStream(track, url, protocol, additionalData) {
+  async loadStream(_track, url, protocol, additionalData) {
     if (protocol === 'hls') {
       const stream = new PassThrough()
       const headers = additionalData?.cookie

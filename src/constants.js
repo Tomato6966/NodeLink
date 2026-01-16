@@ -42,6 +42,7 @@ export const SupportedFormats = {
   FLAC: 'flac',
   OGG_VORBIS: 'ogg-vorbis',
   WAV: 'wav',
+  FLV: 'flv',
   UNKNOWN: 'unknown'
 }
 
@@ -69,6 +70,7 @@ export function normalizeFormat(type) {
   if (lowerType.includes('ogg') || lowerType.includes('vorbis'))
     return SupportedFormats.OGG_VORBIS
   if (lowerType.includes('wav')) return SupportedFormats.WAV
+  if (lowerType.includes('flv')) return SupportedFormats.FLV
 
   return SupportedFormats.UNKNOWN
 }

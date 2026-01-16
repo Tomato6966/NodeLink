@@ -35,14 +35,17 @@ export default class DosProtectionManager {
     const now = Date.now()
 
     if (this.config.ignore) {
-      if (this.config.ignore.ips?.includes(remoteAddress)) return { allowed: true }
+      if (this.config.ignore.ips?.includes(remoteAddress))
+        return { allowed: true }
 
       const userId = req.headers['user-id']
-      if (userId && this.config.ignore.userIds?.includes(userId)) return { allowed: true }
+      if (userId && this.config.ignore.userIds?.includes(userId))
+        return { allowed: true }
 
       const guildIdMatch = req.url?.match(/\/players\/(\d+)/)
       const guildId = guildIdMatch ? guildIdMatch[1] : null
-      if (guildId && this.config.ignore.guildIds?.includes(guildId)) return { allowed: true }
+      if (guildId && this.config.ignore.guildIds?.includes(guildId))
+        return { allowed: true }
     }
 
     if (!this.ipRequestCounts.has(remoteAddress)) {

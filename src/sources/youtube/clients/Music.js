@@ -1,9 +1,9 @@
 import { logger, makeRequest } from '../../../utils.js'
 import {
   BaseClient,
-  YOUTUBE_CONSTANTS,
   buildTrack,
-  checkURLType
+  checkURLType,
+  YOUTUBE_CONSTANTS
 } from '../common.js'
 
 export default class Music extends BaseClient {
@@ -34,10 +34,15 @@ export default class Music extends BaseClient {
   async search(query, type, context) {
     const sourceName = 'ytmusic'
 
+    let params = 'EgWKAQIIAWoQEAMQBBAJEAoQBRAREBAQFQ%3D%3D' // Default (Tracks)
+    if (type === 'playlist') params = 'EgWKAQIoAWoKEAMQBBAJEAoQBRAB'
+    if (type === 'album') params = 'EgWKAQIYAWoKEAMQBBAJEAoQBRAB'
+    if (type === 'artist') params = 'EgWKAQIYAWoKEAMQBBAJEAoQBRAB'
+
     const requestBody = {
       context: this.getClient(context),
       query: query,
-      params: 'EgWKAQIIAWoQEAMQBBAJEAoQBRAREBAQFQ%3D%3D'
+      params
     }
 
     const {
@@ -78,9 +83,11 @@ export default class Music extends BaseClient {
       }
     }
 
-    const tabContent = searchResult.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer?.content
-    
-    let loggedVideoData = false
+    const tabContent =
+      searchResult.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer
+        ?.content
+
+    const _loggedVideoData = false
     const tracks = []
     let videos = null
 
@@ -98,10 +105,16 @@ export default class Music extends BaseClient {
       videos = findShelf(tabContent.sectionListRenderer.contents)
     }
 
-    if (!videos && tabContent?.musicSplitViewRenderer?.mainContent?.sectionListRenderer) {
-      videos = findShelf(tabContent.musicSplitViewRenderer.mainContent.sectionListRenderer.contents)
+    if (
+      !videos &&
+      tabContent?.musicSplitViewRenderer?.mainContent?.sectionListRenderer
+    ) {
+      videos = findShelf(
+        tabContent.musicSplitViewRenderer.mainContent.sectionListRenderer
+          .contents
+      )
     }
-    
+
     if (!videos || videos.length === 0) {
       logger(
         'debug',
@@ -112,7 +125,9 @@ export default class Music extends BaseClient {
     }
 
     for (const video of videos) {
-      const renderer = video.musicResponsiveListItemRenderer || video.musicTwoColumnItemRenderer
+      const renderer =
+        video.musicResponsiveListItemRenderer ||
+        video.musicTwoColumnItemRenderer
       if (!renderer) {
         continue
       }
@@ -126,10 +141,10 @@ export default class Music extends BaseClient {
     return { loadType: 'search', data: tracks }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'ytmusic'
     const urlType = checkURLType(url, sourceName)
-    const apiEndpoint = this.getApiEndpoint()
+    const _apiEndpoint = this.getApiEndpoint()
 
     switch (urlType) {
       case YOUTUBE_CONSTANTS.VIDEO:
@@ -162,7 +177,7 @@ export default class Music extends BaseClient {
             exception: { message, severity: 'common', cause: 'Upstream' }
           }
         }
-        
+
         return await this._handlePlayerResponse(
           playerResponse,
           sourceName,
@@ -171,13 +186,43 @@ export default class Music extends BaseClient {
       }
 
       case YOUTUBE_CONSTANTS.PLAYLIST: {
-        return {
-          exception: {
-            message: 'Music client does not support playlists',
-            severity: 'common',
-            cause: 'UpstreamPlayability'
-          }
+        const listIdMatch = url.match(/[?&]list=([\w-]+)/)
+        if (!listIdMatch || !listIdMatch[1]) {
+          return { loadType: 'empty', data: {} }
         }
+        const playlistId = listIdMatch[1]
+
+        const body = {
+          context: this.getClient(context),
+          playlistId,
+          enablePersistentPlaylistPanel: true,
+          isAudioOnly: true
+        }
+
+        const { body: res, statusCode } = await makeRequest(
+          'https://music.youtube.com/youtubei/v1/next',
+          {
+            method: 'POST',
+            body,
+            headers: {
+              'User-Agent': this.getClient(context).client.userAgent,
+              'X-Goog-Api-Format-Version': '2'
+            },
+            disableBodyCompression: true
+          }
+        )
+
+        if (statusCode !== 200 || !res) {
+          return { loadType: 'empty', data: {} }
+        }
+
+        return await this._handlePlaylistResponse(
+          playlistId,
+          null,
+          res,
+          sourceName,
+          context
+        )
       }
 
       default:
@@ -185,7 +230,7 @@ export default class Music extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager) {
+  async getTrackUrl(_decodedTrack, _context, _cipherManager) {
     return {
       exception: {
         message: 'Music client does not provide direct track URLs.',

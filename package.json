@@ -1,6 +1,6 @@
 {
   "name": "nodelink",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "scripts": {
     "build": "node scripts/build.js",
     "start": "node --dns-result-order=ipv4first --openssl-legacy-provider src/index.js",
@@ -16,14 +16,14 @@
     "@performanc/pwsl-server": "github:performanc/internals#PWSL-server",
     "@performanc/voice": "github:PerformanC/voice",
     "@toddynnn/symphonia-decoder": "1.0.6",
+    "@toddynnn/voice-opus": "^1.0.1",
     "mp4box": "^2.3.0",
-    "myzod": "^1.12.1",
-    "toddy-mediaplex": "^2.0.0"
+    "myzod": "^1.12.1"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.3.10",
-    "@commitlint/cli": "20.2.0",
-    "@commitlint/config-conventional": "20.2.0",
+    "@commitlint/cli": "20.3.0",
+    "@commitlint/config-conventional": "20.3.0",
     "dotenv": "^17.2.3",
     "husky": "9.1.7"
   },

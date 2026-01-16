@@ -29,17 +29,28 @@ export default class RateLimitManager {
       (reqTime) => now - reqTime < timeWindowMs
     )
 
+    const remaining = Math.max(0, maxRequests - entry.requests.length)
+    const reset =
+      entry.requests.length > 0
+        ? entry.requests[0] + timeWindowMs
+        : now + timeWindowMs
+
     if (entry.requests.length >= maxRequests) {
-      return false
+      return { allowed: false, limit: maxRequests, remaining: 0, reset }
     }
 
     entry.requests.push(now)
-    return true
+    return {
+      allowed: true,
+      limit: maxRequests,
+      remaining: remaining - 1,
+      reset
+    }
   }
 
   check(req, parsedUrl) {
     if (!this.config.enabled) {
-      return true
+      return { allowed: true }
     }
 
     if (
@@ -47,7 +58,7 @@ export default class RateLimitManager {
         parsedUrl.pathname.startsWith(path)
       )
     ) {
-      return true
+      return { allowed: true }
     }
 
     const remoteAddress = req.socket.remoteAddress
@@ -57,74 +68,75 @@ export default class RateLimitManager {
       : null
 
     if (this.config.ignore) {
-      if (this.config.ignore.ips?.includes(remoteAddress)) return true
-      if (userId && this.config.ignore.userIds?.includes(userId)) return true
-      if (guildId && this.config.ignore.guildIds?.includes(guildId)) return true
+      if (this.config.ignore.ips?.includes(remoteAddress))
+        return { allowed: true }
+      if (userId && this.config.ignore.userIds?.includes(userId))
+        return { allowed: true }
+      if (guildId && this.config.ignore.guildIds?.includes(guildId))
+        return { allowed: true }
     }
 
-    if (
-      !this._checkAndIncrement(
-        'global',
-        'all',
-        this.config.global.maxRequests,
-        this.config.global.timeWindowMs
-      )
-    ) {
+    const globalCheck = this._checkAndIncrement(
+      'global',
+      'all',
+      this.config.global.maxRequests,
+      this.config.global.timeWindowMs
+    )
+    if (!globalCheck.allowed) {
       logger(
         'warn',
         'RateLimit',
         `Global rate limit exceeded for ${remoteAddress}`
       )
-      return false
+      return globalCheck
     }
 
-    if (
-      !this._checkAndIncrement(
-        'ip',
-        remoteAddress,
-        this.config.perIp.maxRequests,
-        this.config.perIp.timeWindowMs
-      )
-    ) {
+    const ipCheck = this._checkAndIncrement(
+      'ip',
+      remoteAddress,
+      this.config.perIp.maxRequests,
+      this.config.perIp.timeWindowMs
+    )
+    if (!ipCheck.allowed) {
       logger('warn', 'RateLimit', `IP rate limit exceeded for ${remoteAddress}`)
-      return false
+      return ipCheck
     }
 
-    if (
-      userId &&
-      !this._checkAndIncrement(
+    if (userId) {
+      const userCheck = this._checkAndIncrement(
         'userId',
         userId,
         this.config.perUserId.maxRequests,
         this.config.perUserId.timeWindowMs
       )
-    ) {
-      logger(
-        'warn',
-        'RateLimit',
-        `User-Id rate limit exceeded for ${userId} (IP: ${remoteAddress})`
-      )
-      return false
+      if (!userCheck.allowed) {
+        logger(
+          'warn',
+          'RateLimit',
+          `User-Id rate limit exceeded for ${userId} (IP: ${remoteAddress})`
+        )
+        return userCheck
+      }
     }
 
-    if (
-      guildId &&
-      !this._checkAndIncrement(
+    if (guildId) {
+      const guildCheck = this._checkAndIncrement(
         'guildId',
         guildId,
         this.config.perGuildId.maxRequests,
         this.config.perGuildId.timeWindowMs
       )
-    ) {
-      logger(
-        'warn',
-        'RateLimit',
-        `Guild-Id rate limit exceeded for ${guildId} (IP: ${remoteAddress}, User: ${userId})`
-      )
-      return false
+      if (!guildCheck.allowed) {
+        logger(
+          'warn',
+          'RateLimit',
+          `Guild-Id rate limit exceeded for ${guildId} (IP: ${remoteAddress}, User: ${userId})`
+        )
+        return guildCheck
+      }
     }
 
-    return true
+    return { allowed: true }
   }
 
   _cleanup() {
@@ -138,6 +150,10 @@ export default class RateLimitManager {
         this.store.delete(key)
       }
     }
+  }
+
+  clear() {
+    this.store.clear()
   }
 
   destroy() {

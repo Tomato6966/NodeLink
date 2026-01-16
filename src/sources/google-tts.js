@@ -6,7 +6,7 @@ export default class GoogleTTSSource {
     this.nodelink = nodelink
     this.language =
       this.nodelink.options.sources?.googleTts?.language || 'en-US'
-    this.searchTerms = ['gtts']
+    this.searchTerms = ['gtts', 'speak']
     this.baseUrl = 'https://translate.google.com'
     this.priority = 50
   }

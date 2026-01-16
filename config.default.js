@@ -9,18 +9,36 @@ export default {
     enabled: true, // active cluster (or use env CLUSTER_ENABLED)
     workers: 0, // 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
     minWorkers: 1, // Minimum workers to keep alive (improves availability during bursts)
+    specializedSourceWorker: {
+      enabled: true, // If true, source loading (search, lyrics, etc.) is delegated to dedicated workers to prevent voice worker lag
+      count: 1, // Number of separate process clusters for source operations
+      microWorkers: 2, // Number of worker threads per process cluster
+      tasksPerWorker: 32, // Number of parallel tasks each micro-worker can handle before queuing
+      silentLogs: true // If true, micro-workers will only log warnings and errors
+    },
     commandTimeout: 6000, // Timeout for heavy operations like loadTracks (6s)
     fastCommandTimeout: 4000, // Timeout for player commands like play/pause (4s)
     maxRetries: 2, // Number of retry attempts on timeout or worker failure
+    hibernation: {
+      enabled: true,
+      timeoutMs: 1200000
+    },
     scaling: {
-      // New object to group scaling configurations
+      //scaling configurations
       maxPlayersPerWorker: 20, // Reference capacity for utilization calculation
       targetUtilization: 0.7, // Target utilization for scaling up/down
       scaleUpThreshold: 0.75, // Utilization threshold to scale up
       scaleDownThreshold: 0.3, // Utilization threshold to scale down
       checkIntervalMs: 5000, // Interval to check for scaling needs
       idleWorkerTimeoutMs: 60000, // Time in ms an idle worker should wait before being removed
-      queueLengthScaleUpFactor: 5 // How many commands in queue per active worker trigger scale up
+      queueLengthScaleUpFactor: 5, // How many commands in queue per active worker trigger scale up
+      lagPenaltyLimit: 60, // Event loop lag threshold (ms) to penalize worker cost
+      cpuPenaltyLimit: 0.85 // CPU usage threshold (85% of a core) to force scale up
+    },
+    endpoint: {
+      patchEnabled: true,
+      allowExternalPatch: false,
+      code: 'CAPYBARA'
     }
   },
   logging: {
@@ -55,10 +73,12 @@ export default {
   maxSearchResults: 10,
   maxAlbumPlaylistLength: 100,
   playerUpdateInterval: 2000,
+  statsUpdateInterval: 30000,
   trackStuckThresholdMs: 10000,
   zombieThresholdMs: 60000,
   enableHoloTracks: false,
   enableTrackStreamEndpoint: false,
+  enableLoadStreamEndpoint: false,
   resolveExternalLinks: false,
   fetchChannelInfo: false,
   filters: {
@@ -79,9 +99,23 @@ export default {
       timescale: true
     }
   },
-  defaultSearchSource: 'youtube',
+  defaultSearchSource: ['youtube', 'soundcloud'],
   unifiedSearchSources: ['youtube', 'soundcloud'],
   sources: {
+    vkmusic: {
+      enabled: true,
+      userToken: '', // (optional) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> response -> access_token
+      userCookie: '' // (required without userToken) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> request -> cookie (copy full cookie header)
+    },
+    amazonmusic: {
+      enabled: true
+    },
+    mixcloud: {
+      enabled: true
+    },
+    audiomack: {
+      enabled: true
+    },
     deezer: {
       // arl: '',
       // decryptionKey: '',
@@ -91,7 +125,8 @@ export default {
       enabled: true
     },
     soundcloud: {
-      enabled: true
+      enabled: true,
+      // clientId: ""
     },
     local: {
       enabled: true,
@@ -103,6 +138,23 @@ export default {
     vimeo: {
       // Note: not 100% of the songs are currently working (but most should.), because i need to code a different extractor for every year (2010, 2011, etc. not all are done)
       enabled: true,
+    },
+    telegram: {
+      enabled: true
+    },
+    shazam: {
+      enabled: true,
+      allowExplicit: true
+    },
+    bilibili: {
+      enabled: true,
+      sessdata: '' // Optional, improves access to some videos (premium and 4k+)
+    },
+    genius: {
+      enabled: true
+    },
+    pinterest: {
+      enabled: true
     },
     flowery: {
       enabled: true,
@@ -117,6 +169,14 @@ export default {
       playlistLoadLimit: 50,
       artistLoadLimit: 20
       // "secretKey": "38346591" // Optional, defaults to standard key
+    },
+    gaana: {
+      enabled: true,
+      apiUrl: 'https://gaana.1lucas1apk.fun/api', // if you want to host your server https://github.com/notdeltaxd/Gaana-API
+      streamQuality: 'high',
+      playlistLoadLimit: 100,
+      albumLoadLimit: 100,
+      artistLoadLimit: 100
     },
     "google-tts": {
       enabled: true,
@@ -157,6 +217,7 @@ export default {
       enabled: true,
       clientId: '',
       clientSecret: '',
+      externalAuthUrl: 'http://get.1lucas1apk.fun/spotify/gettoken', // URL to external token provider (e.g. http://localhost:8080/api/token - use https://github.com/topi314/spotify-tokener or https://github.com/1Lucas1apk/gettoken)
       market: 'US',
       playlistLoadLimit: 1, // 0 means no limit (loads all tracks), 1 = 100 tracks, 2 = 100 and so on!
       playlistPageLoadConcurrency: 10, // How many pages to load simultaneously
@@ -185,7 +246,8 @@ export default {
       enabled: true,
       // Optional, setting this manually can help unblocking countries (since pandora is US only.). May need to be updated periodically.
       // fetching manually: use a vpn connected to US, go on pandora.com, open devtools, Network tab, first request to appear and copy the 2nd csrfToken= value.
-      // csrfToken: ''
+      // csrfToken: '',
+      remoteTokenUrl: 'https://get.1lucas1apk.fun/pandora/gettoken' // URL to a remote provider that returns { success: true, authToken: "...", csrfToken: "...", expires_in_seconds: ... } //https://github.com/1Lucas1apk/gettoken
     },
     nicovideo: {
       enabled: true
@@ -212,6 +274,9 @@ export default {
     lrclib: {
       enabled: true
     },
+    bilibili: {
+      enabled: true
+    },
     applemusic: {
       enabled: true,
       advanceSearch: true // Uses YTMusic to fetch the correct title and artists instead of relying on messy YouTube video titles, improving lyrics accuracy
@@ -221,6 +286,10 @@ export default {
     quality: 'high', // high, medium, low, lowest
     encryption: 'aead_aes256_gcm_rtpsize',
     resamplingQuality: 'best' // best, medium, fastest, zero order holder, linear
+  },
+  voiceReceive: {
+    enabled: false,
+    format: 'opus' // pcm_s16le, opus
   },
   routePlanner: {
     strategy: 'RotateOnBan', // RotateOnBan, RoundRobin, LoadBalance
@@ -282,10 +351,10 @@ export default {
     autoCleanup: true
   },
   plugins: [
-/*  {
-      name: 'nodelink-sample-plugin',
-      source: 'local'
-    } */
+    /*  {
+          name: 'nodelink-sample-plugin',
+          source: 'local'
+        } */
   ],
   pluginConfig: {}
 }

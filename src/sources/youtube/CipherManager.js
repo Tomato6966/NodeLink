@@ -1,5 +1,9 @@
-import { URLSearchParams } from 'node:url'
-import { http1makeRequest, logger, makeRequest, getVersion } from '../../utils.js'
+import {
+  getVersion,
+  http1makeRequest,
+  logger,
+  makeRequest
+} from '../../utils.js'
 
 const CACHE_DURATION_MS = 12 * 60 * 60 * 1000
 const VERSION = getVersion()
@@ -23,11 +27,14 @@ export default class CipherManager {
     this.explicitPlayerScriptUrl = null
     this.userAgent = `nodelink/${VERSION} (https://github.com/PerformanC/NodeLink)`
     this.stsCache = new Map()
-    
-     setInterval(() => {
-      this.stsCache.clear()
-      logger('debug', 'YouTube-Cipher', 'Cleared STS cache (12h interval)')
-    }, 12 * 60 * 60 * 1000).unref()
+
+    setInterval(
+      () => {
+        this.stsCache.clear()
+        logger('debug', 'YouTube-Cipher', 'Cleared STS cache (12h interval)')
+      },
+      12 * 60 * 60 * 1000
+    ).unref()
   }
 
   setPlayerScriptUrl(url) {
@@ -43,6 +50,14 @@ export default class CipherManager {
     if (this.cipherLoadLock) {
       await new Promise((resolve) => setTimeout(resolve, 100))
       return this.getCachedPlayerScript()
+    }
+
+    const cachedUrl = this.nodelink.credentialManager.get(
+      'yt_player_script_url'
+    )
+    if (cachedUrl && !this.explicitPlayerScriptUrl) {
+      this.cachedPlayerScript = new CachedPlayerScript(cachedUrl)
+      return this.cachedPlayerScript
     }
 
     this.cipherLoadLock = true
@@ -106,6 +121,12 @@ export default class CipherManager {
       return this.stsCache.get(playerUrl)
     }
 
+    const cachedSts = this.nodelink.credentialManager.get(`yt_sts_${playerUrl}`)
+    if (cachedSts) {
+      this.stsCache.set(playerUrl, cachedSts)
+      return cachedSts
+    }
+
     if (!this.config.url) {
       const {
         body: scriptContent,
@@ -145,6 +166,11 @@ export default class CipherManager {
       )
 
       this.stsCache.set(playerUrl, sts)
+      this.nodelink.credentialManager.set(
+        `yt_sts_${playerUrl}`,
+        sts,
+        12 * 60 * 60 * 1000
+      )
       return sts
     }
 
@@ -224,7 +250,7 @@ export default class CipherManager {
         `Cipher server at ${this.config.url} is online.`
       )
       return true
-    } catch (e) {
+    } catch (_e) {
       logger(
         'warn',
         'YouTube-Cipher',
@@ -240,7 +266,7 @@ export default class CipherManager {
     nParam,
     signatureKey,
     playerScript,
-    context
+    _context
   ) {
     if (!this.config.url) {
       throw new Error('Remote cipher URL is not configured.')

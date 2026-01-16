@@ -1,9 +1,9 @@
-import { PassThrough } from 'node:stream'
 import { Buffer } from 'node:buffer'
-import https from 'node:https'
-import http from 'node:http'
-import zlib from 'node:zlib'
 import { spawn } from 'node:child_process'
+import http from 'node:http'
+import https from 'node:https'
+import { PassThrough } from 'node:stream'
+import zlib from 'node:zlib'
 import { encodeTrack, logger } from '../utils.js'
 
 const VIMEO_PATTERNS = [
@@ -779,7 +779,7 @@ export default class VimeoSource {
       identifier: videoId,
       isSeekable: true,
       isStream: false,
-      uri: `https://vimeo.com/${videoId}${hashParam ? '?h=' + hashParam : ''}`,
+      uri: `https://vimeo.com/${videoId}${hashParam ? `?h=${hashParam}` : ''}`,
       artworkUrl: metadata.artworkUrl || null,
       isrc: null,
       sourceName: 'vimeo',
@@ -1262,8 +1262,7 @@ export default class VimeoSource {
             )
           }
           if (!playlistUrl.includes('omit=')) {
-            playlistUrl +=
-              (playlistUrl.includes('?') ? '&' : '?') + 'omit=av1-hevc'
+            playlistUrl += `${playlistUrl.includes('?') ? '&' : '?'}omit=av1-hevc`
           }
           try {
             return await this._fetchPlaylist(playlistUrl, videoId)
@@ -1315,7 +1314,7 @@ export default class VimeoSource {
     throw new Error('No playable streams in config')
   }
 
-  async _fetchPlaylist(playlistUrl, videoId) {
+  async _fetchPlaylist(playlistUrl, _videoId) {
     const response = await _functions.httpRequest(playlistUrl, {
       headers: {
         Accept: '*/*',
