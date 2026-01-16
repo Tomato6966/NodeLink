@@ -1,5 +1,6 @@
 /*
 * Credits: https://github.com/southctrl; adapted for NodeLink
+I added support for lfsearch:query in this file. you're welcome <3
 */
 
 import { http1makeRequest, logger } from '../utils.js'
