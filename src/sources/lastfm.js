@@ -3,7 +3,12 @@
 I added support for lfsearch:query in this file. you're welcome <3
 */
 
-import { encodeTrack, getBestMatch, http1makeRequest, logger } from '../utils.js'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger
+} from '../utils.js'
 
 const LASTFM_PATTERN =
   /^https?:\/\/(?:www\.)?last\.fm\/(?:[a-z]{2}\/)?music\/.+/
@@ -59,7 +64,9 @@ export default class LastFMSource {
     }
 
     const path = this._parsePath(url)
-    if (!path) return { loadType: 'empty', data: {} }
+    if (!path) {
+      return { loadType: 'empty', data: {} }
+    }
 
     try {
       const { body, error, statusCode } = await http1makeRequest(url, {
@@ -67,6 +74,11 @@ export default class LastFMSource {
       })
 
       if (error || statusCode !== 200) {
+        logger(
+          'error',
+          'LastFM',
+          `Failed to fetch Last.fm page: ${error?.message || statusCode}`
+        )
         return {
           exception: {
             message: `Failed to fetch Last.fm page: ${error?.message || statusCode}`,
@@ -75,39 +87,102 @@ export default class LastFMSource {
         }
       }
 
-      const youtubeUrls = this._extractYouTubeUrls(body)
-      if (!youtubeUrls.length) {
-        return {
-          exception: {
-            message: 'No YouTube URLs found on Last.fm page',
-            severity: 'common'
-          }
-        }
+      // The path structure: ['music', 'Artist+Name', '_' or 'Album+Name', 'Track+Name'] Last.fm has weird URLs.
+      const artist = decodeURIComponent(
+        path[1]?.replace(/\+/g, ' ') || 'Unknown'
+      )
+
+      // We just skip the _ if it's there and extract the title and artist.
+      let trackTitle = 'Unknown'
+      if (path[2] === '_' && path[3]) {
+        trackTitle = decodeURIComponent(path[3].replace(/\+/g, ' '))
+      } else if (path[2]) {
+        trackTitle = decodeURIComponent(path[2].replace(/\+/g, ' '))
       }
 
       const isTrack = path.includes('_') || path.length >= 4
 
       if (isTrack) {
-        const youtubeResult = await this.nodelink.sources.resolve(
-          youtubeUrls[0]
+        const searchQuery = `${artist} - ${trackTitle} official audio`
+
+        const searchResult = await this.nodelink.sources.search(
+          'ytmsearch',
+          searchQuery
         )
-        if (youtubeResult.loadType === 'track') {
+
+        if (
+          searchResult.loadType === 'search' &&
+          searchResult.data?.length > 0
+        ) {
+          const bestTrack = searchResult.data[0]
+          logger(
+            'info',
+            'LastFM',
+            `Found official audio track: ${bestTrack.info.title} by ${bestTrack.info.author}`
+          )
           return {
             loadType: 'track',
             data: {
-              ...youtubeResult.data,
+              ...bestTrack,
               info: {
-                ...youtubeResult.data.info,
+                ...bestTrack.info,
                 uri: url,
                 sourceName: 'lastfm'
               }
             }
           }
         }
+
+        logger(
+          'warn',
+          'LastFM',
+          'No official audio found, attempting to search without "official audio" qualifier'
+        )
+        const fallbackSearch = await this.nodelink.sources.search(
+          'ytmsearch',
+          `${artist} - ${trackTitle}`
+        )
+
+        if (
+          fallbackSearch.loadType === 'search' &&
+          fallbackSearch.data?.length > 0
+        ) {
+          const bestTrack = fallbackSearch.data[0]
+          logger(
+            'info',
+            'LastFM',
+            `Found track via fallback: ${bestTrack.info.title} by ${bestTrack.info.author}`
+          )
+          return {
+            loadType: 'track',
+            data: {
+              ...bestTrack,
+              info: {
+                ...bestTrack.info,
+                uri: url,
+                sourceName: 'lastfm'
+              }
+            }
+          }
+        }
+
+        logger('error', 'LastFM', 'No tracks found for this Last.fm track')
+        return {
+          exception: {
+            message: 'No matching tracks found for this Last.fm track',
+            severity: 'fault'
+          }
+        }
       } else {
+        // For albums/artists, try to extract YouTube URLs as before
+        const youtubeUrls = this._extractYouTubeUrls(body)
+
         const tracks = []
+
+        // We try to resolve each YouTube URL found.
         for (const youtubeUrl of youtubeUrls) {
           const youtubeResult = await this.nodelink.sources.resolve(youtubeUrl)
+
           if (youtubeResult.loadType === 'track') {
             tracks.push({
               ...youtubeResult.data,
@@ -121,32 +196,35 @@ export default class LastFMSource {
         }
 
         if (tracks.length) {
-          const artist = decodeURIComponent(
-            path[2]?.replace(/\+/g, ' ') || 'Unknown'
-          )
-          const album = decodeURIComponent(
-            path[3]?.replace(/\+/g, ' ') ||
-              path[1]?.replace(/\+/g, ' ') ||
-              'Unknown'
+          logger(
+            'info',
+            'LastFM',
+            `Resolved playlist: ${trackTitle} - ${artist} with ${tracks.length} tracks`
           )
           return {
             loadType: 'playlist',
             data: {
-              info: { name: `${album} - ${artist}`, selectedTrack: 0 },
+              info: { name: `${trackTitle} - ${artist}`, selectedTrack: 0 },
               pluginInfo: {},
               tracks
             }
           }
         }
-      }
 
-      return {
-        exception: {
-          message: 'Failed to resolve YouTube URLs from Last.fm',
-          severity: 'fault'
+        logger(
+          'error',
+          'LastFM',
+          'Failed to resolve any tracks from Last.fm album/artist'
+        )
+        return {
+          exception: {
+            message: 'Failed to resolve tracks from Last.fm',
+            severity: 'fault'
+          }
         }
       }
     } catch (e) {
+      logger('error', 'LastFM', `Exception during resolve: ${e.message}`, e)
       return {
         exception: { message: e.message, severity: 'fault' }
       }
@@ -157,11 +235,15 @@ export default class LastFMSource {
     try {
       const urlObj = new URL(url)
       const path = urlObj.pathname.split('/').filter(Boolean)
+
       if (path.length > 1 && path[0].length === 2 && path[1] === 'music') {
         path.shift()
       }
-      return path[0] === 'music' && path.length >= 2 ? path : null
-    } catch {
+
+      const result = path[0] === 'music' && path.length >= 2 ? path : null
+      return result
+    } catch (e) {
+      logger('error', 'LastFM', `Error parsing path: ${e.message}`)
       return null
     }
   }
@@ -178,7 +260,9 @@ export default class LastFMSource {
     const urls = new Set()
 
     const playMatch = html.match(YOUTUBE_LINK_PATTERN)
-    if (playMatch) urls.add(playMatch[1])
+    if (playMatch) {
+      urls.add(playMatch[1])
+    }
 
     const regex = new RegExp(YOUTUBE_URL_PATTERN, 'g')
     let match
@@ -280,7 +364,10 @@ export default class LastFMSource {
 
     if (body?.error) {
       return {
-        exception: { message: body.message || 'Last.fm API error', severity: 'fault' }
+        exception: {
+          message: body.message || 'Last.fm API error',
+          severity: 'fault'
+        }
       }
     }
 
@@ -296,7 +383,9 @@ export default class LastFMSource {
       const list = Array.isArray(albums) ? albums : [albums]
       return list
         .filter((item) => item?.name && item?.artist)
-        .map((item) => this._buildCollectionResult(item.name, item.artist, item.url, 'album'))
+        .map((item) =>
+          this._buildCollectionResult(item.name, item.artist, item.url, 'album')
+        )
     }
 
     if (searchType === 'artist') {
@@ -304,7 +393,9 @@ export default class LastFMSource {
       const list = Array.isArray(artists) ? artists : [artists]
       return list
         .filter((item) => item?.name)
-        .map((item) => this._buildCollectionResult(item.name, 'Last.fm', item.url, 'artist'))
+        .map((item) =>
+          this._buildCollectionResult(item.name, 'Last.fm', item.url, 'artist')
+        )
     }
 
     const tracks = body?.results?.trackmatches?.track || []
