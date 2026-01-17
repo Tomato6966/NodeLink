@@ -238,7 +238,7 @@ export default {
     audius: {
       enabled: true,
       appName: '',
-      apiKey: '',
+      apiKey: '', // go to https://audius.co/settings and create an app and paste the app name and api stuff into here.
       apiSecret: '',
       playlistLoadLimit: 100,
       albumLoadLimit: 100
