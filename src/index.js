@@ -562,7 +562,10 @@ class NodelinkServer extends EventEmitter {
       }
 
       if (audius?.enabled) {
-        if (audius.appName !== undefined && typeof audius.appName !== 'string') {
+        if (
+          audius.appName !== undefined &&
+          typeof audius.appName !== 'string'
+        ) {
           throw new Error('sources.audius.appName must be a string')
         }
       }
@@ -571,7 +574,10 @@ class NodelinkServer extends EventEmitter {
         throw new Error('sources.audius.apiKey must be a string')
       }
 
-      if (audius.apiSecret !== undefined && typeof audius.apiSecret !== 'string') {
+      if (
+        audius.apiSecret !== undefined &&
+        typeof audius.apiSecret !== 'string'
+      ) {
         throw new Error('sources.audius.apiSecret must be a string')
       }
 
