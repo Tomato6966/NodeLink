@@ -1,14 +1,3 @@
-/*
- *                      .___       ___.                                __  .__            __         .__
- *   _____ _____     __| _/____   \_ |__ ___.__.   __________  __ ___/  |_|  |__   _____/  |________|  |
- *  /     \\__  \   / __ |/ __ \   | __ <   |  |  /  ___/  _ \|  |  \   __\  |  \_/ ___\   __\_  __ \  |
- * |  Y Y  \/ __ \_/ /_/ \  ___/   | \_\ \___  |  \___ (  <_> )  |  /|  | |   Y  \  \___|  |  |  | \/  |__
- * |__|_|  (____  /\____ |\___  >  |___  / ____| /____  >____/|____/ |__| |___|  /\___  >__|  |__|  |____/
- *       \/     \/      \/    \/       \/\/           \/                       \/     \/
- * My github profile: https://github.com/southctrl
- * You're welcome for another source :) <3 - SouthCtrl
- */
-
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
 const AUDIUS_API_BASE = 'https://discoveryprovider.audius.co'
