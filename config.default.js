@@ -284,10 +284,6 @@ export default {
     },
     bilibili: {
       enabled: true
-    },
-    applemusic: {
-      enabled: true,
-      advanceSearch: true // Uses YTMusic to fetch the correct title and artists instead of relying on messy YouTube video titles, improving lyrics accuracy
     }
   },
   audio: {
