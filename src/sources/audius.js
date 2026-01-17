@@ -73,7 +73,7 @@ export default class AudiusSource {
       const { body, statusCode } = await http1makeRequest(urlObj.toString(), {
         headers: {
           Accept: 'application/json',
-          'User-Agent': 'LavaPlayer-Audius/1.0'
+          'User-Agent': 'Nodelink'
         }
       })
 
@@ -492,7 +492,7 @@ export default class AudiusSource {
       return {
         url: streamUrl,
         protocol: 'http',
-        format: 'arbitrary',
+        format: 'mp3',
         additionalData: {}
       }
     } catch (e) {
