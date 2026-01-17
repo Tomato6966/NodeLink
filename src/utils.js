@@ -1366,10 +1366,36 @@ async function makeRequest(urlString, options, nodelink) {
 }
 
 function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
-  //biome-ignore lint: no-promise-executor-return
+  // biome-ignore lint: no-promise-executor-return
   return new Promise(async (resolve) => {
     try {
+      const writeAndWait = async (chunk) => {
+        if (stream.destroyed) return false
+        const canWrite = stream.write(chunk)
+        if (!canWrite && !stream.destroyed) {
+          await new Promise((res) => {
+            const onDrain = () => {
+              stream.removeListener('close', onClose)
+              res()
+            }
+            const onClose = () => {
+              stream.removeListener('drain', onDrain)
+              res()
+            }
+            stream.once('drain', onDrain)
+            stream.once('close', onClose)
+          })
+        }
+        return !stream.destroyed
+      }
+
       const res = await http1makeRequest(url, { method: 'GET' })
+
+      if (res.error || res.statusCode !== 200) {
+        logger('warn', 'Network', `Failed to fetch HLS playlist: ${res.statusCode}`)
+        return resolve(false)
+      }
+
       const lines = res.body
         .split('\n')
         .map((l) => l.trim())
@@ -1380,11 +1406,49 @@ function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
           method: 'GET',
           streamOnly: true
         })
+
+        if (seg.error || !seg.stream) {
+          logger('warn', 'Network', `Failed to fetch direct segment: ${seg.statusCode}`)
+          return resolve(false)
+        }
+
         seg.stream.pipe(stream, { end: shouldEnd })
-        return resolve(!shouldEnd)
+        seg.stream.on('end', () => {
+          if (shouldEnd) stream.emit('finishBuffering')
+          resolve(!shouldEnd)
+        })
+        seg.stream.on('error', (err) => {
+          if (!stream.destroyed) stream.destroy(err)
+          resolve(false)
+        })
+        return
       }
 
       const base = new URL(url)
+
+      const mapTag = lines.find((l) => l.startsWith('#EXT-X-MAP:'))
+      if (mapTag) {
+        const mapUriMatch = mapTag.match(/URI="([^"]+)"/)
+        if (mapUriMatch) {
+          const initUrl = new URL(mapUriMatch[1], base).toString()
+          const initRes = await http1makeRequest(initUrl, {
+            method: 'GET',
+            responseType: 'buffer'
+          })
+
+          if (!initRes.error && initRes.body) {
+            const ok = await writeAndWait(initRes.body)
+            if (!ok) return resolve(false)
+          } else {
+            logger(
+              'warn',
+              'HLS',
+              `Failed to download initialization segment: ${initUrl}`
+            )
+          }
+        }
+      }
+
       const segs = []
       let sawEnd = false
 
@@ -1398,32 +1462,40 @@ function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
         if (lines[i].startsWith('#EXT-X-ENDLIST')) sawEnd = true
       }
 
-      for (const segUrl of segs) {
+      for (let i = 0; i < segs.length; i++) {
         if (stream.destroyed) break
 
         try {
-          const s = await http1makeRequest(segUrl, {
+          const s = await http1makeRequest(segs[i], {
             method: 'GET',
             streamOnly: true
           })
 
-          if (!s.stream) continue
+          if (s.error || !s.stream || s.statusCode >= 400) {
+            logger('warn', 'HLS', `Failed to download segment ${i} (${segs[i]}): ${s.statusCode}`)
+            continue
+          }
 
           await new Promise((res, rej) => {
-            s.stream.pipe(stream, { end: false })
-            s.stream.on('end', res)
-            s.stream.on('error', rej)
-            stream.on('error', () => {
+            const onEnd = () => {
+              stream.removeListener('error', onError)
+              res()
+            }
+            const onError = (err) => {
               s.stream.destroy()
-              rej(new Error('Destination stream destroyed'))
+              rej(err)
+            }
+            s.stream.pipe(stream, { end: false })
+            s.stream.on('end', onEnd)
+            s.stream.on('error', (err) => {
+              stream.removeListener('error', onError)
+              rej(err)
             })
+            stream.once('error', onError)
           })
         } catch (err) {
           if (!stream.destroyed) {
-            console.error(
-              '[HLS] Error downloading segment',
-              err.code || err.message
-            )
+            logger('warn', 'HLS', `Error during segment ${i}: ${err.message}`)
           }
           break
         }
@@ -1436,13 +1508,19 @@ function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
       if (!sawEnd) {
         resolve(true)
       } else {
-        shouldEnd && stream.emit('finishBuffering')
+        if (shouldEnd) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
         resolve(false)
       }
     } catch (e) {
-      console.error('[HLS] ERR →', e.code || e.message)
+      logger('warn', 'HLS', `Error during segment download: ${e.code || e.message}`)
       if (!stream.destroyed) {
-        shouldEnd && stream.emit('finishBuffering')
+        if (shouldEnd) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
       }
       resolve(false)
     }
@@ -1452,10 +1530,29 @@ function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
 async function loadHLSPlaylist(url, stream) {
   try {
     const res = await http1makeRequest(url, { method: 'GET' })
+
+    if (res.error || res.statusCode !== 200 || !res.body) {
+      logger(
+        'warn',
+        'HLS',
+        `Failed to fetch HLS playlist: ${res.statusCode || res.error || 'empty body'}`
+      )
+      stream.emit('finishBuffering')
+      stream.end()
+      return stream
+    }
+
     const lines = res.body
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean)
+
+    if (!lines.length) {
+      logger('warn', 'HLS', 'Empty HLS playlist received')
+      stream.emit('finishBuffering')
+      stream.end()
+      return stream
+    }
 
     if (lines.some((l) => l.startsWith('#EXTINF'))) {
       return loadHLS(url, stream, false, true)
@@ -1470,15 +1567,20 @@ async function loadHLSPlaylist(url, stream) {
     if (audioTags.length) {
       const defaultTag = audioTags.find((l) => /DEFAULT=YES/.test(l))
       const pickTag = defaultTag || audioTags[audioTags.length - 1]
-      const uri = pickTag.match(/URI="([^"]+)"/)[1]
-      const audioUrl = new URL(uri, url).toString()
-      return loadHLS(audioUrl, stream, false, true)
+      const uriMatch = pickTag.match(/URI="([^"]+)"/)
+      if (uriMatch && uriMatch[1]) {
+        const audioUrl = new URL(uriMatch[1], url).toString()
+        return loadHLS(audioUrl, stream, false, true)
+      }
     }
 
     return loadHLS(url, stream, false, true)
   } catch (e) {
-    console.error('[HLS-AUDIO] ERR →', e.code || e.message)
-    stream.emit('finishBuffering')
+    logger('warn', 'HLS', `Failed to load HLS playlist: ${e.code || e.message}`)
+    if (!stream.destroyed) {
+      stream.emit('finishBuffering')
+      stream.end()
+    }
     return stream
   }
 }

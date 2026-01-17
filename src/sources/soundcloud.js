@@ -3,7 +3,7 @@ import { PassThrough, pipeline } from 'node:stream'
 import {
   encodeTrack,
   http1makeRequest,
-  loadHLS,
+  loadHLSPlaylist,
   logger,
   makeRequest
 } from '../utils.js'
@@ -746,22 +746,27 @@ export default class SoundCloudSource {
     return {
       url: finalUrl,
       protocol,
-      format
+      format,
+      additionalData: { format }
     }
   }
 
-  async loadStream(_track, url, protocol, _additionalData) {
+  async loadStream(_track, url, protocol, additionalData) {
     const stream = new PassThrough()
 
     if (protocol === 'progressive') {
       this._handleProgressive(url, stream)
+      return { stream }
     } else if (protocol === 'hls') {
       this._handleHls(url, stream)
+      if (additionalData?.format === 'aac_hls') {
+        return { stream, type: 'fmp4-buffered' }
+      }
+      return { stream }
     } else {
       stream.destroy(new Error(`Unsupported protocol: ${protocol}`))
+      return { stream }
     }
-
-    return { stream }
   }
 
   async _handleProgressive(url, stream) {
@@ -796,12 +801,13 @@ export default class SoundCloudSource {
 
   async _handleHls(url, stream) {
     try {
-      await loadHLS(url, stream, false, true)
+      await loadHLSPlaylist(url, stream)
     } catch (err) {
-      this._logError('HLS stream failed', err)
+      this._logError('SoundCloud HLS failed', err)
       if (!stream.destroyed) stream.destroy(err)
     }
   }
+
 
   _isValidString(val) {
     return typeof val === 'string' && val.length > 0
