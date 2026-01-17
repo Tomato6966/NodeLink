@@ -1,3 +1,14 @@
+/*
+ *                      .___       ___.                                __  .__            __         .__
+ *   _____ _____     __| _/____   \_ |__ ___.__.   __________  __ ___/  |_|  |__   _____/  |________|  |
+ *  /     \\__  \   / __ |/ __ \   | __ <   |  |  /  ___/  _ \|  |  \   __\  |  \_/ ___\   __\_  __ \  |
+ * |  Y Y  \/ __ \_/ /_/ \  ___/   | \_\ \___  |  \___ (  <_> )  |  /|  | |   Y  \  \___|  |  |  | \/  |__
+ * |__|_|  (____  /\____ |\___  >  |___  / ____| /____  >____/|____/ |__| |___|  /\___  >__|  |__|  |____/
+ *       \/     \/      \/    \/       \/\/           \/                       \/     \/
+ * My github profile: https://github.com/southctrl
+ * You're welcome for another source :) <3 - SouthCtrl
+ */
+
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
 const AUDIUS_API_BASE = 'https://discoveryprovider.audius.co'
@@ -329,7 +340,10 @@ export default class AudiusSource {
       const tracksEndpoint = `/v1/users/${user.id}/tracks?limit=50`
       const tracksData = await this._apiRequest(tracksEndpoint)
 
-      if (!tracksData || (Array.isArray(tracksData) && tracksData.length === 0)) {
+      if (
+        !tracksData ||
+        (Array.isArray(tracksData) && tracksData.length === 0)
+      ) {
         return this._createExceptionResponse('Artist has no tracks.', 'common')
       }
 
@@ -501,7 +515,11 @@ export default class AudiusSource {
       if (this.apiKey) url.searchParams.set('apiKey', this.apiKey)
 
       const streamUrl = url.toString()
-      logger('debug', 'Audius', `Built stream URL for track ${trackId}: ${streamUrl}`)
+      logger(
+        'debug',
+        'Audius',
+        `Built stream URL for track ${trackId}: ${streamUrl}`
+      )
 
       return streamUrl
     } catch (e) {
