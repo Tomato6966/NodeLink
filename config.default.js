@@ -235,6 +235,14 @@ export default {
       albumPageLoadConcurrency: 5,
       allowExplicit: true
     },
+    audius: {
+      enabled: true,
+      appName: '',
+      apiKey: '', // go to https://audius.co/settings and create an app and paste the app name and api stuff into here.
+      apiSecret: '',
+      playlistLoadLimit: 100,
+      albumLoadLimit: 100
+    },
     tidal: {
       enabled: true,
       token: 'token_here', //manually | or "token_here" to get a token automatically, get from tidal web player devtools; using login google account
