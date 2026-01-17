@@ -3,7 +3,12 @@
 I added support for lfsearch:query in this file. you're welcome <3
 */
 
-import { encodeTrack, getBestMatch, http1makeRequest, logger } from '../utils.js'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger
+} from '../utils.js'
 
 const LASTFM_PATTERN =
   /^https?:\/\/(?:www\.)?last\.fm\/(?:[a-z]{2}\/)?music\/.+/
@@ -54,22 +59,16 @@ export default class LastFMSource {
   }
 
   async resolve(url) {
-    logger('debug', 'LastFM', `Starting resolve for URL: ${url}`)
-
     if (!LASTFM_PATTERN.test(url)) {
-      logger('debug', 'LastFM', 'URL does not match Last.fm pattern')
       return { loadType: 'empty', data: {} }
     }
 
     const path = this._parsePath(url)
-    logger('debug', 'LastFM', `Parsed path: ${JSON.stringify(path)}`)
     if (!path) {
-      logger('debug', 'LastFM', 'Failed to parse path from URL')
       return { loadType: 'empty', data: {} }
     }
 
     try {
-      logger('debug', 'LastFM', `Fetching page content from: ${url}`)
       const { body, error, statusCode } = await http1makeRequest(url, {
         method: 'GET'
       })
@@ -88,12 +87,6 @@ export default class LastFMSource {
         }
       }
 
-      logger(
-        'debug',
-        'LastFM',
-        `Page fetched successfully, body length: ${body?.length || 0}`
-      )
-
       // The path structure: ['music', 'Artist+Name', '_' or 'Album+Name', 'Track+Name'] Last.fm has weird URLs.
       const artist = decodeURIComponent(
         path[1]?.replace(/\+/g, ' ') || 'Unknown'
@@ -108,29 +101,13 @@ export default class LastFMSource {
       }
 
       const isTrack = path.includes('_') || path.length >= 4
-      logger(
-        'debug',
-        'LastFM',
-        `Content type: ${isTrack ? 'track' : 'album/artist'}, Artist: ${artist}, Track: ${trackTitle}`
-      )
 
       if (isTrack) {
-        logger(
-          'debug',
-          'LastFM',
-          `Searching for official audio: ${artist} - ${trackTitle}`
-        )
         const searchQuery = `${artist} - ${trackTitle} official audio`
 
         const searchResult = await this.nodelink.sources.search(
           'ytmsearch',
           searchQuery
-        )
-
-        logger(
-          'debug',
-          'LastFM',
-          `Search result loadType: ${searchResult.loadType}, count: ${searchResult.data?.length || 0}`
         )
 
         if (
@@ -198,25 +175,13 @@ export default class LastFMSource {
         }
       } else {
         // For albums/artists, try to extract YouTube URLs as before
-        logger('debug', 'LastFM', `Resolving ${artist} album/artist`)
         const youtubeUrls = this._extractYouTubeUrls(body)
-        logger(
-          'debug',
-          'LastFM',
-          `Extracted ${youtubeUrls.length} YouTube URLs`
-        )
 
         const tracks = []
 
         // We try to resolve each YouTube URL found.
         for (const youtubeUrl of youtubeUrls) {
-          logger('debug', 'LastFM', `Processing YouTube URL: ${youtubeUrl}`)
           const youtubeResult = await this.nodelink.sources.resolve(youtubeUrl)
-          logger(
-            'debug',
-            'LastFM',
-            `YouTube resolve result: ${youtubeResult.loadType}`
-          )
 
           if (youtubeResult.loadType === 'track') {
             tracks.push({
@@ -229,12 +194,6 @@ export default class LastFMSource {
             })
           }
         }
-
-        logger(
-          'debug',
-          'LastFM',
-          `Resolved ${tracks.length} tracks from YouTube URLs`
-        )
 
         if (tracks.length) {
           logger(
@@ -276,15 +235,12 @@ export default class LastFMSource {
     try {
       const urlObj = new URL(url)
       const path = urlObj.pathname.split('/').filter(Boolean)
-      logger('debug', 'LastFM', `Raw path segments: ${JSON.stringify(path)}`)
 
       if (path.length > 1 && path[0].length === 2 && path[1] === 'music') {
-        logger('debug', 'LastFM', 'Removing language code from path')
         path.shift()
       }
 
       const result = path[0] === 'music' && path.length >= 2 ? path : null
-      logger('debug', 'LastFM', `Final parsed path: ${JSON.stringify(result)}`)
       return result
     } catch (e) {
       logger('error', 'LastFM', `Error parsing path: ${e.message}`)
@@ -303,32 +259,16 @@ export default class LastFMSource {
   _extractYouTubeUrls(html) {
     const urls = new Set()
 
-    logger('debug', 'LastFM', 'Attempting to extract YouTube URLs from HTML')
-
     const playMatch = html.match(YOUTUBE_LINK_PATTERN)
     if (playMatch) {
-      logger(
-        'debug',
-        'LastFM',
-        `Found YouTube link via YOUTUBE_LINK_PATTERN: ${playMatch[1]}`
-      )
       urls.add(playMatch[1])
     }
 
     const regex = new RegExp(YOUTUBE_URL_PATTERN, 'g')
     let match
-    let urlCount = 0
     while ((match = regex.exec(html)) !== null) {
-      logger(
-        'debug',
-        'LastFM',
-        `Found YouTube URL via YOUTUBE_URL_PATTERN: ${match[0]}`
-      )
       urls.add(match[0])
-      urlCount++
     }
-
-    logger('debug', 'LastFM', `Total unique YouTube URLs found: ${urls.size}`)
 
     return Array.from(urls)
   }
