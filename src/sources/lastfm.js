@@ -3,12 +3,7 @@
 I added support for lfsearch:query in this file. you're welcome <3
 */
 
-import {
-  encodeTrack,
-  getBestMatch,
-  http1makeRequest,
-  logger
-} from '../utils.js'
+import { encodeTrack, getBestMatch, http1makeRequest, logger } from '../utils.js'
 
 const LASTFM_PATTERN =
   /^https?:\/\/(?:www\.)?last\.fm\/(?:[a-z]{2}\/)?music\/.+/
