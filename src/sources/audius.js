@@ -1,21 +1,14 @@
-/*
- *                      .___       ___.                                __  .__            __         .__   
- *   _____ _____     __| _/____   \_ |__ ___.__.   __________  __ ___/  |_|  |__   _____/  |________|  |  
- *  /     \\__  \   / __ |/ __ \   | __ <   |  |  /  ___/  _ \|  |  \   __\  |  \_/ ___\   __\_  __ \  |  
- * |  Y Y  \/ __ \_/ /_/ \  ___/   | \_\ \___  |  \___ (  <_> )  |  /|  | |   Y  \  \___|  |  |  | \/  |__
- * |__|_|  (____  /\____ |\___  >  |___  / ____| /____  >____/|____/ |__| |___|  /\___  >__|  |__|  |____/
- *       \/     \/      \/    \/       \/\/           \/                       \/     \/         
- * My github profile: https://github.com/southctrl
- * You're welcome for another source :) <3 - SouthCtrl          
- */
-
-import { encodeTrack, ttp1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
 const AUDIUS_API_BASE = 'https://discoveryprovider.audius.co'
-const TRACK_URL_PATTERN = /^https?:\/\/(?:www\.)?audius\.co\/([^/]+)\/([^/?#]+)(?:\?.*)?$/i
-const PLAYLIST_URL_PATTERN = /^https?:\/\/(?:www\.)?audius\.co\/([^/]+)\/playlist\/([^/?#]+)(?:\?.*)?$/i
-const ALBUM_URL_PATTERN = /^https?:\/\/(?:www\.)?audius\.co\/([^/]+)\/album\/([^/?#]+)(?:\?.*)?$/i
-const USER_URL_PATTERN = /^https?:\/\/(?:www\.)?audius\.co\/([^/?#]+)(?:\?.*)?$/i
+const TRACK_URL_PATTERN =
+  /^https?:\/\/(?:www\.)?audius\.co\/([^/]+)\/([^/?#]+)(?:\?.*)?$/i
+const PLAYLIST_URL_PATTERN =
+  /^https?:\/\/(?:www\.)?audius\.co\/([^/]+)\/playlist\/([^/?#]+)(?:\?.*)?$/i
+const ALBUM_URL_PATTERN =
+  /^https?:\/\/(?:www\.)?audius\.co\/([^/]+)\/album\/([^/?#]+)(?:\?.*)?$/i
+const USER_URL_PATTERN =
+  /^https?:\/\/(?:www\.)?audius\.co\/([^/?#]+)(?:\?.*)?$/i
 
 const ARTWORK_SIZES = ['480x480', '1000x1000', '150x150']
 
@@ -24,7 +17,12 @@ export default class AudiusSource {
     this.nodelink = nodelink
     this.config = nodelink.options
     this.searchTerms = ['ausearch']
-    this.patterns = [TRACK_URL_PATTERN, PLAYLIST_URL_PATTERN, ALBUM_URL_PATTERN, USER_URL_PATTERN]
+    this.patterns = [
+      TRACK_URL_PATTERN,
+      PLAYLIST_URL_PATTERN,
+      ALBUM_URL_PATTERN,
+      USER_URL_PATTERN
+    ]
     this.priority = 90
     this.appName = null
     this.apiKey = null
@@ -36,7 +34,7 @@ export default class AudiusSource {
   async setup() {
     try {
       const audiusConfig = this.config.sources.audius || {}
-      
+
       this.appName = audiusConfig.appName
       this.apiKey = audiusConfig.apiKey
       this.apiSecret = audiusConfig.apiSecret
@@ -53,7 +51,9 @@ export default class AudiusSource {
 
   async _apiRequest(endpoint) {
     try {
-      const url = endpoint.startsWith('http') ? endpoint : `${AUDIUS_API_BASE}${endpoint}`
+      const url = endpoint.startsWith('http')
+        ? endpoint
+        : `${AUDIUS_API_BASE}${endpoint}`
       const urlObj = new URL(url)
 
       if (this.appName) urlObj.searchParams.set('app_name', this.appName)
@@ -62,7 +62,7 @@ export default class AudiusSource {
       const { body, statusCode } = await http1makeRequest(urlObj.toString(), {
         headers: {
           Accept: 'application/json',
-          'User-Agent': 'NodeLink/3.5'
+          'User-Agent': 'LavaPlayer-Audius/1.0'
         }
       })
 
@@ -108,8 +108,8 @@ export default class AudiusSource {
       isStream: false,
       position: 0,
       title: trackData.title,
-      uri: trackData.permalink 
-        ? `https://audius.co${trackData.permalink}` 
+      uri: trackData.permalink
+        ? `https://audius.co${trackData.permalink}`
         : `https://audius.co/track/${trackData.id}`,
       artworkUrl: this._getArtworkUrl(trackData.artwork),
       isrc: null,
@@ -146,7 +146,7 @@ export default class AudiusSource {
       }
 
       const tracks = this._normalizeData(data)
-        .map(item => this._buildTrack(item))
+        .map((item) => this._buildTrack(item))
         .filter(Boolean)
 
       if (tracks.length === 0) {
@@ -162,7 +162,10 @@ export default class AudiusSource {
   async resolve(url) {
     try {
       const resolvers = [
-        { pattern: PLAYLIST_URL_PATTERN, method: this._resolvePlaylist.bind(this) },
+        {
+          pattern: PLAYLIST_URL_PATTERN,
+          method: this._resolvePlaylist.bind(this)
+        },
         { pattern: ALBUM_URL_PATTERN, method: this._resolveAlbum.bind(this) },
         { pattern: TRACK_URL_PATTERN, method: this._resolveTrack.bind(this) },
         { pattern: USER_URL_PATTERN, method: this._resolveArtist.bind(this) }
@@ -198,15 +201,22 @@ export default class AudiusSource {
         const permalink = item.permalink
         if (permalink && item.user?.handle) {
           const lowerPermalink = permalink.toLowerCase()
-          if (lowerPermalink === expectedPath || lowerPermalink.endsWith(`/${trackSlug.toLowerCase()}`)) {
+          if (
+            lowerPermalink === expectedPath ||
+            lowerPermalink.endsWith(`/${trackSlug.toLowerCase()}`)
+          ) {
             const track = this._buildTrack(item)
-            return track ? { loadType: 'track', data: track } : this._createEmptyResponse()
+            return track
+              ? { loadType: 'track', data: track }
+              : this._createEmptyResponse()
           }
         }
       }
 
       const track = this._buildTrack(items[0])
-      return track ? { loadType: 'track', data: track } : this._createEmptyResponse()
+      return track
+        ? { loadType: 'track', data: track }
+        : this._createEmptyResponse()
     } catch (e) {
       return this._createExceptionResponse(e.message)
     }
@@ -219,12 +229,22 @@ export default class AudiusSource {
         return this._createExceptionResponse('Playlist not found.', 'common')
       }
 
-      const tracks = await this._loadPlaylistTracks(playlistData.id, this.playlistLoadLimit)
+      const tracks = await this._loadPlaylistTracks(
+        playlistData.id,
+        this.playlistLoadLimit
+      )
       if (tracks.length === 0) {
-        return this._createExceptionResponse('Playlist has no valid tracks.', 'common')
+        return this._createExceptionResponse(
+          'Playlist has no valid tracks.',
+          'common'
+        )
       }
 
-      logger('info', 'Audius', `Loaded ${tracks.length} tracks from playlist "${playlistData.playlist_name || 'Unknown'}".`)
+      logger(
+        'info',
+        'Audius',
+        `Loaded ${tracks.length} tracks from playlist "${playlistData.playlist_name || 'Unknown'}".`
+      )
 
       return {
         loadType: 'playlist',
@@ -254,12 +274,22 @@ export default class AudiusSource {
         return this._createExceptionResponse('Album not found.', 'common')
       }
 
-      const tracks = await this._loadPlaylistTracks(albumData.id, this.albumLoadLimit)
+      const tracks = await this._loadPlaylistTracks(
+        albumData.id,
+        this.albumLoadLimit
+      )
       if (tracks.length === 0) {
-        return this._createExceptionResponse('Album has no valid tracks.', 'common')
+        return this._createExceptionResponse(
+          'Album has no valid tracks.',
+          'common'
+        )
       }
 
-      logger('info', 'Audius', `Loaded ${tracks.length} tracks from album "${albumData.playlist_name || 'Unknown'}".`)
+      logger(
+        'info',
+        'Audius',
+        `Loaded ${tracks.length} tracks from album "${albumData.playlist_name || 'Unknown'}".`
+      )
 
       return {
         loadType: 'playlist',
@@ -304,14 +334,21 @@ export default class AudiusSource {
       }
 
       const tracks = this._normalizeData(tracksData)
-        .map(item => this._buildTrack(item))
+        .map((item) => this._buildTrack(item))
         .filter(Boolean)
 
       if (tracks.length === 0) {
-        return this._createExceptionResponse('Artist has no valid tracks.', 'common')
+        return this._createExceptionResponse(
+          'Artist has no valid tracks.',
+          'common'
+        )
       }
 
-      logger('info', 'Audius', `Loaded ${tracks.length} tracks from artist "${user.name || artist}".`)
+      logger(
+        'info',
+        'Audius',
+        `Loaded ${tracks.length} tracks from artist "${user.name || artist}".`
+      )
 
       return {
         loadType: 'playlist',
@@ -366,7 +403,10 @@ export default class AudiusSource {
     const slugLower = albumSlug.toLowerCase()
 
     for (const playlist of playlists) {
-      if (playlist.is_album && playlist.permalink?.toLowerCase().includes(slugLower)) {
+      if (
+        playlist.is_album &&
+        playlist.permalink?.toLowerCase().includes(slugLower)
+      ) {
         return playlist
       }
     }
@@ -389,13 +429,17 @@ export default class AudiusSource {
     }
 
     return this._normalizeData(tracksData)
-      .map(item => this._buildTrack(item))
+      .map((item) => this._buildTrack(item))
       .filter(Boolean)
   }
 
   async getTrackUrl(decodedTrack, itag) {
     try {
-      logger('debug', 'Audius', `Getting track URL for track ID: ${decodedTrack.identifier}`)
+      logger(
+        'debug',
+        'Audius',
+        `Getting track URL for track ID: ${decodedTrack.identifier}`
+      )
 
       if (!decodedTrack.identifier) {
         logger('error', 'Audius', 'No track identifier provided')
@@ -411,7 +455,11 @@ export default class AudiusSource {
       const streamUrl = this._getStreamUrl(decodedTrack.identifier)
 
       if (!streamUrl) {
-        logger('error', 'Audius', `Failed to get stream URL for track ${decodedTrack.identifier}`)
+        logger(
+          'error',
+          'Audius',
+          `Failed to get stream URL for track ${decodedTrack.identifier}`
+        )
         return {
           exception: {
             message: 'Failed to get stream URL for Audius track.',
@@ -421,7 +469,11 @@ export default class AudiusSource {
         }
       }
 
-      logger('info', 'Audius', `Successfully got stream URL for track ${decodedTrack.identifier}`)
+      logger(
+        'info',
+        'Audius',
+        `Successfully got stream URL for track ${decodedTrack.identifier}`
+      )
 
       return {
         url: streamUrl,
@@ -473,7 +525,11 @@ export default class AudiusSource {
       const httpStream = response.stream
 
       httpStream.on('end', () => {
-        logger('debug', 'Audius', `Stream ended for ${url}, emitting finishBuffering.`)
+        logger(
+          'debug',
+          'Audius',
+          `Stream ended for ${url}, emitting finishBuffering.`
+        )
         httpStream.emit('finishBuffering')
       })
 
