@@ -1,0 +1,59 @@
+name: "Winter of Code: Feature Request"
+description: "Suggest an improvement or new feature"
+title: "[FR]: "
+labels: ["enhancement", "Winter-of-Code", "not confirmed"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep it simple: problem → proposal → why it helps.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      placeholder: "What’s painful or missing today?"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      placeholder: "What should the project do instead? (behavior/API/config)"
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives / workarounds (optional)
+      placeholder: "What are you doing today to work around it?"
+    validations:
+      required: false
+
+  - type: textarea
+    id: example
+    attributes:
+      label: Example usage (optional)
+      render: javascript
+      placeholder: "Small snippet or sample config."
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: woc
+    attributes:
+      label: Winter of Code
+      options:
+        - label: I’m a Winter of Code participant and I’d like to implement this.
+          required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Quick checks
+      options:
+        - label: I searched existing issues/requests to avoid duplicates.
+          required: true
