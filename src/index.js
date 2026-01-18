@@ -561,36 +561,39 @@ class NodelinkServer extends EventEmitter {
         )
       }
 
-      if (audius?.enabled) {
-        if (
-          audius.appName !== undefined &&
-          typeof audius.appName !== 'string'
-        ) {
-          throw new Error('sources.audius.appName must be a string')
-        }
+    if (audius?.enabled) {
+      if (
+        audius?.appName !== undefined &&
+        typeof audius?.appName !== 'string'
+      ) {
+        throw new Error('sources.audius.appName must be a string')
       }
 
-      if (audius.apiKey !== undefined && typeof audius.apiKey !== 'string') {
+      if (
+        audius?.apiKey !== undefined &&
+        typeof audius?.apiKey !== 'string'
+      ) {
         throw new Error('sources.audius.apiKey must be a string')
       }
 
       if (
-        audius.apiSecret !== undefined &&
-        typeof audius.apiSecret !== 'string'
+        audius?.apiSecret !== undefined &&
+        typeof audius?.apiSecret !== 'string'
       ) {
         throw new Error('sources.audius.apiSecret must be a string')
       }
 
       validateNonNegativeInt(
-        audius.playlistLoadLimit,
+        audius?.playlistLoadLimit,
         'sources.audius.playlistLoadLimit'
       )
 
       validateNonNegativeInt(
-        audius.albumLoadLimit,
+        audius?.albumLoadLimit,
         'sources.audius.albumLoadLimit'
       )
     }
+  }
 
     if (jiosaavn?.enabled) {
       validateNonNegativeInt(
