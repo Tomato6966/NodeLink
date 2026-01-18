@@ -1,7 +1,7 @@
 name: Winter of Code | Issue Report
 description: Report an issue, For Winter of Code participants!
-title: "[BUG]: "
-labels: ["bug", "not confirmed"]
+title: "[WOC | BUG]: "
+labels: ["Winter-of-Code", "bug", "not confirmed"]
 
 body:
   - type: input
