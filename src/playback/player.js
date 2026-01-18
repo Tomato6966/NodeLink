@@ -83,14 +83,25 @@ export class Player {
       player: this.toJSON()
     })
 
-    this.waitEvent = (event, filter) =>
-      new Promise((resolve) => {
+    this.waitEvent = (event, filter, timeout = 15000) =>
+      new Promise((resolve, reject) => {
         const handler = (_, payload) => {
           if (!filter || filter(payload)) {
-            this.connection.off(event, handler)
+            clearTimeout(timeoutId)
+            this.connection?.off(event, handler)
             resolve(payload)
           }
         }
+
+        const timeoutId = setTimeout(() => {
+          this.connection?.off(event, handler)
+          reject(
+            new Error(
+              `Event ${event} timed out after ${timeout}ms for guild ${this.guildId}`
+            )
+          )
+        }, timeout)
+
         this.connection.on(event, handler)
       })
 
