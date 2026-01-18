@@ -141,10 +141,16 @@ async function requestHandler(nodelink, req, res) {
     const authHeader = req.headers?.authorization
     const isValidAuth =
       authHeader === metricsPassword ||
-      (authType === 'Bearer' &&
-        authHeader === `${authType} ${metricsPassword}`) ||
-      (authType === 'Basic' &&
-        authHeader === `${authType} ${atob(authHeader.slice(authType.length))}`)
+      (authType === 'Bearer' && authHeader === `Bearer ${metricsPassword}` ||
+      (authType === 'Basic' && (() => {
+        try {
+          const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf8')
+          const pass = decoded.includes(':') ? decoded.split(':')[1] : decoded
+          return pass === metricsPassword
+        } catch {
+          return false
+        }
+      })()))
 
     if (!isValidAuth) {
       logger(
