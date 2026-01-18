@@ -135,22 +135,31 @@ async function requestHandler(nodelink, req, res) {
       authType = 'Bearer'
     }
 
+    const metricsUsername = authConfig.username || 'admin' 
     const metricsPassword =
       authConfig.password || nodelink.options.server.password
 
     const authHeader = req.headers?.authorization
     const isValidAuth =
       authHeader === metricsPassword ||
-      (authType === 'Bearer' && authHeader === `Bearer ${metricsPassword}` ||
+      (authType === 'Bearer' && authHeader === `Bearer ${metricsPassword}`) ||
       (authType === 'Basic' && (() => {
         try {
+          // 1. Decode the "user:pass" string
           const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf8')
-          const pass = decoded.includes(':') ? decoded.split(':')[1] : decoded
-          return pass === metricsPassword
+          
+          // 2. Split by the first colon (passwords can contain colons!)
+          const colonIndex = decoded.indexOf(':')
+          if (colonIndex === -1) return false // Invalid format
+          
+          const user = decoded.slice(0, colonIndex)
+          const pass = decoded.slice(colonIndex + 1)
+          
+          return user === metricsUsername && pass === metricsPassword  //verify both
         } catch {
           return false
         }
-      })()))
+      })())
 
     if (!isValidAuth) {
       logger(

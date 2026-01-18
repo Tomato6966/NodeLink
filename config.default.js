@@ -341,6 +341,7 @@ export default {
     enabled: true,
     authorization: {
       type: 'Bearer', // Bearer or Basic.
+      username: 'admin',
       password: '' // If empty, uses server.password
     }
   },
