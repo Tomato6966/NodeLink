@@ -264,6 +264,9 @@ export default {
     reddit: {
       enabled: true
     },
+    tumblr: {
+      enabled: true 
+    },
     lastfm: {
       enabled: true
     }
