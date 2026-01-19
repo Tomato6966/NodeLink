@@ -83,7 +83,11 @@ export class Player {
       player: this.toJSON()
     })
 
-    this.waitEvent = (event, filter, timeout = 15000) =>
+    this.waitEvent = (
+      event,
+      filter,
+      timeout = this.nodelink.options.eventTimeoutMs ?? 15000
+    ) =>
       new Promise((resolve, reject) => {
         const handler = (_, payload) => {
           if (!filter || filter(payload)) {

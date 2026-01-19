@@ -75,6 +75,7 @@ export default {
   playerUpdateInterval: 2000,
   statsUpdateInterval: 30000,
   trackStuckThresholdMs: 10000,
+  eventTimeoutMs: 15000,
   zombieThresholdMs: 60000,
   enableHoloTracks: false,
   enableTrackStreamEndpoint: false,
