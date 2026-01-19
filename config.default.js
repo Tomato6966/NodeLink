@@ -270,6 +270,12 @@ export default {
     twitter: {
       enabled: true
     },
+    qobuz: {
+      enabled: true,
+      userToken: '', // (optional) get from play.qobuz.com in browser devtools -> Application -> Local Storage -> localuser -> token
+      formatId: '5', // 5 = MP3 320kbps, 6 = FLAC (requires Studio subscription), 27 = Hi-Res FLAC
+      allowExplicit: true
+    },
     lastfm: {
       enabled: true
     }
