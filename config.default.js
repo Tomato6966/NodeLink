@@ -265,7 +265,10 @@ export default {
       enabled: true
     },
     tumblr: {
-      enabled: true 
+      enabled: true
+    },
+    twitter: {
+      enabled: true
     },
     lastfm: {
       enabled: true
