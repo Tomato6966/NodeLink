@@ -29,6 +29,10 @@ const QUERIES = {
     name: 'queryArtistOverview',
     hash: '35648a112beb1794e39ab931365f6ae4a8d45e65396d641eeda94e4003d41497'
   },
+  getRecommendations: {
+    name: 'internalLinkRecommenderTrack',
+    hash: 'c77098ee9d6ee8ad3eb844938722db60570d040b49f41f5ec6e7be9160a7c86b'
+  },
   searchDesktop: {
     name: 'searchDesktop',
     hash: 'fcad5a3e0d5af727fb76966f06971c19cfa2275e6ff7671196753e008611873c'
@@ -142,6 +146,7 @@ export default class SpotifySource {
     let success = false
 
     if (this.externalAuthUrl && !this.anonymousToken) {
+      this.nodelink.credentialManager.set('spotify_anonymous_token', null)
       try {
         const response = await http1makeRequest(this.externalAuthUrl, {
           headers: { Accept: 'application/json' },
@@ -231,18 +236,18 @@ export default class SpotifySource {
       success = true
     }
 
-    if (!this.accessToken && this.anonymousToken) {
-      this.accessToken = this.anonymousToken
-    }
-
     this.tokenInitialized = success
     return success
   }
 
-  async _apiRequest(path) {
+  async _apiRequest(path, retryCount = 0) {
+    if (!this.accessToken) return null
+
     if (!this.tokenInitialized || !this._isTokenValid()) {
       await this.setup()
     }
+
+    if (!this.accessToken) return null
 
     try {
       const url = path.startsWith('http')
@@ -256,16 +261,32 @@ export default class SpotifySource {
       })
 
       if (statusCode === 429) {
+        if (retryCount >= 3) {
+          logger('error', 'Spotify', `Rate limit retry cap reached for ${path}. Skipping.`)
+          return null
+        }
+
         const retryAfter = headers['retry-after']
           ? parseInt(headers['retry-after'], 10)
           : 5
+        
         logger(
           'warn',
           'Spotify',
-          `Rate limited. Retrying after ${retryAfter} seconds.`
+          `Rate limited (Attempt ${retryCount + 1}/3). Requesting new token...`
         )
-        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000))
-        return this._apiRequest(path)
+
+        if (this.externalAuthUrl) {
+          this.anonymousToken = null
+          this.accessToken = null
+          this.tokenInitialized = false
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)))
+          const refreshed = await this._refreshToken()
+          if (refreshed) return this._apiRequest(path, retryCount + 1)
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, Math.min(retryAfter, 10) * 1000))
+        return this._apiRequest(path, retryCount + 1)
       }
 
       if (statusCode === 401) {
@@ -285,7 +306,7 @@ export default class SpotifySource {
     }
   }
 
-  async _internalApiRequest(operation, variables) {
+  async _internalApiRequest(operation, variables, retryCount = 0) {
     if (!this.tokenInitialized || !this._isTokenValid()) {
       await this.setup()
     }
@@ -293,7 +314,7 @@ export default class SpotifySource {
     const token = this.anonymousToken || this.accessToken
 
     if (!token) {
-      throw new Error('No token available for internal API request.')
+      return null
     }
 
     try {
@@ -322,16 +343,32 @@ export default class SpotifySource {
       )
 
       if (statusCode === 429) {
+        if (retryCount >= 3) {
+          logger('error', 'Spotify', `Internal API Rate limit retry cap reached. Skipping.`)
+          return null
+        }
+
         const retryAfter = headers['retry-after']
           ? parseInt(headers['retry-after'], 10)
           : 5
+
         logger(
           'warn',
           'Spotify',
-          `Internal API Rate limited. Retrying after ${retryAfter} seconds.`
+          `Internal API Rate limited (Attempt ${retryCount + 1}/3). Requesting new token...`
         )
-        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000))
-        return this._internalApiRequest(operation, variables)
+
+        if (this.externalAuthUrl) {
+          this.anonymousToken = null
+          this.accessToken = null
+          this.tokenInitialized = false
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)))
+          const refreshed = await this._refreshToken()
+          if (refreshed) return this._internalApiRequest(operation, variables, retryCount + 1)
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, Math.min(retryAfter, 10) * 1000))
+        return this._internalApiRequest(operation, variables, retryCount + 1)
       }
 
       if (statusCode === 401) {
@@ -544,6 +581,33 @@ export default class SpotifySource {
     return allItems
   }
 
+  async _fetchFullTracks(ids) {
+    if (!this.clientId || !this.clientSecret || !this.accessToken || ids.length === 0) return []
+
+    const batches = []
+    for (let i = 0; i < ids.length; i += 50) {
+      batches.push(ids.slice(i, i + 50))
+    }
+
+    const aggregatedTracks = []
+    const fetchPromises = batches.map((batch) =>
+      this._apiRequest(`/tracks?ids=${encodeURIComponent(batch.join(','))}`)
+    )
+
+    try {
+      const results = await Promise.all(fetchPromises)
+      for (const data of results) {
+        if (Array.isArray(data?.tracks)) {
+          aggregatedTracks.push(...data.tracks)
+        }
+      }
+    } catch (e) {
+      logger('warn', 'Spotify', `Failed to fetch full track details: ${e.message}`)
+    }
+
+    return aggregatedTracks
+  }
+
   async search(query, sourceTerm, searchType = 'track') {
     if (this.recommendationTerm.includes(sourceTerm)) {
       return this.getRecommendations(query)
@@ -552,7 +616,7 @@ export default class SpotifySource {
     try {
       const limit = this.config.maxSearchResults || 10
 
-      if (this.externalAuthUrl) {
+      if (this.externalAuthUrl || this.anonymousToken) {
         const data = await this._internalApiRequest(QUERIES.searchDesktop, {
           searchTerm: query,
           offset: 0,
@@ -563,44 +627,39 @@ export default class SpotifySource {
           includePreReleases: false
         })
 
-        if (!data?.searchV2) {
-          return { loadType: 'empty', data: {} }
-        }
-
-        const results = this._processInternalSearchResults(
-          data.searchV2,
-          searchType
-        )
-        return results.length === 0
-          ? { loadType: 'empty', data: {} }
-          : { loadType: 'search', data: results }
-      }
-
-      const typeMap = {
-        track: 'track',
-        album: 'album',
-        playlist: 'playlist',
-        artist: 'artist'
-      }
-      const spotifyType = typeMap[searchType] || 'track'
-
-      const data = await this._apiRequest(
-        `/search?q=${encodeURIComponent(query)}&type=${spotifyType}&limit=${limit}&market=${this.market}`
-      )
-
-      if (!data || data.error) {
-        return {
-          exception: {
-            message: data?.error?.message || 'Search failed on Spotify.',
-            severity: 'common'
+        if (data?.searchV2) {
+          const results = this._processInternalSearchResults(
+            data.searchV2,
+            searchType
+          )
+          if (results.length > 0) {
+            return { loadType: 'search', data: results }
           }
         }
       }
 
-      const results = this._processOfficialSearchResults(data, spotifyType)
-      return results.length === 0
-        ? { loadType: 'empty', data: {} }
-        : { loadType: 'search', data: results }
+      if (this.clientId && this.clientSecret) {
+        const typeMap = {
+          track: 'track',
+          album: 'album',
+          playlist: 'playlist',
+          artist: 'artist'
+        }
+        const spotifyType = typeMap[searchType] || 'track'
+
+        const data = await this._apiRequest(
+          `/search?q=${encodeURIComponent(query)}&type=${spotifyType}&limit=${limit}&market=${this.market}`
+        )
+
+        if (data && !data.error) {
+          const results = this._processOfficialSearchResults(data, spotifyType)
+          if (results.length > 0) {
+            return { loadType: 'search', data: results }
+          }
+        }
+      }
+
+      return { loadType: 'empty', data: {} }
     } catch (e) {
       return {
         exception: { message: e.message, severity: 'fault' }
@@ -610,6 +669,39 @@ export default class SpotifySource {
 
   async getRecommendations(query) {
     try {
+      if (this.externalAuthUrl || this.anonymousToken) {
+        let trackId = query
+        if (!/^[a-zA-Z0-9]{22}$/.test(query) && !query.includes('=')) {
+          const searchResult = await this.search(query, 'spsearch', 'track')
+          if (searchResult.loadType === 'search' && searchResult.data.length > 0) {
+            trackId = searchResult.data[0].info.identifier
+          }
+        }
+
+        if (/^[a-zA-Z0-9]{22}$/.test(trackId)) {
+          const data = await this._internalApiRequest(QUERIES.getRecommendations, {
+            uri: `spotify:track:${trackId}`,
+            limit: 20
+          })
+
+          const items = data?.internalLinkRecommenderTrack?.items || data?.seoRecommendedTrack?.items
+          if (items?.length > 0) {
+            const tracks = items
+              .map((it) => this._buildTrackFromInternal(it.content?.data || it.data))
+              .filter(Boolean)
+
+            return {
+              loadType: 'playlist',
+              data: {
+                info: { name: 'Spotify Recommendations', selectedTrack: 0 },
+                pluginInfo: { type: 'recommendations' },
+                tracks
+              }
+            }
+          }
+        }
+      }
+
       if (query.startsWith('mix:') || !query.includes('=')) {
         let seedType = 'track'
         let seed = query
@@ -886,28 +978,26 @@ export default class SpotifySource {
   }
 
   async _resolveTrack(id) {
-    if (this.externalAuthUrl) {
+    if (this.externalAuthUrl || this.anonymousToken) {
       const data = await this._internalApiRequest(QUERIES.getTrack, {
         uri: `spotify:track:${id}`
       })
-      if (!data?.trackUnion || data.trackUnion.__typename === 'NotFound') {
+      if (data?.trackUnion && data.trackUnion.__typename !== 'NotFound') {
         return {
-          exception: { message: 'Track not found.', severity: 'common' }
+          loadType: 'track',
+          data: this._buildTrackFromInternal(data.trackUnion)
         }
-      }
-      return {
-        loadType: 'track',
-        data: this._buildTrackFromInternal(data.trackUnion)
       }
     }
 
-    const data = await this._apiRequest(`/tracks/${id}?market=${this.market}`)
-    if (!data) {
-      return {
-        exception: { message: 'Track not found.', severity: 'common' }
+    if (this.clientId && this.clientSecret) {
+      const data = await this._apiRequest(`/tracks/${id}?market=${this.market}`)
+      if (data) {
+        return { loadType: 'track', data: this._buildTrack(data) }
       }
     }
-    return { loadType: 'track', data: this._buildTrack(data) }
+
+    return { loadType: 'empty', data: {} }
   }
 
   async _resolveAlbum(id) {
@@ -1009,7 +1099,9 @@ export default class SpotifySource {
   }
 
   async _resolvePlaylist(id) {
-    if (this.externalAuthUrl) {
+    const isAutogenerated = id.startsWith('37i9dQZF') || id.startsWith('37i9dQZE')
+
+    if (this.externalAuthUrl || isAutogenerated) {
       const data = await this._internalApiRequest(QUERIES.getPlaylist, {
         uri: `spotify:playlist:${id}`,
         offset: 0,
@@ -1017,34 +1109,60 @@ export default class SpotifySource {
         enableWatchFeedEntrypoint: false
       })
 
-      if (!data?.playlistV2 || data.playlistV2.__typename === 'NotFound') {
+      if (data?.playlistV2 && data.playlistV2.__typename !== 'NotFound') {
+        const allItems = [...(data.playlistV2.content?.items || [])]
+        const totalTracks = data.playlistV2.content?.totalCount || allItems.length
+
+        if (totalTracks > 100) {
+          const additionalItems = await this._fetchInternalPaginatedData(
+            QUERIES.getPlaylist,
+            `spotify:playlist:${id}`,
+            totalTracks,
+            100,
+            this.playlistLoadLimit,
+            this.playlistPageLoadConcurrency,
+            { enableWatchFeedEntrypoint: false }
+          )
+          allItems.push(...additionalItems)
+        }
+
+        const trackIds = allItems
+          .map((it) => it.itemV2?.data?.uri?.split(':').pop())
+          .filter(Boolean)
+
+        let tracks = []
+        const hasOfficial = this.clientId && this.clientSecret
+
+        if (hasOfficial && trackIds.length > 0) {
+          const fullTracks = await this._fetchFullTracks(trackIds)
+          if (fullTracks.length > 0) {
+            tracks = fullTracks
+              .map((t) => this._buildTrack(t))
+              .filter(Boolean)
+          }
+        }
+
+        if (tracks.length === 0) {
+          tracks = allItems
+            .map((item) => this._buildTrackFromInternal(item.itemV2?.data))
+            .filter(Boolean)
+        }
+
         return {
-          exception: { message: 'Playlist not found.', severity: 'common' }
+          loadType: 'playlist',
+          data: {
+            info: { name: data.playlistV2.name, selectedTrack: 0 },
+            tracks
+          }
         }
       }
 
-      const allItems = [...data.playlistV2.content.items]
-      const totalTracks = data.playlistV2.content.totalCount
-      const additionalItems = await this._fetchInternalPaginatedData(
-        QUERIES.getPlaylist,
-        `spotify:playlist:${id}`,
-        totalTracks,
-        100,
-        this.playlistLoadLimit,
-        this.playlistPageLoadConcurrency,
-        { enableWatchFeedEntrypoint: false }
-      )
-      allItems.push(...additionalItems)
-
-      const tracks = allItems
-        .map((item) => this._buildTrackFromInternal(item.itemV2.data))
-        .filter(Boolean)
-
-      return {
-        loadType: 'playlist',
-        data: {
-          info: { name: data.playlistV2.name, selectedTrack: 0 },
-          tracks
+      if (isAutogenerated && !this.externalAuthUrl) {
+        return {
+          exception: {
+            message: 'Autogenerated playlists require externalAuthUrl to be configured.',
+            severity: 'common'
+          }
         }
       }
     }
