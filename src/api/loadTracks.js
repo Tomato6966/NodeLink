@@ -24,29 +24,32 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  const identifier = result.identifier
+  const identifier = result.identifier.trim()
   logger('debug', 'Tracks', `Loading tracks with identifier: "${identifier}"`)
-
-  const re =
-    /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>(?![A-Z]:\\)[A-Za-z0-9]+):(?<query>(?!\/\/).+)|(?<local>(?:\/|[A-Z]:\\|\\).+))$/i
-  const match = re.exec(identifier)
 
   let url, source, query
 
-  if (match) {
-    url = match.groups.url
-    source = match.groups.source
-    query = match.groups.query
-
-    if (match.groups.local) {
-      source = 'local'
-      query = match.groups.local
-    }
+  if (/^(?:https?|ftts):\/\//i.test(identifier)) {
+    url = identifier
   } else {
-    source = Array.isArray(nodelink.options.defaultSearchSource)
-      ? nodelink.options.defaultSearchSource[0]
-      : nodelink.options.defaultSearchSource
-    query = identifier
+    const re =
+      /^(?:(?<source>(?![A-Z]:\\)[A-Za-z0-9]+):(?<query>(?!\/\/).+)|(?<local>(?:\/|[A-Z]:\\|\\).+))$/i
+    const match = re.exec(identifier)
+
+    if (match) {
+      source = match.groups.source
+      query = match.groups.query
+
+      if (match.groups.local) {
+        source = 'local'
+        query = match.groups.local
+      }
+    } else {
+      source = Array.isArray(nodelink.options.defaultSearchSource)
+        ? nodelink.options.defaultSearchSource[0]
+        : nodelink.options.defaultSearchSource
+      query = identifier
+    }
   }
 
   try {
