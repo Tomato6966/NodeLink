@@ -398,8 +398,6 @@ export default class YouTubeSource {
     this.activeStreams = new Map()
     this.ytContext = {
       client: {
-        clientName: 'WEB',
-        clientVersion: '2.20260114.01.00',
         screenDensityFloat: 1,
         screenHeightPoints: 1080,
         screenPixelDensity: 1,
