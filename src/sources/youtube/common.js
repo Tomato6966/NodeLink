@@ -1617,6 +1617,34 @@ export class BaseClient {
     return response
   }
 
+  async _makeNextRequest(videoId, context, headers) {
+    const apiEndpoint = this.getApiEndpoint()
+    const requestBody = {
+      context: this.getClient(context),
+      videoId: videoId
+    }
+
+    const response = await makeRequest(
+      `${apiEndpoint}/youtubei/v1/next?prettyPrint=false`,
+      {
+        method: 'POST',
+        headers: {
+          'User-Agent': this.getClient(context).client.userAgent,
+          ...(this.getClient(context).client.visitorData
+            ? {
+                'X-Goog-Visitor-Id': this.getClient(context).client.visitorData
+              }
+            : {}),
+          ...headers
+        },
+        body: requestBody,
+        disableBodyCompression: true
+      }
+    )
+
+    return response
+  }
+
   async _handlePlayerResponse(playerResponse, sourceName, videoId, _context) {
     if (!playerResponse || typeof playerResponse !== 'object') {
       logger(

@@ -64,6 +64,8 @@ if (isMainThread) {
         processNextTask()
       } else if (msg.type === 'stream') {
         sendStreamChunk(msg.socketPath, msg.id, msg.chunk)
+      } else if (msg.type === 'chatAction') {
+        sendChatAction(msg.socketPath, msg.id, msg.data)
       } else if (msg.type === 'end') {
         sendStreamEnd(msg.socketPath, msg.id)
         worker.load = Math.max(0, worker.load - 1)
@@ -132,6 +134,11 @@ if (isMainThread) {
   function sendStreamChunk(socketPath, id, chunk) {
     const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     withSocket(socketPath, (socket) => sendFrame(socket, id, 0, payload))
+  }
+
+  function sendChatAction(socketPath, id, data) {
+    const payload = Buffer.from(JSON.stringify(data), 'utf8')
+    withSocket(socketPath, (socket) => sendFrame(socket, id, 3, payload))
   }
 
   function sendStreamEnd(socketPath, id) {
@@ -228,6 +235,8 @@ if (isMainThread) {
   await nodelink.sources.loadFolder()
   await nodelink.lyrics.loadFolder()
 
+  const activeChats = new Map()
+
   parentPort.postMessage({ type: 'ready' })
 
   const sendStreamChunkFromWorker = (id, socketPath, chunk) => {
@@ -245,6 +254,48 @@ if (isMainThread) {
       socketPath,
       error: String(error || 'Unknown error')
     })
+  }
+
+  const handleLiveChat = async (id, socketPath, payload) => {
+    const videoId = payload.videoId
+    const yt = nodelink.sources.getSource('youtube')
+    if (!yt) throw new Error('YouTube source not available in worker')
+
+    activeChats.set(id, true)
+
+    try {
+      const chat = await yt.liveChat.getLiveChat(videoId)
+      if (!chat) throw new Error('Could not initialize live chat')
+
+      const pollLoop = async () => {
+        while (activeChats.has(id)) {
+          try {
+            const result = await chat.poll()
+            if (!result) break
+
+            const { actions, timeoutMs } = result
+
+            if (actions.length > 0 && activeChats.has(id)) {
+              utils.logger('debug', 'SourceWorker', `[${id}] Sending ${actions.length} actions for ${videoId}`)
+              parentPort.postMessage({ type: 'chatAction', id, socketPath, data: { op: 'actions', actions } })
+            }
+
+            await new Promise(resolve => setTimeout(resolve, timeoutMs || 5000))
+          } catch (e) {
+            utils.logger('error', 'SourceWorker', `[${id}] Polling exception for ${videoId}: ${e.message}`)
+            break
+          }
+        }
+      }
+
+      await pollLoop()
+
+      parentPort.postMessage({ type: 'end', id, socketPath })
+    } catch (e) {
+      sendStreamErrorFromWorker(id, socketPath, e.message)
+    } finally {
+      activeChats.delete(id)
+    }
   }
 
   const handleLoadStream = async (id, socketPath, payload) => {
@@ -326,6 +377,20 @@ if (isMainThread) {
       } catch (e) {
         sendStreamErrorFromWorker(id, socketPath, e.message || e)
       }
+      return
+    }
+
+    if (task === 'loadLiveChat') {
+      try {
+        await handleLiveChat(id, socketPath, payload)
+      } catch (e) {
+        sendStreamErrorFromWorker(id, socketPath, e.message || e)
+      }
+      return
+    }
+
+    if (task === 'cancelLiveChat') {
+      activeChats.delete(payload.id)
       return
     }
 

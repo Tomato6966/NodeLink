@@ -952,11 +952,16 @@ class NodelinkServer extends EventEmitter {
 
           let eventName = '/v4/websocket'
           let guildId = null
+          let liveId = null
           try {
             const url = new URL(ws.data.url)
             const voiceMatch = url.pathname.match(
               /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
             )
+            const liveMatch = url.pathname.match(
+              /^\/v4\/websocket\/youtube\/live\/([^/]+)\/?$/
+            )
+
             if (voiceMatch) {
               if (!self.options.voiceReceive?.enabled) {
                 try {
@@ -966,6 +971,9 @@ class NodelinkServer extends EventEmitter {
               }
               eventName = '/v4/websocket/voice'
               guildId = voiceMatch[1]
+            } else if (liveMatch) {
+              eventName = '/v4/websocket/youtube/live'
+              liveId = liveMatch[1]
             }
           } catch {}
 
@@ -975,7 +983,7 @@ class NodelinkServer extends EventEmitter {
             reqShim,
             clientInfo,
             sessionId,
-            guildId
+            guildId || liveId
           )
         },
         message(ws, message) {
@@ -1073,8 +1081,11 @@ class NodelinkServer extends EventEmitter {
       const voiceMatch = pathname.match(
         /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
       )
+      const liveMatch = pathname.match(
+        /^\/v4\/websocket\/youtube\/live\/([^/]+)\/?$/
+      )
 
-      if (pathname === '/v4/websocket' || voiceMatch) {
+      if (pathname === '/v4/websocket' || voiceMatch || liveMatch) {
         if (!headers['user-id']) {
           logger(
             'warn',
@@ -1110,8 +1121,16 @@ class NodelinkServer extends EventEmitter {
           } connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
         )
 
-        const eventName = voiceMatch ? '/v4/websocket/voice' : '/v4/websocket'
-        const guildId = voiceMatch ? voiceMatch[1] : null
+        let eventName = '/v4/websocket'
+        let routeId = null
+
+        if (voiceMatch) {
+          eventName = '/v4/websocket/voice'
+          routeId = voiceMatch[1]
+        } else if (liveMatch) {
+          eventName = '/v4/websocket/youtube/live'
+          routeId = liveMatch[1]
+        }
 
         if (isBun && !this._usingBunServer) {
           this.socket.handleUpgrade(request, socket, head, (ws) => {
@@ -1121,7 +1140,7 @@ class NodelinkServer extends EventEmitter {
               request,
               clientInfo,
               sessionId,
-              guildId
+              routeId
             )
           })
         } else {
@@ -1132,7 +1151,7 @@ class NodelinkServer extends EventEmitter {
               request,
               clientInfo,
               sessionId,
-              guildId
+              routeId
             )
           )
         }
@@ -1167,6 +1186,65 @@ class NodelinkServer extends EventEmitter {
         )
 
         this.registerVoiceSocket(guildId, socket)
+      }
+    )
+
+    this.socket.on(
+      '/v4/websocket/youtube/live',
+      (socket, request, _clientInfo, _sessionId, id) => {
+        let videoId = id
+
+        if (/^\d{17,20}$/.test(id)) {
+          const player = this.sessions.getPlayer(id)
+          if (player?.track?.info?.sourceName?.includes('youtube')) {
+            videoId = player.track.info.identifier
+          }
+        } 
+        else if (id.length > 50) {
+          try {
+            const decoded = decodeTrack(id)
+            if (decoded?.info?.sourceName?.includes('youtube')) {
+              videoId = decoded.info.identifier
+            }
+          } catch (_e) {}
+        }
+
+        if (!this.sourceWorkerManager) {
+          const yt = this.sources.getSource('youtube')
+          if (!yt) {
+            socket.close(1008, 'YouTube source not enabled')
+            return
+          }
+          yt.handleLiveChat(socket, videoId)
+          return
+        }
+
+        logger('info', 'YouTube-LiveChat', `Delegating live chat for video: ${videoId} to worker`)
+
+        const resShim = {
+          headersSent: false,
+          send: (data) => {
+            const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
+            socket.sendFrame(payload, { len: payload.length, fin: true, opcode: Buffer.isBuffer(data) ? 0x02 : 0x01 })
+          },
+          writeHead: (status) => {
+            if (status !== 200) socket.close(1011, 'Worker failed')
+          },
+          write: (data) => {
+            const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
+            socket.sendFrame(payload, { len: payload.length, fin: true, opcode: Buffer.isBuffer(data) ? 0x02 : 0x01 })
+          },
+          end: () => socket.close(1000, 'Finished'),
+          on: (event, cb) => socket.on(event, cb)
+        }
+
+        this.sourceWorkerManager.delegate(
+          request,
+          resShim,
+          'loadLiveChat',
+          { videoId },
+          { isWebSocket: true }
+        )
       }
     )
   }

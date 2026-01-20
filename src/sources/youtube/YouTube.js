@@ -11,6 +11,8 @@ import Web from './clients/Web.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
 import OAuth from './OAuth.js'
 
+import YouTubeLiveChat from './LiveChat.js'
+
 const CHUNK_SIZE = 64 * 1024
 const MAX_RETRIES = 3
 const MAX_URL_REFRESH = 10
@@ -392,9 +394,12 @@ export default class YouTubeSource {
     this.oauth = null
     this.visitorDataInterval = null
     this.cipherManager = new CipherManager(nodelink)
+    this.liveChat = new YouTubeLiveChat(nodelink, this)
     this.activeStreams = new Map()
     this.ytContext = {
       client: {
+        clientName: 'WEB',
+        clientVersion: '2.20260114.01.00',
         screenDensityFloat: 1,
         screenHeightPoints: 1080,
         screenPixelDensity: 1,
@@ -1708,5 +1713,9 @@ export default class YouTubeSource {
       logger('error', 'YouTube', `Failed to fetch chapters: ${e.message}`)
       return []
     }
+  }
+
+  async handleLiveChat(socket, id) {
+    return this.liveChat.handleConnection(socket, id)
   }
 }
