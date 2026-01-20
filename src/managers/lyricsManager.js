@@ -84,7 +84,7 @@ export default class LyricsManager {
     }
   }
 
-  async loadLyrics(decodedTrack, language) {
+  async loadLyrics(decodedTrack, language, skipTrackSource = false) {
     if (
       !decodedTrack ||
       !decodedTrack.info?.sourceName ||
@@ -132,7 +132,7 @@ export default class LyricsManager {
     const sourceName = trackInfo?.sourceName
     const lyricsSource = this.lyricsSources.get(sourceName)
 
-    if (lyricsSource) {
+    if (lyricsSource && !skipTrackSource) {
       const lyrics = await lyricsSource.getLyrics(trackInfo, language)
       if (lyrics && lyrics.loadType !== 'empty') {
         return lyrics

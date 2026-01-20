@@ -48,6 +48,11 @@ export class Player {
     this.audioMixer = null
     this._initAudioMixer()
 
+    this.isLyricsSubscribed = false
+    this.currentLyrics = null
+    this.lyricsLineIndex = -1
+    this.skipTrackSource = false
+
     logger(
       'debug',
       'Player',
@@ -182,6 +187,9 @@ export class Player {
     this.connection.on('audioStream', (audioStream) => {
       audioStream.on('data', () => {
         this._lastStreamDataTime = Date.now()
+        if (this.isLyricsSubscribed && !this.isPaused && this.track) {
+          this._syncLyrics()
+        }
       })
     })
 
@@ -381,6 +389,8 @@ export class Player {
     this.holoTrack = null
     this.isPaused = false
     this.position = 0
+    this.currentLyrics = null
+    this.lyricsLineIndex = -1
   }
 
   async _emitTrackStart() {
@@ -391,6 +401,10 @@ export class Player {
       track: trackToEmit,
       playingQuality: this.streamInfo?.format?.itag || null
     })
+
+    if (this.isLyricsSubscribed) {
+      this._loadLyrics()
+    }
   }
 
   _emitTrackEnd(reason) {
@@ -845,6 +859,7 @@ export class Player {
       const result = await seekPromise
       if (result) {
         this.emitEvent(GatewayEvents.SEEK, { position: this.position })
+        if (this.isLyricsSubscribed) this._recalculateLyricsIndex()
       }
       return result
     } finally {
@@ -1314,6 +1329,93 @@ export class Player {
       return []
     }
     return this.audioMixer.getLayers()
+  }
+
+  async subscribeLyrics(skipTrackSource) {
+    if (this.isLyricsSubscribed) return
+    this.isLyricsSubscribed = true
+    this.skipTrackSource = skipTrackSource === 'true' || skipTrackSource === true
+
+    if (this.track && !this.isPaused) {
+      this._loadLyrics()
+    }
+  }
+
+  unsubscribeLyrics() {
+    this.isLyricsSubscribed = false
+    this.skipTrackSource = false
+    this.currentLyrics = null
+    this.lyricsLineIndex = -1
+  }
+
+  async _loadLyrics() {
+    if (!this.track) return
+    
+    const lyricsData = await this.nodelink.lyrics.loadLyrics(
+      { info: this.track.info },
+      undefined,
+      this.skipTrackSource
+    )
+
+    if (lyricsData && lyricsData.loadType === 'lyrics') {
+      this.currentLyrics = lyricsData.data
+      this.lyricsLineIndex = -1
+      this.emitEvent('LyricsFoundEvent', { lyrics: this.currentLyrics })
+      this._recalculateLyricsIndex()
+    } else {
+      this.currentLyrics = null
+      this.emitEvent('LyricsNotFoundEvent')
+    }
+  }
+
+  _syncLyrics() {
+    if (!this.isLyricsSubscribed || !this.currentLyrics || !this.currentLyrics.lines) return
+
+    const position = this._realPosition()
+    const lines = this.currentLyrics.lines
+    const nextIndex = this.lyricsLineIndex + 1
+
+    if (nextIndex >= lines.length) return
+
+    if (position >= lines[nextIndex].time) {
+      this._recalculateLyricsIndex()
+    }
+  }
+
+  _recalculateLyricsIndex() {
+    if (!this.currentLyrics || !this.currentLyrics.lines) return
+
+    const position = this._realPosition()
+    const lines = this.currentLyrics.lines
+
+    let foundIndex = -1
+    // Efficiently find the current line
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].time <= position) {
+        foundIndex = i
+      } else {
+        break
+      }
+    }
+
+    if (foundIndex !== this.lyricsLineIndex) {
+      const skipped = foundIndex > this.lyricsLineIndex + 1
+      this.lyricsLineIndex = foundIndex
+
+      if (foundIndex !== -1) {
+        const line = lines[foundIndex]
+        this.emitEvent('LyricsLineEvent', {
+          lineIndex: foundIndex,
+          line: {
+            timestamp: line.time,
+            duration: line.duration,
+            line: line.text,
+            plugin: null
+          },
+          skipped
+        })
+      }
+    }
   }
 
   toJSON() {
