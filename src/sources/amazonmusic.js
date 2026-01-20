@@ -1,8 +1,15 @@
-import { encodeTrack, getBestMatch, http1makeRequest, logger } from '../utils.js'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger
+} from '../utils.js'
 import crypto from 'node:crypto'
 
 const BOT_USER_AGENT =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  'Mozilla/5.0 (compatible; NodeLinkBot/0.1; +https://nodelink.js.org/)'
+const SEARCH_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'
 
 function parseISO8601Duration(duration) {
   if (!duration) return 0
@@ -324,7 +331,7 @@ export default class AmazonMusicSource {
   }
 
   async search(query, _sourceTerm) {
-    const headersUA = { 'User-Agent': BOT_USER_AGENT }
+    const headersUA = { 'User-Agent': SEARCH_USER_AGENT }
 
     const decodeAmp = (v) =>
       typeof v === 'string' ? v.replaceAll('&amp;', '&') : v
@@ -369,12 +376,11 @@ export default class AmazonMusicSource {
 
       const config = configRes.body
       const { accessToken, sessionId, deviceId, csrf } = config
-      if (!csrf?.token) throw new Error('Failed to retrieve CSRF token from config')
+      if (!csrf?.token)
+        throw new Error('Failed to retrieve CSRF token from config')
 
       const finalDeviceId =
-        deviceId && !deviceId.startsWith('000')
-          ? deviceId
-          : '13580682033287541'
+        deviceId && !deviceId.startsWith('000') ? deviceId : '13580682033287541'
       const finalSessionId =
         sessionId && !sessionId.startsWith('000')
           ? sessionId
@@ -402,7 +408,7 @@ export default class AmazonMusicSource {
           'x-amzn-device-height': '1080',
           'x-amzn-device-family': 'WebPlayer',
           'x-amzn-device-id': finalDeviceId,
-          'x-amzn-user-agent': BOT_USER_AGENT,
+          'x-amzn-user-agent': SEARCH_USER_AGENT,
           'x-amzn-session-id': finalSessionId,
           'x-amzn-request-id': crypto.randomUUID(),
           'x-amzn-device-language': 'en_US',
@@ -443,16 +449,26 @@ export default class AmazonMusicSource {
       )
 
       if (searchRes.statusCode !== 200) {
-        logger('error', 'AmazonMusic', `Search API returned ${searchRes.statusCode}`)
+        logger(
+          'error',
+          'AmazonMusic',
+          `Search API returned ${searchRes.statusCode}`
+        )
         return { loadType: 'empty', data: {} }
       }
 
       let data
       try {
         data =
-          typeof searchRes.body === 'string' ? JSON.parse(searchRes.body) : searchRes.body
+          typeof searchRes.body === 'string'
+            ? JSON.parse(searchRes.body)
+            : searchRes.body
       } catch (e) {
-        logger('error', 'AmazonMusic', `Failed to parse search response: ${e.message}`)
+        logger(
+          'error',
+          'AmazonMusic',
+          `Failed to parse search response: ${e.message}`
+        )
         return { loadType: 'empty', data: {} }
       }
 
@@ -469,14 +485,16 @@ export default class AmazonMusicSource {
         for (let j = 0; j < items.length; j++) {
           const item = items[j]
           const isSong = item?.label === 'song'
-          const isSquare = typeof item?.interface === 'string' &&
+          const isSquare =
+            typeof item?.interface === 'string' &&
             item.interface.includes('SquareHorizontalItemElement')
           if (!isSong && !isSquare) continue
 
           const deeplink = item?.primaryLink?.deeplink
           const identifier = extractIdentifier(deeplink)
           if (!identifier) continue
-          if (!isSong && (!deeplink || deeplink.indexOf('trackAsin=') === -1)) continue
+          if (!isSong && (!deeplink || deeplink.indexOf('trackAsin=') === -1))
+            continue
 
           tracks.push({
             identifier,
