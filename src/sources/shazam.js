@@ -112,6 +112,65 @@ export default class ShazamSource {
         return (space === -1 ? srcset : srcset.slice(0, space)) || null
       }
 
+      const extractIsrcFromHtml = () => {
+        const tokens = ['"isrc"', '\\"isrc\\"']
+        const isUpper = (c) => c >= 65 && c <= 90
+        const isDigit = (c) => c >= 48 && c <= 57
+        const isUpperOrDigit = (c) => isUpper(c) || isDigit(c)
+
+        for (let t = 0; t < tokens.length; t++) {
+          const token = tokens[t]
+          let from = 0
+
+          while (true) {
+            const at = html.indexOf(token, from)
+            if (at === -1) break
+            from = at + token.length
+
+            let i = html.indexOf(':', from)
+            if (i === -1) break
+            i++
+
+            while (i < html.length) {
+              const cc = html.charCodeAt(i)
+              if (cc !== 32 && cc !== 9 && cc !== 10 && cc !== 13) break
+              i++
+            }
+
+            while (html.charCodeAt(i) === 92) i++
+            if (html.charCodeAt(i) !== 34) continue
+            i++
+
+            if (i + 12 > html.length) continue
+
+            if (
+              !isUpper(html.charCodeAt(i)) ||
+              !isUpper(html.charCodeAt(i + 1))
+            )
+              continue
+
+            if (
+              !isUpperOrDigit(html.charCodeAt(i + 2)) ||
+              !isUpperOrDigit(html.charCodeAt(i + 3)) ||
+              !isUpperOrDigit(html.charCodeAt(i + 4))
+            )
+              continue
+
+            for (let k = 5; k < 12; k++) {
+              if (!isDigit(html.charCodeAt(i + k))) {
+                i = -1
+                break
+              }
+            }
+            if (i === -1) continue
+
+            return html.slice(i, i + 12)
+          }
+        }
+
+        return null
+      }
+
       const appleMusicUrl = extractHrefStartingAt(
         'href="https://www.shazam.com/applemusic/song/'
       )
@@ -186,6 +245,8 @@ export default class ShazamSource {
         return parseIsoMs(findIso())
       })()
 
+      const isrc = extractIsrcFromHtml()
+
       const title =
         extractTextAfterClass('NewTrackPageHeader_trackTitle__') || 'Unknown'
       const artist =
@@ -214,6 +275,8 @@ export default class ShazamSource {
         sourceName: 'shazam',
         appleMusicUrl
       }
+
+      if (isrc) trackInfo.isrc = isrc
 
       return {
         loadType: 'track',
