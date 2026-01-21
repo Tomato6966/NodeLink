@@ -28,11 +28,15 @@ export default class SegmentFetcher {
   async fetchKey(keyInfo) {
     if (!keyInfo || keyInfo.method === 'NONE') return null
     if (this.keyMap.has(keyInfo.uri)) return this.keyMap.get(keyInfo.uri)
-    const { body, error, statusCode } = await http1makeRequest(keyInfo.uri, {
-      headers: this.headers, responseType: 'buffer', localAddress: this.localAddress
-    })
-    if (error || statusCode !== 200) throw new Error(`Key fetch failed: ${statusCode}`)
-    this.keyMap.set(keyInfo.uri, body)
+        const { body, error, statusCode } = await http1makeRequest(keyInfo.uri, {
+          headers: this.headers, responseType: 'buffer', localAddress: this.localAddress
+        })
+    
+        if (error || statusCode !== 200 || !body || body.length === 0) {
+          logger('error', 'SegmentFetcher', `Key fetch failed for ${keyInfo.uri}: Status ${statusCode}, Error: ${error?.message || 'Empty Body'}`)
+          throw new Error(`Key fetch failed: ${statusCode}`)
+        }
+        this.keyMap.set(keyInfo.uri, body)
     return body
   }
 
@@ -77,6 +81,8 @@ export default class SegmentFetcher {
       const iv = segment.key.iv || this._getIv(segment.sequence)
       const algorithm = segment.key.method === 'AES-128' ? 'aes-128-cbc' : 'aes-256-cbc'
       
+      logger('debug', 'SegmentFetcher', `Decrypting segment ${segment.sequence} (Key: ${keyData ? 'OK' : 'FAIL'}, IV: ${iv.toString('hex')})`)
+
       if (options.stream) {
         return stream.pipe(new DecryptTransform(algorithm, keyData, iv))
       } else {

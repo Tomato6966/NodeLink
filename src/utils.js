@@ -711,12 +711,8 @@ function decodeTrack(encoded) {
 
     const sourceName = readModifiedUTF8From(messageBuf, pRef)
 
-    if (messageBuf.length - pRef.value < 8)
-      throw new Error('Unexpected end of message (need 8 bytes for position)')
     const positionOffset = messageBuf.length - 8
-
     const detailsBuf = messageBuf.subarray(pRef.value, positionOffset)
-
     const trackPosition = Number(messageBuf.readBigInt64BE(positionOffset))
 
     let details = []
@@ -830,6 +826,10 @@ function encodeTrack(track) {
   }
 
   writeUTF(track.sourceName)
+
+  if (Array.isArray(track.details)) {
+    for (const detail of track.details) writeNullableText(detail)
+  }
 
   writeLong(track.position ?? 0)
 

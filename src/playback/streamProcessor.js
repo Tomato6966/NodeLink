@@ -38,7 +38,9 @@ const AUDIO_CONSTANTS = Object.freeze({
 const MPEGTS_CONFIG = Object.freeze({
   syncByte: 0x47,
   packetSize: 188,
-  aacStreamType: 0x0f
+  aacStreamType: 0x0f,
+  mp3StreamType: 0x03,
+  mp3StreamType2: 0x04
 })
 
 const _DOWNMIX_COEFFICIENTS = Object.freeze({
@@ -522,7 +524,7 @@ class SymphoniaDecoderStream extends Transform {
   }
 }
 
-class MPEGTSToAACStream extends Transform {
+class MPEGTSDemuxer extends Transform {
   constructor(options) {
     super({
       ...options,
@@ -531,31 +533,26 @@ class MPEGTSToAACStream extends Transform {
 
     this.ringBuffer = new RingBuffer(BUFFER_THRESHOLDS.maxCompressed)
     this.patPmtId = null
-    this.aacPid = null
-    this.aacData = []
-    this.aacPidFound = false
+    this.audioPid = null
+    this.audioPidFound = false
     this._aborted = false
+    this.pesBuffer = Buffer.alloc(0)
+    this.pesRemaining = 0
   }
 
   abort() {
     this._aborted = true
     this.ringBuffer.clear()
-    this.aacData = []
+    this.pesBuffer = Buffer.alloc(0)
   }
 
   _transform(chunk, _encoding, callback) {
-    if (this._aborted) {
-      callback()
-      return
-    }
+    if (this._aborted) return callback()
 
     try {
       this.ringBuffer.write(chunk)
 
-      while (
-        this.ringBuffer.length >= MPEGTS_CONFIG.packetSize &&
-        !this._aborted
-      ) {
+      while (this.ringBuffer.length >= MPEGTS_CONFIG.packetSize && !this._aborted) {
         const head = this.ringBuffer.peek(1)
         if (head[0] !== MPEGTS_CONFIG.syncByte) {
           this.ringBuffer.read(1)
@@ -563,94 +560,90 @@ class MPEGTSToAACStream extends Transform {
         }
 
         const packet = this.ringBuffer.read(MPEGTS_CONFIG.packetSize)
-
-        const payloadUnitStartIndicator = !!(packet[1] & 0x40)
-        const pid = ((packet[1] & 0x1f) << 8) + packet[2]
-        const adaptationFieldControl = (packet[3] & 0x30) >> 4
+        const pusi = !!(packet[1] & 0x40)
+        const pid = ((packet[1] & 0x1f) << 8) | packet[2]
+        const afc = (packet[3] & 0x30) >> 4
 
         let offset = 4
-        if (adaptationFieldControl > 1) {
+        if (afc > 1) {
           offset = 5 + packet[4]
-          if (offset >= MPEGTS_CONFIG.packetSize) {
-            continue
-          }
+          if (offset >= MPEGTS_CONFIG.packetSize) continue
         }
 
-        this._processPacket(packet, pid, payloadUnitStartIndicator, offset)
+        if (pid === 0 && pusi) {
+          this._processPAT(packet, offset)
+        } else if (this.patPmtId && pid === this.patPmtId && pusi) {
+          this._processPMT(packet, offset)
+        } else if (this.audioPid && pid === this.audioPid) {
+          this._processAudioPacket(packet, pusi, offset)
+        }
       }
-
       callback()
     } catch {
       callback()
     }
   }
 
-  _processPacket(packet, pid, pusi, offset) {
-    if (pid === 0 && pusi) {
-      this._processPAT(packet, offset)
-    } else if (this.patPmtId && pid === this.patPmtId && pusi) {
-      this._processPMT(packet, offset)
-    } else if (this.aacPid && pid === this.aacPid) {
-      this._processAACPacket(packet, pusi, offset)
-    }
-  }
-
   _processPAT(packet, offset) {
     offset += packet[offset] + 1
-    this.patPmtId = ((packet[offset + 10] & 0x1f) << 8) | packet[offset + 11]
+    if (offset + 11 < MPEGTS_CONFIG.packetSize) {
+      this.patPmtId = ((packet[offset + 10] & 0x1f) << 8) | packet[offset + 11]
+    }
   }
 
   _processPMT(packet, offset) {
     offset += packet[offset] + 1
-
-    const sectionLength =
-      ((packet[offset + 1] & 0x0f) << 8) | packet[offset + 2]
+    const sectionLength = ((packet[offset + 1] & 0x0f) << 8) | packet[offset + 2]
     const tableEnd = offset + 3 + sectionLength - 4
-    const programInfoLength =
-      ((packet[offset + 10] & 0x0f) << 8) | packet[offset + 11]
-
+    const programInfoLength = ((packet[offset + 10] & 0x0f) << 8) | packet[offset + 11]
     offset += 12 + programInfoLength
 
     while (offset < tableEnd && offset < MPEGTS_CONFIG.packetSize) {
       const streamType = packet[offset]
-      const elementaryPid =
-        ((packet[offset + 1] & 0x1f) << 8) | packet[offset + 2]
-      const esInfoLength =
-        ((packet[offset + 3] & 0x0f) << 8) | packet[offset + 4]
-
-      if (streamType === MPEGTS_CONFIG.aacStreamType && !this.aacPidFound) {
-        this.aacPid = elementaryPid
-        this.aacPidFound = true
+      const elementaryPid = ((packet[offset + 1] & 0x1f) << 8) | packet[offset + 2]
+      if ((streamType === MPEGTS_CONFIG.aacStreamType || streamType === MPEGTS_CONFIG.mp3StreamType || streamType === MPEGTS_CONFIG.mp3StreamType2) && !this.audioPidFound) {
+        this.audioPid = elementaryPid
+        this.audioPidFound = true
         return
       }
-
-      offset += 5 + esInfoLength
+      const esInfoLen = ((packet[offset + 3] & 0x0f) << 8) | packet[offset + 4]
+      offset += 5 + esInfoLen
     }
   }
 
-  _processAACPacket(packet, pusi, offset) {
+  _processAudioPacket(packet, pusi, offset) {
     if (pusi) {
-      if (this.aacData.length > 0 && !this._aborted) {
-        this.push(Buffer.concat(this.aacData))
-        this.aacData = []
+      if (this.pesBuffer.length > 0) {
+        this._emitPES(this.pesBuffer)
+        this.pesBuffer = Buffer.alloc(0)
       }
-
-      const pesHeaderLength = packet[offset + 8]
-      offset += 9 + pesHeaderLength
-
-      if (offset >= MPEGTS_CONFIG.packetSize) return
     }
 
-    if (!this._aborted) {
-      this.aacData.push(packet.subarray(offset))
+    const payload = packet.subarray(offset)
+    if (payload.length > 0) {
+      this.pesBuffer = Buffer.concat([this.pesBuffer, payload])
+    }
+  }
+
+  _emitPES(buffer) {
+    if (buffer.length < 9) return
+    
+    // Check for PES start code 00 00 01
+    if (buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x01) {
+      const headerLength = buffer[8]
+      const payloadOffset = 9 + headerLength
+      
+      if (payloadOffset < buffer.length) {
+        this.push(buffer.subarray(payloadOffset))
+      }
     }
   }
 
   _flush(callback) {
-    if (this.aacData.length > 0 && !this._aborted) {
-      this.push(Buffer.concat(this.aacData))
+    if (this.pesBuffer.length > 0) {
+      this._emitPES(this.pesBuffer)
     }
-    this.aacData = []
+    this.pesBuffer = Buffer.alloc(0)
     this.ringBuffer.clear()
     callback()
   }
@@ -658,7 +651,7 @@ class MPEGTSToAACStream extends Transform {
   _destroy(err, callback) {
     this._aborted = true
     this.ringBuffer.dispose()
-    this.aacData = []
+    this.pesBuffer = Buffer.alloc(0)
     super._destroy(err, callback)
   }
 }
@@ -1685,8 +1678,23 @@ class StreamAudioResource extends BaseAudioResource {
       const demuxer = new FMP4ToAACStream({ bufferMode })
       streams.push(demuxer)
     } else if (_isMpegtsFormat(lowerType)) {
-      const demuxer = new MPEGTSToAACStream()
+      const demuxer = new MPEGTSDemuxer()
       streams.push(demuxer)
+
+      if (lowerType.includes('mp3') || lowerType.includes('mpeg')) {
+        const decoder = new SymphoniaDecoderStream({ resamplingQuality })
+        streams.push(decoder)
+
+        this.pipes.push(...streams.slice(1))
+
+        pipeline(streams, (err) => {
+          if (err && !this._destroyed) {
+            this.stream?.emit('error', err)
+          }
+        })
+
+        return decoder
+      }
     } else if (_isMp4Format(lowerType)) {
       const demuxer = new MP4ToAACStream()
       streams.push(demuxer)
@@ -1946,7 +1954,14 @@ export const createPCMStream = (
         const bufferMode = lowerType.includes('fmp4-buffered')
         streams.push(new FMP4ToAACStream({ bufferMode }))
       }
-      else if (_isMpegtsFormat(lowerType)) streams.push(new MPEGTSToAACStream())
+      else if (_isMpegtsFormat(lowerType)) {
+        streams.push(new MPEGTSDemuxer())
+
+        if (lowerType.includes('mp3') || lowerType.includes('mpeg')) {
+          streams.push(new SymphoniaDecoderStream({ resamplingQuality }))
+          break
+        }
+      }
       else if (_isMp4Format(lowerType)) streams.push(new MP4ToAACStream())
 
       streams.push(new AACDecoderStream({ resamplingQuality }))
