@@ -1,3 +1,22 @@
+import { spawnSync } from 'node:child_process'
+import crypto from 'node:crypto'
+
+if (!crypto.getCiphers().includes('bf-cbc') && !process.env._NL_REEXEC_OSSL) {
+  const env = {
+    ...process.env,
+    _NL_REEXEC_OSSL: '1'
+  }
+
+  const args = [
+    '--openssl-legacy-provider',
+    ...process.execArgv,
+    ...process.argv.slice(1)
+  ]
+
+  const r = spawnSync(process.execPath, args, { stdio: 'inherit', env })
+  process.exit(r.status ?? 1)
+}
+
 import cluster from 'node:cluster'
 import { EventEmitter } from 'node:events'
 import http from 'node:http'
