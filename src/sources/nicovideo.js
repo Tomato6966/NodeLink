@@ -258,6 +258,7 @@ export default class NicoVideoSource {
       }
       const stream = new HLSHandler(url, { 
         headers,
+        type: 'fmp4',
         localAddress: this.nodelink.routePlanner?.getIP()
       })
       return { stream, type: 'fmp4' }

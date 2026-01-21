@@ -5,14 +5,12 @@ import SegmentFetcher from './SegmentFetcher.js'
 
 export default class HLSHandler extends PassThrough {
   constructor(url, options = {}) {
-    super({ highWaterMark: options.highWaterMark || 1024 * 1024 * 2 }) // 2MB default
+    super({ highWaterMark: options.highWaterMark || 1024 * 1024 * 5 })
     
     this.currentUrl = url
-    this.options = options
     this.headers = options.headers || {}
     this.localAddress = options.localAddress || null
-    this.chunkReadahead = options.chunkReadahead || 3
-    this.liveBuffer = options.liveBuffer || 20000
+    this.strategy = options.type?.includes('fmp4') ? 'segmented' : 'streaming'
     
     this.fetcher = new SegmentFetcher({ 
       headers: this.headers,
@@ -22,17 +20,15 @@ export default class HLSHandler extends PassThrough {
     this.processedSegments = new Set()
     this.processedOrder = []
     this.MAX_HISTORY = 100
-
     this.segmentQueue = []
     this.isFetching = false
     this.stop = false
     this.lastMapUri = null
     this.isLive = false
     this.playlistTimer = null
+    this.activeSegmentStream = null
 
-    this.on('close', () => { this.destroy() })
-    this.on('error', () => { this.destroy() })
-
+    this.on('error', (err) => { this.destroy(err) })
     this._start()
   }
 
@@ -43,17 +39,18 @@ export default class HLSHandler extends PassThrough {
   destroy(err) {
     if (this.stop) return
     this.stop = true
-    
     if (this.playlistTimer) {
       clearTimeout(this.playlistTimer)
       this.playlistTimer = null
     }
-
+    if (this.activeSegmentStream) {
+      this.activeSegmentStream.destroy()
+      this.activeSegmentStream = null
+    }
     this.segmentQueue = []
     this.processedSegments.clear()
     this.processedOrder = []
-    
-    super.destroy(err)
+    if (!this.destroyed) super.destroy(err)
   }
 
   _rememberSegment(url) {
@@ -68,20 +65,13 @@ export default class HLSHandler extends PassThrough {
 
   async _playlistLoop() {
     if (this.stop) return
-
     try {
       const { body: playlistContent, error, statusCode } = await http1makeRequest(this.currentUrl, {
-        headers: this.headers,
-        method: 'GET',
-        localAddress: this.localAddress
+        headers: this.headers, method: 'GET', localAddress: this.localAddress
       })
-
-      if (error || statusCode !== 200) {
-        throw new Error(`Failed to fetch playlist: ${statusCode}`)
-      }
+      if (error || statusCode !== 200) throw new Error(`Playlist fetch failed: ${statusCode}`)
 
       const parsed = PlaylistParser.parse(playlistContent, this.currentUrl)
-
       if (parsed.isMaster) {
         this.currentUrl = parsed.variants[0].url
         return setImmediate(() => this._playlistLoop())
@@ -90,35 +80,28 @@ export default class HLSHandler extends PassThrough {
       const isFirstLoad = !this.isLive && this.processedSegments.size === 0
       this.isLive = parsed.isLive
 
-      let segmentsToAdd = parsed.segments
-
       if (isFirstLoad && this.isLive) {
-        const segmentsToSkip = Math.max(0, parsed.segments.length - this.chunkReadahead)
-        segmentsToAdd = parsed.segments.slice(segmentsToSkip)
-        
-        for (let i = 0; i < segmentsToSkip; i++) {
+        const toSkip = Math.max(0, parsed.segments.length - 3)
+        for (let i = 0; i < toSkip; i++) {
           this.processedSegments.add(parsed.segments[i].url)
           this.processedOrder.push(parsed.segments[i].url)
         }
       }
 
-      for (const segment of segmentsToAdd) {
-        if (this._rememberSegment(segment.url)) {
-          this.segmentQueue.push(segment)
-        }
+      const newSegments = parsed.segments.filter(s => !this.processedSegments.has(s.url))
+      for (const segment of newSegments) {
+        this._rememberSegment(segment.url)
+        this.segmentQueue.push(segment)
       }
 
-      if (this.segmentQueue.length > 0 && !this.isFetching) {
-        this._fetchSegments()
-      }
+      if (this.segmentQueue.length > 0 && !this.isFetching) this._fetchSegments()
 
       if (this.isLive && !playlistContent.includes('#EXT-X-ENDLIST')) {
-        this.playlistTimer = setTimeout(() => this._playlistLoop(), parsed.targetDuration * 1000)
+        const delay = Math.max(1, parsed.targetDuration) * 1000
+        this.playlistTimer = setTimeout(() => this._playlistLoop(), delay)
       }
     } catch (err) {
-      logger('error', 'HLSHandler', `Playlist error: ${err.message}`)
       if (!this.isLive) return this.destroy(err)
-      
       this.playlistTimer = setTimeout(() => this._playlistLoop(), 5000)
     }
   }
@@ -128,26 +111,30 @@ export default class HLSHandler extends PassThrough {
     this.isFetching = true
 
     while (this.segmentQueue.length > 0 && !this.stop) {
-      if (this.writableLength >= this.writableHighWaterMark) {
-        await new Promise((resolve) => this.once('drain', resolve))
-        if (this.stop) break
-      }
-
       const segment = this.segmentQueue.shift()
-
       try {
         if (segment.map && segment.map.uri !== this.lastMapUri) {
-          const mapData = await this.fetcher.fetchMap(segment.map)
+          const mapData = await this.fetcher.fetchMap(segment.map, segment.key)
           if (mapData && !this.stop) {
-            this.write(mapData)
+            if (!this.write(mapData)) await new Promise(r => this.once('drain', r))
             this.lastMapUri = segment.map.uri
           }
         }
 
-        const data = await this.fetcher.fetchSegment(segment)
-        
-        if (!this.stop) {
-          this.write(data)
+        if (this.strategy === 'segmented') {
+          const data = await this.fetcher.fetchSegment(segment, { stream: false })
+          if (!this.stop) {
+            if (!this.write(data)) await new Promise(r => this.once('drain', r))
+          }
+        } else {
+          const segmentStream = await this.fetcher.fetchSegment(segment, { stream: true })
+          this.activeSegmentStream = segmentStream
+          
+          for await (const chunk of segmentStream) {
+            if (this.stop) break
+            if (!this.write(chunk)) await new Promise(r => this.once('drain', r))
+          }
+          this.activeSegmentStream = null
         }
       } catch (err) {
         logger('error', 'HLSHandler', `Segment error ${segment.sequence}: ${err.message}`)
@@ -155,7 +142,6 @@ export default class HLSHandler extends PassThrough {
     }
 
     this.isFetching = false
-    
     if (!this.isLive && this.segmentQueue.length === 0 && !this.stop) {
       this.emit('finishBuffering')
       this.end()

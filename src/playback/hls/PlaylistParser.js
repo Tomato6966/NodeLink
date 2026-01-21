@@ -1,8 +1,9 @@
+import { logger } from '../../utils.js'
+
 export default class PlaylistParser {
   static parse(content, baseUrl) {
-    const lines = content.split('\n').map((l) => l.trim()).filter(Boolean)
+    const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
     
-    // 4.3.4: Detect Master Playlist
     if (lines.some(l => l.startsWith('#EXT-X-STREAM-INF'))) {
       return { isMaster: true, variants: this.parseMaster(lines, baseUrl) }
     }
@@ -20,15 +21,13 @@ export default class PlaylistParser {
     let mediaSequence = 0
     let lastByteRange = null
 
-    const mediaSequenceLine = lines.find((l) => l.startsWith('#EXT-X-MEDIA-SEQUENCE:'))
-    if (mediaSequenceLine) {
-      mediaSequence = parseInt(mediaSequenceLine.split(':')[1], 10)
-      result.mediaSequence = mediaSequence
-    }
-
-    const targetDurationLine = lines.find((l) => l.startsWith('#EXT-X-TARGETDURATION:'))
-    if (targetDurationLine) {
-      result.targetDuration = parseInt(targetDurationLine.split(':')[1], 10)
+    for (const line of lines) {
+      if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+        mediaSequence = parseInt(line.split(':')[1], 10)
+        result.mediaSequence = mediaSequence
+      } else if (line.startsWith('#EXT-X-TARGETDURATION:')) {
+        result.targetDuration = parseFloat(line.split(':')[1])
+      }
     }
 
     let segmentIndex = 0
@@ -36,26 +35,32 @@ export default class PlaylistParser {
       const line = lines[i]
 
       if (line.startsWith('#EXT-X-KEY:')) {
-        currentKey = this.parseKey(line, baseUrl)
+        currentKey = this.parseAttributes(line, baseUrl)
       } else if (line.startsWith('#EXT-X-MAP:')) {
-        currentMap = this.parseMap(line, baseUrl)
-      } else if (line.startsWith('#EXT-X-BYTERANGE:')) {
-        lastByteRange = this.parseByteRange(line, lastByteRange)
+        currentMap = this.parseAttributes(line, baseUrl)
       } else if (line.startsWith('#EXTINF:')) {
-        const segmentUrl = lines[++i]
-        if (segmentUrl && !segmentUrl.startsWith('#')) {
-          const absoluteUrl = new URL(segmentUrl, baseUrl).toString()
-          const sequence = mediaSequence + segmentIndex
-          
+        const duration = parseFloat(line.split(':')[1].split(',')[0])
+        let j = i + 1
+        while (j < lines.length && lines[j].startsWith('#')) {
+          if (lines[j].startsWith('#EXT-X-BYTERANGE:')) {
+            lastByteRange = this.parseByteRange(lines[j], lastByteRange)
+          }
+          j++
+        }
+        
+        if (j < lines.length) {
+          const segmentUrl = lines[j]
           result.segments.push({
-            url: absoluteUrl,
+            url: new URL(segmentUrl, baseUrl).toString(),
+            duration,
             key: currentKey,
             map: currentMap,
             byteRange: lastByteRange,
-            sequence
+            sequence: mediaSequence + segmentIndex
           })
           segmentIndex++
-          lastByteRange = null 
+          lastByteRange = null
+          i = j
         }
       }
     }
@@ -68,59 +73,42 @@ export default class PlaylistParser {
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
         const attrLine = lines[i]
-        const url = new URL(lines[++i], baseUrl).toString()
-        const bandwidthMatch = attrLine.match(/BANDWIDTH=(\d+)/)
-        const codecsMatch = attrLine.match(/CODECS="([^"]+)"/)
-        
+        const urlLine = lines[++i]
+        if (!urlLine) break
+
+        const attrs = this.parseAttributes(attrLine, baseUrl)
         variants.push({
-          url,
-          bandwidth: bandwidthMatch ? parseInt(bandwidthMatch[1], 10) : 0,
-          codecs: codecsMatch ? codecsMatch[1] : ''
+          url: new URL(urlLine, baseUrl).toString(),
+          bandwidth: parseInt(attrs.bandwidth || 0, 10)
         })
       }
     }
-
     return variants.sort((a, b) => b.bandwidth - a.bandwidth)
   }
 
-  static parseKey(line, baseUrl) {
-    const methodMatch = line.match(/METHOD=([^,]+)/)
-    const method = methodMatch ? methodMatch[1] : 'NONE'
-    if (method === 'NONE') return null
-
-    const uriMatch = line.match(/URI="([^"]+)"/) 
-    const ivMatch = line.match(/IV=0x([0-9a-fA-F]+)/)
-    if (!uriMatch) return null
-
-    return {
-      method,
-      uri: new URL(uriMatch[1], baseUrl).toString(),
-      iv: ivMatch ? Buffer.from(ivMatch[1], 'hex') : null
+  static parseAttributes(line, baseUrl) {
+    const attrs = {}
+    const regex = /([A-Z0-9-]+)=(?:"([^"]*)"|([^,]*))/g
+    let match
+    while ((match = regex.exec(line)) !== null) {
+      const key = match[1].toLowerCase().replace(/-/g, '')
+      const value = match[2] || match[3]
+      attrs[key] = value
     }
-  }
 
-  static parseMap(line, baseUrl) {
-    const uriMatch = line.match(/URI="([^"]+)"/) 
-    const rangeMatch = line.match(/BYTERANGE="([^"]+)"/) 
-    if (!uriMatch) return null
-
-    return {
-      uri: new URL(uriMatch[1], baseUrl).toString(),
-      byteRange: rangeMatch ? this.parseByteRange(`#EXT-X-BYTERANGE:${rangeMatch[1]}`, null) : null
+    if (attrs.uri) attrs.uri = new URL(attrs.uri, baseUrl).toString()
+    if (attrs.iv && typeof attrs.iv === 'string' && attrs.iv.startsWith('0x')) {
+      attrs.iv = Buffer.from(attrs.iv.substring(2), 'hex')
     }
+    return attrs
   }
 
   static parseByteRange(line, lastRange) {
-    const match = line.match(/:(\d+)(?:@(\d+))?/) 
+    const match = line.match(/:?(\d+)(?:@(\d+))?/) 
     if (!match) return null
-
     const length = parseInt(match[1], 10)
     let offset = match[2] ? parseInt(match[2], 10) : null
-
-    if (offset === null && lastRange) {
-      offset = lastRange.offset + lastRange.length
-    }
-
+    if (offset === null && lastRange) offset = lastRange.offset + lastRange.length
     return { length, offset: offset || 0 }
   }
 }
