@@ -513,6 +513,7 @@ export default class DeezerSource {
             const bufferSized = buf.subarray(0, bufferSize)
 
             if (i % 3 === 0) {
+              blowfish.setIv(IV)
               outputStream.push(Buffer.from(blowfish.decode(bufferSized)))
             } else {
               outputStream.push(bufferSized)

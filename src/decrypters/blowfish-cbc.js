@@ -1,10 +1,14 @@
-const pArray = [
+import { Buffer } from 'node:buffer'
+
+// Pre-computed P-Array (18 words) and S-Boxes (4 x 256 words) flattened into a single Uint32Array
+// Total size: 18 + 1024 = 1042 words
+const BF_CONST = new Uint32Array([
+    // P-Array (0-17)
     0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344, 0xa4093822, 0x299f31d0,
     0x082efa98, 0xec4e6c89, 0x452821e6, 0x38d01377, 0xbe5466cf, 0x34e90c6c,
-    0xc0ac29b7, 0xc97c50dd, 0x3f84d5b5, 0xb5470917, 0x9216d5d9, 0x8979fb1b
-];
+    0xc0ac29b7, 0xc97c50dd, 0x3f84d5b5, 0xb5470917, 0x9216d5d9, 0x8979fb1b,
 
-const sBox0 = [
+    // S-Box 0 (18-273)
     0xd1310ba6, 0x98dfb5ac, 0x2ffd72db, 0xd01adfb7, 0xb8e1afed, 0x6a267e96,
     0xba7c9045, 0xf12c7f99, 0x24a19947, 0xb3916cf7, 0x0801f2e2, 0x858efc16,
     0x636920d8, 0x71574e69, 0xa458fea3, 0xf4933d7e, 0x0d95748f, 0x728eb658,
@@ -47,10 +51,9 @@ const sBox0 = [
     0x11c81968, 0x4e734a41, 0xb3472dca, 0x7b14a94a, 0x1b510052, 0x9a532915,
     0xd60f573f, 0xbc9bc6e4, 0x2b60a476, 0x81e67400, 0x08ba6fb5, 0x571be91f,
     0xf296ec6b, 0x2a0dd915, 0xb6636521, 0xe7b9f9b6, 0xff34052e, 0xc5855664,
-    0x53b02d5d, 0xa99f8fa1, 0x08ba4799, 0x6e85076a
-];
+    0x53b02d5d, 0xa99f8fa1, 0x08ba4799, 0x6e85076a,
 
-const sBox1 = [
+    // S-Box 1 (274-529)
     0x4b7a70e9, 0xb5b32944, 0xdb75092e, 0xc4192623, 0xad6ea6b0, 0x49a7df7d,
     0x9cee60b8, 0x8fedb266, 0xecaa8c71, 0x699a17ff, 0x5664526c, 0xc2b19ee1,
     0x193602a5, 0x75094c29, 0xa0591340, 0xe4183a3e, 0x3f54989a, 0x5b429d65,
@@ -93,10 +96,9 @@ const sBox1 = [
     0xe8efd855, 0x61d99735, 0xa969a7aa, 0xc50c06c2, 0x5a04abfc, 0x800bcadc,
     0x9e447a2e, 0xc3453484, 0xfdd56705, 0x0e1e9ec9, 0xdb73dbd3, 0x105588cd,
     0x675fda79, 0xe3674340, 0xc5c43465, 0x713e38d8, 0x3d28f89e, 0xf16dff20,
-    0x153e21e7, 0x8fb03d4a, 0xe6e39f2b, 0xdb83adf7
-];
+    0x153e21e7, 0x8fb03d4a, 0xe6e39f2b, 0xdb83adf7,
 
-const sBox2 = [
+    // S-Box 2 (530-785)
     0xe93d5a68, 0x948140f7, 0xf64c261c, 0x94692934, 0x411520f7, 0x7602d4f7,
     0xbcf46b2e, 0xd4a20068, 0xd4082471, 0x3320f46a, 0x43b7d4b7, 0x500061af,
     0x1e39f62e, 0x97244546, 0x14214f74, 0xbf8b8840, 0x4d95fc1d, 0x96b591af,
@@ -139,10 +141,9 @@ const sBox2 = [
     0x39720a3d, 0x7c927c24, 0x86e3725f, 0x724d9db9, 0x1ac15bb4, 0xd39eb8fc,
     0xed545578, 0x08fca5b5, 0xd83d7cd3, 0x4dad0fc4, 0x1e50ef5e, 0xb161e6f8,
     0xa28514d9, 0x6c51133c, 0x6fd5c7e7, 0x56e14ec4, 0x362abfce, 0xddc6c837,
-    0xd79a3234, 0x92638212, 0x670efa8e, 0x406000e0
-];
-  
-const sBox3 = [
+    0xd79a3234, 0x92638212, 0x670efa8e, 0x406000e0,
+
+    // S-Box 3 (786-1041)
     0x3a39ce37, 0xd3faf5cf, 0xabc27737, 0x5ac52d1b, 0x5cb0679e, 0x4fa33742,
     0xd3822740, 0x99bc9bbe, 0xd5118e9d, 0xbf0f7315, 0xd62d1c7e, 0xc700c47b,
     0xb78c1b6b, 0x21a19045, 0xb26eb1be, 0x6a366eb4, 0x5748ab2f, 0xbc946e79,
@@ -186,151 +187,195 @@ const sBox3 = [
     0x85cbfe4e, 0x8ae88dd8, 0x7aaaf9b0, 0x4cf9aa7e, 0x1948c25c, 0x02fb8a8c,
     0x01c36ae4, 0xd6ebe1f9, 0x90d4f869, 0xa65cdea0, 0x3f09252d, 0xc208e69f,
     0xb74e6132, 0xce77e25b, 0x578fdfe3, 0x3ac372e6
-];
+])
 
-function fixNegative(number) {
-    return number >>> 0;
+function u32(x) {
+  return x >>> 0
 }
-
 function xor(a, b) {
-    return fixNegative(a ^ b);
+  return u32(a ^ b)
+}
+function add32(a, b) {
+  return u32((a + b) | 0)
+}
+function pack32(b0, b1, b2, b3) {
+  return u32((b0 << 24) | (b1 << 16) | (b2 << 8) | b3)
+}
+function isBytes(v) {
+  return v && typeof v === 'object' && typeof v.byteLength === 'number'
+}
+function toU8(v) {
+  if (v instanceof Uint8Array) return v
+  if (Buffer.isBuffer(v))
+    return new Uint8Array(v.buffer, v.byteOffset, v.byteLength)
+  if (isBytes(v)) return new Uint8Array(v)
+  if (typeof v === 'string') return new TextEncoder().encode(v)
+  throw new Error('Expected string/Buffer/ArrayBuffer/Uint8Array')
 }
 
-function addMod32(a, b) {
-    return fixNegative(a + b | 0);
-}
+export default class BlowfishCBC {
+  constructor(key) {
+    const keyU8 = toU8(key)
 
-function pack32(a, b, c, d) {
-    return fixNegative(a << 24 | b << 16 | c << 8 | d);
-}
+    const P0 = BF_CONST.subarray(0, 18)
+    const S0 = BF_CONST.subarray(18, 18 + 256)
+    const S1 = BF_CONST.subarray(18 + 256, 18 + 512)
+    const S2 = BF_CONST.subarray(18 + 512, 18 + 768)
+    const S3 = BF_CONST.subarray(18 + 768, 18 + 1024)
 
-function unpack32(number) {
-    return [number >>> 24 & 255, number >>> 16 & 255, number >>> 8 & 255, 255 & number];
-}
+    this.p = new Uint32Array(P0)
+    this.s0 = new Uint32Array(S0)
+    this.s1 = new Uint32Array(S1)
+    this.s2 = new Uint32Array(S2)
+    this.s3 = new Uint32Array(S3)
 
-function isString(val) {
-    return "string" == typeof val;
-}
+    this._ivL = 0
+    this._ivR = 0
+    this._haveIv = false
 
-function isBuffer(val) {
-    return "object" == typeof val && "byteLength" in val;
-}
+    this._tail = new Uint8Array(0)
 
-function isStringOrBuffer(val) {
-    return isString(val) || isBuffer(val);
-}
-
-function encodeString(str) {
-    if (isBuffer(str)) return new Uint8Array(str);
-
-    if (isString(str)) {
-        const encoder = new TextEncoder();
-        const encoded = encoder.encode(str);
-        return encoded;
+    let k = keyU8
+    if (k.length < 72) {
+      const expanded = new Uint8Array(72)
+      for (let i = 0; i < 72; i++) expanded[i] = k[i % k.length]
+      k = expanded
     }
 
-    throw new Error("Unsupported type");
+    for (let n = 0, i = 0; n < 18; n++, i += 4) {
+      const w = pack32(k[i], k[i + 1], k[i + 2], k[i + 3])
+      this.p[n] = xor(this.p[n], w)
+    }
+
+    let xL = 0,
+      xR = 0
+
+    for (let i = 0; i < 18; i += 2) {
+      ;[xL, xR] = this._encryptBlock(xL, xR)
+      this.p[i] = xL
+      this.p[i + 1] = xR
+    }
+
+    for (let box = 0; box < 4; box++) {
+      const s =
+        box === 0 ? this.s0 : box === 1 ? this.s1 : box === 2 ? this.s2 : this.s3
+      for (let i = 0; i < 256; i += 2) {
+        ;[xL, xR] = this._encryptBlock(xL, xR)
+        s[i] = xL
+        s[i + 1] = xR
+      }
+    }
+  }
+
+  setIv(iv) {
+    const iv8 = toU8(iv)
+    if (iv8.length !== 8) throw new Error('IV must be 8 bytes')
+    this._ivL = pack32(iv8[0], iv8[1], iv8[2], iv8[3])
+    this._ivR = pack32(iv8[4], iv8[5], iv8[6], iv8[7])
+    this._haveIv = true
+  }
+
+  _F(xL) {
+    const a = (xL >>> 24) & 255
+    const b = (xL >>> 16) & 255
+    const c = (xL >>> 8) & 255
+    const d = xL & 255
+
+    let res = add32(this.s0[a], this.s1[b])
+    res = xor(res, this.s2[c])
+    res = add32(res, this.s3[d])
+    return res
+  }
+
+  _encryptBlock(xL, xR) {
+    for (let i = 0; i < 16; i++) {
+      xL = xor(xL, this.p[i])
+      xR = xor(xR, this._F(xL))
+      const t = xL
+      xL = xR
+      xR = t
+    }
+    const t = xL
+    xL = xR
+    xR = t
+
+    xR = xor(xR, this.p[16])
+    xL = xor(xL, this.p[17])
+    return [xL, xR]
+  }
+
+  _decryptBlock(xL, xR) {
+    for (let i = 17; i > 1; i--) {
+      xL = xor(xL, this.p[i])
+      xR = xor(xR, this._F(xL))
+      const t = xL
+      xL = xR
+      xR = t
+    }
+    const t = xL
+    xL = xR
+    xR = t
+
+    xR = xor(xR, this.p[1])
+    xL = xor(xL, this.p[0])
+    return [xL, xR]
+  }
+
+  decode(chunk) {
+    if (!this._haveIv) throw new Error('IV not set')
+    const inU8 = toU8(chunk)
+
+    let data
+    if (this._tail.length) {
+      data = new Uint8Array(this._tail.length + inU8.length)
+      data.set(this._tail, 0)
+      data.set(inU8, this._tail.length)
+    } else {
+      data = inU8
+    }
+
+    const fullLen = data.length - (data.length % 8)
+    const remain = data.length - fullLen
+
+    if (remain) {
+      this._tail = data.subarray(fullLen)
+    } else {
+      this._tail = new Uint8Array(0)
+    }
+
+    if (fullLen === 0) return Buffer.alloc(0)
+
+    const out = Buffer.allocUnsafe(fullLen)
+
+    let ivL = this._ivL
+    let ivR = this._ivR
+
+    for (let i = 0; i < fullLen; i += 8) {
+      const xL = pack32(data[i], data[i + 1], data[i + 2], data[i + 3])
+      const xR = pack32(data[i + 4], data[i + 5], data[i + 6], data[i + 7])
+
+      let [pL, pR] = this._decryptBlock(xL, xR)
+
+      pL = xor(pL, ivL)
+      pR = xor(pR, ivR)
+
+      ivL = xL
+      ivR = xR
+
+      out[i] = (pL >>> 24) & 255
+      out[i + 1] = (pL >>> 16) & 255
+      out[i + 2] = (pL >>> 8) & 255
+      out[i + 3] = pL & 255
+
+      out[i + 4] = (pR >>> 24) & 255
+      out[i + 5] = (pR >>> 16) & 255
+      out[i + 6] = (pR >>> 8) & 255
+      out[i + 7] = pR & 255
+    }
+
+    this._ivL = ivL
+    this._ivR = ivR
+
+    return out
+  }
 }
-
-class BlowfishCBC {
-    constructor(key) {
-        if (!isStringOrBuffer(key)) throw new Error("Key should be a string or an ArrayBuffer / Buffer");
-        this.iv = null;
-        this.pArray = pArray.slice();
-        this.sBox = [
-            sBox0.slice(),
-            sBox1.slice(),
-            sBox2.slice(),
-            sBox3.slice()
-        ];
-        const encodedKey = encodeString(key);
-        if (encodedKey.length < 72) {
-            const expanded = [];
-            while (expanded.length < 72) {
-                for (let t = 0; t < encodedKey.length; t++) expanded.push(encodedKey[t]);
-            }
-            key = new Uint8Array(expanded);
-        } else {
-            key = encodedKey;
-        }
-        for (let n = 0, i = 0; n < 18; n++, i += 4) {
-            let packed = pack32(key[i], key[i + 1], key[i + 2], key[i + 3]);
-            this.pArray[n] = xor(this.pArray[n], packed);
-        }
-        let xL = 0;
-        let xR = 0;
-        for (let f = 0; f < 18; f += 2) {
-            const block = this.#encryptBlock(xL, xR);
-            xL = block[0];
-            xR = block[1];
-            this.pArray[f] = xL;
-            this.pArray[f + 1] = xR;
-        }
-        for (let a = 0; a < 4; a++) {
-            for (let c = 0; c < 256; c += 2) {
-                const block = this.#encryptBlock(xL, xR);
-                xL = block[0];
-                xR = block[1];
-                this.sBox[a][c] = xL;
-                this.sBox[a][c + 1] = xR;
-            }
-        }
-    }
-
-    setIv(iv) {
-        if (!isStringOrBuffer(iv)) throw new Error("IV should be a string or an ArrayBuffer / Buffer");
-        iv = encodeString(iv);
-        if (iv.length !== 8) throw new Error("IV should be 8 byte length");
-        this.iv = iv;
-    }
-
-    #encryptBlock(xL, xR) {
-        for (let t = 0; t < 16; t++) {
-            xL = xor(xL, this.pArray[t]);
-            xR = xor(xR, this.#F(xL));
-            [xL, xR] = [xR, xL];
-        }
-        [xL, xR] = [xR, xL];
-        xL = xor(xL, this.pArray[17]);
-        xR = xor(xR, this.pArray[16]);
-        return [xL, xR];
-    }
-
-    #decryptBlock(xL, xR) {
-        for (let t = 17; 1 < t; t--) {
-            xL = xor(xL, this.pArray[t]);
-            xR = xor(xR, this.#F(xL));
-            [xL, xR] = [xR, xL];
-        }
-        [xL, xR] = [xR, xL];
-        xL = xor(xL, this.pArray[0]);
-        xR = xor(xR, this.pArray[1]);
-        return [xL, xR];
-    }
-
-    #F(xL) {
-        let res = addMod32(this.sBox[0][xL >>> 24 & 255], this.sBox[1][xL >>> 16 & 255]);
-        res = xor(res, this.sBox[2][xL >>> 8 & 255]);
-        return addMod32(res, this.sBox[3][255 & xL]);
-    }
-
-    decode(buf) {
-        if (buf.length % 8 != 0) throw new Error("Buffer size should be a multiple of 8");
-        const decoded = new Uint8Array(buf.length);
-        let ivL = pack32(this.iv[0], this.iv[1], this.iv[2], this.iv[3]);
-        let ivR = pack32(this.iv[4], this.iv[5], this.iv[6], this.iv[7]);
-        for (let i = 0; i < buf.length; i += 8) {
-            const xL = pack32(buf[i], buf[i + 1], buf[i + 2], buf[i + 3]);
-            const xR = pack32(buf[i + 4], buf[i + 5], buf[i + 6], buf[i + 7]);
-            let xLxR = this.#decryptBlock(xL, xR);
-            xLxR = [xor(ivL, xLxR[0]), xor(ivR, xLxR[1])];
-            ivL = xL;
-            ivR = xR;
-            decoded.set(unpack32(xLxR[0]), i);
-            decoded.set(unpack32(xLxR[1]), i + 4);
-        }
-        return decoded;
-    }
-}
-
-export default BlowfishCBC
