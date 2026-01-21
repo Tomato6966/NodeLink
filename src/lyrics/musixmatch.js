@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { unlink } from 'node:fs/promises'
+import { unlink, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -192,6 +192,25 @@ export default class MusixmatchLyrics {
       try {
         await unlink(this.tokenFile)
       } catch {}
+    }
+  }
+
+  async _readToken() {
+    try {
+      const data = await readFile(this.tokenFile, 'utf-8')
+      const parsed = JSON.parse(data)
+      if (parsed?.value && parsed?.expires) return parsed
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  async _saveToken(token, expires) {
+    try {
+      await writeFile(this.tokenFile, JSON.stringify({ value: token, expires }))
+    } catch (e) {
+      logger('warn', 'Lyrics', `Failed to save token: ${e.message}`)
     }
   }
 
