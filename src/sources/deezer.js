@@ -1,6 +1,7 @@
 import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
+import BlowfishCBC from '../decrypters/blowfish-cbc.js'
 import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
 
 const IV = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])
@@ -502,6 +503,9 @@ export default class DeezerSource {
           i = 0
         }
 
+        const blowfish = new BlowfishCBC(trackKey)
+        blowfish.setIv(IV)
+
         res.stream.on('data', (chunk) => {
           buf = Buffer.concat([buf, chunk])
 
@@ -509,11 +513,7 @@ export default class DeezerSource {
             const bufferSized = buf.subarray(0, bufferSize)
 
             if (i % 3 === 0) {
-              const decipher = crypto
-                .createDecipheriv('bf-cbc', trackKey, IV)
-                .setAutoPadding(false)
-              outputStream.push(decipher.update(bufferSized))
-              outputStream.push(decipher.final())
+              outputStream.push(Buffer.from(blowfish.decode(bufferSized)))
             } else {
               outputStream.push(bufferSized)
             }
