@@ -1,153 +1,6 @@
-import crypto from 'node:crypto'
-import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
-async function manageEncryptedHls(url, stream, headers) {
-  try {
-    const {
-      body: playlistContent,
-      error,
-      statusCode
-    } = await http1makeRequest(url, { headers })
-    if (error || statusCode !== 200) {
-      throw new Error(
-        `Failed to fetch HLS playlist: ${error?.message || statusCode}`
-      )
-    }
-    const lines = playlistContent.split('\n').map((l) => l.trim())
-    const keyTag = lines.find((l) => l.startsWith('#EXT-X-KEY:'))
-    if (!keyTag) {
-      throw new Error('No encryption key found in HLS playlist.')
-    }
-    const keyUriMatch = keyTag.match(/URI="([^"]+)"/)
-    const ivMatch = keyTag.match(/IV=0x([0-9a-fA-F]+)/)
-    if (!keyUriMatch) {
-      throw new Error('Could not parse encryption key from playlist.')
-    }
-    const keyUrl = new URL(keyUriMatch[1], url).toString()
-    const iv = ivMatch ? Buffer.from(ivMatch[1], 'hex') : null
-    const {
-      body: key,
-      error: keyError,
-      statusCode: keyStatus
-    } = await http1makeRequest(keyUrl, { headers, responseType: 'buffer' })
-    if (keyError || keyStatus !== 200) {
-      throw new Error(
-        `Failed to fetch decryption key: ${keyError?.message || keyStatus}`
-      )
-    }
-
-    const mediaSequenceTag = lines.find((l) =>
-      l.startsWith('#EXT-X-MEDIA-SEQUENCE:')
-    )
-    const mediaSequence = mediaSequenceTag
-      ? Number.parseInt(mediaSequenceTag.split(':')[1], 10)
-      : 0
-    const mapTag = lines.find((l) => l.startsWith('#EXT-X-MAP:'))
-
-    if (mapTag) {
-      const mapUriMatch = mapTag.match(/URI="([^"]+)"/)
-      if (mapUriMatch) {
-        const mapUrl = new URL(mapUriMatch[1], url).toString()
-        const {
-          body: initSegment,
-          error: mapError,
-          statusCode: mapStatus
-        } = await http1makeRequest(mapUrl, { headers, responseType: 'buffer' })
-        if (!mapError && mapStatus === 200 && initSegment.length > 0) {
-          let decryptedInit = initSegment
-          if (initSegment.length % 16 === 0 && iv) {
-            const decipher = crypto.createDecipheriv('aes-128-cbc', key, iv)
-            decipher.setAutoPadding(false)
-            decryptedInit = Buffer.concat([
-              decipher.update(initSegment),
-              decipher.final()
-            ])
-          }
-
-          stream.write(decryptedInit)
-        }
-      }
-    }
-    const segments = []
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('#EXTINF:')) {
-        const segmentUrl = lines[++i]
-        if (segmentUrl && !segmentUrl.startsWith('#')) {
-          segments.push(new URL(segmentUrl, url).toString())
-        }
-      }
-    }
-    logger(
-      'debug',
-      'NicoVideo-HLS',
-      `Found ${segments.length} segments to process`
-    )
-    ;(async () => {
-      for (let segIndex = 0; segIndex < segments.length; segIndex++) {
-        if (stream.destroyed) break
-        const segmentUrl = segments[segIndex]
-        let segmentIv
-        if (iv) {
-          segmentIv = iv
-        } else {
-          const sequenceNum = mediaSequence + segIndex
-          segmentIv = Buffer.alloc(16)
-          segmentIv.writeBigUInt64BE(BigInt(sequenceNum), 8)
-        }
-        try {
-          const {
-            body: encryptedSegment,
-            error: segError,
-            statusCode: segStatus
-          } = await http1makeRequest(segmentUrl, {
-            headers,
-            responseType: 'buffer'
-          })
-          if (segError || segStatus !== 200) {
-            logger(
-              'warn',
-              'NicoVideo-HLS',
-              `Skipping segment ${segIndex + 1}: ${segError?.message || segStatus}`
-            )
-            continue
-          }
-          const decipher = crypto.createDecipheriv(
-            'aes-128-cbc',
-            key,
-            segmentIv
-          )
-          decipher.setAutoPadding(false)
-          const decryptedSegment = Buffer.concat([
-            decipher.update(encryptedSegment),
-            decipher.final()
-          ])
-          if (!stream.destroyed) {
-            stream.write(decryptedSegment)
-          }
-        } catch (decryptError) {
-          logger(
-            'warn',
-            'NicoVideo-HLS',
-            `Failed to decrypt segment ${segIndex + 1}: ${decryptError.message}`
-          )
-        }
-      }
-      if (!stream.destroyed) {
-        stream.emit('finishBuffering')
-        stream.end()
-      }
-    })().catch((e) => {
-      logger('error', 'NicoVideo-HLS', `Stream processing error: ${e.message}`)
-      if (!stream.destroyed) {
-        stream.destroy(e)
-      }
-    })
-  } catch (e) {
-    logger('error', 'NicoVideo-HLS', `HLS loading failed: ${e.message}`)
-    stream.destroy(e)
-  }
-}
 export default class NicoVideoSource {
   constructor(nodelink) {
     this.nodelink = nodelink
@@ -399,11 +252,14 @@ export default class NicoVideoSource {
   }
   async loadStream(_track, url, protocol, additionalData) {
     if (protocol === 'hls') {
-      const stream = new PassThrough()
-      const headers = additionalData?.cookie
-        ? { Cookie: additionalData.cookie }
-        : {}
-      manageEncryptedHls(url, stream, headers)
+      const headers = this._buildHeaders()
+      if (additionalData?.cookie) {
+        headers.Cookie = additionalData.cookie
+      }
+      const stream = new HLSHandler(url, { 
+        headers,
+        localAddress: this.nodelink.routePlanner?.getIP()
+      })
       return { stream, type: 'fmp4' }
     }
     return {
