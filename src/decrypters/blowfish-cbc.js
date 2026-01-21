@@ -333,4 +333,4 @@ class BlowfishCBC {
     }
 }
 
-module.exports = BlowfishCBC;
+export default BlowfishCBC
