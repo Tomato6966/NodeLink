@@ -599,6 +599,7 @@ export class Player {
     }
 
     this._lastPosition = position
+    this._syncLyrics()
 
     this.session.socket.send(
       JSON.stringify({
@@ -878,7 +879,7 @@ export class Player {
 
   async _seekUsingSource(position, endTime) {
     if (!this.track) return false
-    
+
     logger(
       'debug',
       'Player',
@@ -892,7 +893,7 @@ export class Player {
       ...this.track.info,
       audioTrackId: this.track.audioTrackId
     }
-    
+
     const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
 
@@ -1444,7 +1445,7 @@ export class Player {
 
   async _loadLyrics() {
     if (!this.track) return
-    
+
     const lyricsData = await this.nodelink.lyrics.loadLyrics(
       { info: this.track.info },
       undefined,
@@ -1452,7 +1453,20 @@ export class Player {
     )
 
     if (lyricsData && lyricsData.loadType === 'lyrics') {
-      this.currentLyrics = lyricsData.data
+      const payload = {
+        sourceName: this.track.info.sourceName,
+        provider: lyricsData.data.provider,
+        text: lyricsData.data.lines.map((l) => l.text).join('\n'),
+        lines: lyricsData.data.lines.map((line) => ({
+          timestamp: line.time,
+          duration: line.duration,
+          line: line.text,
+          plugin: {}
+        })),
+        plugin: {}
+      }
+
+      this.currentLyrics = payload
       this.lyricsLineIndex = -1
       this.emitEvent('LyricsFoundEvent', { lyrics: this.currentLyrics })
       this._recalculateLyricsIndex()
@@ -1471,7 +1485,7 @@ export class Player {
 
     if (nextIndex >= lines.length) return
 
-    if (position >= lines[nextIndex].time) {
+    if (position >= lines[nextIndex].timestamp) {
       this._recalculateLyricsIndex()
     }
   }
@@ -1485,7 +1499,7 @@ export class Player {
     let foundIndex = -1
     // Efficiently find the current line
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].time <= position) {
+      if (lines[i].timestamp <= position) {
         foundIndex = i
       } else {
         break
@@ -1500,12 +1514,7 @@ export class Player {
         const line = lines[foundIndex]
         this.emitEvent('LyricsLineEvent', {
           lineIndex: foundIndex,
-          line: {
-            timestamp: line.time,
-            duration: line.duration,
-            line: line.text,
-            plugin: null
-          },
+          line: line,
           skipped
         })
       }

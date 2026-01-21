@@ -135,6 +135,7 @@ export default class LyricsManager {
     if (lyricsSource && !skipTrackSource) {
       const lyrics = await lyricsSource.getLyrics(trackInfo, language)
       if (lyrics && lyrics.loadType !== 'empty') {
+        lyrics.data.provider = sourceName
         return lyrics
       }
     }
@@ -148,6 +149,7 @@ export default class LyricsManager {
         )
         const lyrics = await source.getLyrics(trackInfo, language)
         if (lyrics && lyrics.loadType !== 'empty') {
+          lyrics.data.provider = name
           return lyrics
         }
       }
