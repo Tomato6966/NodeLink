@@ -263,11 +263,11 @@ export class Player {
         EndReasons.LOAD_FAILED
       ].includes(state.reason)
     ) {
-      if (this.isUpdatingTrack && state.reason === 'finished') {
+      if ((this.isUpdatingTrack || this._isSeeking) && state.reason === 'finished') {
         logger(
           'debug',
           'Player',
-          `Ignoring spurious idle/finished event during track replacement for guild ${this.guildId}.`
+          `Ignoring spurious idle/finished event during track replacement/seek for guild ${this.guildId}.`
         )
         return
       }
@@ -456,7 +456,7 @@ export class Player {
   async _fetchResource(info, urlData, startTime) {
     await getStreamProcessor()
 
-    if (startTime)
+    if (startTime !== undefined)
       urlData.additionalData = { startTime, ...urlData.additionalData }
 
     const track = urlData?.newTrack ? urlData?.newTrack?.info : info
@@ -806,7 +806,7 @@ export class Player {
     this._isSeeking = true
     try {
       const sourceName = this.track.info.sourceName
-      const unsupportedSources = ['deezer', 'local']
+      const unsupportedSources = ['local']
 
       let seekPromise
       if (!this.streamInfo?.url) {
@@ -844,8 +844,17 @@ export class Player {
           )
         }
       }
-      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
+
+      const source = this.nodelink.sources.getSource(sourceName)
+      const canNativeSeek = sourceName === 'deezer' || (source && typeof source.loadStream === 'function')
+
+      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url && sourceName !== 'deezer') {
         seekPromise = this._seekeableSeek(
+          seekPosition,
+          endTime !== undefined ? endTime : this.track.endTime
+        )
+      } else if (canNativeSeek) {
+        seekPromise = this._seekUsingSource(
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime
         )
@@ -865,6 +874,91 @@ export class Player {
     } finally {
       this._isSeeking = false
     }
+  }
+
+  async _seekUsingSource(position, endTime) {
+    if (!this.track) return false
+    
+    logger(
+      'debug',
+      'Player',
+      `Seeking using source (native) to ${position}ms for guild ${this.guildId}`
+    )
+
+    this.position = position
+    this.track.endTime = endTime
+
+    const trackInfo = {
+      ...this.track.info,
+      audioTrackId: this.track.audioTrackId
+    }
+    
+    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+    this.streamInfo = { ...urlData, trackInfo: this.track.info }
+
+    if (urlData.exception) {
+      const err = new Error(urlData.exception.message)
+      this._onError(err)
+      return false
+    }
+
+    if (!this.connection) {
+      this._initConnection()
+    }
+
+    if (
+      !this.connection ||
+      !this.connection.udpInfo ||
+      !this.connection.udpInfo.secretKey
+    ) {
+      await this.waitEvent(
+        'stateChange',
+        (s) => s.status === 'connected' && this.connection?.udpInfo?.secretKey
+      )
+    }
+
+    if (
+      !this.connection ||
+      !this.connection.udpInfo ||
+      !this.connection.udpInfo.secretKey
+    ) {
+      const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`
+      logger('error', 'Player', errorMessage)
+      this._onError(new Error(errorMessage))
+      return false
+    }
+
+    const fetched = await this._fetchResource(
+      this.track.info,
+      urlData,
+      position
+    )
+    if (fetched.exception) {
+      const err = new Error(fetched.exception.message)
+      this._onError(err)
+      return false
+    }
+
+    if (this.connection.audioStream) {
+      this.connection.audioStream?.destroy()
+    }
+
+    const resource = fetched.stream
+    if (this.volumePercent !== 100) {
+      resource.setVolume(this.volumePercent / 100)
+    }
+
+    this.setFilters(this.filters)
+
+    logger(
+      'debug',
+      'Player',
+      `Playing resource for guild ${this.guildId} after source seek`
+    )
+    this.connection.play(resource)
+    await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
+
+    return true
   }
 
   async _seekeableSeek(position, endTime) {
