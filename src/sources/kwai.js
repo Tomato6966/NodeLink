@@ -132,8 +132,9 @@ export default class KwaiSource {
       artworkUrl: videoData.thumbnail,
       uri: queryUrl,
       isStream: false,
-      isSeekable: false,
+      isSeekable: true,
       position: 0,
+      author: item.author?.name || 'Unknown Artist',
       isrc: null
     }
     return {

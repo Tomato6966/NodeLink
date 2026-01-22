@@ -169,7 +169,14 @@ export default class JioSaavnSource {
     }
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('jiosaavn', decodedTrack.identifier)
+      if (cached) return cached
+    }
+
+    const trackId = decodedTrack.identifier
+
     try {
       logger(
         'debug',

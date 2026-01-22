@@ -324,7 +324,12 @@ export default class MixcloudSource {
     }
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('mixcloud', decodedTrack.identifier)
+      if (cached) return cached
+    }
+
     let { encryptedHls, encryptedUrl } = decodedTrack.pluginInfo || {}
 
     if (!encryptedHls && !encryptedUrl) {

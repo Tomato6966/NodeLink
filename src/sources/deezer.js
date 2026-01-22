@@ -349,7 +349,12 @@ export default class DeezerSource {
     }
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('deezer', decodedTrack.identifier)
+      if (cached) return cached
+    }
+
     if (this.licenseToken) {
       try {
         const { body: trackData } = await makeRequest(
@@ -394,12 +399,14 @@ export default class DeezerSource {
 
           if (streamData.data && streamData.data[0] && streamData.data[0].media && streamData.data[0].media.length > 0 && streamData.data[0].media[0].sources && streamData.data[0].media[0].sources.length > 0) {
             const streamInfo = streamData.data[0].media[0]
-            return {
+            const result = {
               url: streamInfo.sources[0].url,
               protocol: 'https',
               format: streamInfo.format.startsWith('MP3') ? 'mp3' : 'flac',
               additionalData: trackInfo
             }
+            this.nodelink.trackCacheManager.set('deezer', decodedTrack.identifier, result, 1000 * 60 * 60 * 4)
+            return result
           }
         }
       } catch (e) {

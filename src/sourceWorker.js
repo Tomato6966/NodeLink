@@ -214,6 +214,7 @@ if (isMainThread) {
     { default: SourceManager },
     { default: LyricsManager },
     { default: CredentialManager },
+    { default: TrackCacheManager },
     { default: RoutePlannerManager },
     { default: StatsManager }
   ] = await Promise.all([
@@ -221,17 +222,20 @@ if (isMainThread) {
     import('./managers/sourceManager.js'),
     import('./managers/lyricsManager.js'),
     import('./managers/credentialManager.js'),
+    import('./managers/trackCacheManager.js'),
     import('./managers/routePlannerManager.js'),
     import('./managers/statsManager.js')
   ])
 
   nodelink.statsManager = new StatsManager(nodelink)
   nodelink.credentialManager = new CredentialManager(nodelink)
+  nodelink.trackCacheManager = new TrackCacheManager(nodelink)
   nodelink.routePlanner = new RoutePlannerManager(nodelink)
   nodelink.sources = new SourceManager(nodelink)
   nodelink.lyrics = new LyricsManager(nodelink)
 
   await nodelink.credentialManager.load()
+  await nodelink.trackCacheManager.load()
   await nodelink.sources.loadFolder()
   await nodelink.lyrics.loadFolder()
 

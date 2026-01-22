@@ -180,7 +180,7 @@ export default class RedditSource {
   _buildTrack(partialInfo) {
     const track = {
       identifier: partialInfo.identifier,
-      isSeekable: false,
+      isSeekable: !partialInfo.isStream,
       author: partialInfo.author,
       length: partialInfo.length,
       isStream: partialInfo.isStream,

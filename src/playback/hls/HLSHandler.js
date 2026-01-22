@@ -13,6 +13,7 @@ export default class HLSHandler extends PassThrough {
     this.localAddress = options.localAddress || null
     this.onResolveUrl = options.onResolveUrl || null
     this.strategy = options.strategy || (options.type?.includes('fmp4') ? 'segmented' : 'streaming')
+    this.startTime = (options.startTime || 0) / 1000
     
     this.fetcher = new SegmentFetcher({ 
       headers: this.headers,
@@ -122,6 +123,26 @@ export default class HLSHandler extends PassThrough {
       }
 
       this.isLive = parsed.isLive
+      logger('debug', 'HLSHandler', `Processing playlist. Live: ${this.isLive}, Segments: ${parsed.segments.length}, startTime: ${this.startTime}s`)
+
+      if (this.startTime > 0 && !this.isLive && this.processedSegments.size === 0) {
+        let elapsed = 0
+        let skippedCount = 0
+        for (const seg of parsed.segments) {
+          if (elapsed + seg.duration <= this.startTime) {
+            elapsed += seg.duration
+            const key = seg.sequence !== -1 ? seg.sequence : seg.url
+            this.processedSegments.add(key)
+            this.processedOrder.push(key)
+            if (seg.sequence !== -1 && seg.sequence > this.highestSequence) this.highestSequence = seg.sequence
+            skippedCount++
+          } else {
+            break
+          }
+        }
+        logger('debug', 'HLSHandler', `Skipped ${skippedCount} segments. New elapsed: ${elapsed}s, Target: ${this.startTime}s`)
+        this.startTime = 0
+      }
 
       if (this.lastMediaSequence !== -1 && (parsed.mediaSequence < this.lastMediaSequence || parsed.mediaSequence > this.lastMediaSequence + this.maxGap)) {
         if (this.isLive) {

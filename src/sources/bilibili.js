@@ -776,11 +776,12 @@ export default class BilibiliSource {
       }
 
       if (protocol === 'hls' || url.includes('.m3u8')) {
-        const stream = new HLSHandler(url, {
-          type: 'mpegts',
-          headers,
-          localAddress: this.nodelink.routePlanner?.getIP()
-        })
+      const stream = new HLSHandler(url, { 
+        headers: HEADERS, 
+        type: 'mpegts', 
+        localAddress: this.nodelink.routePlanner?.getIP(),
+        startTime: additionalData?.startTime || 0
+      })
         return { stream, type: 'mpegts' }
       }
 

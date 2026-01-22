@@ -388,7 +388,7 @@ export default class InstagramSource {
         thumbnail: thumbnail,
         title: title,
         isStream: false,
-        isSeekable: false
+        isSeekable: true
       },
       exception: null
     }
@@ -541,7 +541,7 @@ export default class InstagramSource {
         thumbnail: videoNode.display_url || media.display_url || '',
         title: title,
         isStream: false,
-        isSeekable: false
+        isSeekable: true
       },
       exception: null
     }
@@ -600,7 +600,7 @@ export default class InstagramSource {
       artworkUrl: trackData.thumbnail || trackData.artworkUrl,
       uri: queryUrl,
       isStream: trackData.isStream,
-      isSeekable: trackData.isSeekable,
+      isSeekable: !trackData.isStream,
       position: 0,
       isrc: null
     }

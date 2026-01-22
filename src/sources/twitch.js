@@ -551,10 +551,12 @@ export default class TwitchSource {
 
   async loadStream(_track, url, protocol) {
     if (protocol === 'hls') {
-      const stream = new HLSHandler(url, { 
-        type: 'mpegts',
-        localAddress: this.nodelink.routePlanner?.getIP() 
-      })
+          const stream = new HLSHandler(url, { 
+            type: 'mpegts', 
+            localAddress: this.nodelink.routePlanner?.getIP(),
+            startTime: additionalData?.startTime || 0
+          })
+      
       return { stream, type: 'mpegts' }
     }
 
@@ -609,7 +611,7 @@ export default class TwitchSource {
   buildTrack(partialInfo) {
     const track = {
       identifier: partialInfo.identifier,
-      isSeekable: false,
+      isSeekable: !partialInfo.isStream,
       author: partialInfo.author,
       length: partialInfo.length,
       isStream: partialInfo.isStream,

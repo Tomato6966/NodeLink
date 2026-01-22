@@ -5,6 +5,7 @@ import v8 from 'node:v8'
 import { GatewayEvents } from './constants.js'
 import ConnectionManager from './managers/connectionManager.js'
 import CredentialManager from './managers/credentialManager.js'
+import TrackCacheManager from './managers/trackCacheManager.js'
 import LyricsManager from './managers/lyricsManager.js'
 import PluginManager from './managers/pluginManager.js'
 import RoutePlannerManager from './managers/routePlannerManager.js'
@@ -247,6 +248,8 @@ nodelink.voiceRelay = createVoiceRelay({
 
 nodelink.statsManager = new StatsManager(nodelink)
 nodelink.credentialManager = new CredentialManager(nodelink)
+nodelink.trackCacheManager = new TrackCacheManager(nodelink)
+await nodelink.trackCacheManager.load()
 nodelink.sources = new SourceManager(nodelink)
 nodelink.lyrics = new LyricsManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(nodelink)

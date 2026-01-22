@@ -215,10 +215,10 @@ export default class FlowerySource {
   buildTrack(partialInfo) {
     const track = {
       identifier: partialInfo.identifier,
-      isSeekable: false,
-      author: partialInfo.author,
+      isSeekable: true,
+      author: 'Flowery TTS',
       length: -1,
-      isStream: true,
+      isStream: false,
       position: 0,
       title: partialInfo.title,
       uri: partialInfo.uri,
@@ -234,7 +234,13 @@ export default class FlowerySource {
     }
   }
 
-  async getTrackUrl(track) {
+  async getTrackUrl(track, itag, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('flowery', track.identifier)
+      if (cached) return cached
+    }
+
+    const { body, error, statusCode } = await http1makeRequest(
     let format = 'mp3'
     try {
       const urlObj = new URL(track.uri)

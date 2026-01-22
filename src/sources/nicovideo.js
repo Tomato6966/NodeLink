@@ -55,7 +55,7 @@ export default class NicoVideoSource {
     const tracks = body.data.map((item) => {
       const trackInfo = {
         identifier: item.contentId,
-        isSeekable: false,
+        isSeekable: true,
         author: item.owner?.name || 'Unknown Artist',
         length: item.duration * 1000,
         isStream: false,
@@ -108,7 +108,7 @@ export default class NicoVideoSource {
       : 0
     const track = {
       identifier: videoIdFromApi,
-      isSeekable: false,
+      isSeekable: true,
       author: jsonLd.author?.name || 'Unknown Artist',
       length: durationMs,
       isStream: false,
@@ -143,7 +143,12 @@ export default class NicoVideoSource {
     }
     return outputs
   }
-  async getTrackUrl(track) {
+  async getTrackUrl(track, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('nicovideo', track.identifier)
+      if (cached) return cached
+    }
+
     const {
       body: pageData,
       error,
@@ -243,12 +248,14 @@ export default class NicoVideoSource {
       }
     }
     const audioPlaylistUrl = new URL(audioUri, masterPlaylistUrl).toString()
-    return {
+    const result = {
       url: audioPlaylistUrl,
       protocol: 'hls',
       format: 'aac',
       additionalData: { cookie }
     }
+    this.nodelink.trackCacheManager.set('nicovideo', track.identifier, result, 1000 * 60 * 60)
+    return result
   }
   async loadStream(_track, url, protocol, additionalData) {
     if (protocol === 'hls') {
@@ -259,7 +266,8 @@ export default class NicoVideoSource {
       const stream = new HLSHandler(url, { 
         headers,
         type: 'fmp4',
-        localAddress: this.nodelink.routePlanner?.getIP()
+        localAddress: this.nodelink.routePlanner?.getIP(),
+        startTime: additionalData?.startTime || 0
       })
       return { stream, type: 'fmp4' }
     }

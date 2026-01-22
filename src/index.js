@@ -8,6 +8,7 @@ import WebSocketServer from '@performanc/pwsl-server'
 import requestHandler from './api/index.js'
 import connectionManager from './managers/connectionManager.js'
 import CredentialManager from './managers/credentialManager.js'
+import TrackCacheManager from './managers/trackCacheManager.js'
 import routePlannerManager from './managers/routePlannerManager.js'
 import sessionManager from './managers/sessionManager.js'
 import statsManager from './managers/statsManager.js'
@@ -167,6 +168,7 @@ class NodelinkServer extends EventEmitter {
 
     this.routePlanner = new routePlannerManager(this)
     this.credentialManager = new CredentialManager(this)
+    this.trackCacheManager = new TrackCacheManager(this)
     this.connectionManager = new connectionManager(this)
     this.statsManager = new statsManager(this)
     this.rateLimitManager = new RateLimitManager(this)
@@ -1520,6 +1522,7 @@ class NodelinkServer extends EventEmitter {
     this._validateConfig()
 
     await this.credentialManager.load()
+    await this.trackCacheManager.load()
     await this.statsManager.initialize()
 
     // Ensure sources are initialized before proceeding
@@ -1738,6 +1741,7 @@ if (clusterEnabled && cluster.isPrimary) {
       nserver._stopHeartbeat()
 
       await nserver.credentialManager.forceSave()
+      await nserver.trackCacheManager.forceSave()
 
       workerManager.destroy()
 
@@ -1791,6 +1795,7 @@ if (clusterEnabled && cluster.isPrimary) {
       nserver._stopHeartbeat()
 
       await nserver.credentialManager.forceSave()
+      await nserver.trackCacheManager.forceSave()
 
       await nserver._cleanupWebSocketServer()
 

@@ -524,8 +524,8 @@ export default class AmazonMusicSource {
     }
   }
 
-  async getTrackUrl(decodedTrack) {
-    const query = `${decodedTrack.title} ${decodedTrack.author} official audio`
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+    const query = `${decodedTrack.title} ${decodedTrack.author}`
 
     try {
       let searchResult
@@ -570,7 +570,7 @@ export default class AmazonMusicSource {
       if (!bestMatch)
         throw new Error('No suitable alternative stream found after filtering.')
 
-      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info, itag, forceRefresh)
       return { newTrack: bestMatch, ...streamInfo }
     } catch (e) {
       logger(

@@ -456,15 +456,15 @@ export class Player {
   async _fetchResource(info, urlData, startTime) {
     await getStreamProcessor()
 
-    if (startTime !== undefined)
-      urlData.additionalData = { startTime, ...urlData.additionalData }
+    const additionalData = { ...urlData.additionalData }
+    if (startTime !== undefined) additionalData.startTime = startTime
 
     const track = urlData?.newTrack ? urlData?.newTrack?.info : info
     const fetched = await this.nodelink.sources.getTrackStream(
       track,
       urlData.url,
       urlData.protocol,
-      urlData.additionalData
+      additionalData
     )
     if (fetched.exception) return fetched
     const resource = createAudioResource(
@@ -623,15 +623,11 @@ export class Player {
       ...this.track.info,
       audioTrackId: this.track.audioTrackId
     }
-    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo, null, this._isRecovering)
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
     logger('debug', 'Player', `Got track URL for guild ${this.guildId}`, {
       urlData
     })
-
-    if (['mp4', 'm4a', 'mov'].includes(this.streamInfo.format)) {
-      this.track.info.isSeekable = false
-    }
 
     if (urlData.exception) {
       const err = new Error(urlData.exception.message)
@@ -849,7 +845,7 @@ export class Player {
       const source = this.nodelink.sources.getSource(sourceName)
       const canNativeSeek = sourceName === 'deezer' || (source && typeof source.loadStream === 'function')
 
-      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url && sourceName !== 'deezer') {
+      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url && sourceName !== 'deezer' && this.streamInfo.protocol !== 'hls') {
         seekPromise = this._seekeableSeek(
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime
@@ -1054,7 +1050,7 @@ export class Player {
       ...this.track.info,
       audioTrackId: this.track.audioTrackId
     }
-    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo, null, this._isRecovering)
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
 
     if (urlData.exception) {

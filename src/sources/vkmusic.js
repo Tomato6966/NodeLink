@@ -263,7 +263,12 @@ export default class VKMusicSource {
     return { encoded: encodeTrack(trackInfo), info: trackInfo }
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('vkmusic', decodedTrack.identifier)
+      if (cached) return cached
+    }
+
     const id = decodedTrack.identifier
     const accessKey = decodedTrack.details?.[0]
     logger('debug', 'VKMusic', `Resolving stream for: ${id}`)
@@ -290,7 +295,9 @@ export default class VKMusicSource {
     }
     if (url && (url.startsWith('http') || url.includes('.m3u8'))) {
       logger('debug', 'VKMusic', `Stream resolved: ${url.substring(0, 50)}...`)
-      return { url, protocol: url.includes('.m3u8') ? 'hls' : 'https', format: url.includes('.m3u8') ? 'mpegts' : 'mp3' }
+      const result = { url, protocol: url.includes('.m3u8') ? 'hls' : 'https', format: url.includes('.m3u8') ? 'mpegts' : 'mp3' }
+      this.nodelink.trackCacheManager.set('vkmusic', decodedTrack.identifier, result, 1000 * 60 * 60 * 2)
+      return result
     }
     logger('warn', 'VKMusic', 'Native stream not found, falling back to YouTube')
     const searchRes = await this.nodelink.sources.searchWithDefault(`${decodedTrack.title} ${decodedTrack.author}`)
@@ -304,7 +311,15 @@ export default class VKMusicSource {
     const headers = { 'User-Agent': USER_AGENT, 'Cookie': this.cookie, 'Referer': 'https://vk.com/', 'Origin': 'https://vk.com' }
     if (protocol === 'hls') {
       logger('debug', 'VKMusic', 'Loading HLS stream via mpegts strategy')
-      return { stream: new HLSHandler(url, { headers, type: 'mpegts', localAddress: this.nodelink.routePlanner?.getIP() }), type: 'mpegts' }
+      return { 
+        stream: new HLSHandler(url, { 
+          headers, 
+          type: 'mpegts', 
+          localAddress: this.nodelink.routePlanner?.getIP(),
+          startTime: additionalData?.startTime || 0
+        }), 
+        type: 'mpegts' 
+      }
     }
     const { stream, error } = await http1makeRequest(url, { method: 'GET', streamOnly: true, headers })
     if (error) throw error

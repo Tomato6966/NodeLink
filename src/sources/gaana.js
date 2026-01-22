@@ -145,9 +145,9 @@ export default class GaanaSource {
   async loadStream(track, url, protocol, additionalData) {
     if (protocol === 'hls') {
       const stream = new HLSHandler(url, {
-        headers: BASE_HEADERS,
-        strategy: 'segmented',
-        localAddress: this.nodelink.routePlanner?.getIP()
+        type: 'mpegts',
+        localAddress: this.nodelink.routePlanner?.getIP(),
+        startTime: additionalData?.startTime || 0
       })
       return { stream, type: 'mpegts' }
     }

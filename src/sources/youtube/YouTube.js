@@ -728,7 +728,15 @@ export default class YouTubeSource {
     }
   }
 
-  async getTrackUrl(decodedTrack, itag) {
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('youtube', decodedTrack.identifier)
+      if (cached) {
+        logger('debug', 'YouTube', `Using cached URL for ${decodedTrack.identifier}`)
+        return cached
+      }
+    }
+
     const clientList = this.config.clients.playback
     const clientErrors = []
 
@@ -792,7 +800,9 @@ export default class YouTubeSource {
               'YouTube',
               `URL pre-flight check successful for client ${clientName}.`
             )
-            return { ...urlData, additionalData: { contentLength } }
+            const result = { ...urlData, additionalData: { contentLength } }
+            this.nodelink.trackCacheManager.set('youtube', decodedTrack.identifier, result, 1000 * 60 * 60 * 5)
+            return result
           }
 
           const errorMessage = `URL pre-flight failed. Status: ${check.statusCode}, Error: ${check.error?.message}`
@@ -825,7 +835,9 @@ export default class YouTubeSource {
                 'YouTube',
                 `HLS fallback check successful for client ${clientName}.`
               )
-              return { url: urlData.hlsUrl, protocol: 'hls', format: 'mpegts' }
+              const result = { url: urlData.hlsUrl, protocol: 'hls', format: 'mpegts' }
+              this.nodelink.trackCacheManager.set('youtube', decodedTrack.identifier, result, 1000 * 60 * 60 * 5)
+              return result
             }
 
             const hlsError = `HLS fallback failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
@@ -850,7 +862,9 @@ export default class YouTubeSource {
               'YouTube',
               `HLS-only check successful for client ${clientName}.`
             )
-            return { url: urlData.hlsUrl, protocol: 'hls', format: 'mpegts' }
+            const result = { url: urlData.hlsUrl, protocol: 'hls', format: 'mpegts' }
+            this.nodelink.trackCacheManager.set('youtube', decodedTrack.identifier, result, 1000 * 60 * 60 * 5)
+            return result
           }
 
           const hlsError = `HLS-only check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
@@ -1313,7 +1327,7 @@ export default class YouTubeSource {
       }
 
       try {
-        const newUrlData = await this.getTrackUrl(decodedTrack)
+        const newUrlData = await this.getTrackUrl(decodedTrack, null, true)
 
         if (destroyed || cancelSignal.aborted) return
 

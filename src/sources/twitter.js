@@ -185,7 +185,13 @@ export default class TwitterSource {
     }
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(track, itag, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('twitter', track.identifier)
+      if (cached) return cached
+    }
+
+    const videoId = track.identifier
     if (decodedTrack.pluginInfo?.directUrl) {
       return { 
         url: decodedTrack.pluginInfo.directUrl, 
@@ -218,7 +224,8 @@ export default class TwitterSource {
           type: 'fmp4',
           strategy: 'segmented',
           headers,
-          localAddress: this.nodelink.routePlanner?.getIP()
+          localAddress: this.nodelink.routePlanner?.getIP(),
+          startTime: additionalData?.startTime || 0
         })
         return { stream, type: 'fmp4' }
       }

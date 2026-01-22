@@ -596,9 +596,17 @@ export default class SoundCloudSource {
     }
   }
 
-  async getTrackUrl(info) {
+  async getTrackUrl(info, forceRefresh = false) {
     if (!info?.identifier) {
       return this._buildException('Invalid track info')
+    }
+
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('soundcloud', info.identifier)
+      if (cached) {
+        logger('debug', 'Sources', `Using cached SoundCloud URL for ${info.identifier}`)
+        return cached
+      }
     }
 
     try {
@@ -621,7 +629,11 @@ export default class SoundCloudSource {
         return this._buildException(msg)
       }
 
-      return await this._selectTranscoding(req.body)
+      const result = await this._selectTranscoding(req.body)
+      if (result && !result.exception) {
+        this.nodelink.trackCacheManager.set('soundcloud', info.identifier, result, 1000 * 60 * 60 * 3)
+      }
+      return result
     } catch (err) {
       this._logError('getTrackUrl exception', err)
 
@@ -759,7 +771,8 @@ export default class SoundCloudSource {
     } else if (protocol === 'hls') {
       const stream = new HLSHandler(url, {
         type: 'mpegts',
-        localAddress: this.nodelink.routePlanner?.getIP()
+        localAddress: this.nodelink.routePlanner?.getIP(),
+        startTime: additionalData?.startTime || 0
       })
       return { stream, type: 'mpegts' }
     } else {
