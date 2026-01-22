@@ -79,7 +79,7 @@ export default class TwitterSource {
         tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true
       }
       
-      const { body, statusCode } = await this._callGraphQL('2ICDjqPd81tulZcYrtpTuQ/TweetResultByRestId', { 
+      const { body, statusCode: _statusCode } = await this._callGraphQL('2ICDjqPd81tulZcYrtpTuQ/TweetResultByRestId', { 
         tweetId: id, 
         withCommunity: false, 
         includePromotedContent: false, 
@@ -191,7 +191,7 @@ export default class TwitterSource {
       if (cached) return cached
     }
 
-    const videoId = track.identifier
+    const _videoId = track.identifier
     if (track.pluginInfo?.directUrl) {
       return { 
         url: track.pluginInfo.directUrl, 
