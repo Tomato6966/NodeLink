@@ -12,7 +12,7 @@ export default class HLSHandler extends PassThrough {
     this.headers = options.headers || {}
     this.localAddress = options.localAddress || null
     this.onResolveUrl = options.onResolveUrl || null
-    this.strategy = options.type?.includes('fmp4') ? 'segmented' : 'streaming'
+    this.strategy = options.strategy || (options.type?.includes('fmp4') ? 'segmented' : 'streaming')
     
     this.fetcher = new SegmentFetcher({ 
       headers: this.headers,
@@ -24,12 +24,13 @@ export default class HLSHandler extends PassThrough {
     this.processedOrder = []
     this.MAX_HISTORY = 200
     this.segmentQueue = []
+    this.MAX_PARALLEL_FETCHES = this.strategy === 'segmented' ? 3 : (this.strategy === 'streaming' ? 2 : 1)
     this.isFetching = false
     this.stop = false
     this.lastMapUri = null
     this.isLive = false
     this.playlistTimer = null
-    this.activeSegmentStream = null
+    this.activeSegmentStreams = new Map()
     this.lastMediaSequence = -1
     this.highestSequence = -1
     this.maxGap = 30
@@ -54,10 +55,10 @@ export default class HLSHandler extends PassThrough {
       clearTimeout(this.playlistTimer)
       this.playlistTimer = null
     }
-    if (this.activeSegmentStream) {
-      this.activeSegmentStream.destroy()
-      this.activeSegmentStream = null
+    for (const stream of this.activeSegmentStreams.values()) {
+      stream.destroy()
     }
+    this.activeSegmentStreams.clear()
     this.segmentQueue = []
     this.processedSegments.clear()
     this.processedOrder = []
@@ -107,17 +108,15 @@ export default class HLSHandler extends PassThrough {
       }
 
       if (parsed.isMaster) {
-        const bestVariant = parsed.variants.reduce((prev, current) => {
-          const hasAudio = (v) => v.codecs?.includes('mp4a') || v.codecs?.includes('opus')
-          if (!hasAudio(prev)) return current
-          if (!hasAudio(current)) return prev
-          return (current.bandwidth > prev.bandwidth) ? current : prev
-        }, parsed.variants[0])
+        const sortedVariants = parsed.variants.sort((a, b) => b.bandwidth - a.bandwidth)
+        const bestVariant = sortedVariants.find(v => 
+          (v.codecs?.includes('mp4a') || v.codecs?.includes('opus')) && 
+          !v.codecs?.includes('avc1')
+        ) || sortedVariants.find(v => 
+          v.codecs?.includes('mp4a') || v.codecs?.includes('opus')
+        ) || sortedVariants[0]
 
-        const itag = bestVariant.url.match(/[\/&]itag[\/](\d+)/)?.[1] || 
-                     bestVariant.url.match(/[?&]itag=(\d+)/)?.[1] || 'unknown'
-
-        logger('debug', 'HLSHandler', `Selected variant itag: ${itag}, bandwidth: ${bestVariant.bandwidth}, codecs: ${bestVariant.codecs}`)
+        logger('debug', 'HLSHandler', `Selected variant bandwidth: ${bestVariant.bandwidth}, codecs: ${bestVariant.codecs}`)
         this.currentUrl = bestVariant.url
         return setImmediate(() => this._playlistLoop())
       }
@@ -125,13 +124,15 @@ export default class HLSHandler extends PassThrough {
       this.isLive = parsed.isLive
 
       if (this.lastMediaSequence !== -1 && (parsed.mediaSequence < this.lastMediaSequence || parsed.mediaSequence > this.lastMediaSequence + this.maxGap)) {
-        logger('warn', 'HLSHandler', `Playlist sequence discontinuity (${this.lastMediaSequence} -> ${parsed.mediaSequence}). Resetting to live edge.`)
-        this.segmentQueue = []
-        this.processedSegments.clear()
-        this.processedOrder = []
-        this.highestSequence = -1
-        this.preRolled = false
-        this.justResynced = true
+        if (this.isLive) {
+          logger('warn', 'HLSHandler', `Playlist sequence discontinuity (${this.lastMediaSequence} -> ${parsed.mediaSequence}). Resetting to live edge.`)
+          this.segmentQueue = []
+          this.processedSegments.clear()
+          this.processedOrder = []
+          this.highestSequence = -1
+          this.preRolled = false
+          this.justResynced = true
+        }
       }
       this.lastMediaSequence = parsed.mediaSequence
 
@@ -142,7 +143,7 @@ export default class HLSHandler extends PassThrough {
       }
 
       const isFirstLoad = this.processedSegments.size === 0
-      if ((isFirstLoad || this.justResynced) && this.isLive) {
+      if (this.isLive && (isFirstLoad || this.justResynced)) {
         if (this.justResynced) {
           this.processedSegments.clear()
           this.processedOrder = []
@@ -158,6 +159,8 @@ export default class HLSHandler extends PassThrough {
           this.processedOrder.push(key)
           if (seg.sequence !== -1 && seg.sequence > this.highestSequence) this.highestSequence = seg.sequence
         }
+        this.justResynced = false
+      } else {
         this.justResynced = false
       }
 
@@ -209,44 +212,63 @@ export default class HLSHandler extends PassThrough {
     }
   }
 
+  async _fetchWithRetry(segment, attempt = 1) {
+    try {
+      if (this.strategy === 'segmented') {
+        const data = await this.fetcher.fetchSegment(segment, { stream: false })
+        return { segment, data }
+      }
+      const stream = await this.fetcher.fetchSegment(segment, { stream: true })
+      return { segment, stream }
+    } catch (err) {
+      if (this.stop) return null
+      const isRecoverable = err.message === 'aborted' || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT'
+      if (isRecoverable && attempt <= 3) {
+        const delay = Math.pow(2, attempt) * 500
+        logger('warn', 'HLSHandler', `Segment fetch failed (attempt ${attempt}/3): ${err.message}. Retrying in ${delay}ms...`)
+        await new Promise(r => setTimeout(r, delay))
+        return this._fetchWithRetry(segment, attempt + 1)
+      }
+      logger('error', 'HLSHandler', `Segment fetch permanently failed ${segment.sequence}: ${err.message}`)
+      return null
+    }
+  }
+
   async _fetchSegments() {
     if (this.isFetching || this.stop) return
     this.isFetching = true
 
-    let nextSegmentPromise = null
+    const fetchPool = new Map()
 
-    const getSegment = async (seg) => {
-      try {
-        if (this.strategy === 'segmented') {
-          return { segment: seg, data: await this.fetcher.fetchSegment(seg, { stream: false }) }
-        }
-        return { segment: seg, stream: await this.fetcher.fetchSegment(seg, { stream: true }) }
-      } catch (err) {
-        logger('error', 'HLSHandler', `Segment fetch error ${seg.sequence}: ${err.message}`)
-        return null
+    const fillPool = () => {
+      while (fetchPool.size < this.MAX_PARALLEL_FETCHES && this.segmentQueue.length > 0) {
+        const seg = this.segmentQueue.shift()
+        const key = seg.sequence !== -1 ? seg.sequence : seg.url
+        fetchPool.set(key, this._fetchWithRetry(seg))
       }
     }
 
-    while ((this.segmentQueue.length > 0 || nextSegmentPromise) && !this.stop) {
-      if (this.isLive && this.segmentQueue.length < 3 && !nextSegmentPromise) {
+    while ((this.segmentQueue.length > 0 || fetchPool.size > 0) && !this.stop) {
+      fillPool()
+
+      if (this.isLive && fetchPool.size === 0 && this.segmentQueue.length === 0 && !this.preRolled) {
         await new Promise(r => setTimeout(r, 500))
-        if (this.segmentQueue.length === 0) break
+        if (this.segmentQueue.length === 0 && fetchPool.size === 0) break
+        continue
       }
 
-      let current
-      if (nextSegmentPromise) {
-        current = await nextSegmentPromise
-        nextSegmentPromise = null
-      } else {
-        const seg = this.segmentQueue.shift()
-        current = await getSegment(seg)
+      if (fetchPool.size === 0) break
+
+      const [key, promise] = fetchPool.entries().next().value
+      fetchPool.delete(key)
+      
+      const current = await promise
+      if (!current) {
+        logger('warn', 'HLSHandler', `Skipping failed segment: ${key}`)
+        continue
       }
 
-      if (!current) continue
-
-      if (this.segmentQueue.length > 0 && !this.stop) {
-        nextSegmentPromise = getSegment(this.segmentQueue.shift())
-      }
+      this.preRolled = true
 
       try {
         const { segment, data, stream } = current
@@ -263,12 +285,12 @@ export default class HLSHandler extends PassThrough {
             if (!this.write(data)) await new Promise(r => this.once('drain', r))
           }
         } else if (stream) {
-          this.activeSegmentStream = stream
+          this.activeSegmentStreams.set(key, stream)
           for await (const chunk of stream) {
             if (this.stop) break
             if (!this.write(chunk)) await new Promise(r => this.once('drain', r))
           }
-          this.activeSegmentStream = null
+          this.activeSegmentStreams.delete(key)
         }
       } catch (err) {
         logger('error', 'HLSHandler', `Segment processing error: ${err.message}`)
@@ -276,7 +298,7 @@ export default class HLSHandler extends PassThrough {
     }
 
     this.isFetching = false
-    if (!this.isLive && this.segmentQueue.length === 0 && !this.stop) {
+    if (!this.isLive && this.segmentQueue.length === 0 && fetchPool.size === 0 && !this.stop) {
       this.emit('finishBuffering')
       this.end()
     }

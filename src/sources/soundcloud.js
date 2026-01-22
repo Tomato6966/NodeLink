@@ -1,12 +1,12 @@
-import { PassThrough, pipeline } from 'node:stream'
+import { PassThrough } from 'node:stream'
 
 import {
   encodeTrack,
   http1makeRequest,
-  loadHLSPlaylist,
   logger,
   makeRequest
 } from '../utils.js'
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const BASE_URL = 'https://api-v2.soundcloud.com'
 const SOUNDCLOUD_URL = 'https://soundcloud.com'
@@ -752,18 +752,18 @@ export default class SoundCloudSource {
   }
 
   async loadStream(_track, url, protocol, additionalData) {
-    const stream = new PassThrough()
-
     if (protocol === 'progressive') {
+      const stream = new PassThrough()
       this._handleProgressive(url, stream)
       return { stream }
     } else if (protocol === 'hls') {
-      this._handleHls(url, stream)
-      if (additionalData?.format === 'aac_hls') {
-        return { stream, type: 'fmp4-buffered' }
-      }
-      return { stream }
+      const stream = new HLSHandler(url, {
+        type: 'mpegts',
+        localAddress: this.nodelink.routePlanner?.getIP()
+      })
+      return { stream, type: 'mpegts' }
     } else {
+      const stream = new PassThrough()
       stream.destroy(new Error(`Unsupported protocol: ${protocol}`))
       return { stream }
     }
@@ -781,30 +781,28 @@ export default class SoundCloudSource {
         return
       }
 
-      pipeline(res.stream, stream, (err) => {
-        if (err) {
-          logger(
-            'error',
-            'Sources',
-            `Progressive pipeline error: ${err.message}`
-          )
-          if (!stream.destroyed) stream.destroy(err)
-        } else {
+      res.stream.on('data', (chunk) => {
+        if (!stream.write(chunk)) res.stream.pause()
+      })
+
+      stream.on('drain', () => {
+        if (!res.stream.destroyed) res.stream.resume()
+      })
+
+      res.stream.on('end', () => {
+        if (!stream.writableEnded) {
           stream.emit('finishBuffering')
+          stream.end()
         }
+      })
+
+      res.stream.on('error', (err) => {
+        logger('error', 'Sources', `Progressive stream error: ${err.message}`)
+        if (!stream.destroyed) stream.destroy(err)
       })
     } catch (err) {
       this._logError('Progressive stream failed', err)
       stream.destroy(err)
-    }
-  }
-
-  async _handleHls(url, stream) {
-    try {
-      await loadHLSPlaylist(url, stream)
-    } catch (err) {
-      this._logError('SoundCloud HLS failed', err)
-      if (!stream.destroyed) stream.destroy(err)
     }
   }
 
