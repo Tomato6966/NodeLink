@@ -1,6 +1,7 @@
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const MIXIN_KEY_ENC_TAB = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
@@ -759,7 +760,7 @@ export default class BilibiliSource {
     }
   }
 
-  async loadStream(decodedTrack, url, _protocol, additionalData) {
+  async loadStream(decodedTrack, url, protocol, additionalData) {
     try {
       let type = decodedTrack.format
 
@@ -769,9 +770,23 @@ export default class BilibiliSource {
         else type = 'mp4'
       }
 
+      const headers = {
+        ...HEADERS,
+        ...additionalData?.headers
+      }
+
+      if (protocol === 'hls' || url.includes('.m3u8')) {
+        const stream = new HLSHandler(url, {
+          type: 'mpegts',
+          headers,
+          localAddress: this.nodelink.routePlanner?.getIP()
+        })
+        return { stream, type: 'mpegts' }
+      }
+
       const response = await http1makeRequest(url, {
         method: 'GET',
-        headers: additionalData?.headers || {},
+        headers,
         streamOnly: true
       })
 
@@ -781,9 +796,25 @@ export default class BilibiliSource {
 
       const stream = new PassThrough()
 
-      response.stream.on('data', (chunk) => stream.write(chunk))
-      response.stream.on('end', () => stream.emit('finishBuffering'))
-      response.stream.on('error', (err) => stream.destroy(err))
+      response.stream.on('data', (chunk) => {
+        if (!stream.write(chunk)) response.stream.pause()
+      })
+
+      stream.on('drain', () => {
+        if (!response.stream.destroyed) response.stream.resume()
+      })
+
+      response.stream.on('end', () => {
+        if (!stream.writableEnded) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
+      })
+
+      response.stream.on('error', (err) => {
+        logger('error', 'Bilibili', `Upstream stream error: ${err.message}`)
+        if (!stream.destroyed) stream.destroy(err)
+      })
 
       return { stream: stream, type: type }
     } catch (err) {
