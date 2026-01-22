@@ -212,7 +212,7 @@ export default class RedditSource {
 
     return { url, protocol: 'https', format }
   }
-  async loadStream(decodedTrack, url) {
+  async loadStream(decodedTrack, url, _protocol, _additionalData) {
     logger(
       'debug',
       'Sources',

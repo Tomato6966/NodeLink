@@ -307,7 +307,7 @@ export default class VKMusicSource {
     return { exception: { message: 'Stream not found', severity: 'fault' } }
   }
 
-  async loadStream(_track, url, protocol) {
+  async loadStream(_track, url, protocol, additionalData) {
     const headers = { 'User-Agent': USER_AGENT, 'Cookie': this.cookie, 'Referer': 'https://vk.com/', 'Origin': 'https://vk.com' }
     if (protocol === 'hls') {
       logger('debug', 'VKMusic', 'Loading HLS stream via mpegts strategy')

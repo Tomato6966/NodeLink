@@ -73,13 +73,13 @@ export default class GoogleTTSSource {
     }
   }
 
-  async getTrackUrl(track, itag, forceRefresh = false) {
+  async getTrackUrl(track, _itag, forceRefresh = false) {
     if (!forceRefresh) {
       const cached = this.nodelink.trackCacheManager.get('google-tts', track.identifier)
       if (cached) return cached
     }
 
-    const query = track.identifier
+    const _query = track.identifier
     return {
       url: track.uri,
       protocol: 'https',
@@ -87,7 +87,7 @@ export default class GoogleTTSSource {
     }
   }
 
-  async loadStream(decodedTrack, url) {
+  async loadStream(decodedTrack, url, _protocol, _additionalData) {
     logger(
       'debug',
       'Sources',

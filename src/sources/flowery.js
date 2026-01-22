@@ -240,7 +240,6 @@ export default class FlowerySource {
       if (cached) return cached
     }
 
-    const { body, error, statusCode } = await http1makeRequest(
     let format = 'mp3'
     try {
       const urlObj = new URL(track.uri)
@@ -262,7 +261,7 @@ export default class FlowerySource {
     }
   }
 
-  async loadStream(decodedTrack, url) {
+  async loadStream(decodedTrack, url, _protocol, _additionalData) {
     logger(
       'debug',
       'Sources',

@@ -132,7 +132,7 @@ export default class TwitterSource {
 
     const trackInfo = {
       identifier: id,
-      isSeekable: !isHLS,
+      isSeekable: true,
       author: isSyndication ? legacy.user.name : (result?.core?.user_results?.result?.legacy?.name || 'Twitter User'),
       length: isSyndication ? (media.durationMs || 0) : (media.video_info?.duration_millis || 0),
       isStream: isHLS,
@@ -192,15 +192,15 @@ export default class TwitterSource {
     }
 
     const videoId = track.identifier
-    if (decodedTrack.pluginInfo?.directUrl) {
+    if (track.pluginInfo?.directUrl) {
       return { 
-        url: decodedTrack.pluginInfo.directUrl, 
-        protocol: decodedTrack.pluginInfo.isHLS ? 'hls' : 'https',
-        format: decodedTrack.pluginInfo.isHLS ? 'm3u8' : 'mp4' 
+        url: track.pluginInfo.directUrl, 
+        protocol: track.pluginInfo.isHLS ? 'hls' : 'https',
+        format: track.pluginInfo.isHLS ? 'm3u8' : 'mp4' 
       }
     }
 
-    const res = await this.resolve(decodedTrack.uri)
+    const res = await this.resolve(track.uri)
     if (res.loadType === 'track') {
       return { 
         url: res.data.pluginInfo.directUrl, 
@@ -212,7 +212,7 @@ export default class TwitterSource {
     throw new Error('Failed to extract Twitter media URL')
   }
 
-  async loadStream(decodedTrack, url) {
+  async loadStream(decodedTrack, url, protocol, additionalData) {
     try {
       const headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',

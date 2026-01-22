@@ -156,7 +156,7 @@ export default class TumblrSource {
     throw new Error('Failed to extract Tumblr media URL')
   }
 
-  async loadStream(decodedTrack, url) {
+  async loadStream(_decodedTrack, url, _protocol, _additionalData) {
     try {
       const options = {
         method: 'GET',

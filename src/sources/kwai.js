@@ -134,7 +134,6 @@ export default class KwaiSource {
       isStream: false,
       isSeekable: true,
       position: 0,
-      author: item.author?.name || 'Unknown Artist',
       isrc: null
     }
     return {

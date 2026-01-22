@@ -324,7 +324,7 @@ export default class MixcloudSource {
     }
   }
 
-  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+  async getTrackUrl(decodedTrack, _itag, forceRefresh = false) {
     if (!forceRefresh) {
       const cached = this.nodelink.trackCacheManager.get('mixcloud', decodedTrack.identifier)
       if (cached) return cached
@@ -359,7 +359,7 @@ export default class MixcloudSource {
     throw new Error('No stream URL available for Mixcloud track')
   }
 
-  async loadStream(_decodedTrack, url, protocol) {
+  async loadStream(_decodedTrack, url, protocol, additionalData) {
     try {
       if (protocol === 'hls') {
         const stream = new HLSHandler(url, {
@@ -369,19 +369,22 @@ export default class MixcloudSource {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Referer': 'https://www.mixcloud.com/'
-          }
+          },
+          startTime: additionalData?.startTime || 0
         })
         return { stream, type: 'mpegts' }
+      }
+
+      const headers = {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Referer: 'https://www.mixcloud.com/'
       }
 
       const options = {
         method: 'GET',
         streamOnly: true,
-        headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          Referer: 'https://www.mixcloud.com/'
-        }
+        headers
       }
 
       const response = await http1makeRequest(url, options)

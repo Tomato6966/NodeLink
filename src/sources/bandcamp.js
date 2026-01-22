@@ -219,7 +219,7 @@ export default class BandCampSource {
     }
   }
 
-  async loadStream(decodedTrack, url) {
+  async loadStream(decodedTrack, url, _protocol, _additionalData) {
     logger(
       'debug',
       'Sources',
