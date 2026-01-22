@@ -245,7 +245,7 @@ export default class HLSHandler extends PassThrough {
       if (this.stop) return null
       const isRecoverable = err.message === 'aborted' || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT'
       if (isRecoverable && attempt <= 3) {
-        const delay = Math.pow(2, attempt) * 500
+        const delay = 2 ** attempt * 500
         logger('warn', 'HLSHandler', `Segment fetch failed (attempt ${attempt}/3): ${err.message}. Retrying in ${delay}ms...`)
         await new Promise(r => setTimeout(r, delay))
         return this._fetchWithRetry(segment, attempt + 1)
@@ -253,6 +253,23 @@ export default class HLSHandler extends PassThrough {
       logger('error', 'HLSHandler', `Segment fetch permanently failed ${segment.sequence}: ${err.message}`)
       return null
     }
+  }
+
+  async _waitForDrain() {
+    if (this.destroyed || this.stop) return
+    return new Promise((resolve) => {
+      const cleanup = () => {
+        this.removeListener('drain', onDrain)
+        this.removeListener('close', onFinish)
+        this.removeListener('error', onFinish)
+        resolve()
+      }
+      const onDrain = cleanup
+      const onFinish = cleanup
+      this.once('drain', onDrain)
+      this.once('close', onFinish)
+      this.once('error', onFinish)
+    })
   }
 
   async _fetchSegments() {
@@ -296,20 +313,20 @@ export default class HLSHandler extends PassThrough {
         if (segment.map && segment.map.uri !== this.lastMapUri) {
           const mapData = await this.fetcher.fetchMap(segment.map, segment.key)
           if (mapData && !this.stop) {
-            if (!this.write(mapData)) await new Promise(r => this.once('drain', r))
+            if (!this.write(mapData)) await this._waitForDrain()
             this.lastMapUri = segment.map.uri
           }
         }
 
         if (this.strategy === 'segmented') {
           if (!this.stop && data) {
-            if (!this.write(data)) await new Promise(r => this.once('drain', r))
+            if (!this.write(data)) await this._waitForDrain()
           }
         } else if (stream) {
           this.activeSegmentStreams.set(key, stream)
           for await (const chunk of stream) {
             if (this.stop) break
-            if (!this.write(chunk)) await new Promise(r => this.once('drain', r))
+            if (!this.write(chunk)) await this._waitForDrain()
           }
           this.activeSegmentStreams.delete(key)
         }

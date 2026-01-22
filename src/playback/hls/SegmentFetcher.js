@@ -8,7 +8,7 @@ class DecryptTransform extends Transform {
     this.decipher = crypto.createDecipheriv(algorithm, key, iv)
     this.decipher.setAutoPadding(false)
   }
-  _transform(chunk, encoding, callback) {
+  _transform(chunk, _encoding, callback) {
     try { this.push(this.decipher.update(chunk)); callback() }
     catch (err) { callback(err) }
   }
@@ -44,6 +44,10 @@ export default class SegmentFetcher {
           logger('error', 'SegmentFetcher', `Key fetch failed for ${keyInfo.uri}: Status ${statusCode}, Error: ${error?.message || 'Empty Body'}`)
           throw new Error(`Key fetch failed: ${statusCode}`)
         }
+        if (this.keyMap.size >= 20) {
+          const firstKey = this.keyMap.keys().next().value
+          this.keyMap.delete(firstKey)
+        }
         this.keyMap.set(keyInfo.uri, body)
     return body
   }
@@ -54,7 +58,7 @@ export default class SegmentFetcher {
       headers: this.headers, responseType: 'buffer', localAddress: this.localAddress
     })
     if (error || statusCode !== 200) throw new Error(`Map fetch failed: ${statusCode}`)
-    if (keyInfo && keyInfo.iv && body.length % 16 === 0) {
+    if (keyInfo?.iv && body.length % 16 === 0) {
       const keyData = await this.fetchKey(keyInfo)
       const algorithm = keyInfo.method === 'AES-128' ? 'aes-128-cbc' : 'aes-256-cbc'
       const decipher = crypto.createDecipheriv(algorithm, keyData, keyInfo.iv)
