@@ -1,5 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const AUTH = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
 
@@ -207,37 +208,53 @@ export default class TwitterSource {
 
   async loadStream(decodedTrack, url) {
     try {
-      const options = {
-        method: 'GET',
-        streamOnly: true,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Referer': 'https://twitter.com/'
-        }
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Referer': 'https://twitter.com/'
       }
 
-      const response = await http1makeRequest(url, options)
+      if (url.includes('.m3u8')) {
+        const stream = new HLSHandler(url, {
+          type: 'fmp4',
+          strategy: 'segmented',
+          headers,
+          localAddress: this.nodelink.routePlanner?.getIP()
+        })
+        return { stream, type: 'fmp4' }
+      }
+
+      const response = await http1makeRequest(url, {
+        method: 'GET',
+        headers,
+        streamOnly: true
+      })
+
       if (response.error || !response.stream) throw response.error || new Error('Failed to get stream')
 
       const stream = new PassThrough()
+      let finished = false
+      const finish = () => {
+        if (finished) return
+        finished = true
+        if (!stream.writableEnded) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
+      }
 
       response.stream.on('data', (chunk) => {
         if (!stream.destroyed) stream.write(chunk)
       })
 
-      response.stream.on('end', () => {
-        if (!stream.destroyed) {
-          stream.emit('finishBuffering')
-          stream.end()
-        }
-      })
+      response.stream.on('end', finish)
+      response.stream.on('close', finish)
 
       response.stream.on('error', (err) => {
         logger('error', 'Twitter', `External stream error: ${err.message}`)
         if (!stream.destroyed) stream.destroy(err)
       })
 
-      return { stream, type: decodedTrack.pluginInfo?.isHLS ? 'application/x-mpegURL' : 'video/mp4' }
+      return { stream, type: 'video/mp4' }
     } catch (e) {
       logger('error', 'Twitter', `Failed to load stream: ${e.message}`)
       return { exception: { message: e.message, severity: 'fault' } }

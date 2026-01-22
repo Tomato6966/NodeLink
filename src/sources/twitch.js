@@ -558,10 +558,12 @@ export default class TwitchSource {
       return { stream, type: 'mpegts' }
     }
 
-    const { stream, error, statusCode } = await http1makeRequest(url, {
+    const { stream: resStream, error, statusCode } = await http1makeRequest(url, {
+      method: 'GET',
       streamOnly: true
     })
-    if (error || statusCode !== 200) {
+
+    if (error || statusCode !== 200 || !resStream) {
       return {
         exception: {
           message: `Failed to load stream: ${error?.message || statusCode}`,
@@ -569,6 +571,29 @@ export default class TwitchSource {
         }
       }
     }
+
+    const stream = new PassThrough()
+
+    resStream.on('data', (chunk) => {
+      if (!stream.write(chunk)) resStream.pause()
+    })
+
+    stream.on('drain', () => {
+      if (!resStream.destroyed) resStream.resume()
+    })
+
+    resStream.on('end', () => {
+      if (!stream.writableEnded) {
+        stream.emit('finishBuffering')
+        stream.end()
+      }
+    })
+
+    resStream.on('error', (err) => {
+      logger('error', 'Twitch', `External stream error: ${err.message}`)
+      if (!stream.destroyed) stream.destroy(err)
+    })
+
     return { stream, type: 'mp4' }
   }
 
