@@ -1,5 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { http1makeRequest, logger, makeRequest } from '../../utils.js'
+import HLSHandler from '../../playback/hls/HLSHandler.js'
 import CipherManager from './CipherManager.js'
 import Android from './clients/Android.js'
 import AndroidVR from './clients/AndroidVR.js'
@@ -17,364 +18,6 @@ const CHUNK_SIZE = 64 * 1024
 const MAX_RETRIES = 3
 const MAX_URL_REFRESH = 10
 const VISITOR_DATA_INTERVAL = 3600000
-const PLAYLIST_FALLBACK_SEGMENTS = 3
-
-async function _manageYoutubeHlsStream(
-  hlsManifestUrl,
-  outputStream,
-  cancelSignal,
-  streamKey,
-  source
-) {
-  const segmentQueue = []
-  const processedSegments = new Set()
-  const MAX_PROCESSED_TRACK = 100
-  const processedOrder = new Array(MAX_PROCESSED_TRACK)
-  let processedIndex = 0
-  let cleanedUp = false
-  let playlistEnded = false
-  const MAX_LIVE_QUEUE_SIZE = 15
-
-  const rememberSegment = (key) => {
-    if (processedSegments.has(key)) return false
-
-    const old = processedOrder[processedIndex]
-    if (old !== undefined) processedSegments.delete(old)
-
-    processedSegments.add(key)
-    processedOrder[processedIndex] = key
-    processedIndex = (processedIndex + 1) % MAX_PROCESSED_TRACK
-
-    return true
-  }
-
-  const cleanup = () => {
-    if (cleanedUp) return
-    cleanedUp = true
-    cancelSignal.aborted = true
-    outputStream.stopHls = null
-    outputStream.removeListener('close', cleanup)
-    outputStream.removeListener('error', cleanup)
-
-    if (source?.activeStreams && streamKey) {
-      source.activeStreams.delete(streamKey)
-    }
-
-    segmentQueue.length = 0
-    processedSegments.clear()
-    processedOrder.length = 0
-  }
-
-  outputStream.once('close', cleanup)
-  outputStream.once('error', cleanup)
-  outputStream.stopHls = cleanup
-
-  const fetchWithUserAgent = (url) => http1makeRequest(url, { method: 'GET' })
-
-  const playlistFetcher = async (playlistUrl, isLive = false) => {
-    let isFirstFetch = true
-    let lastMediaSequence = -1
-
-    try {
-      while (!cancelSignal.aborted) {
-        const {
-          body: playlistContent,
-          error,
-          statusCode
-        } = await fetchWithUserAgent(playlistUrl)
-
-        if (error || statusCode !== 200) {
-          logger(
-            'error',
-            'YouTube-HLS-Fetcher',
-            `Playlist fetch failed: ${statusCode} - ${error?.message}`
-          )
-          return
-        }
-
-        const lines = playlistContent.split('\n').map((l) => l.trim())
-
-        let targetDuration = 2
-        let mediaSequence = 0
-
-        const targetDurationLine = lines.find((l) =>
-          l.startsWith('#EXT-X-TARGETDURATION:')
-        )
-        if (targetDurationLine) {
-          const parts = targetDurationLine.split(':')
-          if (parts[1]) {
-            const parsed = Number.parseInt(parts[1], 10)
-            if (!Number.isNaN(parsed)) targetDuration = parsed
-          }
-        }
-
-        const mediaSequenceLine = lines.find((l) =>
-          l.startsWith('#EXT-X-MEDIA-SEQUENCE:')
-        )
-        if (mediaSequenceLine) {
-          const parts = mediaSequenceLine.split(':')
-          if (parts[1]) {
-            const parsed = Number.parseInt(parts[1], 10)
-            if (!Number.isNaN(parsed)) mediaSequence = parsed
-          }
-        }
-
-        const currentSegments = []
-        let segIdx = 0
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].startsWith('#EXTINF:')) {
-            const segmentUrl = lines[i + 1]
-            if (segmentUrl && !segmentUrl.startsWith('#')) {
-              const url = new URL(segmentUrl, playlistUrl).toString()
-              const seq = mediaSequence + segIdx++
-              currentSegments.push({ url, seq })
-            }
-          }
-        }
-
-        if (!isFirstFetch && isLive && mediaSequence > lastMediaSequence + 30) {
-          logger(
-            'warn',
-            'YouTube-HLS-Fetcher',
-            `Fell behind live edge (gap: ${mediaSequence - lastMediaSequence}), resetting buffer`
-          )
-          segmentQueue.length = 0
-          processedSegments.clear()
-          processedOrder.length = 0
-          isFirstFetch = true
-        }
-
-        lastMediaSequence = mediaSequence
-
-        if (isFirstFetch) {
-          const segmentsToTake = isLive ? 3 : PLAYLIST_FALLBACK_SEGMENTS
-          const startIdx = Math.max(0, currentSegments.length - segmentsToTake)
-          for (let i = startIdx; i < currentSegments.length; i++) {
-            const seg = currentSegments[i]
-            const key = isLive ? seg.seq : seg.url
-            if (rememberSegment(key)) {
-              segmentQueue.push(seg)
-            }
-          }
-          isFirstFetch = false
-        } else {
-          for (const seg of currentSegments) {
-            const key = isLive ? seg.seq : seg.url
-
-            if (!processedSegments.has(key)) {
-              if (isLive && segmentQueue.length >= MAX_LIVE_QUEUE_SIZE) {
-                segmentQueue.shift()
-              }
-
-              if (rememberSegment(key)) {
-                segmentQueue.push(seg)
-              }
-            }
-          }
-        }
-
-        if (playlistContent.includes('#EXT-X-ENDLIST')) {
-          playlistEnded = true
-          return
-        }
-
-        await new Promise((resolve) => {
-          const timeout = setTimeout(
-            resolve,
-            Math.max(1, targetDuration) * 1000
-          )
-          if (typeof timeout.unref === 'function') timeout.unref()
-        })
-      }
-    } finally {
-      playlistEnded = true
-    }
-  }
-
-  const segmentDownloader = async () => {
-    let nextSegmentPromise = null // { url, promise }
-
-    while (true) {
-      if (
-        cancelSignal.aborted ||
-        (playlistEnded && segmentQueue.length === 0 && !nextSegmentPromise)
-      )
-        break
-
-      if (segmentQueue.length === 0 && !nextSegmentPromise) {
-        await new Promise((resolve) => {
-          const timeout = setTimeout(resolve, 50)
-          if (typeof timeout.unref === 'function') timeout.unref()
-        })
-        continue
-      }
-
-      try {
-        let segmentUrl = null
-
-        let res
-        if (nextSegmentPromise) {
-          segmentUrl = nextSegmentPromise.url
-          res = await nextSegmentPromise.promise
-          nextSegmentPromise = null
-        } else {
-          const seg = segmentQueue.shift()
-          if (!seg) continue
-          segmentUrl = seg.url
-          res = await http1makeRequest(segmentUrl, { streamOnly: true })
-        }
-
-        if (
-          segmentQueue.length > 0 &&
-          !nextSegmentPromise &&
-          !cancelSignal.aborted
-        ) {
-          const nextSeg = segmentQueue.shift()
-          if (nextSeg) {
-            nextSegmentPromise = {
-              url: nextSeg.url,
-              promise: http1makeRequest(nextSeg.url, { streamOnly: true })
-            }
-          }
-        }
-
-        if (res.error || res.statusCode !== 200) {
-          if (res.stream) res.stream.destroy()
-
-          let retryCount = 0
-          let success = false
-          while (retryCount < 3 && !cancelSignal.aborted) {
-            retryCount++
-            const retryRes = await http1makeRequest(segmentUrl, {
-              streamOnly: true
-            })
-            if (!retryRes.error && retryRes.statusCode === 200) {
-              res = retryRes
-              success = true
-              break
-            }
-            if (retryRes.stream) retryRes.stream.destroy()
-            await new Promise((r) => setTimeout(r, 500 * retryCount))
-          }
-
-          if (!success) {
-            logger(
-              'warn',
-              'YouTube-HLS-Downloader',
-              `Failed segment after retries: ${res.statusCode}`
-            )
-            continue
-          }
-        }
-
-        if (outputStream.destroyed || cancelSignal.aborted) {
-          if (res.stream && !res.stream.destroyed) res.stream.destroy()
-          break
-        }
-
-        await new Promise((resolve, reject) => {
-          res.stream.pipe(outputStream, { end: false })
-          res.stream.on('end', resolve)
-          res.stream.on('error', (err) => {
-            if (err.message === 'aborted' || err.code === 'ECONNRESET') {
-              resolve()
-            } else {
-              reject(err)
-            }
-          })
-        })
-      } catch (e) {
-        if (!cancelSignal.aborted && e.message !== 'aborted') {
-          logger(
-            'error',
-            'YouTube-HLS-Downloader',
-            `Error processing segment: ${e.message}`
-          )
-        }
-      }
-    }
-
-    if (!outputStream.destroyed && !outputStream.writableEnded) {
-      outputStream.emit('finishBuffering')
-      outputStream.end()
-    }
-  }
-
-  try {
-    const {
-      body: masterPlaylistContent,
-      error: masterError,
-      statusCode: masterStatusCode
-    } = await fetchWithUserAgent(hlsManifestUrl)
-
-    if (masterError || masterStatusCode !== 200) {
-      throw new Error(
-        `Master playlist fetch failed: ${masterStatusCode} - ${masterError?.message}`
-      )
-    }
-
-    const lines = masterPlaylistContent.split('\n').map((l) => l.trim())
-    let bestStreamUrl = null
-    let bestAudioOnlyUrl = null
-    let bestBandwidth = 0
-    let bestAudioOnlyBandwidth = 0
-    const isLive =
-      masterPlaylistContent.includes('yt_live_broadcast') ||
-      masterPlaylistContent.includes('live/1')
-
-    if (isLive) {
-      logger(
-        'debug',
-        'YouTube-HLS',
-        'Live stream detected, remember that this is still experimental (for performance reasons)'
-      )
-    }
-
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
-        const streamInf = lines[i]
-        const streamUrl = lines[i + 1]
-
-        if (streamUrl && !streamUrl.startsWith('#')) {
-          const bandwidthMatch = streamInf.match(/BANDWIDTH=(\d+)/)
-          const codecsMatch = streamInf.match(/CODECS="([^"]+)"/)
-
-          const bandwidth = bandwidthMatch
-            ? Number.parseInt(bandwidthMatch[1], 10)
-            : 0
-          const codecs = codecsMatch ? codecsMatch[1] : ''
-
-          if (codecs.includes('avc1') && codecs.includes('mp4a')) {
-            if (bandwidth > bestBandwidth) {
-              bestBandwidth = bandwidth
-              bestStreamUrl = new URL(streamUrl, hlsManifestUrl).toString()
-            }
-          } else if (codecs.includes('mp4a') || codecs.includes('opus')) {
-            if (bandwidth > bestAudioOnlyBandwidth) {
-              bestAudioOnlyBandwidth = bandwidth
-              bestAudioOnlyUrl = new URL(streamUrl, hlsManifestUrl).toString()
-            }
-          }
-        }
-      }
-    }
-
-    const selectedPlaylistUrl = bestStreamUrl || bestAudioOnlyUrl
-    if (!selectedPlaylistUrl) throw new Error('No suitable HLS stream found')
-
-    logger('debug', 'YouTube-HLS', `Selected stream: ${selectedPlaylistUrl}`)
-
-    await Promise.all([
-      playlistFetcher(selectedPlaylistUrl, isLive),
-      segmentDownloader()
-    ])
-  } catch (e) {
-    logger('error', 'YouTube-HLS', `Error managing HLS stream: ${e.message}`)
-    if (!outputStream.destroyed) outputStream.destroy(e)
-  } finally {
-    cleanup()
-  }
-}
 
 export default class YouTubeSource {
   constructor(nodelink) {
@@ -1265,11 +908,33 @@ export default class YouTubeSource {
 
     try {
       if (protocol === 'hls') {
-        const stream = new PassThrough()
-        _manageYoutubeHlsStream(url, stream, cancelSignal, streamKey, this)
+        const playerScript = await this.cipherManager.getCachedPlayerScript()
+        const stream = new HLSHandler(url, { 
+          type: 'mpegts', 
+          localAddress: this.nodelink.routePlanner?.getIP(),
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Referer': 'https://www.youtube.com/',
+            'Origin': 'https://www.youtube.com'
+          },
+          onResolveUrl: async (segmentUrl) => {
+            if (segmentUrl.includes('/n/')) {
+              const nToken = segmentUrl.match(/\/n\/([^/]+)/)?.[1]
+              if (nToken && playerScript) {
+                try {
+                  return await this.cipherManager.resolveUrl(segmentUrl, null, nToken, null, playerScript)
+                } catch (err) {
+                  logger('warn', 'YouTube', `Failed to resolve n-token: ${err.message}`)
+                }
+              }
+            }
+            return null
+          }
+        })
 
         const originalDestroy = stream.destroy.bind(stream)
         stream.destroy = (err) => {
+          if (cancelSignal.aborted) return
           cancelSignal.aborted = true
           this.activeStreams.delete(streamKey)
           originalDestroy(err)

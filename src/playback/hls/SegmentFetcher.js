@@ -22,15 +22,23 @@ export default class SegmentFetcher {
   constructor(options = {}) {
     this.headers = options.headers || {}
     this.localAddress = options.localAddress || null
+    this.onResolveUrl = options.onResolveUrl || null
     this.keyMap = new Map()
   }
 
   async fetchKey(keyInfo) {
     if (!keyInfo || keyInfo.method === 'NONE') return null
     if (this.keyMap.has(keyInfo.uri)) return this.keyMap.get(keyInfo.uri)
-        const { body, error, statusCode } = await http1makeRequest(keyInfo.uri, {
-          headers: this.headers, responseType: 'buffer', localAddress: this.localAddress
-        })
+
+    let url = keyInfo.uri
+    if (this.onResolveUrl) {
+      const resolved = await this.onResolveUrl(url)
+      if (resolved) url = resolved
+    }
+
+    const { body, error, statusCode } = await http1makeRequest(url, {
+      headers: this.headers, responseType: 'buffer', localAddress: this.localAddress
+    })
     
         if (error || statusCode !== 200 || !body || body.length === 0) {
           logger('error', 'SegmentFetcher', `Key fetch failed for ${keyInfo.uri}: Status ${statusCode}, Error: ${error?.message || 'Empty Body'}`)
@@ -57,16 +65,19 @@ export default class SegmentFetcher {
   }
 
   async fetchSegment(segment, options = { stream: true }) {
-    const headers = { 
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      ...this.headers 
+    let url = segment.url
+    if (this.onResolveUrl) {
+      const resolved = await this.onResolveUrl(url)
+      if (resolved) url = resolved
     }
+
+    const headers = { ...this.headers }
     if (segment.byteRange) {
       const end = segment.byteRange.offset + segment.byteRange.length - 1
       headers.Range = `bytes=${segment.byteRange.offset}-${end}`
     }
 
-    const { body, stream, error, statusCode } = await http1makeRequest(segment.url, {
+    const { body, stream, error, statusCode } = await http1makeRequest(url, {
       headers,
       responseType: options.stream ? undefined : 'buffer',
       streamOnly: options.stream,
@@ -74,7 +85,12 @@ export default class SegmentFetcher {
       timeout: 15000
     })
 
-    if (error || (statusCode !== 200 && statusCode !== 206)) throw new Error(`Segment failed: ${statusCode}`)
+    if (error || (statusCode !== 200 && statusCode !== 206)) {
+      if (statusCode === 403) {
+        logger('warn', 'SegmentFetcher', `Segment 403 Forbidden: ${url.substring(0, 100)}...`)
+      }
+      throw new Error(`Segment failed: ${statusCode}`)
+    }
 
     if (segment.key && segment.key.method !== 'NONE') {
       const keyData = await this.fetchKey(segment.key)

@@ -2,6 +2,10 @@ import { logger } from '../../utils.js'
 
 export default class PlaylistParser {
   static parse(content, baseUrl) {
+    if (!content.includes('#EXT')) {
+      throw new Error('Invalid HLS playlist format')
+    }
+
     const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
     
     if (lines.some(l => l.startsWith('#EXT-X-STREAM-INF'))) {
@@ -31,10 +35,13 @@ export default class PlaylistParser {
     }
 
     let segmentIndex = 0
+    let pendingDiscontinuity = false
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]
 
-      if (line.startsWith('#EXT-X-KEY:')) {
+      if (line.startsWith('#EXT-X-DISCONTINUITY')) {
+        pendingDiscontinuity = true
+      } else if (line.startsWith('#EXT-X-KEY:')) {
         currentKey = this.parseAttributes(line, baseUrl)
       } else if (line.startsWith('#EXT-X-MAP:')) {
         currentMap = this.parseAttributes(line, baseUrl)
@@ -56,10 +63,12 @@ export default class PlaylistParser {
             key: currentKey,
             map: currentMap,
             byteRange: lastByteRange,
-            sequence: mediaSequence + segmentIndex
+            sequence: mediaSequence + segmentIndex,
+            discontinuity: pendingDiscontinuity
           })
           segmentIndex++
           lastByteRange = null
+          pendingDiscontinuity = false
           i = j
         }
       }
@@ -79,7 +88,8 @@ export default class PlaylistParser {
         const attrs = this.parseAttributes(attrLine, baseUrl)
         variants.push({
           url: new URL(urlLine, baseUrl).toString(),
-          bandwidth: parseInt(attrs.bandwidth || 0, 10)
+          bandwidth: parseInt(attrs.bandwidth || 0, 10),
+          codecs: attrs.codecs || ''
         })
       }
     }
