@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { PassThrough } from 'node:stream'
 import { encodeTrack, getBestMatch, http1makeRequest, logger } from '../utils.js'
 
 const API_BASE = 'https://api.music.yandex.net'
@@ -6,11 +7,11 @@ const USER_AGENT = 'Yandex-Music-API'
 const CLIENT_HEADER = 'YandexMusicAndroid/24023621'
 
 const URL_PATTERN =
-  /^(?:https?:\/\/)?music\.yandex\.(?<domain>ru|com|kz|by)\/(?<type1>artist|album|track)\/(?<id1>\d+)(?:\/(?<type2>track)\/(?<id2>\d+))?\/?$/i
+  /^(?:https?:\/\/)?music\.yandex\.(?<domain>ru|com|kz|by)\/(?<type1>artist|album|track)\/(?<id1>\d+)(?:\/(?<type2>track)\/(?<id2>\d+))?\/?(?:[?#].*)?$/i
 const URL_PLAYLIST_PATTERN =
-  /^(?:https?:\/\/)?music\.yandex\.(?<domain>ru|com|kz|by)\/users\/(?<user>[0-9A-Za-z@.-]+)\/playlists\/(?<id>\d+)\/?$/i
+  /^(?:https?:\/\/)?music\.yandex\.(?<domain>ru|com|kz|by)\/users\/(?<user>[0-9A-Za-z@.-]+)\/playlists\/(?<id>\d+)\/?(?:[?#].*)?$/i
 const URL_PLAYLIST_UUID_PATTERN =
-  /^(?:https?:\/\/)?music\.yandex\.(?<domain>ru|com|kz|by)\/playlists\/(?<uuid>[0-9A-Za-z.-]+)\/?$/i
+  /^(?:https?:\/\/)?music\.yandex\.(?<domain>ru|com|kz|by)\/playlists\/(?<uuid>[0-9A-Za-z.-]+)\/?(?:[?#].*)?$/i
 
 const SEARCH_PREFIX = 'ymsearch'
 const RECOMMENDATIONS_PREFIX = 'ymrec'
@@ -124,13 +125,14 @@ export default class YandexMusicSource {
   }
 
   async resolve(url) {
+    const cleanUrl = typeof url === 'string' ? url.split(/[?#]/)[0] : url
     if (!this.hasToken) {
-      const fallback = await this._resolveWithSongLink(url, null)
+      const fallback = await this._resolveWithSongLink(cleanUrl, null)
       return fallback || { loadType: 'empty', data: {} }
     }
 
     try {
-      let match = url.match(URL_PATTERN)
+      let match = cleanUrl.match(URL_PATTERN)
       if (match?.groups) {
         const domain = match.groups.domain
         const type1 = match.groups.type1
@@ -146,7 +148,7 @@ export default class YandexMusicSource {
         if (type1 === 'track') return await this._getTrack(match.groups.id1, domain)
       }
 
-      match = url.match(URL_PLAYLIST_PATTERN)
+      match = cleanUrl.match(URL_PLAYLIST_PATTERN)
       if (match?.groups) {
         return await this._getPlaylist(
           match.groups.user,
@@ -155,7 +157,7 @@ export default class YandexMusicSource {
         )
       }
 
-      match = url.match(URL_PLAYLIST_UUID_PATTERN)
+      match = cleanUrl.match(URL_PLAYLIST_UUID_PATTERN)
       if (match?.groups) {
         return await this._getPlaylistByUuid(
           match.groups.uuid,
@@ -225,19 +227,48 @@ export default class YandexMusicSource {
   }
 
   async loadStream(_track, url) {
+    const stream = new PassThrough()
     try {
       const response = await http1makeRequest(url, {
         method: 'GET',
-        streamOnly: true
+        streamOnly: true,
+        localAddress: this.nodelink.routePlanner?.getIP()
       })
 
-      if (!response.stream) {
-        throw new Error('No stream in response')
+      if (response.error || (response.statusCode && response.statusCode !== 200 && response.statusCode !== 206)) {
+        const message = response.error?.message || `HTTP ${response.statusCode} on ${url}`
+        return { exception: { message, severity: 'fault' } }
       }
 
-      return { stream: response.stream, type: 'audio/mpeg' }
+      if (!response.stream) {
+        return {
+          exception: { message: 'No stream in response', severity: 'fault' }
+        }
+      }
+
+      response.stream.on('data', (chunk) => {
+        if (!stream.write(chunk)) response.stream.pause()
+      })
+
+      stream.on('drain', () => {
+        if (!response.stream.destroyed) response.stream.resume()
+      })
+
+      response.stream.on('end', () => {
+        if (!stream.writableEnded) {
+          stream.emit('finishBuffering')
+        }
+      })
+
+      response.stream.on('error', (err) => {
+        logger('error', 'YandexMusic', `Stream error: ${err.message}`)
+        if (!stream.destroyed) stream.destroy(err)
+      })
+
+      return { stream, type: 'audio/mpeg' }
     } catch (e) {
       logger('error', 'YandexMusic', `Stream failed: ${e.message}`)
+      if (!stream.destroyed) stream.destroy(e)
       return { exception: { message: e.message, severity: 'fault' } }
     }
   }
