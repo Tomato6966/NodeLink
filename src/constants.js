@@ -25,7 +25,9 @@ export const GatewayEvents = {
   PLAYER_RECONNECTING: 'PlayerReconnectingEvent',
   PLAYER_CONNECTED: 'PlayerConnectedEvent',
   MIX_STARTED: 'MixStartedEvent',
-  MIX_ENDED: 'MixEndedEvent'
+  MIX_ENDED: 'MixEndedEvent',
+  ETERNALBOX_INFO: 'EternalBoxInfoEvent',
+  ETERNALBOX_JUMP: 'EternalBoxJumpEvent'
 }
 export const EndReasons = {
   STOPPED: 'stopped',

@@ -402,6 +402,29 @@ export class Player {
       playingQuality: this.streamInfo?.format?.itag || null
     })
 
+    if (trackToEmit?.info?.sourceName === 'eternalbox') {
+      const info = trackToEmit.info
+      const pluginInfo = trackToEmit.pluginInfo || {}
+      const links = {
+        jukeboxPage: `https://eternalboxmirror.xyz/jukebox_go.html?id=${info.identifier}`,
+        analysisUrl: pluginInfo.analysisUrl || null,
+        streamUrl: pluginInfo.streamUrl || null,
+        ogAudioSource: pluginInfo.ogAudioSource || null,
+        spotifyUrl: pluginInfo.spotify?.url || info.uri || null
+      }
+
+      this.emitEvent(GatewayEvents.ETERNALBOX_INFO, {
+        track: trackToEmit,
+        eternalbox: {
+          id: info.identifier,
+          service: pluginInfo.service || null,
+          analysisSummary: pluginInfo.analysisSummary || null,
+          spotify: pluginInfo.spotify || null,
+          links
+        }
+      })
+    }
+
     if (this.isLyricsSubscribed) {
       this._loadLyrics()
     }
@@ -467,6 +490,14 @@ export class Player {
       additionalData
     )
     if (fetched.exception) return fetched
+    if (fetched.stream?.on) {
+      fetched.stream.on('eternalboxJump', (data) => {
+        this.emitEvent(GatewayEvents.ETERNALBOX_JUMP, {
+          track: this.holoTrack || this.track,
+          eternalbox: data
+        })
+      })
+    }
     const resource = createAudioResource(
       fetched.stream,
       fetched.type || urlData.format,

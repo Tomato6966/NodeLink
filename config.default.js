@@ -164,6 +164,38 @@ export default {
     http: {
       enabled: true
     },
+    eternalbox: {
+      enabled: true,
+      baseUrl: 'https://eternalboxmirror.xyz',
+      searchResults: 30,
+      enrichSpotify: true,
+      includeAnalysis: true,
+      includeAnalysisSummary: true,
+      eternalStream: true,
+      cacheMaxBytes: 20 * 1024 * 1024,
+      maxBranches: 4,
+      maxBranchThreshold: 75,
+      branchThresholdStart: 10,
+      branchThresholdStep: 5,
+      branchTargetDivisor: 6,
+      addLastEdge: true,
+      justBackwards: false,
+      justLongBranches: false,
+      removeSequentialBranches: true,
+      useFilteredSegments: true,
+      minRandomBranchChance: 0.18,
+      maxRandomBranchChance: 0.5,
+      randomBranchChanceDelta: 0.09,
+      timbreWeight: 1,
+      pitchWeight: 10,
+      loudStartWeight: 1,
+      loudMaxWeight: 1,
+      durationWeight: 100,
+      confidenceWeight: 1,
+      infiniteStream: true,
+      maxReconnects: 0,
+      reconnectDelayMs: 1000
+    },
     vimeo: {
       // Note: not 100% of the songs are currently working (but most should.), because i need to code a different extractor for every year (2010, 2011, etc. not all are done)
       enabled: true,
