@@ -111,6 +111,34 @@ export default {
     amazonmusic: {
       enabled: true
     },
+    rss: {
+      enabled: true
+    },
+    songlink: {
+      enabled: true,
+      apiKey: '',
+      userCountry: 'US',
+      songIfSingle: true,
+      useApi: true,
+      useScrapeFallback: true,
+      preferredPlatforms: [
+        'spotify',
+        'appleMusic',
+        'youtubeMusic',
+        'youtube',
+        'deezer',
+        'tidal',
+        'amazonMusic',
+        'soundcloud',
+        'bandcamp',
+        'audius',
+        'audiomack',
+        'pandora',
+        'itunes',
+        'amazonStore'
+      ],
+      fallbackToAny: true
+    },
     mixcloud: {
       enabled: true
     },
