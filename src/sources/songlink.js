@@ -1,6 +1,7 @@
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
 
-const SONG_LINK_PATTERN = /^https?:\/\/(?:www\.)?(song\.link|odesli\.co)\/.+/i
+const SONG_LINK_PATTERN =
+  /^https?:\/\/(?:www\.)?(song\.link|album\.link|artist\.link|pods\.link|odesli\.co)\/.+/i
 const DEFAULT_PLATFORM_ORDER = [
   'spotify',
   'appleMusic',
@@ -235,6 +236,18 @@ export default class SongLinkSource {
     }
   }
 
+  async getSongLinkData(url) {
+    return await this._fetchSongLinkData(url)
+  }
+
+  getPlatformOrder(linksByPlatform = {}) {
+    return this._buildPlatformOrder(linksByPlatform)
+  }
+
+  getPlatformSourceName(platform) {
+    return PLATFORM_SOURCE_MAP[platform] || null
+  }
+
   async getTrackUrl(decodedTrack) {
     try {
       const uri = decodedTrack?.uri
@@ -382,12 +395,30 @@ export default class SongLinkSource {
 
     if (Object.keys(linksByPlatform).length === 0) return null
 
+    const entitiesByUniqueId = {}
+    const entityId = pageData.entityUniqueId
+    const entityData = pageData.entityData
+    if (entityId && entityData) {
+      entitiesByUniqueId[entityId] = {
+        id: entityData.id,
+        type: entityData.type,
+        title: entityData.title,
+        artistName: entityData.artistName,
+        thumbnailUrl: entityData.thumbnailUrl,
+        duration:
+          typeof entityData.duration === 'number'
+            ? entityData.duration / 1000
+            : undefined,
+        isrc: entityData.isrc || null
+      }
+    }
+
     return {
       entityUniqueId: pageData.entityUniqueId,
       userCountry,
       pageUrl: pageData.pageUrl || root?.props?.pageProps?.pageUrl,
       linksByPlatform,
-      entitiesByUniqueId: {}
+      entitiesByUniqueId
     }
   }
 

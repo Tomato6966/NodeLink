@@ -338,6 +338,15 @@ export default {
     },
     lastfm: {
       enabled: true
+    },
+    yandexmusic: {
+      enabled: true,
+      accessToken: '',
+      allowUnavailable: false,
+      allowExplicit: true,
+      artistLoadLimit: 1, // 0 = no limit, 1 = 10 tracks, 2 = 20 tracks, etc.
+      albumLoadLimit: 1, // 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
+      playlistLoadLimit: 1 // 0 = no limit, 1 = 100 tracks, 2 = 200 tracks, etc.
     }
   },
   lyrics: {
@@ -356,6 +365,9 @@ export default {
       enabled: true
     },
     bilibili: {
+      enabled: true
+    },
+    yandexmusic: {
       enabled: true
     }
   },
