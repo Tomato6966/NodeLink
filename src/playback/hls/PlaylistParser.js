@@ -7,9 +7,10 @@ export default class PlaylistParser {
     }
 
     const lines = content.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
-    
+
     if (lines.some(l => l.startsWith('#EXT-X-STREAM-INF'))) {
-      return { isMaster: true, variants: this.parseMaster(lines, baseUrl) }
+      const { variants, audioGroups } = this.parseMaster(lines, baseUrl)
+      return { isMaster: true, variants, audioGroups }
     }
 
     const result = {
@@ -54,7 +55,7 @@ export default class PlaylistParser {
           }
           j++
         }
-        
+
         if (j < lines.length) {
           const segmentUrl = lines[j]
           result.segments.push({
@@ -79,8 +80,16 @@ export default class PlaylistParser {
 
   static parseMaster(lines, baseUrl) {
     const variants = []
+    const audioGroups = {}
+
     for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
+        if (lines[i].startsWith('#EXT-X-MEDIA:')) {
+            const attrs = this.parseAttributes(lines[i], baseUrl)
+            if (attrs.type === 'AUDIO' && attrs.groupid) {
+                if (!audioGroups[attrs.groupid]) audioGroups[attrs.groupid] = []
+                audioGroups[attrs.groupid].push(attrs)
+            }
+        } else if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
         const attrLine = lines[i]
         const urlLine = lines[++i]
         if (!urlLine) break
@@ -89,11 +98,12 @@ export default class PlaylistParser {
         variants.push({
           url: new URL(urlLine, baseUrl).toString(),
           bandwidth: parseInt(attrs.bandwidth || 0, 10),
-          codecs: attrs.codecs || ''
+          codecs: attrs.codecs || '',
+          audio: attrs.audio
         })
       }
     }
-    return variants.sort((a, b) => b.bandwidth - a.bandwidth)
+    return { variants: variants.sort((a, b) => b.bandwidth - a.bandwidth), audioGroups }
   }
 
   static parseAttributes(line, baseUrl) {
@@ -114,7 +124,7 @@ export default class PlaylistParser {
   }
 
   static parseByteRange(line, lastRange) {
-    const match = line.match(/:?(\d+)(?:@(\d+))?/) 
+    const match = line.match(/:?(\d+)(?:@(\d+))?/)
     if (!match) return null
     const length = parseInt(match[1], 10)
     let offset = match[2] ? parseInt(match[2], 10) : null

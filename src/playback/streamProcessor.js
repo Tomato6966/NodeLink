@@ -601,6 +601,7 @@ class MPEGTSDemuxer extends Transform {
     while (offset < tableEnd && offset < MPEGTS_CONFIG.packetSize) {
       const streamType = packet[offset]
       const elementaryPid = ((packet[offset + 1] & 0x1f) << 8) | packet[offset + 2]
+
       if ((streamType === MPEGTS_CONFIG.aacStreamType || streamType === MPEGTS_CONFIG.mp3StreamType || streamType === MPEGTS_CONFIG.mp3StreamType2) && !this.audioPidFound) {
         this.audioPid = elementaryPid
         this.audioPidFound = true
@@ -627,12 +628,12 @@ class MPEGTSDemuxer extends Transform {
 
   _emitPES(buffer) {
     if (buffer.length < 9) return
-    
+
     // Check for PES start code 00 00 01
     if (buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x01) {
       const headerLength = buffer[8]
       const payloadOffset = 9 + headerLength
-      
+
       if (payloadOffset < buffer.length) {
         this.push(buffer.subarray(payloadOffset))
       }

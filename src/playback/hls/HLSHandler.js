@@ -6,7 +6,7 @@ import SegmentFetcher from './SegmentFetcher.js'
 export default class HLSHandler extends PassThrough {
   constructor(url, options = {}) {
     super({ highWaterMark: options.highWaterMark || 1024 * 1024 * 5 })
-    
+
     this.masterUrl = url
     this.currentUrl = url
     this.headers = options.headers || {}
@@ -14,13 +14,13 @@ export default class HLSHandler extends PassThrough {
     this.onResolveUrl = options.onResolveUrl || null
     this.strategy = options.strategy || (options.type?.includes('fmp4') ? 'segmented' : 'streaming')
     this.startTime = (options.startTime || 0) / 1000
-    
-    this.fetcher = new SegmentFetcher({ 
+
+    this.fetcher = new SegmentFetcher({
       headers: this.headers,
       localAddress: this.localAddress,
       onResolveUrl: this.onResolveUrl
     })
-    
+
     this.processedSegments = new Set()
     this.processedOrder = []
     this.MAX_HISTORY = 200
@@ -110,14 +110,25 @@ export default class HLSHandler extends PassThrough {
 
       if (parsed.isMaster) {
         const sortedVariants = parsed.variants.sort((a, b) => b.bandwidth - a.bandwidth)
-        const bestVariant = sortedVariants.find(v => 
-          (v.codecs?.includes('mp4a') || v.codecs?.includes('opus')) && 
+        const bestVariant = sortedVariants.find(v =>
+          (v.codecs?.includes('mp4a') || v.codecs?.includes('opus')) &&
           !v.codecs?.includes('avc1')
-        ) || sortedVariants.find(v => 
+        ) || sortedVariants.find(v =>
           v.codecs?.includes('mp4a') || v.codecs?.includes('opus')
         ) || sortedVariants[0]
 
         logger('debug', 'HLSHandler', `Selected variant bandwidth: ${bestVariant.bandwidth}, codecs: ${bestVariant.codecs}`)
+
+        if (bestVariant.audio && parsed.audioGroups && parsed.audioGroups[bestVariant.audio]) {
+          const group = parsed.audioGroups[bestVariant.audio]
+          const audioRendition = group.find(r => r.default === 'YES') || group.find(r => r.autoselect === 'YES') || group[0]
+
+          if (audioRendition && audioRendition.uri) {
+             this.currentUrl = audioRendition.uri
+             return setImmediate(() => this._playlistLoop())
+          }
+        }
+
         this.currentUrl = bestVariant.url
         return setImmediate(() => this._playlistLoop())
       }
@@ -299,7 +310,7 @@ export default class HLSHandler extends PassThrough {
 
       const [key, promise] = fetchPool.entries().next().value
       fetchPool.delete(key)
-      
+
       const current = await promise
       if (!current) {
         logger('warn', 'HLSHandler', `Skipping failed segment: ${key}`)

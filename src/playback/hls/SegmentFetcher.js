@@ -39,7 +39,7 @@ export default class SegmentFetcher {
     const { body, error, statusCode } = await http1makeRequest(url, {
       headers: this.headers, responseType: 'buffer', localAddress: this.localAddress
     })
-    
+
         if (error || statusCode !== 200 || !body || body.length === 0) {
           logger('error', 'SegmentFetcher', `Key fetch failed for ${keyInfo.uri}: Status ${statusCode}, Error: ${error?.message || 'Empty Body'}`)
           throw new Error(`Key fetch failed: ${statusCode}`)
@@ -100,7 +100,7 @@ export default class SegmentFetcher {
       const keyData = await this.fetchKey(segment.key)
       const iv = segment.key.iv || this._getIv(segment.sequence)
       const algorithm = segment.key.method === 'AES-128' ? 'aes-128-cbc' : 'aes-256-cbc'
-      
+
       logger('debug', 'SegmentFetcher', `Decrypting segment ${segment.sequence} (Key: ${keyData ? 'OK' : 'FAIL'}, IV: ${iv.toString('hex')})`)
 
       if (options.stream) {
