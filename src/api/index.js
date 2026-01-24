@@ -283,7 +283,7 @@ async function requestHandler(nodelink, req, res) {
             trace
           )
           req.destroy()
-          return
+          resolve()
         }
         body += chunk.toString()
       }
