@@ -295,6 +295,8 @@ class BUS,VCmd,VEvt,SMeta,Route,Creds,BPool infra
 class SessionMgr,WorkerMgr,SourceMgr manager
 ```
 
+---
+
 ## Usage
 
 NodeLink is compatible with most Lavalink clients, as it implements nearly the entire original API.
@@ -441,6 +443,12 @@ See [LICENSE](LICENSE) for full details.
 
 NodeLink was born from a simple desire: to understand and master every detail of an audio server — without relying on closed, heavy, or complicated solutions.
 The goal is to make audio accessible, transparent, and fun to build.
+
+---
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=PerformanC/NodeLink&type=timeline&legend=top-left)](https://www.star-history.com/#PerformanC/NodeLink&type=timeline&legend=top-left)
 
 ---
 
