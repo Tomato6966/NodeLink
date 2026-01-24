@@ -251,13 +251,59 @@ async function requestHandler(nodelink, req, res) {
     }
   }
 
+  const MAX_BODY_SIZE = nodelink.options.server?.maxBodySize || 10 * 1024 * 1024
+
   let body = ''
   if (req.method !== 'GET') {
+    const contentLength = parseInt(req.headers['content-length'])
+    if (!isNaN(contentLength) && contentLength > MAX_BODY_SIZE) {
+      logger(
+        'warn',
+        'Server',
+        `Request rejected: Content-Length ${contentLength} exceeds limit of ${MAX_BODY_SIZE}`
+      )
+      sendErrorResponse(
+        req,
+        res,
+        413,
+        'Payload Too Large',
+        'Request body is too large.',
+        parsedUrl.pathname,
+        trace
+      )
+      req.destroy()
+      return
+    }
+
     await new Promise((resolve) => {
-      req.on('data', (chunk) => {
+      let receivedSize = 0
+
+      const onData = (chunk) => {
+        receivedSize += chunk.length
+        if (receivedSize > MAX_BODY_SIZE) {
+          logger(
+            'warn',
+            'Server',
+            `Request rejected: Body size exceeded limit of ${MAX_BODY_SIZE}`
+          )
+          req.removeListener('data', onData)
+          req.removeListener('end', onEnd)
+          sendErrorResponse(
+            req,
+            res,
+            413,
+            'Payload Too Large',
+            'Request body is too large.',
+            parsedUrl.pathname,
+            trace
+          )
+          req.destroy()
+          resolve()
+        }
         body += chunk.toString()
-      })
-      req.on('end', () => {
+      }
+
+      const onEnd = () => {
         try {
           if (
             req.headers['content-type']?.includes('application/json') &&
@@ -283,7 +329,10 @@ async function requestHandler(nodelink, req, res) {
           return
         }
         resolve()
-      })
+      }
+
+      req.on('data', onData)
+      req.on('end', onEnd)
     })
   }
   req.body = body
