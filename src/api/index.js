@@ -236,7 +236,7 @@ async function requestHandler(nodelink, req, res) {
     }
   }
 
-  const MAX_BODY_SIZE = 10 * 1024 * 1024
+  const MAX_BODY_SIZE = nodelink.options.server?.maxBodySize || 10 * 1024 * 1024
 
   let body = ''
   if (req.method !== 'GET') {
