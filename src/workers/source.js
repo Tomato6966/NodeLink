@@ -7,16 +7,16 @@ import {
   Worker,
   workerData
 } from 'node:worker_threads'
-import * as utils from './utils.js'
+import * as utils from '../utils.js'
 
 const __filename = fileURLToPath(import.meta.url)
 
 if (isMainThread) {
   let config
   try {
-    config = (await import('../config.js')).default
+    config = (await import('../../config.js')).default
   } catch {
-    config = (await import('../config.default.js')).default
+    config = (await import('../../config.default.js')).default
   }
 
   const specConfig = config.cluster?.specializedSourceWorker || {}
@@ -218,13 +218,13 @@ if (isMainThread) {
     { default: RoutePlannerManager },
     { default: StatsManager }
   ] = await Promise.all([
-    import('./playback/streamProcessor.js'),
-    import('./managers/sourceManager.js'),
-    import('./managers/lyricsManager.js'),
-    import('./managers/credentialManager.js'),
-    import('./managers/trackCacheManager.js'),
-    import('./managers/routePlannerManager.js'),
-    import('./managers/statsManager.js')
+    import('../playback/processing/streamProcessor.js'),
+    import('../managers/sourceManager.js'),
+    import('../managers/lyricsManager.js'),
+    import('../managers/credentialManager.js'),
+    import('../managers/trackCacheManager.js'),
+    import('../managers/routePlannerManager.js'),
+    import('../managers/statsManager.js')
   ])
 
   nodelink.statsManager = new StatsManager(nodelink)

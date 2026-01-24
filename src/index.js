@@ -1768,7 +1768,7 @@ if (clusterEnabled && cluster.isPrimary) {
 
   await serverInstancePromise
 } else if (clusterEnabled && cluster.isWorker) {
-  await import('./worker.js')
+  await import('./workers/main.js')
 } else {
   const serverInstancePromise = (async () => {
     const nserver = new NodelinkServer(config, PlayerManager, false)

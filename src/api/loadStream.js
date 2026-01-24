@@ -1,6 +1,6 @@
 import { pipeline } from 'node:stream'
 import myzod from 'myzod'
-import { createPCMStream } from '../playback/streamProcessor.js'
+import { createPCMStream } from '../playback/processing/streamProcessor.js'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const loadStreamSchema = myzod.object({

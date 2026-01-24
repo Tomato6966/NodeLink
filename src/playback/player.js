@@ -9,7 +9,7 @@ let createSeekeableAudioResource
 async function getStreamProcessor() {
   if (createAudioResource) return
 
-  const processor = await import('./streamProcessor.js')
+  const processor = await import('./processing/streamProcessor.js')
   createAudioResource = processor.createAudioResource
   createSeekeableAudioResource = processor.createSeekeableAudioResource
 }
@@ -124,7 +124,7 @@ export class Player {
   }
 
   async _initAudioMixer() {
-    const { AudioMixer } = await import('./AudioMixer.js')
+    const { AudioMixer } = await import('./processing/AudioMixer.js')
     this.audioMixer = new AudioMixer(
       this.nodelink.options?.mix ?? {
         enabled: true,
@@ -1390,7 +1390,7 @@ export class Player {
     const mixVolume = volume ?? mixConfig.defaultVolume
 
     const { createAudioResource: createResource } = await import(
-      './streamProcessor.js'
+      './processing/streamProcessor.js'
     )
 
     const urlData = await this.nodelink.sources.getTrackUrl(trackPayload.info)

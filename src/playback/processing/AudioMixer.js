@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { RingBuffer } from './RingBuffer.js'
+import { RingBuffer } from '../structs/RingBuffer.js'
 
 const LAYER_BUFFER_SIZE = 1024 * 1024 // 1MB per layer (~5 seconds of PCM)
 
