@@ -434,7 +434,7 @@ Questions, feedback, or contributions are always welcome:
 
 ## License
 
-NodeLink is open-source software released under the **BSD 3-Clause License**.
+NodeLink is open-source software released under the **GNU General Public License v3.0**.
 See [LICENSE](LICENSE) for full details.
 
 ---
