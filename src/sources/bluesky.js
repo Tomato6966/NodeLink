@@ -1,6 +1,7 @@
 import { PassThrough } from 'node:stream'
 import { encodeTrack, logger, makeRequest, http1makeRequest } from '../utils.js'
 import HLSHandler from '../playback/hls/HLSHandler.js'
+import PlaylistParser from '../playback/hls/PlaylistParser.js'
 
 export default class BlueskySource {
   constructor(nodelink) {
@@ -29,6 +30,30 @@ export default class BlueskySource {
     return pds?.serviceEndpoint || 'https://bsky.social'
   }
 
+  async _getDuration(playlistUrl) {
+    try {
+      const { body, error, statusCode } = await makeRequest(playlistUrl, { method: 'GET' })
+      if (error || statusCode !== 200 || !body) return 0
+
+      const parsed = PlaylistParser.parse(body, playlistUrl)
+
+      if (parsed.isMaster) {
+        if (parsed.variants && parsed.variants.length > 0) {
+          return await this._getDuration(parsed.variants[0].url)
+        }
+        return 0
+      }
+
+      let duration = 0
+      for (const segment of parsed.segments) {
+        duration += segment.duration
+      }
+      return Math.round(duration * 1000)
+    } catch (e) {
+      return 0
+    }
+  }
+
   async search(query) {
     logger('debug', 'Bluesky', `Searching for: ${query}`)
     const searchUrl = `https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=${encodeURIComponent(query)}&limit=${this.config.maxSearchResults || 10}`
@@ -36,8 +61,7 @@ export default class BlueskySource {
     const { body, error } = await makeRequest(searchUrl, { method: 'GET' })
     if (error || !body || !body.posts) return { loadType: 'empty', data: {} }
 
-    const tracks = body.posts
-      .map(post => this.buildTrack(post))
+    const tracks = (await Promise.all(body.posts.map(post => this.buildTrack(post))))
       .filter(track => track !== null)
 
     return {
@@ -61,7 +85,7 @@ export default class BlueskySource {
     }
 
     const post = body.thread.post
-    const track = this.buildTrack(post)
+    const track = await this.buildTrack(post)
 
     if (!track) return { loadType: 'empty', data: {} }
 
@@ -164,7 +188,7 @@ export default class BlueskySource {
     return { stream: pass, type: 'mp4' }
   }
 
-  buildTrack(post) {
+  async buildTrack(post) {
     const embed = post.embed?.media || post.embed
     if (!embed) return null
 
@@ -178,11 +202,16 @@ export default class BlueskySource {
     const title = (post.record?.text || post.value?.text || 'Bluesky Media').split('\n')[0].slice(0, 72)
     const author = post.author?.displayName || handle
 
+    let length = 0
+    if (playlistUrl) {
+      length = await this._getDuration(playlistUrl)
+    }
+
     const trackInfo = {
       identifier: id,
       isSeekable: true,
       author: author,
-      length: 0,
+      length,
       isStream: false,
       position: 0,
       title: title,
