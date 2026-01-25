@@ -51,6 +51,9 @@ export class Player {
     this._fadeTimers = { trackEnd: null, pause: null, stop: null }
     this._isResuming = false
     this._pendingTrackStartFade = false
+    this._lyricsBasePosition = 0
+    this._lyricsBasePackets = 0
+    this._lyricsMarkerTimer = null
 
     this.isLyricsSubscribed = false
     this.currentLyrics = null
@@ -296,6 +299,8 @@ export class Player {
       this.isPaused = false
 
       if (!wasResuming && !this._isRestoring) {
+        this._lyricsBasePackets =
+          this.connection?.statistics?.packetsExpected ?? 0
         this._fading('trackStart')
         this._emitTrackStart()
       }
@@ -397,6 +402,12 @@ export class Player {
     this.currentLyrics = null
     this.lyricsLineIndex = -1
     this._fading('reset')
+    this._lyricsBasePosition = 0
+    this._lyricsBasePackets = 0
+    if (this._lyricsMarkerTimer) {
+      clearTimeout(this._lyricsMarkerTimer)
+      this._lyricsMarkerTimer = null
+    }
   }
 
   async _emitTrackStart() {
@@ -726,6 +737,7 @@ export class Player {
     if (this.volumePercent !== 100) {
       resource.setVolume(this.volumePercent / 100)
     }
+    this._lyricsBasePosition = startTime
     this._fading('trackStartArm', { resource })
     this._fading('trackEndSchedule', { startPosition: startTime || 0 })
 
@@ -905,6 +917,13 @@ export class Player {
       const result = await seekPromise
       if (result) {
         this.emitEvent(GatewayEvents.SEEK, { position: this.position })
+        this._lyricsBasePosition = this.position
+        this._lyricsBasePackets =
+          this.connection?.statistics?.packetsExpected ?? 0
+        if (this._lyricsMarkerTimer) {
+          clearTimeout(this._lyricsMarkerTimer)
+          this._lyricsMarkerTimer = null
+        }
         if (this.isLyricsSubscribed) this._recalculateLyricsIndex()
         this._fading('seek')
         this._fading('trackEndSchedule', { startPosition: this.position })
@@ -1488,6 +1507,10 @@ export class Player {
     this.skipTrackSource = false
     this.currentLyrics = null
     this.lyricsLineIndex = -1
+    if (this._lyricsMarkerTimer) {
+      clearTimeout(this._lyricsMarkerTimer)
+      this._lyricsMarkerTimer = null
+    }
   }
 
   async _loadLyrics() {
@@ -1516,32 +1539,85 @@ export class Player {
       this.currentLyrics = payload
       this.lyricsLineIndex = -1
       this.emitEvent('LyricsFoundEvent', { lyrics: this.currentLyrics })
+      if (this._lyricsMarkerTimer) {
+        clearTimeout(this._lyricsMarkerTimer)
+        this._lyricsMarkerTimer = null
+      }
       this._recalculateLyricsIndex()
+      this._syncLyrics(true)
     } else {
       this.currentLyrics = null
       this.emitEvent('LyricsNotFoundEvent')
     }
   }
 
-  _syncLyrics() {
+  _syncLyrics(force = false) {
     if (!this.isLyricsSubscribed || !this.currentLyrics || !this.currentLyrics.lines) return
+    if (this._lyricsMarkerTimer && !force) return
 
-    const position = this._realPosition()
+    const stats = this.connection?.statistics
+    if (!stats) return
+    const timescale = this.filters.filters?.timescale || {
+      speed: 1.0,
+      rate: 1.0
+    }
+    const playbackSpeed = (timescale.speed || 1.0) * (timescale.rate || 1.0)
+    const packets = stats.packetsExpected ?? this._lyricsBasePackets
+    const deltaPackets = Math.max(0, packets - this._lyricsBasePackets)
+    const position = this._lyricsBasePosition + deltaPackets * 20 * playbackSpeed
     const lines = this.currentLyrics.lines
-    const nextIndex = this.lyricsLineIndex + 1
+    this._recalculateLyricsIndex(position, lines)
 
+    const nextIndex = this.lyricsLineIndex + 1
     if (nextIndex >= lines.length) return
 
-    if (position >= lines[nextIndex].timestamp) {
-      this._recalculateLyricsIndex()
-    }
+    const nextTimestamp = lines[nextIndex].timestamp
+    const delayMs = Math.max(0, (nextTimestamp - position) / playbackSpeed)
+
+    this._lyricsMarkerTimer = setTimeout(() => {
+      this._lyricsMarkerTimer = null
+      if (!this.isLyricsSubscribed || !this.currentLyrics || !this.currentLyrics.lines) return
+      const nowStats = this.connection?.statistics
+      if (!nowStats) return
+      const nowPackets = nowStats.packetsExpected ?? this._lyricsBasePackets
+      const nowDeltaPackets = Math.max(0, nowPackets - this._lyricsBasePackets)
+      const nowPosition =
+        this._lyricsBasePosition + nowDeltaPackets * 20 * playbackSpeed
+      const drift = nowPosition - nextTimestamp
+
+      if (drift < -15) {
+        this._syncLyrics(true)
+        return
+      }
+
+      this.lyricsLineIndex = nextIndex
+      this.emitEvent('LyricsLineEvent', {
+        lineIndex: nextIndex,
+        line: lines[nextIndex],
+        skipped: drift > 60
+      })
+      this._syncLyrics(true)
+    }, delayMs)
   }
 
-  _recalculateLyricsIndex() {
+  _recalculateLyricsIndex(positionOverride, linesOverride) {
     if (!this.currentLyrics || !this.currentLyrics.lines) return
 
-    const position = this._realPosition()
-    const lines = this.currentLyrics.lines
+    const lines = linesOverride || this.currentLyrics.lines
+    let position = positionOverride
+
+    if (position === undefined) {
+      const stats = this.connection?.statistics
+      if (!stats) return
+      const timescale = this.filters.filters?.timescale || {
+        speed: 1.0,
+        rate: 1.0
+      }
+      const playbackSpeed = (timescale.speed || 1.0) * (timescale.rate || 1.0)
+      const packets = stats.packetsExpected ?? this._lyricsBasePackets
+      const deltaPackets = Math.max(0, packets - this._lyricsBasePackets)
+      position = this._lyricsBasePosition + deltaPackets * 20 * playbackSpeed
+    }
 
     let foundIndex = -1
     // Efficiently find the current line
