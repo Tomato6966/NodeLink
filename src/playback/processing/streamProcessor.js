@@ -13,6 +13,7 @@ import WebmOpusDemuxer from '../demuxers/WebmOpus.js'
 import { FiltersManager } from './filtersManager.js'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.js'
 import { RingBuffer } from '../structs/RingBuffer.js'
+import { FadeTransformer } from './FadeTransformer.js'
 import { VolumeTransformer } from './VolumeTransformer.js'
 
 const AUDIO_CONFIG = Object.freeze({
@@ -229,6 +230,34 @@ class BaseAudioResource {
       filterManager.update(filters)
     } else {
       throw new Error('Filters not found in the pipeline.')
+    }
+  }
+
+  setFadeVolume(volume) {
+    if (!this.pipes) return
+
+    const fadeTransformer = this.pipes.find(
+      (p) => p instanceof FadeTransformer
+    )
+
+    if (fadeTransformer) {
+      fadeTransformer.setGain(volume)
+    } else {
+      throw new Error('FadeTransformer not found in the pipeline.')
+    }
+  }
+
+  fadeTo(volume, durationMs, curve) {
+    if (!this.pipes) return
+
+    const fadeTransformer = this.pipes.find(
+      (p) => p instanceof FadeTransformer
+    )
+
+    if (fadeTransformer) {
+      fadeTransformer.fadeTo(volume, durationMs, curve)
+    } else {
+      throw new Error('FadeTransformer not found in the pipeline.')
     }
   }
 
@@ -1762,8 +1791,14 @@ class StreamAudioResource extends BaseAudioResource {
     volume,
     audioMixer = null
   ) {
-    const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
     const filters = new FiltersManager(nodelink, initialFilters)
+    const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
+    const fadeTransformer = new FadeTransformer({
+      type: 's16le',
+      volume: 1.0,
+      sampleRate: AUDIO_CONFIG.sampleRate,
+      channels: AUDIO_CONFIG.channels
+    })
     const opusEncoder = new OpusEncoder({
       rate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels,
@@ -1772,17 +1807,14 @@ class StreamAudioResource extends BaseAudioResource {
 
     opusEncoder.setDTX(false)
 
-    const streams = [pcmStream, volumeTransformer]
-    this.pipes.push(volumeTransformer)
+    const streams = [pcmStream, filters, volumeTransformer, fadeTransformer]
+    this.pipes.push(filters, volumeTransformer, fadeTransformer)
 
     if (audioMixer && (nodelink.options?.mix?.enabled ?? true)) {
       const mixer = new MixerTransform(audioMixer)
       streams.push(mixer)
       this.pipes.push(mixer)
     }
-
-    streams.push(filters)
-    this.pipes.push(filters)
 
     // Inject Audio Interceptors (Low-level stream manipulation)
     if (nodelink.extensions?.audioInterceptors) {

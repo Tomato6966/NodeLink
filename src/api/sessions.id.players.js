@@ -30,6 +30,7 @@ const updatePlayerSchema = myzod
     volume: myzod.number().min(0).max(1000).optional(),
     paused: myzod.boolean().optional(),
     filters: filtersSchema.optional(),
+    fading: myzod.unknown().optional(),
     voice: voiceStateSchema.optional(),
     guildId: myzod.string().optional()
   })
@@ -51,6 +52,59 @@ const pathSchema = myzod.object({
     )
     .optional()
 })
+
+const sanitizeFadingConfig = (raw) => {
+  const safe = {
+    enabled: false,
+    trackStart: { duration: 0, curve: 'linear' },
+    trackEnd: { duration: 0, curve: 'linear' },
+    trackStop: { duration: 0, curve: 'linear' },
+    seek: { duration: 0, curve: 'linear' },
+    ducking: {
+      enabled: false,
+      duration: 0,
+      targetVolume: 0.3,
+      curve: 'linear'
+    }
+  }
+
+  if (!raw || typeof raw !== 'object') return safe
+  safe.enabled = raw.enabled === true
+
+  const updateSection = (key) => {
+    const section = raw[key]
+    if (!section || typeof section !== 'object') return
+    if (Number.isFinite(section.duration)) {
+      safe[key].duration = Math.max(0, section.duration)
+    }
+    if (typeof section.curve === 'string') {
+      safe[key].curve = section.curve
+    }
+  }
+
+  updateSection('trackStart')
+  updateSection('trackEnd')
+  updateSection('trackStop')
+  updateSection('seek')
+
+  if (raw.ducking && typeof raw.ducking === 'object') {
+    safe.ducking.enabled = raw.ducking.enabled === true
+    if (Number.isFinite(raw.ducking.duration)) {
+      safe.ducking.duration = Math.max(0, raw.ducking.duration)
+    }
+    if (Number.isFinite(raw.ducking.targetVolume)) {
+      safe.ducking.targetVolume = Math.max(
+        0,
+        Math.min(1, raw.ducking.targetVolume)
+      )
+    }
+    if (typeof raw.ducking.curve === 'string') {
+      safe.ducking.curve = raw.ducking.curve
+    }
+  }
+
+  return safe
+}
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const parts = parsedUrl.pathname.split('/')
@@ -424,6 +478,16 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             payload.filters
           )
           await session.players.setFilters(guildId, payload)
+        }
+
+        if (payload.fading !== undefined) {
+          logger(
+            'debug',
+            'PlayerUpdate',
+            `Setting fading for guild ${guildId}`
+          )
+          const sanitizedFading = sanitizeFadingConfig(payload.fading)
+          await session.players.setFading(guildId, sanitizedFading)
         }
 
         const playerJson = await session.players.toJSON(guildId)

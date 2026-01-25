@@ -341,6 +341,41 @@ export default class PlayerManager {
     return player.setFilters(filtersPayload)
   }
 
+  async setFading(guildId, fadingConfig) {
+    const interception = await this._runInterceptors(
+      'setFading',
+      guildId,
+      fadingConfig
+    )
+    if (interception?.handled) return interception.result
+
+    const session = this.nodelink.sessions.get(this.sessionId)
+    const playerKey = `${this.sessionId}:${guildId}`
+
+    if (this.isCluster) {
+      const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
+      if (!worker) throw new Error('Player not assigned to a worker.')
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          sessionId: this.sessionId,
+          guildId,
+          userId: session.userId,
+          command: 'setFading',
+          args: [fadingConfig]
+        }
+      )
+      if (result?.playerNotFound) {
+        throw new Error('Player not found.')
+      }
+      return result
+    }
+    const player = this.players.get(playerKey)
+    if (!player) throw new Error('Player not found locally.')
+    return player.setFading(fadingConfig)
+  }
+
   async updateVoice(guildId, voicePayload) {
     const interception = await this._runInterceptors(
       'updateVoice',

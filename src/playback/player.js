@@ -47,6 +47,10 @@ export class Player {
     this.lastManualReconnect = 0
     this.audioMixer = null
     this._initAudioMixer()
+    this.fading = this.nodelink.options?.audio?.fading
+    this._fadeTimers = { trackEnd: null, pause: null, stop: null }
+    this._isResuming = false
+    this._pendingTrackStartFade = false
 
     this.isLyricsSubscribed = false
     this.currentLyrics = null
@@ -292,6 +296,7 @@ export class Player {
       this.isPaused = false
 
       if (!wasResuming && !this._isRestoring) {
+        this._fading('trackStart')
         this._emitTrackStart()
       }
     } else if (state.status === 'paused') {
@@ -391,6 +396,7 @@ export class Player {
     this.position = 0
     this.currentLyrics = null
     this.lyricsLineIndex = -1
+    this._fading('reset')
   }
 
   async _emitTrackStart() {
@@ -720,6 +726,8 @@ export class Player {
     if (this.volumePercent !== 100) {
       resource.setVolume(this.volumePercent / 100)
     }
+    this._fading('trackStartArm', { resource })
+    this._fading('trackEndSchedule', { startPosition: startTime || 0 })
 
     this.setFilters(this.filters)
 
@@ -775,6 +783,7 @@ export class Player {
         }
 
         this.track = { encoded, info, endTime, userData, audioTrackId }
+        this._fading('reset')
 
         if (!this.voice.endpoint || !this.voice.token) {
           logger(
@@ -897,6 +906,8 @@ export class Player {
       if (result) {
         this.emitEvent(GatewayEvents.SEEK, { position: this.position })
         if (this.isLyricsSubscribed) this._recalculateLyricsIndex()
+        this._fading('seek')
+        this._fading('trackEndSchedule', { startPosition: this.position })
       }
       return result
     } finally {
@@ -975,6 +986,7 @@ export class Player {
     if (this.volumePercent !== 100) {
       resource.setVolume(this.volumePercent / 100)
     }
+    this._fading('seekPrepare', { resource })
 
     this.setFilters(this.filters)
 
@@ -1032,6 +1044,7 @@ export class Player {
       if (this.volumePercent !== 100) {
         resource.setVolume(this.volumePercent / 100)
       }
+      this._fading('seekPrepare', { resource })
       resource.setFilters(this.filters)
 
       const oldStream = this.connection.play(resource)
@@ -1140,6 +1153,7 @@ export class Player {
     if (this.volumePercent !== 100) {
       resource.setVolume(this.volumePercent / 100)
     }
+    this._fading('seekPrepare', { resource })
 
     this.setFilters(this.filters)
 
@@ -1160,6 +1174,7 @@ export class Player {
       if (this.destroying || !this.track) return false
       if (this.connection && this.connStatus !== 'destroyed') {
         if (this.connection.audioStream) {
+          if (this._fading('trackStop')) return true
           this.connection.stop(EndReasons.STOPPED)
         } else {
           this._emitTrackEnd(EndReasons.STOPPED)
@@ -1208,6 +1223,11 @@ export class Player {
     this.volumePercent = Math.max(0, Math.min(1000, level))
     this.connection?.audioStream?.setVolume(this.volumePercent / 100)
     this.emitEvent(GatewayEvents.VOLUME_CHANGED, { volume: this.volumePercent })
+    return true
+  }
+
+  setFading(config) {
+    this.fading = config
     return true
   }
 
@@ -1553,6 +1573,7 @@ export class Player {
       guildId: this.guildId,
       track: this.track,
       volume: this.volumePercent,
+      fading: this.fading,
       paused: this.isPaused,
       filters: this.filters,
       state: {
@@ -1563,5 +1584,119 @@ export class Player {
       },
       voice: { ...this.voice }
     }
+  }
+
+  _fading(action, payload = {}) {
+    const timers = this._fadeTimers
+    if (!timers) return false
+
+    if (action === 'reset') {
+      if (timers.trackEnd) clearTimeout(timers.trackEnd)
+      if (timers.pause) clearTimeout(timers.pause)
+      if (timers.stop) clearTimeout(timers.stop)
+      timers.trackEnd = null
+      timers.pause = null
+      timers.stop = null
+      this._pendingTrackStartFade = false
+      return false
+    }
+
+    if (action === 'trackEndSchedule' && timers.trackEnd) {
+      clearTimeout(timers.trackEnd)
+      timers.trackEnd = null
+    }
+
+    if (!this.fading || this.fading.enabled !== true) return false
+
+    let section = null
+    if (action === 'trackStart' || action === 'trackStartArm')
+      section = this.fading.trackStart
+    else if (action === 'trackEndSchedule') section = this.fading.trackEnd
+    else if (action === 'trackStop') section = this.fading.trackStop
+    else if (action === 'seek') section = this.fading.seek
+    else if (action === 'seekPrepare') section = this.fading.seek
+    else return false
+
+    if (
+      !section ||
+      !Number.isFinite(section.duration) ||
+      section.duration <= 0
+    )
+      return false
+
+    if (action === 'trackStartArm') {
+      const resource = payload.resource
+      if (!resource?.setFadeVolume) return false
+      resource.setFadeVolume(0)
+      this._pendingTrackStartFade = true
+      return true
+    }
+
+    if (action === 'trackStart') {
+      if (!this._pendingTrackStartFade) return false
+      const stream = payload.resource || this.connection?.audioStream
+      if (!stream?.fadeTo) return false
+      this._pendingTrackStartFade = false
+      stream.fadeTo(1, section.duration, section.curve)
+      return true
+    }
+
+    if (action === 'seekPrepare') {
+      const resource = payload.resource
+      if (!resource?.setFadeVolume) return false
+      resource.setFadeVolume(0)
+      return true
+    }
+
+    if (action === 'seek') {
+      const stream = this.connection?.audioStream
+      if (!stream?.setFadeVolume) return false
+      stream.setFadeVolume(0)
+      stream.fadeTo(1, section.duration, section.curve)
+      return true
+    }
+
+    if (action === 'trackStop') {
+      const stream = this.connection?.audioStream
+      if (!stream?.fadeTo) return false
+      if (timers.stop) clearTimeout(timers.stop)
+      stream.fadeTo(0, section.duration, section.curve)
+      timers.stop = setTimeout(() => {
+        this.connection?.stop(EndReasons.STOPPED)
+        if (timers.stop) {
+          clearTimeout(timers.stop)
+          timers.stop = null
+        }
+      }, section.duration)
+      return true
+    }
+
+    if (action === 'trackEndSchedule') {
+      if (!this.track?.info) return false
+      const total =
+        this.track.endTime && this.track.endTime > 0
+          ? this.track.endTime
+          : this.track.info.length || 0
+      if (!Number.isFinite(total) || total <= 0) return false
+
+      const startPosition = payload.startPosition || 0
+      const remaining = Math.max(0, total - startPosition)
+      const fadeDuration = Math.min(section.duration, remaining)
+      const delay = Math.max(0, remaining - fadeDuration)
+
+      timers.trackEnd = setTimeout(() => {
+        const stream = this.connection?.audioStream
+        if (stream?.fadeTo) {
+          stream.fadeTo(0, fadeDuration, section.curve)
+        }
+        if (timers.trackEnd) {
+          clearTimeout(timers.trackEnd)
+          timers.trackEnd = null
+        }
+      }, delay)
+      return true
+    }
+
+    return false
   }
 }

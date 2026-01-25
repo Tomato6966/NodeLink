@@ -374,7 +374,35 @@ export default {
   audio: {
     quality: 'high', // high, medium, low, lowest
     encryption: 'aead_aes256_gcm_rtpsize',
-    resamplingQuality: 'best' // best, medium, fastest, zero order holder, linear
+    resamplingQuality: 'best', // best, medium, fastest, zero order holder, linear
+    fading: {
+      enabled: false,
+      // curve meanings:
+      // linear = constant rate, exponential = slow start then faster,
+      // logarithmic = fast start then slower, s-curve = smooth start/end
+      trackStart: {
+        duration: 0,
+        curve: 'linear'
+      },
+      trackEnd: {
+        duration: 0,
+        curve: 'linear'
+      },
+      trackStop: {
+        duration: 0,
+        curve: 'linear'
+      },
+      seek: {
+        duration: 0,
+        curve: 'linear'
+      },
+      ducking: {
+        enabled: false,
+        duration: 0,
+        targetVolume: 0.3,
+        curve: 'linear'
+      }
+    }
   },
   voiceReceive: {
     enabled: false,
