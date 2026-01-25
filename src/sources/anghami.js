@@ -4,7 +4,7 @@ export default class AnghamiSource {
   constructor(nodelink) {
     this.nodelink = nodelink
     this.config = nodelink.options
-    this.searchTerms = ['anghamisearch']
+    this.searchTerms = ['agsearch']
     this.patterns = [
       /^https?:\/\/(?:play\.|www\.)?anghami\.com\/(?:song|album|playlist|artist)\/(\d+)/
     ]
@@ -335,18 +335,19 @@ export default class AnghamiSource {
   }
 
   buildTrack(item) {
-    const artworkUrl = item.coverArt 
-      ? `https://angartwork.akamaized.net/?id=${item.coverArt}&size=640`
+    const artworkId = item.coverArt || item.AlbumArt || item.cover
+    const artworkUrl = artworkId 
+      ? `https://artwork.anghcdn.co/?id=${artworkId}&size=640`
       : null
 
     const trackInfo = {
       identifier: item.id.toString(),
       isSeekable: true,
-      author: item.artist,
-      length: Math.round(parseFloat(item.duration) * 1000),
+      author: item.artist || item.artistName || 'Unknown Artist',
+      length: Math.round(parseFloat(item.duration || 0) * 1000),
       isStream: false,
       position: 0,
-      title: item.title,
+      title: item.title || item.name,
       uri: `https://play.anghami.com/song/${item.id}`,
       artworkUrl: artworkUrl,
       isrc: null,
