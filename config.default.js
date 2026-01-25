@@ -111,6 +111,10 @@ export default {
     amazonmusic: {
       enabled: true
     },
+    anghami: {
+      enabled: false,
+      cookies: '' // Optional: Useful for accessing restricted or private content
+    },
     rss: {
       enabled: true
     },
