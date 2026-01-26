@@ -1566,7 +1566,14 @@ import WorkerManager from './managers/workerManager.js'
 
 if (clusterEnabled && cluster.isPrimary) {
   if (config.sources?.youtube?.getOAuthToken) {
+    // dynamicly import OAuth (if enabled)
+    const OAuth = (await import('./sources/youtube/OAuth.js').catch((e) => {
+      logger('error', 'youtube', `\x1b[1m\x1b[31mOAuth class not found Error: ${e.message}\x1b[0m`)
+      process.exit(1)
+    })).default
+
     const mockNodelink = { options: config }
+    mockNodelink.credentialManager = new CredentialManager(mockNodelink)
     const validator = new OAuth(mockNodelink)
     await validator.validateCurrentTokens()
 
