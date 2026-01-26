@@ -514,6 +514,12 @@ export class Player {
           eternalbox: data
         })
       })
+      fetched.stream.on('icyMetadata', (data) => {
+        this.emitEvent(GatewayEvents.STREAM_METADATA, {
+          track: this.holoTrack || this.track,
+          stream: data
+        })
+      })
     }
     const resource = createAudioResource(
       fetched.stream,

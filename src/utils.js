@@ -972,11 +972,20 @@ async function _internalHttp1Request(urlString, options = {}) {
         res.resume()
         const nextUrl = new URL(respHeaders.location, currentUrl).href
         const isGetRedirect = [301, 302, 303].includes(statusCode)
+        let nextMethod = method
+        let nextBody = body
+        if (method === 'HEAD') {
+          nextMethod = 'HEAD'
+          nextBody = undefined
+        } else if (isGetRedirect) {
+          nextMethod = 'GET'
+          nextBody = undefined
+        }
         const nextOptions = {
           ...options,
           _redirectsFollowed: _redirectsFollowed + 1,
-          method: isGetRedirect ? 'GET' : method,
-          body: isGetRedirect ? undefined : body
+          method: nextMethod,
+          body: nextBody
         }
         resolve(http1makeRequest(nextUrl, nextOptions))
         return
@@ -1242,7 +1251,10 @@ async function makeRequest(urlString, options, nodelink) {
           const newLocation = new URL(headers.location, urlString).href
           let nextMethod = method
           let nextBody = body
-          if (
+          if (method === 'HEAD') {
+            nextMethod = 'HEAD'
+            nextBody = undefined
+          } else if (
             (statusCode === 301 || statusCode === 302) &&
             ['POST', 'PUT', 'DELETE'].includes(method)
           ) {

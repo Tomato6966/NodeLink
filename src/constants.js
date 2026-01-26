@@ -27,7 +27,8 @@ export const GatewayEvents = {
   MIX_STARTED: 'MixStartedEvent',
   MIX_ENDED: 'MixEndedEvent',
   ETERNALBOX_INFO: 'EternalBoxInfoEvent',
-  ETERNALBOX_JUMP: 'EternalBoxJumpEvent'
+  ETERNALBOX_JUMP: 'EternalBoxJumpEvent',
+  STREAM_METADATA: 'StreamMetadataEvent'
 }
 export const EndReasons = {
   STOPPED: 'stopped',
