@@ -346,6 +346,9 @@ export default {
     lastfm: {
       enabled: true
     },
+    letrasmus: {
+      enabled: true
+    },
     yandexmusic: {
       enabled: true,
       accessToken: '',
@@ -369,6 +372,9 @@ export default {
       // signatureSecret: ''
     },
     lrclib: {
+      enabled: true
+    },
+    letrasmus: {
       enabled: true
     },
     bilibili: {
