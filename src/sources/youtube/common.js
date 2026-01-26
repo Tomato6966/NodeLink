@@ -985,6 +985,16 @@ export async function buildTrack(
       FALLBACK_TITLE
     )
 
+    if (title === FALLBACK_TITLE && Array.isArray(renderer.flexColumns)) {
+      title = safeString(
+        getRunsText(
+          renderer.flexColumns[0]?.musicResponsiveListItemFlexColumnRenderer
+            ?.text?.runs
+        ),
+        FALLBACK_TITLE
+      )
+    }
+
     const subtitleRuns = getItemValue(renderer, ['subtitle.runs'])
     const longBylineRuns = getItemValue(renderer, ['longBylineText.runs'])
     const shortBylineRuns = getItemValue(renderer, ['shortBylineText.runs'])
@@ -995,6 +1005,14 @@ export async function buildTrack(
       author = safeString(longBylineRuns[0]?.text, FALLBACK_AUTHOR)
     } else if (Array.isArray(shortBylineRuns) && shortBylineRuns.length > 0) {
       author = safeString(shortBylineRuns[0]?.text, FALLBACK_AUTHOR)
+    }
+
+    if (author === FALLBACK_AUTHOR && Array.isArray(renderer.flexColumns)) {
+      author = safeString(
+        renderer.flexColumns[1]?.musicResponsiveListItemFlexColumnRenderer?.text
+          ?.runs?.[0]?.text,
+        FALLBACK_AUTHOR
+      )
     }
 
     let lengthText = null
@@ -1009,6 +1027,20 @@ export async function buildTrack(
       lengthText =
         getItemValue(renderer, ['lengthText.simpleText']) ||
         getRunsText(getItemValue(renderer, ['lengthText.runs']))
+    }
+
+    if (!lengthText && (Array.isArray(renderer.flexColumns) || Array.isArray(renderer.fixedColumns))) {
+      const columns = [...(renderer.flexColumns || []), ...(renderer.fixedColumns || [])]
+      for (const column of columns) {
+        const textObj = column.musicResponsiveListItemFlexColumnRenderer?.text || column.musicResponsiveListItemFixedColumnRenderer?.text
+        if (Array.isArray(textObj?.runs)) {
+          const found = textObj.runs.find((run) => run.text && /^\d{1,2}:\d{2}(:\d{2})?$/.test(run.text))
+          if (found) {
+            lengthText = found.text
+            break
+          }
+        }
+      }
     }
 
     const parsed = parseLengthAndStream(
