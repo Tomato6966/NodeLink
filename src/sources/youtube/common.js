@@ -1858,7 +1858,10 @@ export class BaseClient {
     }
 
     const playlistTitle =
-      contentsRoot.playlist?.playlist?.title || 'Unknown Playlist'
+      contentsRoot.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]
+        ?.tabRenderer?.content?.musicQueueRenderer?.header?.musicQueueHeaderRenderer?.subtitle?.runs?.[0]?.text ||
+      contentsRoot.playlist?.playlist?.title ||
+      'Unknown Playlist'
 
     return {
       loadType: 'playlist',
