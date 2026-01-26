@@ -31,6 +31,8 @@ export class Player {
 
     this.track = null
     this.holoTrack = null
+    this.nextTrack = null
+    this.nextResource = null
     this.isPaused = false
     this.volumePercent = this.nodelink.options?.defaultVolume ?? 100
     this.filters = {}
@@ -270,6 +272,25 @@ export class Player {
         EndReasons.LOAD_FAILED
       ].includes(state.reason)
     ) {
+      if (state.reason === EndReasons.FINISHED && this.nextResource) {
+        const resource = this.nextResource
+        const nextTrack = this.nextTrack
+
+        this._emitTrackEnd(EndReasons.GAPLESS)
+
+        this.track = nextTrack
+        this.nextTrack = null
+        this.nextResource = null
+
+        this.position = 0
+        this._lyricsBasePosition = 0
+        this._lyricsBasePackets = 0
+
+        this.connection.play(resource)
+
+        return
+      }
+
       if ((this.isUpdatingTrack || this._isSeeking) && state.reason === 'finished') {
         logger(
           'debug',
@@ -395,6 +416,12 @@ export class Player {
   }
 
   _resetTrack() {
+    if (this.nextResource) {
+      this.nextResource.destroy()
+      this.nextResource = null
+      this.nextTrack = null
+    }
+
     this.track = null
     this.holoTrack = null
     this.isPaused = false
@@ -1197,6 +1224,13 @@ export class Player {
     this.isUpdatingTrack = true
     try {
       if (this.destroying || !this.track) return false
+
+      if (this.nextResource) {
+        this.nextResource.destroy()
+        this.nextResource = null
+        this.nextTrack = null
+      }
+
       if (this.connection && this.connStatus !== 'destroyed') {
         if (this.connection.audioStream) {
           if (this._fading('trackStop')) return true
@@ -1212,6 +1246,46 @@ export class Player {
       return true
     } finally {
       this.isUpdatingTrack = false
+    }
+  }
+
+  async preload(payload) {
+    if (this.destroying) return false
+
+    if (this.nextResource) {
+      this.nextResource.destroy()
+      this.nextResource = null
+      this.nextTrack = null
+    }
+
+    try {
+      const trackInfo = {
+        ...payload.info,
+        audioTrackId: payload.audioTrackId
+      }
+
+      const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+      if (urlData.exception) return false
+
+      const fetched = await this._fetchResource(payload.info, urlData, 0)
+      if (fetched.exception) return false
+
+      this.nextTrack = payload
+      this.nextResource = fetched.stream
+
+      if (this.volumePercent !== 100) {
+        this.nextResource.setVolume(this.volumePercent / 100)
+      }
+      this.nextResource.setFilters(this.filters)
+
+      return true
+    } catch (err) {
+      logger(
+        'error',
+        'Player',
+        `Preload failed for guild ${this.guildId}: ${err.message}`
+      )
+      return false
     }
   }
 

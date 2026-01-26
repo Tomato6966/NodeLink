@@ -35,7 +35,8 @@ export const EndReasons = {
   FINISHED: 'finished',
   LOAD_FAILED: 'loadFailed',
   REPLACED: 'replaced',
-  CLEANUP: 'cleanup'
+  CLEANUP: 'cleanup',
+  GAPLESS: 'gapless'
 }
 
 export const SupportedFormats = {

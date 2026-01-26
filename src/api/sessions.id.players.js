@@ -24,6 +24,7 @@ const updatePlayerTrackSchema = myzod
 const updatePlayerSchema = myzod
   .object({
     track: updatePlayerTrackSchema.optional(),
+    nextTrack: updatePlayerTrackSchema.optional(),
     encodedTrack: myzod.string().nullable().optional(),
     position: myzod.number().min(0).optional(),
     endTime: myzod.number().min(0).nullable().optional(),
@@ -261,7 +262,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             logger(
               'debug',
               'PlayerUpdate',
-              `Voice payload for guild ${guildId} is identical. Skipping.`
+              `Voice payload for guild ${this.guildId} is identical. Skipping.`
             )
           } else {
             logger(
@@ -278,6 +279,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         const userData = payload.track?.userData
 
         const trackPayload = payload.track
+        const nextTrackPayload = payload.nextTrack
         const legacyEncodedTrack = payload.encodedTrack
 
         if (legacyEncodedTrack) {
@@ -385,6 +387,46 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               encoded: legacyEncodedTrack,
               info: decodedTrack.info
             }
+          }
+        }
+
+        if (nextTrackPayload) {
+          let trackToPreload = null
+
+          if (nextTrackPayload.encoded !== undefined) {
+            const decodedTrack = decodeTrack(nextTrackPayload.encoded)
+            if (decodedTrack) {
+              trackToPreload = {
+                encoded: nextTrackPayload.encoded,
+                info: decodedTrack.info,
+                audioTrackId:
+                  nextTrackPayload.language || nextTrackPayload.audioTrackId || null,
+                userData: nextTrackPayload.userData
+              }
+            }
+          } else if (nextTrackPayload.identifier) {
+            if (nodelink.loadTrack) {
+              const loadResult = await nodelink.loadTrack(nextTrackPayload.identifier)
+              if (loadResult.loadType === 'track') {
+                trackToPreload = {
+                  encoded: loadResult.data.encoded,
+                  info: loadResult.data.info,
+                  audioTrackId:
+                    nextTrackPayload.language || nextTrackPayload.audioTrackId || null,
+                  userData: nextTrackPayload.userData
+                }
+              }
+            }
+          }
+
+          if (trackToPreload) {
+            logger(
+              'debug',
+              'PlayerUpdate',
+              `Preloading track for guild ${guildId}:`,
+              { track: trackToPreload.info }
+            )
+            await session.players.preload(guildId, trackToPreload)
           }
         }
 
