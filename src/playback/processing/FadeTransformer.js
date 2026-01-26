@@ -61,28 +61,22 @@ export class FadeTransformer extends Transform {
     }
   }
 
-  _transform(chunk, _encoding, callback) {
+  process(chunk) {
     const sampleCount = chunk.length / 2
-    if (!sampleCount) {
-      this.push(chunk)
-      return callback()
-    }
+    if (!sampleCount) return chunk
 
     let gainStart = this.currentGain
     let gainEnd = this.currentGain
 
     if (this.fade) {
       const { startGain, targetGain, durationMs, elapsedMs, curve } = this.fade
-      const chunkDurationMs =
-        (sampleCount / this.channels / this.sampleRate) * 1000
+      const chunkDurationMs = (sampleCount / this.channels / this.sampleRate) * 1000
       const nextElapsed = Math.min(durationMs, elapsedMs + chunkDurationMs)
       const progressStart = durationMs === 0 ? 1 : elapsedMs / durationMs
       const progressEnd = durationMs === 0 ? 1 : nextElapsed / durationMs
 
-      gainStart =
-        startGain + (targetGain - startGain) * _applyCurve(progressStart, curve)
-      gainEnd =
-        startGain + (targetGain - startGain) * _applyCurve(progressEnd, curve)
+      gainStart = startGain + (targetGain - startGain) * _applyCurve(progressStart, curve)
+      gainEnd = startGain + (targetGain - startGain) * _applyCurve(progressEnd, curve)
 
       this.fade.elapsedMs = nextElapsed
       if (nextElapsed >= durationMs) {
@@ -93,26 +87,29 @@ export class FadeTransformer extends Transform {
       }
     }
 
-    if (gainStart === 1 && gainEnd === 1) {
-      this.push(chunk)
-      return callback()
-    }
+    if (gainStart === 1 && gainEnd === 1) return chunk
 
-    const samples = new Int16Array(
-      chunk.buffer,
-      chunk.byteOffset,
-      sampleCount
-    )
+    const view = chunk.byteOffset % 2 === 0
+      ? new Int16Array(chunk.buffer, chunk.byteOffset, sampleCount)
+      : new Int16Array(Uint8Array.prototype.slice.call(chunk).buffer)
+
     const step = sampleCount > 1 ? (gainEnd - gainStart) / (sampleCount - 1) : 0
 
-    for (let i = 0; i < samples.length; i++) {
+    for (let i = 0; i < view.length; i++) {
       const gain = gainStart + step * i
-      const value = samples[i] * gain
-      samples[i] =
-        value < -32768 ? -32768 : value > 32767 ? 32767 : Math.round(value)
+      const value = view[i] * gain
+      view[i] = value < -32768 ? -32768 : value > 32767 ? 32767 : (value | 0)
     }
 
-    this.push(chunk)
+    return chunk.byteOffset % 2 === 0 ? chunk : Buffer.from(view.buffer)
+  }
+
+  flush() {
+    return Buffer.alloc(0)
+  }
+
+  _transform(chunk, _encoding, callback) {
+    this.push(this.process(chunk))
     callback()
   }
 }

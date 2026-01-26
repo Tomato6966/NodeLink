@@ -34,7 +34,9 @@ const FILTER_CLASSES = {
   echo: Echo,
   phaser: Phaser,
   timescale: Timescale,
-  spatial: Spatial
+  spatial: Spatial,
+  reverb: Reverb,
+  flanger: Flanger
 }
 
 export class FiltersManager extends Transform {
@@ -43,26 +45,6 @@ export class FiltersManager extends Transform {
     this.nodelink = nodelink
     this.activeFilters = []
     this.filterInstances = {}
-
-    this.availableFilters = {
-      tremolo: new Tremolo(),
-      vibrato: new Vibrato(),
-      lowpass: new Lowpass(),
-      highpass: new Highpass(),
-      rotation: new Rotation(),
-      karaoke: new Karaoke(),
-      distortion: new Distortion(),
-      channelMix: new ChannelMix(),
-      equalizer: new Equalizer(),
-      chorus: new Chorus(),
-      compressor: new Compressor(),
-      echo: new Echo(),
-      phaser: new Phaser(),
-      timescale: new Timescale(),
-      spatial: new Spatial(),
-      reverb: new Reverb(),
-      flanger: new Flanger()
-    }
 
     if (this.nodelink.extensions?.filters) {
       for (const [name, filter] of this.nodelink.extensions.filters) {
@@ -95,50 +77,39 @@ export class FiltersManager extends Transform {
     }
 
     this.activeFilters.sort((a, b) => (a.priority || 99) - (b.priority || 99))
-
-    if (this.activeFilters.length > 0) {
-      logger(
-        'debug',
-        'Filters',
-        `Active filter order: ${this.activeFilters.map((f) => f.constructor.name).join(', ')}`
-      )
-    }
   }
 
-  _transform(chunk, _encoding, callback) {
-    if (this.activeFilters.length === 0) {
-      this.push(chunk)
-      return callback()
-    }
+  process(chunk) {
+    if (this.activeFilters.length === 0) return chunk
 
-    let processedChunk = chunk
+    let processed = chunk
     for (const filter of this.activeFilters) {
-      processedChunk = filter.process(processedChunk)
+      processed = filter.process(processed)
     }
-
-    if (processedChunk && processedChunk.length > 0) {
-      this.push(processedChunk)
-    }
-
-    callback()
+    return processed
   }
 
-  _flush(callback) {
-    let remainingChunk = Buffer.alloc(0)
-
+  flush() {
+    let remaining = Buffer.alloc(0)
     for (const filter of this.activeFilters) {
       if (typeof filter.flush === 'function') {
         const flushed = filter.flush()
         if (flushed && flushed.length > 0) {
-          remainingChunk = Buffer.concat([remainingChunk, flushed])
+          remaining = Buffer.concat([remaining, flushed])
         }
       }
     }
+    return remaining
+  }
 
-    if (remainingChunk.length > 0) {
-      this.push(remainingChunk)
-    }
+  _transform(chunk, _encoding, callback) {
+    this.push(this.process(chunk))
+    callback()
+  }
 
+  _flush(callback) {
+    const remaining = this.flush()
+    if (remaining.length > 0) this.push(remaining)
     callback()
   }
 }

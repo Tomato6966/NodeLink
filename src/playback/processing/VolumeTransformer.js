@@ -1,6 +1,6 @@
 import { Transform } from 'node:stream'
 
-const FADE_FRAMES = 50 // 50 frames * 20ms/frame = 1 second fade
+const FADE_FRAMES = 50 
 
 const VOLUME_LUT = new Int32Array(151)
 for (let i = 0; i <= 150; i++) {
@@ -31,53 +31,52 @@ export class VolumeTransformer extends Transform {
 
   setVolume(volume) {
     if (this.targetVolume === volume) return
-
     this.startFadeVolume = this.currentVolume
     this.targetVolume = volume
     this.fadeProgress = 0
   }
 
-  _transform(chunk, _encoding, callback) {
-    let volumeToApply = this.currentVolume
+  process(chunk) {
+    const sampleCount = chunk.length / 2
+    if (!sampleCount) return chunk
 
+    let volumeToApply = this.currentVolume
     if (this.fadeProgress < FADE_FRAMES) {
       const progress = this.fadeProgress / FADE_FRAMES
-      volumeToApply =
-        this.startFadeVolume +
-        (this.targetVolume - this.startFadeVolume) * progress
+      volumeToApply = this.startFadeVolume + (this.targetVolume - this.startFadeVolume) * progress
       this.fadeProgress++
     } else {
       volumeToApply = this.targetVolume
     }
-
     this.currentVolume = volumeToApply
 
     const volumePercent = volumeToApply * 100
-
-    if (Math.round(volumePercent) === 100) {
-      this.push(chunk)
-      return callback()
-    }
+    if (Math.round(volumePercent) === 100) return chunk
 
     if (volumePercent !== this.lastVolumePercent) {
       this._setupMultipliers(volumePercent)
       this.lastVolumePercent = volumePercent
     }
 
-    const samples = new Int16Array(
-      chunk.buffer,
-      chunk.byteOffset,
-      chunk.length / 2
-    )
     const multiplier = this.integerMultiplier
+    const view = chunk.byteOffset % 2 === 0 
+      ? new Int16Array(chunk.buffer, chunk.byteOffset, sampleCount)
+      : new Int16Array(Uint8Array.prototype.slice.call(chunk).buffer)
 
-    for (let i = 0; i < samples.length; i++) {
-      const value = (samples[i] * multiplier) / 10000
-      samples[i] =
-        value < -32768 ? -32768 : value > 32767 ? 32767 : Math.round(value)
+    for (let i = 0; i < view.length; i++) {
+      const val = (view[i] * multiplier) / 10000
+      view[i] = val < -32768 ? -32768 : val > 32767 ? 32767 : (val | 0)
     }
 
-    this.push(chunk)
+    return chunk.byteOffset % 2 === 0 ? chunk : Buffer.from(view.buffer)
+  }
+
+  flush() {
+    return Buffer.alloc(0)
+  }
+
+  _transform(chunk, _encoding, callback) {
+    this.push(this.process(chunk))
     callback()
   }
 }

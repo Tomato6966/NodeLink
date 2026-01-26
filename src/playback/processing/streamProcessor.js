@@ -15,6 +15,7 @@ import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.js'
 import { RingBuffer } from '../structs/RingBuffer.js'
 import { FadeTransformer } from './FadeTransformer.js'
 import { VolumeTransformer } from './VolumeTransformer.js'
+import { FlowController } from './FlowController.js'
 
 const AUDIO_CONFIG = Object.freeze({
   sampleRate: 48000,
@@ -210,6 +211,12 @@ class BaseAudioResource {
   setVolume(volume) {
     if (!this.pipes) return
 
+    const flowController = this.pipes.find((p) => p instanceof FlowController)
+    if (flowController) {
+      flowController.setVolume(volume)
+      return
+    }
+
     const volumeTransformer = this.pipes.find(
       (p) => p instanceof VolumeTransformer
     )
@@ -224,6 +231,12 @@ class BaseAudioResource {
   setFilters(filters) {
     if (!this.pipes) return
 
+    const flowController = this.pipes.find((p) => p instanceof FlowController)
+    if (flowController) {
+      flowController.setFilters(filters)
+      return
+    }
+
     const filterManager = this.pipes.find((p) => p instanceof FiltersManager)
 
     if (filterManager) {
@@ -235,6 +248,12 @@ class BaseAudioResource {
 
   setFadeVolume(volume) {
     if (!this.pipes) return
+
+    const flowController = this.pipes.find((p) => p instanceof FlowController)
+    if (flowController) {
+      flowController.setFadeVolume(volume)
+      return
+    }
 
     const fadeTransformer = this.pipes.find(
       (p) => p instanceof FadeTransformer
@@ -249,6 +268,12 @@ class BaseAudioResource {
 
   fadeTo(volume, durationMs, curve) {
     if (!this.pipes) return
+
+    const flowController = this.pipes.find((p) => p instanceof FlowController)
+    if (flowController) {
+      flowController.fadeTo(volume, durationMs, curve)
+      return
+    }
 
     const fadeTransformer = this.pipes.find(
       (p) => p instanceof FadeTransformer
@@ -1587,31 +1612,6 @@ class FLVToAACStream extends Transform {
   }
 }
 
-class MixerTransform extends Transform {
-  constructor(audioMixer) {
-    super()
-    this.audioMixer = audioMixer
-  }
-
-  _transform(mainChunk, _encoding, callback) {
-    if (
-      !this.audioMixer ||
-      !this.audioMixer.enabled ||
-      !this.audioMixer.hasActiveLayers()
-    ) {
-      return callback(null, mainChunk)
-    }
-
-    try {
-      const layerChunks = this.audioMixer.readLayerChunks(mainChunk.length)
-      const mixed = this.audioMixer.mixBuffers(mainChunk, layerChunks)
-      callback(null, mixed)
-    } catch (_error) {
-      callback(null, mainChunk)
-    }
-  }
-}
-
 class StreamAudioResource extends BaseAudioResource {
   constructor(
     stream,
@@ -1799,6 +1799,9 @@ class StreamAudioResource extends BaseAudioResource {
       sampleRate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels
     })
+    
+    const flowController = new FlowController(filters, volumeTransformer, fadeTransformer, audioMixer)
+    
     const opusEncoder = new OpusEncoder({
       rate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels,
@@ -1807,14 +1810,8 @@ class StreamAudioResource extends BaseAudioResource {
 
     opusEncoder.setDTX(false)
 
-    const streams = [pcmStream, filters, volumeTransformer, fadeTransformer]
-    this.pipes.push(filters, volumeTransformer, fadeTransformer)
-
-    if (audioMixer && (nodelink.options?.mix?.enabled ?? true)) {
-      const mixer = new MixerTransform(audioMixer)
-      streams.push(mixer)
-      this.pipes.push(mixer)
-    }
+    const streams = [pcmStream, flowController]
+    this.pipes.push(flowController)
 
     // Inject Audio Interceptors (Low-level stream manipulation)
     if (nodelink.extensions?.audioInterceptors) {
