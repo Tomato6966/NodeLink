@@ -6,7 +6,7 @@ import {
   YOUTUBE_CONSTANTS
 } from '../common.js'
 
-export default class Music extends BaseClient {
+export default class WebRemix extends BaseClient {
   constructor(nodelink, oauth) {
     super(nodelink, 'WEB_REMIX', oauth)
   }
@@ -228,7 +228,7 @@ export default class Music extends BaseClient {
   async getTrackUrl(_decodedTrack, _context, _cipherManager) {
     return {
       exception: {
-        message: 'Music client does not provide direct track URLs.',
+        message: 'WebRemix client does not provide direct track URLs.',
         severity: 'common'
       }
     }
