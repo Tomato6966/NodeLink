@@ -384,6 +384,11 @@ export default {
       enabled: true
     }
   },
+  meanings: {
+    letrasmus: {
+      enabled: true
+    }
+  },
   audio: {
     quality: 'high', // high, medium, low, lowest
     encryption: 'aead_aes256_gcm_rtpsize',

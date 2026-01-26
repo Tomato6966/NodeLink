@@ -163,6 +163,7 @@ class NodelinkServer extends EventEmitter {
     this.sessions = new sessionManager(this, PlayerManagerClass)
     this.sources = null
     this.lyrics = null
+    this.meanings = null
 
     this._sourceInitPromise = this._initSources(isClusterPrimary, options)
 
@@ -226,13 +227,15 @@ class NodelinkServer extends EventEmitter {
 
   async _initSources(isClusterPrimary, _options) {
     if (!isClusterPrimary) {
-      const [{ default: sourceMan }, { default: lyricsMan }] =
+      const [{ default: sourceMan }, { default: lyricsMan }, { default: meaningMan }] =
         await Promise.all([
           import('./managers/sourceManager.js'),
-          import('./managers/lyricsManager.js')
+          import('./managers/lyricsManager.js'),
+          import('./managers/meaningManager.js')
         ])
       this.sources = new sourceMan(this)
       this.lyrics = new lyricsMan(this)
+      this.meanings = new meaningMan(this)
     }
   }
 
@@ -1543,6 +1546,7 @@ class NodelinkServer extends EventEmitter {
     if (this.sources && (!startOptions.isClusterPrimary || !specEnabled)) {
       await this.sources.loadFolder()
       await this.lyrics.loadFolder()
+      await this.meanings.loadFolder()
     }
 
     this._setupSocketEvents()

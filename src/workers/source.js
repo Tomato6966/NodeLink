@@ -213,6 +213,7 @@ if (isMainThread) {
     { createPCMStream },
     { default: SourceManager },
     { default: LyricsManager },
+    { default: MeaningManager },
     { default: CredentialManager },
     { default: TrackCacheManager },
     { default: RoutePlannerManager },
@@ -221,6 +222,7 @@ if (isMainThread) {
     import('../playback/processing/streamProcessor.js'),
     import('../managers/sourceManager.js'),
     import('../managers/lyricsManager.js'),
+    import('../managers/meaningManager.js'),
     import('../managers/credentialManager.js'),
     import('../managers/trackCacheManager.js'),
     import('../managers/routePlannerManager.js'),
@@ -233,11 +235,13 @@ if (isMainThread) {
   nodelink.routePlanner = new RoutePlannerManager(nodelink)
   nodelink.sources = new SourceManager(nodelink)
   nodelink.lyrics = new LyricsManager(nodelink)
+  nodelink.meanings = new MeaningManager(nodelink)
 
   await nodelink.credentialManager.load()
   await nodelink.trackCacheManager.load()
   await nodelink.sources.loadFolder()
   await nodelink.lyrics.loadFolder()
+  await nodelink.meanings.loadFolder()
 
   const activeChats = new Map()
 
@@ -412,6 +416,12 @@ if (isMainThread) {
           break
         case 'loadLyrics':
           result = await nodelink.lyrics.loadLyrics(
+            { info: payload.decodedTrackInfo },
+            payload.language
+          )
+          break
+        case 'loadMeaning':
+          result = await nodelink.meanings.loadMeaning(
             { info: payload.decodedTrackInfo },
             payload.language
           )
