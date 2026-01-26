@@ -7,6 +7,95 @@ import {
 
 const SOLR_ENDPOINT = 'https://solr.sscdn.co/letras/m1/'
 
+const cleanText = (text) => {
+  if (!text) return ''
+  return text
+    .replace(/\s*\([^)]*\)/g, ' ')
+    .replace(/\s*\[[^\]]*\]/g, ' ')
+    .replace(
+      /\b(official|video|audio|mv|visualizer|live|session|ao vivo|lyric|lyrics|hd|4k|remix|edit|cover|acoustic|instrumental)\b/gi,
+      ' '
+    )
+    .replace(/feat\.?/gi, ' ')
+    .replace(/ft\.?/gi, ' ')
+    .replace(/[^\w\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+const buildSearchCandidates = (trackInfo) => {
+  const candidates = new Set()
+  const rawTitle = trackInfo?.title || ''
+  const rawAuthor = trackInfo?.author || ''
+
+  const cleanedTitle = cleanText(rawTitle)
+  const cleanedAuthor = cleanText(rawAuthor)
+
+  const pushCandidate = (title, author) => {
+    const t = cleanText(title)
+    const a = cleanText(author)
+    const combined = [t, a].filter(Boolean).join(' ').trim()
+    if (combined) candidates.add(combined)
+  }
+
+  const rawTitleLower = rawTitle.toLowerCase()
+  const rawAuthorLower = rawAuthor.toLowerCase()
+
+  if (cleanedTitle || cleanedAuthor) {
+    pushCandidate(cleanedTitle, cleanedAuthor)
+  }
+
+  if (cleanedTitle) candidates.add(cleanedTitle)
+
+  const splitTitle = (title, sep) => {
+    if (!title.includes(sep)) return null
+    const parts = title.split(sep).map((part) => part.trim())
+    if (parts.length < 2) return null
+    return [parts[0], parts.slice(1).join(sep).trim()]
+  }
+
+  const dashSplit = splitTitle(rawTitle, ' - ')
+  if (dashSplit) {
+    const [left, right] = dashSplit
+    const leftClean = cleanText(left)
+    const rightClean = cleanText(right)
+
+    if (rightClean) {
+      pushCandidate(rightClean, cleanedAuthor || leftClean)
+      candidates.add(rightClean)
+    }
+
+    if (leftClean && rightClean) {
+      pushCandidate(rightClean, leftClean)
+    }
+  }
+
+  const pipeSplit = splitTitle(rawTitle, ' | ')
+  if (pipeSplit) {
+    const [left, right] = pipeSplit
+    const leftClean = cleanText(left)
+    const rightClean = cleanText(right)
+    if (leftClean) candidates.add(leftClean)
+    if (rightClean) candidates.add(rightClean)
+    if (leftClean && cleanedAuthor) pushCandidate(leftClean, cleanedAuthor)
+  }
+
+  if (rawAuthorLower && rawTitleLower.includes(rawAuthorLower)) {
+    const stripped = cleanText(rawTitle.replace(new RegExp(rawAuthor, 'ig'), ''))
+    if (stripped) {
+      pushCandidate(stripped, cleanedAuthor)
+      candidates.add(stripped)
+    }
+  }
+
+  if (cleanedAuthor) {
+    pushCandidate(cleanedTitle, cleanedAuthor)
+    candidates.add(cleanedAuthor)
+  }
+
+  return Array.from(candidates)
+}
+
 const parseJsonp = (body) => {
   if (!body) return null
   const trimmed = body.trim()
@@ -139,30 +228,65 @@ export default class LetrasMusMeaning {
 
   async getMeaning(trackInfo, language) {
     try {
-      let letrasTrack = trackInfo
-      if (trackInfo.sourceName !== 'letrasmus') {
-        const query = `${trackInfo.title} ${trackInfo.author}`.trim()
-        const results = await searchLetras(query, 10)
+      let candidates = []
+      if (trackInfo.sourceName === 'letrasmus') {
+        candidates = [{ info: trackInfo }]
+      } else {
+        const searchCandidates = buildSearchCandidates(trackInfo)
+        let results = []
+
+        for (const query of searchCandidates) {
+          results = await searchLetras(query, 12)
+          if (results.length) break
+        }
+
         if (results.length) {
-          const best = getBestMatch(results, trackInfo)
-          if (best?.info) {
-            letrasTrack = best.info
+          const matchTarget = {
+            ...trackInfo,
+            title: cleanText(trackInfo.title),
+            author: cleanText(trackInfo.author)
           }
+          const best = getBestMatch(results, matchTarget)
+          const ordered = []
+          if (best?.info) ordered.push(best)
+          for (const item of results) {
+            if (!best || item.info.uri !== best.info?.uri) ordered.push(item)
+          }
+          candidates = ordered
         }
       }
 
-      if (!letrasTrack?.uri || letrasTrack.sourceName !== 'letrasmus') {
+      if (!candidates.length) {
         return { loadType: 'empty', data: {} }
       }
 
-      const baseUrl = letrasTrack.uri.endsWith('/')
-        ? letrasTrack.uri
-        : `${letrasTrack.uri}/`
-      const meaningUrl = `${baseUrl}significado.html`
-      const { body, statusCode, error } = await http1makeRequest(meaningUrl, {
-        method: 'GET'
-      })
-      if (error || statusCode !== 200 || !body) {
+      let body = null
+      let meaningUrl = null
+      let resolvedTrack = null
+
+      for (const candidate of candidates) {
+        const letrasTrack = candidate.info
+        if (!letrasTrack?.uri || letrasTrack.sourceName !== 'letrasmus') continue
+
+        const baseUrl = letrasTrack.uri.endsWith('/')
+          ? letrasTrack.uri
+          : `${letrasTrack.uri}/`
+        const url = `${baseUrl}significado.html`
+        const { body: fetchedBody, statusCode, error } =
+          await http1makeRequest(url, { method: 'GET' })
+
+        if (error || statusCode !== 200 || !fetchedBody) continue
+
+        const meaningCheck = extractMeaning(fetchedBody)
+        if (!meaningCheck.body.length) continue
+
+        body = fetchedBody
+        meaningUrl = url
+        resolvedTrack = letrasTrack
+        break
+      }
+
+      if (!body || !meaningUrl || !resolvedTrack) {
         return { loadType: 'empty', data: {} }
       }
 
@@ -218,8 +342,8 @@ export default class LetrasMusMeaning {
             reviewedBy: null
           },
           song: {
-            title: omq?.Name || letrasTrack.title || null,
-            artist: omq?.Artist || letrasTrack.author || null,
+            title: omq?.Name || resolvedTrack.title || null,
+            artist: omq?.Artist || resolvedTrack.author || null,
             youtubeId: omq?.YoutubeID || null,
             letrasId: omq?.ID || null,
             artworkUrl: ogImage || null
