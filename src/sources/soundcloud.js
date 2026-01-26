@@ -604,8 +604,13 @@ export default class SoundCloudSource {
     if (!forceRefresh) {
       const cached = this.nodelink.trackCacheManager.get('soundcloud', info.identifier)
       if (cached) {
-        logger('debug', 'Sources', `Using cached SoundCloud URL for ${info.identifier}`)
-        return cached
+        const expiresMatch = cached.url.match(/expires=(\d+)/)
+        const expires = expiresMatch ? parseInt(expiresMatch[1]) * 1000 : 0
+
+        if (expires > Date.now() + 5000) {
+          logger('debug', 'Sources', `Using cached SoundCloud URL for ${info.identifier}`)
+          return cached
+        }
       }
     }
 
@@ -631,7 +636,7 @@ export default class SoundCloudSource {
 
       const result = await this._selectTranscoding(req.body)
       if (result && !result.exception) {
-        this.nodelink.trackCacheManager.set('soundcloud', info.identifier, result, 1000 * 60 * 60 * 3)
+        this.nodelink.trackCacheManager.set('soundcloud', info.identifier, result, 1000 * 60 * 15)
       }
       return result
     } catch (err) {
@@ -769,12 +774,22 @@ export default class SoundCloudSource {
       this._handleProgressive(url, stream)
       return { stream }
     } else if (protocol === 'hls') {
+      let type = additionalData?.format
+
+      if (type === 'aac_hls') {
+        type = 'fmp4'
+      } else if (type === 'mp3') {
+        type = 'mp3'
+      } else {
+        type = 'mpegts'
+      }
+
       const stream = new HLSHandler(url, {
-        type: 'mpegts',
+        type,
         localAddress: this.nodelink.routePlanner?.getIP(),
         startTime: additionalData?.startTime || 0
       })
-      return { stream, type: 'mpegts' }
+      return { stream, type }
     } else {
       const stream = new PassThrough()
       stream.destroy(new Error(`Unsupported protocol: ${protocol}`))
