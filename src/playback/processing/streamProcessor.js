@@ -384,10 +384,19 @@ class SymphoniaDecoderStream extends Transform {
       this._loopScheduled ||
       this._isDecoding ||
       !this._isDecoderValid() ||
-      this.readableFlowing === false ||
-      this.readableLength >= this.readableHighWaterMark
+      this.readableFlowing === false
     )
       return
+
+    if (this.readableLength >= this.readableHighWaterMark) {
+      this._loopScheduled = true
+      this._timeoutId = setTimeout(() => {
+        this._timeoutId = null
+        this._loopScheduled = false
+        if (this._isDecoderValid()) this._scheduleDecode()
+      }, AUDIO_CONSTANTS.decodeIntervalMs)
+      return
+    }
 
     this._loopScheduled = true
 
