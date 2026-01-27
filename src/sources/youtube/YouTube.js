@@ -232,7 +232,7 @@ async function _manageYoutubeHlsStream(
 
         if (res.error || res.statusCode !== 200) {
           if (res.stream) res.stream.destroy()
-          
+
           let retryCount = 0
           let success = false
           while (retryCount < 3 && !cancelSignal.aborted) {
@@ -978,7 +978,8 @@ export default class YouTubeSource {
   }
 
   async getTrackUrl(decodedTrack, itag) {
-    const clientList = this.config.clients.playback
+    let clientList = [...this.config.clients.playback]
+    clientList = ['Web', ...clientList.filter(c => c !== 'Web') || 'Android']
     const clientErrors = []
 
     for (const clientName of clientList) {
@@ -1012,6 +1013,16 @@ export default class YouTubeSource {
         }
 
         if (urlData.protocol === 'sabr') {
+          const bestAudio = urlData.formats
+            ?.filter((f) => f.mimeType?.includes('audio'))
+            .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+
+          if (bestAudio) {
+            urlData.format = bestAudio.mimeType?.includes('webm')
+              ? 'webm/opus'
+              : 'm4a'
+          }
+
           return urlData
         }
 
@@ -1176,15 +1187,45 @@ export default class YouTubeSource {
 
         const stream = new PassThrough()
 
-        sabr.on('data', (chunk) => stream.write(chunk))
+        sabr.on('data', (chunk) => {
+          if (!stream.write(chunk)) {
+            sabr.pause()
+          }
+        })
+        stream.on('drain', () => sabr.resume())
+
         sabr.on('end', () => stream.end())
-        sabr.on('error', (err) => {
+        sabr.on('error', async (err) => {
           logger('error', 'YouTube', `SABR stream error: ${err.message}`)
-          stream.destroy(err)
+
+          if ((err.message.includes('sabr.malformed_config') || err.message.includes('sabr.media_serving_enforcement_id_error')) && !isRecovering) {
+            logger('info', 'YouTube', `Known recoverable error detected (${err.message}), triggering stall recovery...`)
+            sabr.emit('stall')
+            return
+          }
+
+          if (!stream.destroyed) stream.destroy(err)
+        })
+
+        const originalDestroy = stream.destroy.bind(stream)
+        let isDestroying = false
+        stream.destroy = (err) => {
+          if (isDestroying) return
+          isDestroying = true
+          sabr.destroy(err)
+          this.activeStreams.delete(streamKey)
+          originalDestroy(err)
+        }
+
+        stream.once('close', () => {
+          if (isDestroying) return
+          isDestroying = true
+          sabr.destroy()
+          this.activeStreams.delete(streamKey)
         })
 
         const bestAudio = additionalData.formats.filter(f => f.mimeType?.includes('audio')).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
-        
+
         sabr.start(bestAudio.itag)
 
         const type = bestAudio.mimeType?.includes('webm') ? 'webm/opus' : 'm4a'

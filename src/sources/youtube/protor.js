@@ -9,42 +9,39 @@ export class ProtoWriter {
     }
     writeTag(fieldNumber, wireType) { this.writeVarint((fieldNumber << 3) | wireType); }
     writeString(fieldNumber, str) {
-        if (str === undefined || str === null || str === "") return;
+        if (!str) return; // Canonical: omit "", null, undefined
         const buf = Buffer.from(str, 'utf8');
         this.writeTag(fieldNumber, 2);
         this.writeVarint(buf.length);
         this.chunks.push(buf);
     }
     writeBytes(fieldNumber, buffer) {
-        if (buffer === undefined || buffer === null || buffer.length === 0) return;
+        if (!buffer || buffer.length === 0) return; // Canonical: omit
         if (typeof buffer === 'string') {
-            try {
-                buffer = base64ToU8(buffer);
-            } catch (e) {
-                buffer = Buffer.from(buffer, 'utf8');
-            }
+            try { buffer = base64ToU8(buffer); } catch (e) { buffer = Buffer.from(buffer, 'utf8'); }
         }
         this.writeTag(fieldNumber, 2);
         this.writeVarint(buffer.length);
         this.chunks.push(buffer);
     }
     writeInt32(fieldNumber, value) {
-        if (value === undefined || value === null) return;
+        if (!value) return; // Canonical: omit 0, null, undefined
         this.writeTag(fieldNumber, 0);
         this.writeVarint(value);
     }
     writeInt64(fieldNumber, value) {
-        if (value === undefined || value === null) return;
+        // playerTimeMs is often "0" as string or 0 as number
+        if (!value || value === "0") return; // Canonical: omit 0
         this.writeTag(fieldNumber, 0);
         this.writeVarint(value);
     }
     writeBool(fieldNumber, value) {
-        if (value === undefined || value === null || value === false) return;
+        if (!value) return; // Canonical: omit false
         this.writeTag(fieldNumber, 0);
         this.writeVarint(1);
     }
     writeFloat(fieldNumber, value) {
-        if (value === undefined || value === null || value === 0) return;
+        if (!value) return; // Canonical: omit 0
         this.writeTag(fieldNumber, 5);
         const buf = Buffer.alloc(4);
         buf.writeFloatLE(value);
@@ -74,7 +71,7 @@ export class ProtoReader {
     readVarint() {
         let result = 0n, shift = 0n;
         while (true) {
-            if (this.pos >= this.buffer.length) return result; 
+            if (this.pos >= this.buffer.length) return result;
             const b = this.buffer[this.pos++];
             result |= BigInt(b & 0x7F) << shift;
             shift += 7n;
@@ -114,8 +111,9 @@ export class ProtoReader {
 export const FormatId = {
     encode(msg, writer) {
         writer.writeInt32(1, msg.itag);
-        writer.writeInt64(2, msg.lastModified || msg.last_modified || 0);
+        writer.writeInt64(2, msg.lastModified || msg.last_modified);
         writer.writeString(3, msg.xtags);
+        return writer;
     },
     decode(reader, len) {
         const end = reader.pos + len;
@@ -134,15 +132,19 @@ export const FormatId = {
 
 export const ClientAbrState = {
     encode(msg, writer) {
-        writer.writeInt64(28, msg.playerTimeMs);
-        writer.writeInt32(40, msg.enabledTrackTypesBitfield);
-        writer.writeString(69, msg.audioTrackId);
-        writer.writeInt32(21, msg.stickyResolution);
-        writer.writeBool(46, msg.drcEnabled);
-        writer.writeInt32(34, msg.visibility);
-        writer.writeFloat(35, msg.playbackRate || 1.0);
-        writer.writeBool(22, msg.clientViewportIsFlexible);
         writer.writeInt32(16, msg.lastManualSelectedResolution);
+        writer.writeInt32(21, msg.stickyResolution);
+        writer.writeBool(22, msg.clientViewportIsFlexible);
+        writer.writeInt64(23, msg.bandwidthEstimate);
+        writer.writeInt64(28, msg.playerTimeMs);
+        writer.writeInt32(34, msg.visibility);
+        writer.writeFloat(35, msg.playbackRate);
+        writer.writeInt64(39, msg.timeSinceLastActionMs);
+        writer.writeInt32(40, msg.enabledTrackTypesBitfield);
+        writer.writeInt64(44, msg.playerState);
+        writer.writeBool(46, msg.drcEnabled);
+        writer.writeString(69, msg.audioTrackId);
+        return writer;
     }
 };
 
@@ -150,6 +152,7 @@ export const ClientInfo = {
     encode(msg, writer) {
         writer.writeInt32(16, msg.clientName);
         writer.writeString(17, msg.clientVersion);
+        return writer;
     }
 };
 
@@ -157,44 +160,32 @@ export const VideoPlaybackAbrRequest = {
     encode(msg) {
         const writer = new ProtoWriter();
         if (msg.clientAbrState) {
-            const w = new ProtoWriter();
-            ClientAbrState.encode(msg.clientAbrState, w);
-            writer.writeMessage(1, w);
+            writer.writeMessage(1, ClientAbrState.encode(msg.clientAbrState, new ProtoWriter()));
         }
         if (msg.selectedFormatIds) {
             for (const f of msg.selectedFormatIds) {
-                const w = new ProtoWriter();
-                FormatId.encode(f, w);
-                writer.writeMessage(2, w);
+                writer.writeMessage(2, FormatId.encode(f, new ProtoWriter()));
             }
         }
         if (msg.bufferedRanges) {
             for (const r of msg.bufferedRanges) {
-                const w = new ProtoWriter();
-                BufferedRange.encode(r, w);
-                writer.writeMessage(3, w);
+                writer.writeMessage(3, BufferedRange.encode(r, new ProtoWriter()));
             }
         }
-        // Field 4 (playerTimeMs) is not sent by googlevideo's SABR implementation; keep timing only in clientAbrState.
+        writer.writeInt64(4, msg.playerTimeMs);
         writer.writeBytes(5, msg.videoPlaybackUstreamerConfig);
         if (msg.preferredAudioFormatIds) {
             for (const f of msg.preferredAudioFormatIds) {
-                const w = new ProtoWriter();
-                FormatId.encode(f, w);
-                writer.writeMessage(16, w);
+                writer.writeMessage(16, FormatId.encode(f, new ProtoWriter()));
             }
         }
         if (msg.preferredVideoFormatIds) {
             for (const f of msg.preferredVideoFormatIds) {
-                const w = new ProtoWriter();
-                FormatId.encode(f, w);
-                writer.writeMessage(17, w);
+                writer.writeMessage(17, FormatId.encode(f, new ProtoWriter()));
             }
         }
         if (msg.streamerContext) {
-            const w = new ProtoWriter();
-            StreamerContext.encode(msg.streamerContext, w);
-            writer.writeMessage(19, w);
+            writer.writeMessage(19, StreamerContext.encode(msg.streamerContext, new ProtoWriter()));
         }
         return writer.finish();
     }
@@ -202,9 +193,10 @@ export const VideoPlaybackAbrRequest = {
 
 export const TimeRange = {
     encode(msg, writer) {
-        writer.writeInt64(1, msg.startTicks || 0);
-        writer.writeInt64(2, msg.durationTicks || 0);
-        writer.writeInt32(3, msg.timescale || 0);
+        writer.writeInt64(1, msg.startTicks);
+        writer.writeInt64(2, msg.durationTicks);
+        writer.writeInt32(3, msg.timescale);
+        return writer;
     },
     decode(reader, len) {
         const end = reader.pos + len;
@@ -224,19 +216,16 @@ export const TimeRange = {
 export const BufferedRange = {
     encode(msg, writer) {
         if (msg.formatId) {
-            const w = new ProtoWriter();
-            FormatId.encode(msg.formatId, w);
-            writer.writeMessage(1, w);
+            writer.writeMessage(1, FormatId.encode(msg.formatId, new ProtoWriter()));
         }
-        writer.writeInt64(2, msg.startTimeMs || 0);
-        writer.writeInt64(3, msg.durationMs || 0);
-        writer.writeInt32(4, msg.startSegmentIndex || 0);
-        writer.writeInt32(5, msg.endSegmentIndex || 0);
+        writer.writeInt64(2, msg.startTimeMs);
+        writer.writeInt64(3, msg.durationMs);
+        writer.writeInt32(4, msg.startSegmentIndex);
+        writer.writeInt32(5, msg.endSegmentIndex);
         if (msg.timeRange) {
-            const w = new ProtoWriter();
-            TimeRange.encode(msg.timeRange, w);
-            writer.writeMessage(6, w);
+            writer.writeMessage(6, TimeRange.encode(msg.timeRange, new ProtoWriter()));
         }
+        return writer;
     }
 };
 
@@ -249,18 +238,22 @@ export const MediaHeader = {
             const field = tag >>> 3;
             if (field === 1) msg.headerId = Number(reader.readVarint());
             else if (field === 3) msg.itag = Number(reader.readVarint());
+            else if (field === 4) msg.lmt = reader.readVarint().toString();
             else if (field === 5) msg.xtags = reader.readString();
             else if (field === 8) msg.isInitSeg = Boolean(reader.readVarint());
             else if (field === 9) msg.sequenceNumber = Number(reader.readVarint());
             else if (field === 11) msg.startMs = reader.readVarint().toString();
             else if (field === 12) msg.durationMs = reader.readVarint().toString();
             else if (field === 13) {
-                msg.formatId = FormatId.decode(reader, Number(reader.readVarint()));
-                msg.itag = msg.formatId.itag;
-                msg.xtags = msg.formatId.xtags;
+                const subLen = Number(reader.readVarint());
+                msg.formatId = FormatId.decode(reader, subLen);
+                msg.itag = msg.formatId.itag || msg.itag;
+                msg.xtags = msg.formatId.xtags || msg.xtags;
             } else if (field === 14) msg.contentLength = reader.readVarint().toString();
-            else if (field === 15) msg.timeRange = TimeRange.decode(reader, Number(reader.readVarint()));
-            else reader.skip(tag & 7);
+            else if (field === 15) {
+                const subLen = Number(reader.readVarint());
+                msg.timeRange = TimeRange.decode(reader, subLen);
+            } else reader.skip(tag & 7);
         }
         return msg;
     }
@@ -275,7 +268,7 @@ export const FormatInitializationMetadata = {
             const field = tag >>> 3;
             if (field === 2) {
                 msg.formatId = FormatId.decode(reader, Number(reader.readVarint()));
-                msg.itag = msg.formatId.itag; 
+                msg.itag = msg.formatId.itag;
             } else if (field === 4) msg.endSegmentNumber = reader.readVarint().toString();
             else if (field === 5) msg.mimeType = reader.readString();
             else if (field === 9) msg.durationUnits = reader.readVarint().toString();
@@ -485,15 +478,11 @@ export const RequestCancellationPolicy = {
 export const StreamerContext = {
     encode(msg, writer) {
         if (msg.clientInfo) {
-            const w = new ProtoWriter();
-            ClientInfo.encode(msg.clientInfo, w);
-            writer.writeMessage(1, w);
+            writer.writeMessage(1, ClientInfo.encode(msg.clientInfo, new ProtoWriter()));
         }
         writer.writeBytes(2, msg.poToken);
         if (msg.playbackCookie) {
-            const w = new ProtoWriter();
-            w.writeBytes(1, msg.playbackCookie);
-            writer.writeMessage(3, w);
+            writer.writeBytes(3, msg.playbackCookie);
         }
         if (msg.sabrContexts) {
             for (const ctx of msg.sabrContexts) {
@@ -508,6 +497,7 @@ export const StreamerContext = {
                 writer.writeInt32(6, type);
             }
         }
+        return writer;
     }
 };
 
@@ -550,4 +540,52 @@ export function concatenateChunks(chunks) {
         offset += chunk.length;
     }
     return result;
+}
+
+export class UMPWriter {
+    constructor() {
+        this.chunks = [];
+    }
+
+    write(partType, partData) {
+        this.writeVarInt(partType);
+        this.writeVarInt(partData.length);
+        this.chunks.push(partData);
+    }
+
+    writeVarInt(value) {
+        if (value < 0) throw new Error('VarInt value cannot be negative.');
+
+        if (value < 128) {
+            this.chunks.push(new Uint8Array([value]));
+        } else if (value < 16384) {
+            this.chunks.push(new Uint8Array([
+                (value & 0x3F) | 0x80,
+                value >> 6
+            ]));
+        } else if (value < 2097152) {
+            this.chunks.push(new Uint8Array([
+                (value & 0x1F) | 0xC0,
+                (value >> 5) & 0xFF,
+                value >> 13
+            ]));
+        } else if (value < 268435456) {
+            this.chunks.push(new Uint8Array([
+                (value & 0x0F) | 0xE0,
+                (value >> 4) & 0xFF,
+                (value >> 12) & 0xFF,
+                value >> 20
+            ]));
+        } else {
+            const data = new Uint8Array(5);
+            const view = new DataView(data.buffer);
+            data[0] = 0xF0;
+            view.setUint32(1, value, true);
+            this.chunks.push(data);
+        }
+    }
+
+    finish() {
+        return concatenateChunks(this.chunks);
+    }
 }

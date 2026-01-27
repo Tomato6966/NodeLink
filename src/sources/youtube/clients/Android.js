@@ -314,6 +314,46 @@ export default class Android extends BaseClient {
       return { exception: { message, severity: 'common', cause: 'Upstream' } }
     }
 
+    const streamingData = playerResponse.streamingData || playerResponse.streaming_data
+    const serverAbrUrl = streamingData?.serverAbrStreamingUrl || streamingData?.server_abr_streaming_url
+    const ustreamerConfig = playerResponse.playerConfig?.mediaCommonConfig?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig
+
+    if (serverAbrUrl) {
+      logger('debug', 'YouTube-Android', `SABR URL found for ${decodedTrack.identifier}. Using SABR protocol.`)
+
+      const formats = [...(streamingData.formats || []), ...(streamingData.adaptiveFormats || streamingData.adaptive_formats || [])].map(f => ({
+        itag: f.itag,
+        lastModified: f.lastModified || f.last_modified_ms,
+        xtags: f.xtags,
+        width: f.width,
+        height: f.height,
+        mimeType: f.mimeType || f.mime_type,
+        audioQuality: f.audioQuality || f.audio_quality,
+        bitrate: f.bitrate,
+        averageBitrate: f.averageBitrate || f.average_bitrate,
+        quality: f.quality,
+        qualityLabel: f.qualityLabel || f.quality_label,
+        audioTrackId: f.audioTrack?.id,
+        approxDurationMs: f.approxDurationMs || f.approx_duration_ms,
+        contentLength: f.contentLength || f.content_length,
+        isDrc: !!f.isDrc
+      }))
+
+      return {
+        protocol: 'sabr',
+        url: serverAbrUrl,
+        additionalData: {
+          serverAbrStreamingUrl: serverAbrUrl,
+          videoPlaybackUstreamerConfig: ustreamerConfig,
+          visitorData: this.getClient(context).client.visitorData,
+          clientInfo: { clientName: 3, clientVersion: '20.51.39' },
+          formats,
+          accessToken: null,
+          userAgent: this.getClient(context).client.userAgent
+        }
+      }
+    }
+
     return await this._extractStreamData(
       playerResponse,
       decodedTrack,
