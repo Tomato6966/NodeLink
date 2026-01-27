@@ -250,6 +250,20 @@ export default {
       enabled: true,
       language: 'en-US'
     },
+    // Piper TTS Configuration
+    // This source uses an external Piper TTS HTTP server.
+    // You can find the Piper HTTP server repository here:
+    // https://github.com/OHF-Voice/piper1-gpl/tree/main?tab=readme-ov-file
+    pipertts: {
+      enabled: false, // Disabled by default. Enable it to use Piper TTS.
+      url: 'http://localhost:5000', // URL of your Piper TTS server
+      // Optional settings (defaults from Piper):
+      // voice: 'en_US-lessac-medium',
+      // speaker: 0,
+      // length_scale: 1.0,
+      // noise_scale: 0.667,
+      // noise_w_scale: 0.8
+    },
     youtube: {
       enabled: true,
       allowItag: [], // additional itags for audio streams, e.g., [140, 141]
