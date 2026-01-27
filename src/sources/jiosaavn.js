@@ -1,5 +1,6 @@
-import crypto from 'node:crypto'
+import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { desEcbDecryptBase64ToUtf8 } from '../decrypters/des-ecb.js'
 
 const API_BASE = 'https://www.jiosaavn.com/api.php'
 const J_BUFFER = Buffer.from('38346591')
@@ -234,7 +235,29 @@ export default class JioSaavnSource {
       }
     }
 
-    return { stream, type: 'mp4' }
+    const passthrough = new PassThrough()
+
+    stream.on('data', (chunk) => {
+      if (!passthrough.write(chunk)) stream.pause()
+    })
+
+    passthrough.on('drain', () => {
+      if (!stream.destroyed) stream.resume()
+    })
+
+    stream.on('end', () => {
+      if (!passthrough.writableEnded) {
+        passthrough.emit('finishBuffering')
+        passthrough.end()
+      }
+    })
+
+    stream.on('error', (err) => {
+      logger('error', 'JioSaavn', `Stream error: ${err.message}`)
+      if (!passthrough.destroyed) passthrough.destroy(err)
+    })
+
+    return { stream: passthrough, type: 'mp4' }
   }
 
   async _getJson(params) {
@@ -318,11 +341,7 @@ export default class JioSaavnSource {
   }
 
   _decryptUrl(encryptedUrl) {
-    const decipher = crypto.createDecipheriv('des-ecb', J_BUFFER, null)
-    decipher.setAutoPadding(true)
-    return (
-      decipher.update(encryptedUrl, 'base64', 'utf8') + decipher.final('utf8')
-    )
+    return desEcbDecryptBase64ToUtf8(encryptedUrl, J_BUFFER)
   }
 
   _cleanString(str) {
