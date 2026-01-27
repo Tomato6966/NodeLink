@@ -1143,7 +1143,6 @@ export class SabrStream extends PassThrough {
                 throw err;
             }
             buffer = ump.compositeBuffer;
-            buffer = ump.compositeBuffer;
         }
 
         const responseDump = this.enableTrafficDump && responseDumpChunks.length
