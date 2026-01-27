@@ -4,7 +4,7 @@ const FRAME_SIZE = 3840
 
 export class FlowController extends Transform {
   constructor(filters, volume, fade, audioMixer = null) {
-    super({ highWaterMark: 1920 })
+    super({ highWaterMark: FRAME_SIZE * 4 })
 
     this.filters = filters
     this.volume = volume
