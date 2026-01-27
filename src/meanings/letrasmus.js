@@ -1,9 +1,5 @@
 import { translateMany, translateText } from '../modules/googleTranslate.js'
-import {
-  getBestMatch,
-  http1makeRequest,
-  logger
-} from '../utils.js'
+import { getBestMatch, http1makeRequest, logger } from '../utils.js'
 
 const SOLR_ENDPOINT = 'https://solr.sscdn.co/letras/m1/'
 
@@ -112,13 +108,28 @@ const parseJsonp = (body) => {
 
 const decodeHtml = (text) => {
   if (!text) return text
-  return text
+
+  let out = text
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
+    .replace(/&#x27;/gi, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+
+  out = out.replace(/&#(\d+);/g, (_, dec) => {
+    const code = Number(dec)
+    if (!Number.isFinite(code)) return _
+    return String.fromCodePoint(code)
+  })
+
+  out = out.replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
+    const code = parseInt(hex, 16)
+    if (!Number.isFinite(code)) return _
+    return String.fromCodePoint(code)
+  })
+
+  return out
 }
 
 const extractMeta = (html, property) => {
@@ -302,15 +313,15 @@ export default class LetrasMusMeaning {
         const sourceLang = 'pt'
         try {
           const translatedParagraphs = await translateMany(
-            meaning.body,
+            meaning.body.map(decodeHtml),
             sourceLang,
             language
           )
           const translatedTitle = meaning.title
-            ? await translateText(meaning.title, sourceLang, language)
+            ? await translateText(decodeHtml(meaning.title), sourceLang, language)
             : null
           const translatedDescription = ogDescription
-            ? await translateText(ogDescription, sourceLang, language)
+            ? await translateText(decodeHtml(ogDescription), sourceLang, language)
             : null
           translated = {
             language: {
