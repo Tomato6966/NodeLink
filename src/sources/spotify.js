@@ -4,6 +4,8 @@ import {
   http1makeRequest,
   logger
 } from '../utils.js'
+import { fetchCanvas } from '../modules/spotifyCanvas.js'
+import { getLocalToken } from '../modules/spotifyAuth.js'
 
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1'
 const SPOTIFY_CLIENT_API_URL = 'https://spclient.wg.spotify.com'
@@ -63,6 +65,8 @@ export default class SpotifySource {
     this.tokenInitialized = false
     this.allowExplicit = true
     this.anonymousToken = null
+    this.mobileToken = null
+    this.spDc = null
   }
 
   async setup() {
@@ -72,11 +76,16 @@ export default class SpotifySource {
     this.anonymousToken = this.nodelink.credentialManager.get(
       'spotify_anonymous_token'
     )
+    this.mobileToken = this.nodelink.credentialManager.get(
+      'spotify_mobile_token'
+    )
 
     const hasOfficialConfig =
       this.config.sources.spotify?.clientId &&
       this.config.sources.spotify?.clientSecret
-    const hasAnonymousConfig = this.config.sources.spotify?.externalAuthUrl
+    const hasAnonymousConfig =
+      this.config.sources.spotify?.externalAuthUrl ||
+      this.config.sources.spotify?.sp_dc
 
     const missingOfficial = hasOfficialConfig && !this.accessToken
     const missingAnonymous = hasAnonymousConfig && !this.anonymousToken
@@ -84,6 +93,12 @@ export default class SpotifySource {
     if (!missingOfficial && !missingAnonymous) {
       if (this.accessToken || this.anonymousToken) {
         this.tokenInitialized = true
+
+        if (this.config.sources.spotify?.sp_dc) {
+          this.spDc = this.config.sources.spotify.sp_dc
+          if (!this.mobileToken) await this._refreshMobileToken()
+        }
+
         return true
       }
     }
@@ -92,6 +107,7 @@ export default class SpotifySource {
       this.clientId = this.config.sources.spotify?.clientId
       this.clientSecret = this.config.sources.spotify?.clientSecret
       this.externalAuthUrl = this.config.sources.spotify?.externalAuthUrl
+      this.spDc = this.config.sources.spotify?.sp_dc
       this.playlistLoadLimit =
         this.config.sources.spotify?.playlistLoadLimit ?? 0
       this.playlistPageLoadConcurrency =
@@ -104,11 +120,11 @@ export default class SpotifySource {
       this.market = this.config.sources.spotify?.market || 'US'
       this.allowExplicit = this.config.sources.spotify?.allowExplicit ?? true
 
-      if (!this.externalAuthUrl && (!this.clientId || !this.clientSecret)) {
+      if (!this.externalAuthUrl && !this.spDc && (!this.clientId || !this.clientSecret)) {
         logger(
           'warn',
           'Spotify',
-          'Neither externalAuthUrl nor Client ID/Secret provided. Disabling source.'
+          'Neither externalAuthUrl, sp_dc nor Client ID/Secret provided. Disabling source.'
         )
         return false
       }
@@ -118,7 +134,7 @@ export default class SpotifySource {
         logger(
           'info',
           'Spotify',
-          `Tokens initialized successfully. Official: ${!!this.accessToken}, Anonymous: ${!!this.anonymousToken}`
+          `Tokens initialized successfully. Official: ${!!this.accessToken}, Anonymous: ${!!this.anonymousToken}, Mobile: ${!!this.mobileToken}`
         )
       }
       return success
@@ -140,6 +156,30 @@ export default class SpotifySource {
     return (
       this.tokenExpiry && Date.now() < this.tokenExpiry - TOKEN_REFRESH_MARGIN
     )
+  }
+
+  async _refreshMobileToken() {
+    if (!this.spDc) return
+
+    try {
+      const { getLocalToken } = await import('../modules/spotifyAuth.js')
+      const tokenData = await getLocalToken(this.spDc, 'mobile-web-player')
+      if (tokenData?.accessToken) {
+        this.mobileToken = tokenData.accessToken
+        const expiresMs = tokenData.accessTokenExpirationTimestampMs
+          ? tokenData.accessTokenExpirationTimestampMs - Date.now()
+          : 3600000
+
+        this.nodelink.credentialManager.set(
+          'spotify_mobile_token',
+          this.mobileToken,
+          Math.max(expiresMs, 60000)
+        )
+        logger('debug', 'Spotify', 'Canvas token (mobile) refreshed successfully')
+      }
+    } catch (e) {
+      logger('warn', 'Spotify', `Mobile token refresh failed: ${e.message}`)
+    }
   }
 
   async _refreshToken() {
@@ -236,8 +276,16 @@ export default class SpotifySource {
       success = true
     }
 
-    this.tokenInitialized = success
-    return success
+    if (this.spDc) {
+      await this._refreshMobileToken()
+
+      if (!this.externalAuthUrl && this.mobileToken) {
+        this.anonymousToken = this.mobileToken
+      }
+    }
+
+    this.tokenInitialized = success || !!this.mobileToken
+    return this.tokenInitialized
   }
 
   async _apiRequest(path, retryCount = 0) {
@@ -983,9 +1031,27 @@ export default class SpotifySource {
         uri: `spotify:track:${id}`
       })
       if (data?.trackUnion && data.trackUnion.__typename !== 'NotFound') {
+        const track = this._buildTrackFromInternal(data.trackUnion)
+
+        if (this.mobileToken && track) {
+          const cachedCanvas = this.nodelink.trackCacheManager.get('spotify-canvas', id)
+          if (cachedCanvas) {
+            track.pluginInfo.canvas = cachedCanvas
+          } else {
+            const canvasRes = await fetchCanvas(
+              `spotify:track:${id}`,
+              this.mobileToken
+            )
+            if (canvasRes?.data?.canvasesList?.[0]) {
+              track.pluginInfo.canvas = canvasRes.data
+              this.nodelink.trackCacheManager.set('spotify-canvas', id, canvasRes.data, 1000 * 60 * 60 * 12)
+            }
+          }
+        }
+
         return {
           loadType: 'track',
-          data: this._buildTrackFromInternal(data.trackUnion)
+          data: track
         }
       }
     }
@@ -993,7 +1059,25 @@ export default class SpotifySource {
     if (this.clientId && this.clientSecret) {
       const data = await this._apiRequest(`/tracks/${id}?market=${this.market}`)
       if (data) {
-        return { loadType: 'track', data: this._buildTrack(data) }
+        const track = this._buildTrack(data)
+
+        if (this.mobileToken && track) {
+          const cachedCanvas = this.nodelink.trackCacheManager.get('spotify-canvas', id)
+          if (cachedCanvas) {
+            track.pluginInfo.canvas = cachedCanvas
+          } else {
+            const canvasRes = await fetchCanvas(
+              `spotify:track:${id}`,
+              this.mobileToken
+            )
+            if (canvasRes?.data?.canvasesList?.[0]) {
+              track.pluginInfo.canvas = canvasRes.data
+              this.nodelink.trackCacheManager.set('spotify-canvas', id, canvasRes.data, 1000 * 60 * 60 * 12)
+            }
+          }
+        }
+
+        return { loadType: 'track', data: track }
       }
     }
 
