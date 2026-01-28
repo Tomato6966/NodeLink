@@ -305,7 +305,8 @@ export default {
       playlistPageLoadConcurrency: 10, // How many pages to load simultaneously
       albumLoadLimit: 1, // 0 means no limit (loads all tracks), 1 = 50 tracks, 2 = 100 tracks, etc.
       albumPageLoadConcurrency: 5, // How many pages to load simultaneously
-      allowExplicit: true // If true plays the explicit version of the song, If false plays the Non-Explicit version of the song. Normal songs are not affected.
+      allowExplicit: true, // If true plays the explicit version of the song, If false plays the Non-Explicit version of the song. Normal songs are not affected.
+      sp_dc: '' // fot getting mobile token (optional) get from spotify in browser devtools -> Application -> Cookies -> sp_dc (requered for canvas)
     },
     applemusic: {
       enabled: true,
