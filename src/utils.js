@@ -299,12 +299,14 @@ function sendResponse(req, res, data, status, trace = false) {
     res.end(buffer)
     return
   }
-
   const compressions = [
     { type: 'br', method: zlib.brotliCompress },
     { type: 'gzip', method: zlib.gzip },
     { type: 'deflate', method: zlib.deflate }
   ]
+  if (process.versions.node >= '22.0.0') {
+    compressions.unshift({ type: 'zstd', method: zlib.zstdCompress })
+  }
 
   for (const { type, method } of compressions) {
     if (encoding.includes(type)) {
