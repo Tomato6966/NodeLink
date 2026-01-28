@@ -284,7 +284,8 @@ export class Player {
 
         this.position = 0
         this._lyricsBasePosition = 0
-        this._lyricsBasePackets = 0
+        this._lyricsBasePackets =
+          this.connection?.statistics?.packetsExpected ?? 0
 
         this.connection.play(resource)
 
@@ -428,7 +429,7 @@ export class Player {
     this.lyricsLineIndex = -1
     this._fading('reset')
     this._lyricsBasePosition = 0
-    this._lyricsBasePackets = 0
+    this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
     if (this._lyricsMarkerTimer) {
       clearTimeout(this._lyricsMarkerTimer)
       this._lyricsMarkerTimer = null
