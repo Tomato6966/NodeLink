@@ -11,6 +11,14 @@ const decodeHtml = (text) => {
     .replace(/&#x27;/g, "'")
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+}
+
+const cleanText = (text) => {
+  if (!text) return ''
+  let cleaned = decodeHtml(text)
+  cleaned = cleaned.replace(/\[[^\]]*\]/g, '').replace(/\([^)]*\)/g, '')
+  return cleaned.trim()
 }
 
 const parseJsonp = (body) => {
@@ -55,10 +63,9 @@ const extractLyricOriginal = (html) => {
   text = text.replace(/<br\s*\/?>/gi, '\n')
   text = text.replace(/<\/p>/gi, '\n')
   text = text.replace(/<[^>]+>/g, '')
-  text = decodeHtml(text)
   return text
     .split('\n')
-    .map((line) => line.trim())
+    .map(cleanText)
     .filter(Boolean)
 }
 
@@ -104,7 +111,7 @@ const parseSubtitle = (subtitle) => {
   return parsed
     .map((entry) => {
       if (!Array.isArray(entry) || entry.length < 3) return null
-      const text = entry[0]
+      const text = cleanText(entry[0])
       const start = Number.parseFloat(entry[1])
       const end = Number.parseFloat(entry[2])
       if (!text || Number.isNaN(start) || Number.isNaN(end)) return null
