@@ -321,6 +321,8 @@ export class Player {
       this.isPaused = false
 
       if (!wasResuming && !this._isRestoring) {
+        this._lyricsBasePackets =
+          this.connection?.statistics?.packetsExpected ?? 0
         this._fading('trackStart')
         this._emitTrackStart()
       }
