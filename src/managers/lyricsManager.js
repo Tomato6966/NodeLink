@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { logger } from '../utils.js'
-import { alignLyrics } from '../utils/lyricsAligner.js'
+import { alignLyrics } from '../modules/lyricsAligner.js'
 
 let lyricRegistry
 try {
