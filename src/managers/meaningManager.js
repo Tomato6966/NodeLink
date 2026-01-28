@@ -105,7 +105,11 @@ export default class MeaningManager {
       }
     }
 
-    for (const [name, source] of this.meaningSources) {
+    const sortedSources = Array.from(this.meaningSources.entries()).sort(
+      (a, b) => (b[1].priority || 0) - (a[1].priority || 0)
+    )
+
+    for (const [name, source] of sortedSources) {
       if (name !== sourceName) {
         const meaning = await source.getMeaning(trackInfo, language)
         if (meaning && meaning.loadType !== 'empty') {

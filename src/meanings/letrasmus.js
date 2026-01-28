@@ -231,6 +231,7 @@ const searchLetras = async (query, limit = 10) => {
 export default class LetrasMusMeaning {
   constructor(nodelink) {
     this.nodelink = nodelink
+    this.priority = 70
   }
 
   async setup() {

@@ -401,6 +401,9 @@ export default {
   meanings: {
     letrasmus: {
       enabled: true
+    },
+    wikipedia: {
+      enabled: true
     }
   },
   audio: {
