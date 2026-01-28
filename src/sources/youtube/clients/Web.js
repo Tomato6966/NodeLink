@@ -5,12 +5,12 @@ import {
   buildTrack,
   checkURLType
 } from '../common.js'
-import { PoTokenManager } from '../potoke.js'
+import { poTokenManager } from '../potoke.js'
 
 export default class Web extends BaseClient {
   constructor(nodelink, oauth) {
     super(nodelink, 'WEB', oauth)
-    this.poTokenManager = new PoTokenManager()
+    this.poTokenManager = poTokenManager
   }
 
   getClient(context) {
@@ -255,7 +255,7 @@ export default class Web extends BaseClient {
     }
 
     const { poToken, visitorData } = await this.poTokenManager.generate(decodedTrack.identifier)
-    
+
     if (poToken) {
       const client = this.getClient(context)
       client.client.visitorData = visitorData
@@ -288,7 +288,7 @@ export default class Web extends BaseClient {
 
       try {
         const { body: playerResponse } = await makeRequest(
-          'https://youtubei.googleapis.com/youtubei/v1/player?prettyPrint=false', 
+          'https://youtubei.googleapis.com/youtubei/v1/player?prettyPrint=false',
           {
             method: 'POST',
             headers: {
@@ -310,7 +310,7 @@ export default class Web extends BaseClient {
 
         if (serverAbrUrl) {
           const playerScript = await cipherManager.getCachedPlayerScript()
-          
+
           let resolvedUrl = serverAbrUrl
           if (playerScript) {
             try {

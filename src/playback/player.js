@@ -590,6 +590,7 @@ export class Player {
       audioTrackId: this.track.audioTrackId
     }
     const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+    if (!this.track) return false
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
     logger('debug', 'Player', `Got track URL for guild ${this.guildId}`, {
       urlData
@@ -796,6 +797,7 @@ export class Player {
               audioTrackId: this.track.audioTrackId
             }
             const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+            if (!this.track) return false
             this.streamInfo = { ...urlData, trackInfo: this.track.info }
             logger(
               'debug',
@@ -926,6 +928,7 @@ export class Player {
       audioTrackId: this.track.audioTrackId
     }
     const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+    if (!this.track) return false
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
 
     if (urlData.exception) {

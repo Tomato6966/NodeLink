@@ -4,22 +4,23 @@ import path from 'node:path';
 import { appendFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { logger, makeRequest } from '../../utils.js';
-import { PoTokenManager } from './potoke.js';
-import { 
-    UMPPartId, 
-    FormatInitializationMetadata, 
-    SabrError, 
-    SabrRedirect, 
-    StreamProtectionStatus, 
-    MediaHeader, 
-    NextRequestPolicy, 
+import { poTokenManager } from './potoke.js';
+import {
+    UMPPartId,
+    FormatInitializationMetadata,
+    SabrError,
+    SabrRedirect,
+    StreamProtectionStatus,
+    MediaHeader,
+    NextRequestPolicy,
     PlaybackStartPolicy,
     RequestIdentifier,
     RequestCancellationPolicy,
-    SabrContextUpdate, 
-    SabrContextSendingPolicy, 
-    VideoPlaybackAbrRequest, 
+    SabrContextUpdate,
+    SabrContextSendingPolicy,
+    VideoPlaybackAbrRequest,
     ProtoReader,
+    UMPWriter,
     base64ToU8,
     concatenateChunks
 } from './protor.js';
@@ -87,30 +88,32 @@ class CompositeBuffer {
         this.chunks = [];
         this.currentChunkOffset = 0;
         this.currentChunkIndex = 0;
-        this.currentDataView = undefined;
         this.totalLength = 0;
+        this.currentDataView = undefined;
         chunks.forEach((chunk) => this.append(chunk));
     }
     append(chunk) {
         if (chunk instanceof Uint8Array) {
+            if (chunk.length === 0) return;
             this.chunks.push(chunk);
             this.totalLength += chunk.length;
-        } else {
+        } else if (chunk instanceof CompositeBuffer) {
             chunk.chunks.forEach((c) => this.append(c));
         }
+        this.currentDataView = undefined;
     }
     split(position) {
         const extractedBuffer = new CompositeBuffer();
         const remainingBuffer = new CompositeBuffer();
         let remainingPos = position;
-        
+
         for(const chunk of this.chunks) {
             if (remainingPos >= chunk.length) {
                 extractedBuffer.append(chunk);
                 remainingPos -= chunk.length;
             } else if (remainingPos > 0) {
-                extractedBuffer.append(new Uint8Array(chunk.buffer, chunk.byteOffset, remainingPos));
-                remainingBuffer.append(new Uint8Array(chunk.buffer, chunk.byteOffset + remainingPos, chunk.length - remainingPos));
+                extractedBuffer.append(chunk.subarray(0, remainingPos));
+                remainingBuffer.append(chunk.subarray(remainingPos));
                 remainingPos = 0;
             } else {
                 remainingBuffer.append(chunk);
@@ -123,9 +126,10 @@ class CompositeBuffer {
         this.focus(position);
         return this.chunks[this.currentChunkIndex][position - this.currentChunkOffset];
     }
+    getLength() { return this.totalLength; }
     focus(position) {
         if (position < this.currentChunkOffset) this.resetFocus();
-        while (this.currentChunkOffset + this.chunks[this.currentChunkIndex].length <= position && this.currentChunkIndex < this.chunks.length - 1) {
+        while (this.currentChunkIndex < this.chunks.length && this.currentChunkOffset + this.chunks[this.currentChunkIndex].length <= position) {
             this.currentChunkOffset += this.chunks[this.currentChunkIndex].length;
             this.currentChunkIndex += 1;
         }
@@ -139,20 +143,28 @@ class UmpReader {
     read(handlePart) {
         while (true) {
             let offset = 0;
-            const [partType, newOffset] = this.readVarInt(offset);
-            offset = newOffset;
-            const [partSize, finalOffset] = this.readVarInt(offset);
-            offset = finalOffset;
-            if (partType < 0 || partSize < 0) break;
-            if (!this.compositeBuffer.canReadBytes(offset, partSize)) {
-                if (!this.compositeBuffer.canReadBytes(offset, 1)) break;
-                return { type: partType, size: partSize, data: this.compositeBuffer };
+            const [partType, nextOffset] = this.readVarInt(offset);
+            if (partType < 0) break;
+
+            const [partSize, finalOffset] = this.readVarInt(nextOffset);
+            if (partSize < 0) break;
+
+            if (!this.compositeBuffer.canReadBytes(finalOffset, partSize)) {
+                const split = this.compositeBuffer.split(finalOffset);
+                return {
+                    type: partType,
+                    size: partSize,
+                    headerSize: finalOffset,
+                    data: split.remainingBuffer,
+                    incomplete: true
+                };
             }
-            const splitResult = this.compositeBuffer.split(offset).remainingBuffer.split(partSize);
-            offset = 0;
+
+            const splitResult = this.compositeBuffer.split(finalOffset).remainingBuffer.split(partSize);
             handlePart({ type: partType, size: partSize, data: splitResult.extractedBuffer });
             this.compositeBuffer = splitResult.remainingBuffer;
         }
+        return undefined;
     }
     readVarInt(offset) {
         let byteLength;
@@ -161,6 +173,7 @@ class UmpReader {
             byteLength = firstByte < 128 ? 1 : firstByte < 192 ? 2 : firstByte < 224 ? 3 : firstByte < 240 ? 4 : 5;
         } else { byteLength = 0; }
         if (byteLength < 1 || !this.compositeBuffer.canReadBytes(offset, byteLength)) return [-1, offset];
+
         let value;
         switch (byteLength) {
             case 1: value = this.compositeBuffer.getUint8(offset++); break;
@@ -228,26 +241,58 @@ export class SabrStream extends PassThrough {
         this.requestNumber = 0;
         this.mediaHeadersProcessed = false;
         this._aborted = false;
-        
-        this.poToken = config.poToken; 
+        this.formatSequenceCounters = new Map(); // itag -> lastSeq
+        this.downloadedSegmentsByItag = new Map(); // itag -> Map<segNum, seg>
+
+        this.poToken = config.poToken;
         this.visitorData = config.visitorData;
-        
+
         this.serverAbrStreamingUrl = config.serverAbrStreamingUrl;
+        if (this.serverAbrStreamingUrl) {
+            const url = new URL(this.serverAbrStreamingUrl);
+            url.searchParams.set('alr', 'yes');
+            url.searchParams.set('ump', '1');
+            url.searchParams.set('srfvp', '1');
+            this.serverAbrStreamingUrl = url.toString();
+        }
         this.videoPlaybackUstreamerConfig = config.videoPlaybackUstreamerConfig;
         this.clientInfo = config.clientInfo;
         this.formatIds = config.formats || [];
         this.startTime = config.startTime || 0;
         this.positionCallback = config.positionCallback;
         this.userAgent = config.userAgent || USER_AGENT;
-        
+
         this.cachedBufferedRanges = [];
-        
+
+        this.totalLength = 0;
+        this.totalDurationMs = 0;
         this.totalDownloadedMs = 0;
+        this.virtualPlayerTimeMs = 0;
+        this.lastVirtualAdvanceAt = 0;
+        this.lastIterationAt = Date.now();
+        this.lastReportedPlayerTimeMs = 0;
+        this.partialPart = undefined;
+
+        this.pendingRangesHeaders = new Map();
+        this.cachedBufferedRanges = null;
+        this.lastReportedRanges = new Set();
 
         this.enableTrafficLog = true;
         this.trafficLogPath = path.join(process.cwd(), 'sabr_traffic.jsonl');
         this.enableTrafficDump = true;
         this.trafficDumpMaxBytes = 64 * 1024;
+
+        this.noMediaStreak = 0;
+        this.abortController = new AbortController();
+
+        if (typeof this.poToken === 'string') {
+            try {
+                this.poToken = base64ToU8(this.poToken);
+            } catch (e) {
+                logger('error', 'SABR', `Failed to decode PO token: ${e.message}`);
+                this.poToken = null;
+            }
+        }
     }
 
     logTraffic(entry) {
@@ -267,9 +312,44 @@ export class SabrStream extends PassThrough {
 
     async loop(audioFormat) {
         try {
+            if (this.lastVirtualAdvanceAt === 0) this.lastVirtualAdvanceAt = Date.now();
             while (!this._aborted && !this.destroyed) {
                 const now = Date.now();
-                const reportedPlayerTime = (this.config.startTime || 0) + this.totalDownloadedMs;
+                const prevPlayerTime = this.virtualPlayerTimeMs;
+
+                if (this.totalDownloadedMs > this.virtualPlayerTimeMs) {
+                    if (this.lastVirtualAdvanceAt > 0) {
+                        this.virtualPlayerTimeMs += (now - this.lastVirtualAdvanceAt);
+                    }
+                    this.lastVirtualAdvanceAt = now;
+                } else {
+                    if (this.totalDownloadedMs > 0) {
+                        if (this.lastVirtualAdvanceAt > 0) {
+                           const advance = (now - this.lastVirtualAdvanceAt);
+                           this.virtualPlayerTimeMs = Math.min(this.virtualPlayerTimeMs + advance, this.totalDownloadedMs);
+                        }
+                        this.lastVirtualAdvanceAt = now;
+                    }
+                }
+
+                if (Math.floor(this.virtualPlayerTimeMs / 1000) !== Math.floor(prevPlayerTime / 1000)) {
+                    logger('debug', 'SABR', `Tracking: downloaded=${Math.floor(this.totalDownloadedMs)}ms virtualPlayerTime=${Math.floor(prevPlayerTime)}ms -> ${Math.floor(this.virtualPlayerTimeMs)}ms`);
+                }
+
+                this.lastIterationAt = now;
+
+                let reportedPlayerTime = Math.floor(this.virtualPlayerTimeMs);
+
+                this.lastReportedPlayerTimeMs = reportedPlayerTime;
+
+                if (this.readableLength > MAX_BUFFER_BYTES) {
+                    await wait(250);
+                    continue;
+                }
+
+                if (this.mediaHeadersProcessed && this.positionCallback) {
+                    this.positionCallback(reportedPlayerTime);
+                }
 
                 if (this.lastRequestAt) {
                     const since = now - this.lastRequestAt;
@@ -277,17 +357,42 @@ export class SabrStream extends PassThrough {
                 }
                 this.lastRequestAt = Date.now();
 
-                await this.fetchAndProcessSegments({
-                        playerTimeMs: reportedPlayerTime,
+                try {
+                    await this.fetchAndProcessSegments({
+                        playerTimeMs: Math.floor(this.totalDownloadedMs),
+                        bandwidthEstimate: 15000000,
                         enabledTrackTypesBitfield: 1,
                         audioTrackId: audioFormat.audioTrackId || "",
-                        stickyResolution: 360,
-                        drcEnabled: false,
+                        playerState: 1n,
                         visibility: 1,
                         playbackRate: 1.0,
-                        clientViewportIsFlexible: false,
-                        lastManualSelectedResolution: undefined
+                        stickyResolution: 1080,
+                        lastManualSelectedResolution: 1080,
+                        clientViewportIsFlexible: false
                     }, audioFormat);
+                } catch (e) {
+                    if (this._aborted || this.destroyed) break;
+
+                    if (e.message.includes('sabr.malformed_config') || e.message.includes('sabr.media_serving_enforcement_id_error')) {
+                        logger('warn', 'SABR', `Recoverable error detected: ${e.message}. Triggering recovery signal...`);
+
+                        if (e.message.includes('media_serving_enforcement_id_error')) {
+                            logger('warn', 'SABR', 'Enforcement ID error detected. Clearing SABR contexts to force fresh state.');
+                            this.sabrContexts.clear();
+                            this.activeSabrContextTypes.clear();
+                        }
+
+                        this.emit('stall');
+
+                        const currentRn = this.requestNumber;
+                        while (this.requestNumber === currentRn && !this._aborted && !this.destroyed) {
+                            await wait(500);
+                        }
+                        continue;
+                    }
+
+                    throw e;
+                }
 
                 if (!this.nextRequestPolicy?.backoffTimeMs && this.initializedFormatsMap.size === 0) {
                     await wait(250);
@@ -299,12 +404,58 @@ export class SabrStream extends PassThrough {
     }
 
     destroy(err) {
+        if (this._aborted) return;
         this._aborted = true;
+        this.abortController.abort();
         super.destroy(err);
     }
 
+    updateSession(config) {
+        if (config.serverAbrStreamingUrl) {
+            const url = new URL(config.serverAbrStreamingUrl);
+            url.searchParams.set('alr', 'yes');
+            url.searchParams.set('ump', '1');
+            url.searchParams.set('srfvp', '1');
+            this.serverAbrStreamingUrl = url.toString();
+        }
+        if (config.videoPlaybackUstreamerConfig) {
+            this.videoPlaybackUstreamerConfig = config.videoPlaybackUstreamerConfig;
+        }
+        if (config.poToken) {
+            this.poToken = typeof config.poToken === 'string' ? base64ToU8(config.poToken) : config.poToken;
+        }
+        if (config.playbackCookie) {
+            if (!this.nextRequestPolicy) this.nextRequestPolicy = {};
+            this.nextRequestPolicy.playbackCookie = config.playbackCookie;
+        } else if (this.nextRequestPolicy) {
+            delete this.nextRequestPolicy.playbackCookie;
+        }
+        this.requestNumber = 0;
+        this.noMediaStreak = 0;
+        this.pendingRangesHeaders.clear();
+
+        logger('info', 'SABR', `Session updated. Continuing with RN=${this.requestNumber}, URL=${this.serverAbrStreamingUrl.slice(0, 50)}...`);
+    }
+
+    clearBuffers() {
+        this.initializedFormatsMap.clear();
+        this.downloadedSegmentsByItag.clear();
+        this.formatSequenceCounters.clear();
+        this.partialSegmentQueue.clear();
+
+        this.mediaHeadersProcessed = false;
+        this.pendingRangesHeaders.clear();
+        this.cachedBufferedRanges = null;
+        this.lastReportedRanges.clear();
+
+        this.sabrContexts.clear();
+        this.activeSabrContextTypes.clear();
+
+        logger('info', 'SABR', `Buffers cleared for recovery. Preserving timeline position: ${this.cumulativeDownloadedMs}ms`);
+    }
+
     decodePart(part, decoder) {
-        try { 
+        try {
             const data = concatenateChunks(part.data.chunks);
             return decoder.decode(new ProtoReader(data), data.length);
         } catch(e) { return undefined; }
@@ -352,18 +503,24 @@ export class SabrStream extends PassThrough {
         if (!m) return;
         const k = FormatKeyUtils.fromFormatInitializationMetadata(m);
         if (!this.initializedFormatsMap.has(k)) {
-            this.initializedFormatsMap.set(k, { formatInitializationMetadata: m, downloadedSegments: new Map() });
+            this.initializedFormatsMap.set(k, { formatInitializationMetadata: m });
             logger('debug', 'SABR', `Format init: key=${k} mime=${m.mimeType || ''} endSeg=${m.endSegmentNumber || ''}`);
         }
     }
 
-    handleSabrError(part) { 
-        const err = this.decodePart(part, SabrError); 
-        if(err) this.emit('error', new Error(`SABR Error: ${err.code} ${err.type}`)); 
+    handleSabrError(part) {
+        const err = this.decodePart(part, SabrError);
+        if (err) {
+            const error = new Error(`SABR Error: ${err.code} ${err.type}`);
+            error.code = err.code;
+            error.type = err.type;
+            if (this._aborted || this.destroyed) return;
+            throw error;
+        }
     }
 
-    handleSabrRedirect(part) { 
-        const red = this.decodePart(part, SabrRedirect); 
+    handleSabrRedirect(part) {
+        const red = this.decodePart(part, SabrRedirect);
         if(red && red.url) {
             this.serverAbrStreamingUrl = red.url;
         }
@@ -386,8 +543,42 @@ export class SabrStream extends PassThrough {
             return;
         }
 
-        const level = status.status === 2 ? 'debug' : 'warn';
+        if (status.status === 2) {
+            logger('warn', 'SABR', `Stream Protection Status: ${status.status} (Limited Playback). Triggering token refresh...`);
+            poTokenManager.reset();
+            this.emit('stall');
+            return;
+        }
+
+        const level = 'warn';
         logger(level, 'SABR', `Stream Protection Status: ${status.status}`);
+    }
+
+    handleMediaPartial(buffer, headerId, isFirstChunk) {
+        const s = this.partialSegmentQueue.get(headerId);
+        if (s) {
+
+            let dataToPush = buffer;
+
+            if (isFirstChunk) {
+                if (buffer.getLength() > 1) {
+                    dataToPush = buffer.split(1).remainingBuffer;
+                } else if (buffer.getLength() === 1) {
+                    return;
+                }
+            }
+
+            const bytes = dataToPush.getLength();
+            s.loadedBytes = (s.loadedBytes || 0) + bytes;
+
+            for (const c of dataToPush.chunks) this.push(c);
+
+            if (bytes > 0) {
+               // logger('debug', 'SABR', `d: ${bytes}`); // Verbose
+            }
+        } else {
+            // logger('trace', 'SABR', `Partial media for unknown headerId: ${headerId}`);
+        }
     }
 
     handleMedia(part) {
@@ -395,7 +586,16 @@ export class SabrStream extends PassThrough {
         const s = this.partialSegmentQueue.get(headerId);
         if (s) {
             const d = part.data.split(1).remainingBuffer;
-            for (const c of d.chunks) s.bufferedChunks.push(c);
+            const bytes = d.totalLength;
+            s.loadedBytes = (s.loadedBytes || 0) + bytes;
+
+            for (const c of d.chunks) this.push(c);
+
+            if (bytes > 0) {
+               logger('debug', 'SABR', `Media data: id=${headerId} bytes=${bytes} total=${s.loadedBytes}/${s.mediaHeader?.contentLength || '?'}`);
+            }
+        } else {
+            logger('trace', 'SABR', `Media data for unknown headerId: ${headerId}`);
         }
     }
 
@@ -403,21 +603,44 @@ export class SabrStream extends PassThrough {
         const h = this.decodePart(part, MediaHeader);
         if (h) {
             const key = FormatKeyUtils.fromMediaHeader(h);
-            const segmentNumber = h.isInitSeg ? 0 : (h.sequenceNumber || 0);
-            
+            const headerId = h.headerId || 0;
+
+            let segmentNumber = h.sequenceNumber;
+            if (h.isInitSeg) {
+                segmentNumber = 0;
+            } else if (segmentNumber === undefined || segmentNumber === 0) {
+                const count = (this.formatSequenceCounters.get(h.itag) || 0) + 1;
+                this.formatSequenceCounters.set(h.itag, count);
+                segmentNumber = count;
+            } else {
+                this.formatSequenceCounters.set(h.itag, segmentNumber);
+            }
+
             if (!h.durationMs || h.durationMs === "0") {
                 if (h.timeRange && h.timeRange.timescale > 0) {
-                    h.durationMs = Math.ceil((parseInt(h.timeRange.durationTicks || '0') / h.timeRange.timescale) * 1000).toString();
+                    h.durationMs = Math.ceil((Number(h.timeRange.durationTicks || 0n) / h.timeRange.timescale) * 1000).toString();
                 }
             }
 
-            this.partialSegmentQueue.set(h.headerId || 0, { 
-                formatIdKey: key, 
+            const mediaHeader = h;
+            const formatIdKey = key;
+
+            if (!this.pendingRangesHeaders.has(formatIdKey)) {
+                this.pendingRangesHeaders.set(formatIdKey, []);
+            }
+            this.pendingRangesHeaders.get(formatIdKey).push(mediaHeader);
+
+            logger('debug', 'SABR', `MediaHeader: id=${headerId} itag=${h.itag} seq=${segmentNumber} dur=${h.durationMs}ms`);
+
+            this.partialSegmentQueue.set(headerId, {
+                formatIdKey: key,
                 segmentNumber,
-                mediaHeader: h, 
+                mediaHeader: h,
                 durationMs: h.durationMs,
-                bufferedChunks: [] 
+                loadedBytes: 0
             });
+        } else {
+            logger('warn', 'SABR', 'Failed to decode MediaHeader');
         }
     }
 
@@ -425,45 +648,56 @@ export class SabrStream extends PassThrough {
         const id = part.data.getUint8(0);
         const s = this.partialSegmentQueue.get(id);
         if (s) {
-            const f = this.initializedFormatsMap.get(s.formatIdKey);
-            if (f) {
-                const totalBytes = s.bufferedChunks.reduce((acc, c) => acc + c.length, 0);
+            logger('debug', 'SABR', `MediaEnd: id=${id} seq=${s.segmentNumber} totalBytes=${s.loadedBytes}`);
 
-                if (f.downloadedSegments.has(s.segmentNumber)) {
-                    logger('warn', 'SABR', `Ignoring duplicate segment ${s.segmentNumber} for format ${s.formatIdKey}`);
-                } else {
-                    for (const c of s.bufferedChunks) this.push(c);
-                    if (s.durationMs && !this.positionCallback) this.startTime += parseInt(s.durationMs);
-                    
-                    if (s.durationMs) {
-                        this.totalDownloadedMs += parseInt(s.durationMs, 10);
-                    }
+            const itag = s.mediaHeader?.itag || s.mediaHeader?.formatId?.itag;
+
+            let segmentDuration = 0;
+            if (s.durationMs) {
+                segmentDuration = Number(s.durationMs);
+            } else if (s.mediaHeader?.timeRange && s.mediaHeader.timeRange.timescale > 0) {
+                segmentDuration = Math.ceil((Number(s.mediaHeader.timeRange.durationTicks || 0n) / s.mediaHeader.timeRange.timescale) * 1000);
+            }
+
+            if (segmentDuration > 0) {
+                this.totalDownloadedMs += segmentDuration;
+                this.mediaHeadersProcessed = true;
+                logger('debug', 'SABR', `Segment received: itag=${itag} seq=${s.segmentNumber} dur=${segmentDuration}ms totalDownloaded=${Math.floor(this.totalDownloadedMs)}ms`);
+            }
+
+            if (itag) {
+                if (!this.downloadedSegmentsByItag.has(itag)) {
+                    this.downloadedSegmentsByItag.set(itag, new Map());
                 }
-                
-                s.bufferedChunks = [];
+                const segMap = this.downloadedSegmentsByItag.get(itag);
 
-                f.downloadedSegments.set(s.segmentNumber, {
-                    durationMs: s.durationMs,
-                    byteLength: totalBytes,
-                    mediaHeader: s.mediaHeader
-                });
+                if (segMap.has(s.segmentNumber)) {
+                    logger('warn', 'SABR', `Ignoring duplicate segment ${s.segmentNumber} for itag ${itag}`);
+                } else {
+                    const sorted = Array.from(segMap.values()).sort((a, b) => a.endMs - b.endMs);
+                    const newestEndMs = sorted.length > 0 ? sorted[sorted.length - 1].endMs : 0;
 
-                if (!f.lastMediaHeaders) f.lastMediaHeaders = [];
-                f.lastMediaHeaders.push(s.mediaHeader);
-
-                const MAX_SEGMENT_AGE_MS = 600000;
-                let accumulatedDuration = 0;
-                const sortedSegs = Array.from(f.downloadedSegments.keys()).sort((a, b) => b - a);
-                
-                for (const segNum of sortedSegs) {
-                    const seg = f.downloadedSegments.get(segNum);
-                    accumulatedDuration += parseInt(seg.durationMs || '0', 10);
-                    
-                    if (accumulatedDuration > MAX_SEGMENT_AGE_MS) {
-                        f.downloadedSegments.delete(segNum);
+                    let startMs = Number(s.mediaHeader.startMs || 0n);
+                    if (startMs === 0 && s.mediaHeader.timeRange && s.mediaHeader.timeRange.timescale > 0) {
+                        startMs = Number((BigInt(s.mediaHeader.timeRange.startTicks || 0n) * 1000n) / BigInt(s.mediaHeader.timeRange.timescale));
                     }
+                    const endMs = startMs + segmentDuration;
+
+                    segMap.set(s.segmentNumber, {
+                        segmentNumber: s.segmentNumber,
+                        durationMs: segmentDuration,
+                        byteLength: s.loadedBytes || 0,
+                        mediaHeader: s.mediaHeader,
+                        startMs,
+                        endMs
+                    });
+
+                    let maxEdge = this.cumulativeDownloadedMs || 0;
+                    if (endMs > maxEdge) maxEdge = endMs;
+                    this.cumulativeDownloadedMs = maxEdge;
                 }
             }
+
             this.partialSegmentQueue.delete(id);
         }
     }
@@ -509,6 +743,7 @@ export class SabrStream extends PassThrough {
         if (ctx && ctx.type !== undefined && ctx.value?.length) {
             this.sabrContexts.set(ctx.type, ctx);
             if (ctx.sendByDefault) this.activeSabrContextTypes.add(ctx.type);
+            logger('debug', 'SABR', `Received context update type=${ctx.type} len=${ctx.value?.length} sendByDefault=${ctx.sendByDefault}`);
         }
     }
 
@@ -522,7 +757,13 @@ export class SabrStream extends PassThrough {
     }
 
     handleSnackbarMessage(part) {}
-    handleReloadPlayerResponse(part) {}
+    handleReloadPlayerResponse(part) {
+        const reloadContext = this.decodePart(part, ReloadPlaybackContext);
+        if (reloadContext) {
+            logger('warn', 'SABR', `Reload requested by server. Reason: ${reloadContext.reason || 'unknown'}`);
+            this.emit('stall');
+        }
+    }
 
     logDetailedState({ abrState, audioFormat, videoFormat, selectedFormatIds, preferredAudioFormatIds, preferredVideoFormatIds, bufferedRanges, contexts, unsent }) {
         const now = Date.now();
@@ -532,8 +773,8 @@ export class SabrStream extends PassThrough {
         const cookieLen = this.nextRequestPolicy?.playbackCookie?.length || 0;
         const initKeys = Array.from(this.initializedFormatsMap.keys()).slice(0, 5);
 
-        const initAudio = this.getInitializedByFormat(audioFormat);
-        const segs = initAudio?.downloadedSegments ? Array.from(initAudio.downloadedSegments.values()) : [];
+        const segMap = this.downloadedSegmentsByItag.get(audioFormat?.itag);
+        const segs = segMap ? Array.from(segMap.values()) : [];
         const downloadedMs = segs.reduce((sum, s) => sum + parseInt(s.durationMs || '0'), 0);
         const aheadMs = abrState?.playerTimeMs !== undefined ? (downloadedMs - abrState.playerTimeMs) : undefined;
 
@@ -555,38 +796,57 @@ export class SabrStream extends PassThrough {
 
     buildBufferedRanges(vFormat, aFormat) {
         const bufferedRanges = [];
-        const formats = [vFormat, aFormat].filter((f) => f);
+        const formats = [vFormat, aFormat].filter(f => f);
 
         for (const format of formats) {
-            const initialized = this.getInitializedByFormat(format);
-            if (!initialized || !initialized.lastMediaHeaders?.length) continue;
+            const itag = format.itag;
+            const formatIdKey = createKey(itag, format.xtags);
+            const headers = this.pendingRangesHeaders.get(formatIdKey);
 
-            const headers = initialized.lastMediaHeaders;
-            const durationMs = headers.reduce((sum, h) => sum + (parseInt(h.durationMs || '0', 10)), 0);
-            
-            const formatId = initialized.formatInitializationMetadata?.formatId || headers[0].formatId || this.resolveFormatIdForRequest(format);
+            if (!headers || headers.length === 0) continue;
+
+            const durationMs = headers.reduce((sum, h) => sum + parseInt(h.durationMs || '0'), 0);
+            const startH = headers[0];
+            const endH = headers[headers.length - 1];
 
             bufferedRanges.push({
-                formatId,
                 durationMs: durationMs.toString(),
-                startTimeMs: String(headers[0].startMs || '0'),
-                startSegmentIndex: headers[0].isInitSeg ? 0 : (headers[0].sequenceNumber || 0),
-                endSegmentIndex: headers[headers.length - 1].sequenceNumber || 0,
+                formatId: this.resolveFormatIdForRequest(format),
+                startTimeMs: (startH.startMs || "0").toString(),
+                startSegmentIndex: startH.sequenceNumber || 1,
+                endSegmentIndex: endH.sequenceNumber || 1,
                 timeRange: {
-                    durationTicks: durationMs.toString(),
-                    startTicks: headers[0].startMs || '0',
-                    timescale: headers[0].timeRange?.timescale || 1000
+                    durationTicks: (BigInt(durationMs) * BigInt(startH.timeRange?.timescale || 1000) / 1000n).toString(),
+                    startTicks: (startH.startMs || "0").toString(),
+                    timescale: startH.timeRange?.timescale || 1000
                 }
             });
-            initialized.lastMediaHeaders = [];
+
+            this.pendingRangesHeaders.set(formatIdKey, []);
         }
 
         return bufferedRanges;
     }
 
+    finalizeRange(r) {
+
+        return {
+            durationMs: r.durationMs.toString(),
+            formatId: r.formatId,
+            startTimeMs: r.startTimeMs.toString(),
+            startSegmentIndex: r.startSegmentIndex,
+            endSegmentIndex: r.endSegmentIndex,
+            timeRange: {
+                durationTicks: (BigInt(Math.floor(r.durationMs)) * BigInt(r.timescale) / 1000n).toString(),
+                startTicks: r.startTicks.toString(),
+                timescale: r.timescale
+            }
+        };
+    }
+
     async fetchAndProcessSegments(abrState, audioFormat, videoFormat) {
          if (!this.videoPlaybackUstreamerConfig || !this.clientInfo) throw new Error('Missing config');
-         
+
          if (this.nextRequestPolicy?.backoffTimeMs > 0) {
              const backoff = this.nextRequestPolicy.backoffTimeMs;
              logger('warn', 'SABR', `Waiting for backoff: ${backoff}ms`);
@@ -595,16 +855,25 @@ export class SabrStream extends PassThrough {
          }
 
          const formats = [videoFormat, audioFormat].filter(f => f);
+         const formatsInitialized = this.initializedFormatsMap.size > 0;
          const requestFormatIds = formats.map((f) => this.resolveFormatIdForRequest(f)).filter((f) => f);
-         const selectedFormatIds = (this.initializedFormatsMap.size > 0) ? requestFormatIds : [];
 
-         this.cachedBufferedRanges = this.buildBufferedRanges(videoFormat, audioFormat);
+         const selectedFormatIds = formatsInitialized ? requestFormatIds : [];
+
+          if (!this.cachedBufferedRanges) {
+              this.cachedBufferedRanges = this.buildBufferedRanges(videoFormat, audioFormat);
+          }
 
          const contexts = [];
+         const unsent = [];
+
          for (const ctx of this.sabrContexts.values()) {
-             if (this.activeSabrContextTypes.has(ctx.type)) contexts.push({ type: ctx.type, value: ctx.value });
+             if (this.activeSabrContextTypes.has(ctx.type)) {
+                 contexts.push({ type: ctx.type, value: ctx.value });
+             } else {
+                 unsent.push(ctx.type);
+             }
          }
-         const unsent = Array.from(this.activeSabrContextTypes).filter(t => !this.sabrContexts.has(t));
 
          const preferredAudioFormatIds = audioFormat ? [this.resolveFormatIdForRequest(audioFormat)] : [];
          const preferredVideoFormatIds = videoFormat ? [this.resolveFormatIdForRequest(videoFormat)] : [];
@@ -623,12 +892,17 @@ export class SabrStream extends PassThrough {
          });
 
          const requestBody = VideoPlaybackAbrRequest.encode({
-            clientAbrState: abrState,
+            clientAbrState: {
+                ...abrState,
+                playerTimeMs: BigInt(abrState.playerTimeMs || 0).toString(),
+                bandwidthEstimate: BigInt(abrState.bandwidthEstimate || 0).toString(),
+                timeSinceLastActionMs: 0n
+            },
+            selectedFormatIds: selectedFormatIds,
+            bufferedRanges,
+            videoPlaybackUstreamerConfig: typeof this.videoPlaybackUstreamerConfig === 'string' ? base64ToU8(this.videoPlaybackUstreamerConfig) : this.videoPlaybackUstreamerConfig,
             preferredAudioFormatIds,
             preferredVideoFormatIds,
-            selectedFormatIds: selectedFormatIds,
-            videoPlaybackUstreamerConfig: typeof this.videoPlaybackUstreamerConfig === 'string' ? base64ToU8(this.videoPlaybackUstreamerConfig) : this.videoPlaybackUstreamerConfig,
-            bufferedRanges,
             streamerContext: {
                 poToken: this.poToken,
                 playbackCookie: this.nextRequestPolicy?.playbackCookie,
@@ -662,7 +936,7 @@ export class SabrStream extends PassThrough {
 
         const reqPreviewB64 = b64Trunc(requestBody, 1024);
         logger('debug', 'SABR', `Traffic -> rn=${trafficReq.rn} bodyB64[1024B]=${reqPreviewB64.length > 260 ? (reqPreviewB64.slice(0, 260) + '...') : reqPreviewB64} (full in sabr_traffic.jsonl)`);
-        
+
         const rn = this.requestNumber;
         const url = new URL(this.serverAbrStreamingUrl);
         url.searchParams.set('rn', rn.toString());
@@ -672,7 +946,7 @@ export class SabrStream extends PassThrough {
             'content-type': 'application/x-protobuf',
             'accept': 'application/vnd.yt-ump',
             'x-goog-visitor-id': this.visitorData || "",
-            'x-youtube-client-name': '1',
+            'x-youtube-client-name': String(this.clientInfo?.clientName || '1'),
             'x-youtube-client-version': this.clientInfo?.clientVersion || "",
             'origin': 'https://www.youtube.com',
             'referer': `https://www.youtube.com/watch?v=${this.videoId}`,
@@ -687,7 +961,8 @@ export class SabrStream extends PassThrough {
         const res = await fetch(url.toString(), {
             method: 'POST',
             headers,
-            body: requestBody
+            body: requestBody,
+            signal: this.abortController.signal
         });
 
         if (!res.ok) {
@@ -743,6 +1018,8 @@ export class SabrStream extends PassThrough {
 
         this.mediaHeadersProcessed = false;
 
+        let activePartial = null;
+
         while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -761,50 +1038,110 @@ export class SabrStream extends PassThrough {
             buffer.append(value);
 
             const ump = new UmpReader(buffer);
-            ump.read((part) => {
-                partCounts[part.type] = (partCounts[part.type] || 0) + 1;
-                partSeq.push({ type: part.type, name: umpPartName(part.type), size: part.size });
+            try {
+                const res = ump.read((part) => {
+                    if (this._aborted) return;
 
-                if (part.type === UMPPartId.MEDIA) saw.media = true;
-                else if (part.type === UMPPartId.MEDIA_HEADER) saw.mediaHeader = true;
-                else if (part.type === UMPPartId.MEDIA_END) saw.mediaEnd = true;
-                else if (part.type === UMPPartId.NEXT_REQUEST_POLICY) saw.nextRequestPolicy = true;
-                else if (part.type === UMPPartId.PLAYBACK_START_POLICY) saw.playbackStartPolicy = true;
-                else if (part.type === UMPPartId.REQUEST_IDENTIFIER) saw.requestIdentifier = true;
-                else if (part.type === UMPPartId.REQUEST_CANCELLATION_POLICY) saw.requestCancellationPolicy = true;
-                else if (part.type === UMPPartId.SABR_ERROR) saw.sabrError = true;
-                else if (part.type === UMPPartId.SABR_REDIRECT) saw.sabrRedirect = true;
-                else if (part.type === UMPPartId.SABR_CONTEXT_UPDATE) saw.sabrContextUpdate = true;
-                else if (part.type === UMPPartId.STREAM_PROTECTION_STATUS) saw.streamProtectionStatus = true;
+                    let handled = false;
+                    if (part.type === UMPPartId.MEDIA && activePartial && activePartial.type === UMPPartId.MEDIA) {
+                         const alreadyPushed = activePartial.processedBytes;
+                         const remainder = part.data.split(alreadyPushed).remainingBuffer;
 
-                if (this.enableTrafficDump && this.trafficDumpMaxBytes > 0) {
-                    const shouldDumpPayload = (part.type !== UMPPartId.MEDIA) && (part.type !== UMPPartId.MEDIA_HEADER) && (part.type !== UMPPartId.MEDIA_END);
-                    if (shouldDumpPayload && part.size <= this.trafficDumpMaxBytes) {
-                        try {
-                            const payload = concatenateChunks(part.data.chunks);
-                            let decoded;
+                         const headerId = activePartial.id ?? (part.data.getLength() > 0 ? part.data.getUint8(0) : 0);
+                         const isFirst = alreadyPushed === 0;
+
+                         this.handleMediaPartial(remainder, headerId, isFirst);
+                         handled = true;
+                         activePartial = null;
+                    }
+
+                    if (activePartial) activePartial = null;
+
+                    partCounts[part.type] = (partCounts[part.type] || 0) + 1;
+                    partSeq.push({ type: part.type, name: umpPartName(part.type), size: part.size });
+
+                    if (part.type === UMPPartId.MEDIA) saw.media = true;
+                    else if (part.type === UMPPartId.MEDIA_HEADER) saw.mediaHeader = true;
+                    else if (part.type === UMPPartId.MEDIA_END) saw.mediaEnd = true;
+                    else if (part.type === UMPPartId.NEXT_REQUEST_POLICY) saw.nextRequestPolicy = true;
+                    else if (part.type === UMPPartId.PLAYBACK_START_POLICY) saw.playbackStartPolicy = true;
+                    else if (part.type === UMPPartId.REQUEST_IDENTIFIER) saw.requestIdentifier = true;
+                    else if (part.type === UMPPartId.REQUEST_CANCELLATION_POLICY) saw.requestCancellationPolicy = true;
+                    else if (part.type === UMPPartId.SABR_ERROR) saw.sabrError = true;
+                    else if (part.type === UMPPartId.SABR_REDIRECT) saw.sabrRedirect = true;
+                    else if (part.type === UMPPartId.SABR_CONTEXT_UPDATE) saw.sabrContextUpdate = true;
+                    else if (part.type === UMPPartId.STREAM_PROTECTION_STATUS) saw.streamProtectionStatus = true;
+
+                    if (this.enableTrafficDump && this.trafficDumpMaxBytes > 0) {
+                        const shouldDumpPayload = (part.type !== UMPPartId.MEDIA) && (part.type !== UMPPartId.MEDIA_HEADER) && (part.type !== UMPPartId.MEDIA_END);
+                        if (shouldDumpPayload && part.size <= this.trafficDumpMaxBytes) {
                             try {
-                                if (part.type === UMPPartId.PLAYBACK_START_POLICY) decoded = PlaybackStartPolicy.decode(new ProtoReader(payload), payload.length);
-                                else if (part.type === UMPPartId.REQUEST_IDENTIFIER) decoded = RequestIdentifier.decode(new ProtoReader(payload), payload.length);
-                                else if (part.type === UMPPartId.REQUEST_CANCELLATION_POLICY) decoded = RequestCancellationPolicy.decode(new ProtoReader(payload), payload.length);
-                            } catch {}
+                                const payload = concatenateChunks(part.data.chunks);
+                                let decoded;
+                                try {
+                                    if (part.type === UMPPartId.PLAYBACK_START_POLICY) decoded = PlaybackStartPolicy.decode(new ProtoReader(payload), payload.length);
+                                    else if (part.type === UMPPartId.REQUEST_IDENTIFIER) decoded = RequestIdentifier.decode(new ProtoReader(payload), payload.length);
+                                    else if (part.type === UMPPartId.REQUEST_CANCELLATION_POLICY) decoded = RequestCancellationPolicy.decode(new ProtoReader(payload), payload.length);
+                                } catch {}
 
-                            partDumps.push({
-                                type: part.type,
-                                name: umpPartName(part.type),
-                                size: part.size,
-                                sha256: sha256Hex(payload),
-                                payloadB64: b64Trunc(payload, this.trafficDumpMaxBytes),
-                                payloadB64Truncated: payload.length > this.trafficDumpMaxBytes,
-                                decoded
-                            });
-                        } catch {}
+                                partDumps.push({
+                                    type: part.type,
+                                    name: umpPartName(part.type),
+                                    size: part.size,
+                                    sha256: sha256Hex(payload),
+                                    payloadB64: b64Trunc(payload, this.trafficDumpMaxBytes),
+                                    payloadB64Truncated: payload.length > this.trafficDumpMaxBytes,
+                                    decoded
+                                });
+                            } catch {}
+                        }
+                    }
+
+                    if (!handled) {
+                        const handler = this.umpPartHandlers.get(part.type);
+                        if (handler) handler(part);
+                    }
+                });
+
+                if (res && res.incomplete) {
+                    if (!activePartial) {
+                        activePartial = {
+                            type: res.type,
+                            totalSize: res.size,
+                            headerSize: res.headerSize,
+                            processedBytes: 0,
+                            id: undefined
+                        };
+                    }
+
+                    if (res.type === UMPPartId.MEDIA) {
+                        const available = res.data.getLength();
+                        const newBytesCount = available - activePartial.processedBytes;
+
+                        if (newBytesCount > 0) {
+                             const split = res.data.split(activePartial.processedBytes);
+                             const newChunk = split.remainingBuffer;
+
+                             let headerId = activePartial.id;
+
+                             if (activePartial.processedBytes === 0 && newChunk.getLength() >= 1) {
+                                 headerId = newChunk.getUint8(0);
+                                 activePartial.id = headerId;
+                             }
+
+                             if (headerId !== undefined) {
+                                 const isFirst = (activePartial.processedBytes === 0);
+                                 this.handleMediaPartial(newChunk, headerId, isFirst);
+                             }
+
+                             activePartial.processedBytes += newBytesCount;
+                        }
                     }
                 }
-
-                const handler = this.umpPartHandlers.get(part.type);
-                if (handler) handler(part);
-            });
+            } catch (err) {
+                if (this._aborted) return;
+                throw err;
+            }
             buffer = ump.compositeBuffer;
         }
 
@@ -845,6 +1182,16 @@ export class SabrStream extends PassThrough {
         if (saw.media) {
             this.mediaHeadersProcessed = true;
             this.cachedBufferedRanges = undefined;
+            this.noMediaStreak = 0;
+        } else if (trafficRes.policy.backoffTimeMs > 0) {
+            this.noMediaStreak++;
+            this.cachedBufferedRanges = undefined;
+
+            if (this.noMediaStreak >= 12) {
+                logger('warn', 'SABR', `Stall detected (noMediaStreak=${this.noMediaStreak}). Signaling for re-resolution.`);
+                this.emit('stall');
+                this.noMediaStreak = 0;
+            }
         }
     }
 }
