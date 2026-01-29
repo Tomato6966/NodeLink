@@ -10,7 +10,7 @@ export default class ShazamSource {
     this.nodelink = nodelink
     this.config = nodelink.options
     this.searchTerms = ['shsearch', 'szsearch']
-    this.patterns = [/https?:\/\/(?:www\.)?shazam\.com\/song\/\d+\/([^/?#]+)/]
+    this.patterns = [/https?:\/\/(?:www\.)?shazam\.com\/song\/\d+(?:\/[^/?#]+)?/]
     this.priority = 90
     this.allowExplicit = true
   }
@@ -247,13 +247,35 @@ export default class ShazamSource {
 
       const isrc = extractIsrcFromHtml()
 
-      const title =
-        extractTextAfterClass('NewTrackPageHeader_trackTitle__') || 'Unknown'
-      const artist =
-        extractTextAfterClass('TrackPageArtistLink_artistNameText__') ||
-        'Unknown'
+      const extractMetaContent = (prop) => {
+        const regex = new RegExp(`<meta property="${prop}" content="([^"]+)"`)
+        const match = html.match(regex)
+        return match ? match[1] : null
+      }
 
-      const artworkUrl = extractArtworkFromImgAlt()
+      let title = extractTextAfterClass('NewTrackPageHeader_trackTitle__')
+      let artist = extractTextAfterClass('TrackPageArtistLink_artistNameText__')
+      let artworkUrl = extractArtworkFromImgAlt()
+
+      if (!title || title === 'Unknown') {
+        const ogTitle = extractMetaContent('og:title')
+        if (ogTitle) {
+          const match = ogTitle.match(/^(.+?) - (.+?):/)
+          if (match) {
+            title = match[1]
+            artist = match[2]
+          } else {
+             title = ogTitle
+          }
+        }
+      }
+
+      if (!title) title = 'Unknown'
+      if (!artist) artist = 'Unknown'
+
+      if (!artworkUrl) {
+        artworkUrl = extractMetaContent('og:image')
+      }
 
       if (title === 'Unknown' && !appleMusicUrl)
         return { loadType: 'empty', data: {} }
@@ -297,11 +319,39 @@ export default class ShazamSource {
       const query = `${decodedTrack.title} ${decodedTrack.author}`
       const hasResults = (r) => r?.loadType === 'search' && r.data?.length
 
-      let searchResult = await this.nodelink.sources.search(
-        'youtube',
-        query,
-        'ytmsearch'
-      )
+      let searchResult
+
+      if (decodedTrack.isrc) {
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          `"${decodedTrack.isrc}"`,
+          'ytmsearch'
+        )
+
+        if (hasResults(searchResult)) {
+          logger(
+            'debug',
+            'Shazam',
+            `Found result via ISRC: ${decodedTrack.isrc}`
+          )
+        }
+      }
+
+      if (!hasResults(searchResult)) {
+        if (decodedTrack.isrc) {
+          logger(
+            'debug',
+            'Shazam',
+            `ISRC search failed for ${decodedTrack.isrc}, falling back to text query`
+          )
+        }
+
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          query,
+          'ytmsearch'
+        )
+      }
 
       if (!hasResults(searchResult)) {
         searchResult = await this.nodelink.sources.searchWithDefault(query)
