@@ -7,8 +7,8 @@ import AndroidVR from './clients/AndroidVR.js'
 import IOS from './clients/IOS.js'
 import Music from './clients/Music.js'
 import TV from './clients/TV.js'
-import TVEmbedded from './clients/TVEmbedded.js'
 import Web from './clients/Web.js'
+import WebEmbedded from './clients/WebEmbedded.js'
 import WebRemix from './clients/Web_Remix.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
 import OAuth from './OAuth.js'
@@ -65,8 +65,8 @@ export default class YouTubeSource {
       Music,
       WebRemix,
       TV,
-      TVEmbedded,
-      Web
+      Web,
+      WebEmbedded
     }
 
     for (const clientName in clientClasses) {
