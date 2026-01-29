@@ -185,17 +185,13 @@ export default class SpotifySource {
   async _refreshToken() {
     let success = false
 
-    if (this.externalAuthUrl && !this.anonymousToken) {
+    if (!this.anonymousToken) {
       this.nodelink.credentialManager.set('spotify_anonymous_token', null)
+
       try {
-        const response = await http1makeRequest(this.externalAuthUrl, {
-          headers: { Accept: 'application/json' },
-          disableBodyCompression: true
-        })
+        const tokenData = await getLocalToken(null, 'web-player')
 
-        const { body: tokenData, error, statusCode } = response
-
-        if (!error && statusCode === 200 && tokenData?.accessToken) {
+        if (tokenData?.accessToken) {
           this.anonymousToken = tokenData.accessToken
           const expiresMs = tokenData.accessTokenExpirationTimestampMs
             ? tokenData.accessTokenExpirationTimestampMs - Date.now()
@@ -211,19 +207,55 @@ export default class SpotifySource {
             Math.max(expiresMs, 60000)
           )
           success = true
-        } else {
-          logger(
-            'warn',
-            'Spotify',
-            `Failed to fetch anonymous token: ${statusCode}`
-          )
+          logger('debug', 'Spotify', 'Generated local anonymous token')
         }
       } catch (e) {
         logger(
-          'error',
+          'warn',
           'Spotify',
-          `Anonymous token refresh failed: ${e.message}`
+          `Local anonymous token generation failed: ${e.message}`
         )
+      }
+
+      if (!this.anonymousToken && this.externalAuthUrl) {
+        try {
+          const response = await http1makeRequest(this.externalAuthUrl, {
+            headers: { Accept: 'application/json' },
+            disableBodyCompression: true
+          })
+
+          const { body: tokenData, error, statusCode } = response
+
+          if (!error && statusCode === 200 && tokenData?.accessToken) {
+            this.anonymousToken = tokenData.accessToken
+            const expiresMs = tokenData.accessTokenExpirationTimestampMs
+              ? tokenData.accessTokenExpirationTimestampMs - Date.now()
+              : 3600000
+
+            if (!this.accessToken) {
+              this.tokenExpiry = Date.now() + Math.max(expiresMs, 60000)
+            }
+
+            this.nodelink.credentialManager.set(
+              'spotify_anonymous_token',
+              this.anonymousToken,
+              Math.max(expiresMs, 60000)
+            )
+            success = true
+          } else {
+            logger(
+              'warn',
+              'Spotify',
+              `Failed to fetch anonymous token from external URL: ${statusCode}`
+            )
+          }
+        } catch (e) {
+          logger(
+            'error',
+            'Spotify',
+            `External anonymous token refresh failed: ${e.message}`
+          )
+        }
       }
     } else if (this.anonymousToken) {
       success = true
@@ -317,7 +349,7 @@ export default class SpotifySource {
         const retryAfter = headers['retry-after']
           ? parseInt(headers['retry-after'], 10)
           : 5
-        
+
         logger(
           'warn',
           'Spotify',
