@@ -1058,10 +1058,7 @@ class MP4ToAACStream extends Transform {
   _emitSampleWithADTS(sample) {
     const { profile, samplingIndex, channelCount } = this.audioConfig
 
-    const sampleData =
-      sample.data instanceof ArrayBuffer
-        ? Buffer.from(sample.data)
-        : Buffer.from(sample.data.buffer || sample.data)
+    const sampleData = Buffer.from(sample.data)
 
     this.push(
       _createAdtsHeader(
@@ -1089,13 +1086,8 @@ class MP4ToAACStream extends Transform {
       if (codecParts.length >= 3) {
         const objectType = Number.parseInt(codecParts[2], 10)
 
-        if (objectType === 5) {
-          const coreSamplingIndex = SAMPLE_RATES.indexOf(
-            track.audio.sample_rate / 2
-          )
-          if (coreSamplingIndex !== -1) {
-            samplingIndex = coreSamplingIndex
-          }
+        if (objectType === 5 || objectType === 29) {
+          profile = 2
         } else {
           profile = objectType
         }
@@ -1808,9 +1800,9 @@ class StreamAudioResource extends BaseAudioResource {
       sampleRate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels
     })
-    
+
     const flowController = new FlowController(filters, volumeTransformer, fadeTransformer, audioMixer)
-    
+
     const opusEncoder = new OpusEncoder({
       rate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels,
@@ -1847,6 +1839,8 @@ class StreamAudioResource extends BaseAudioResource {
     pipeline(streams, (err) => {
       if (err && !this._destroyed) {
         opusEncoder.emit('error', err)
+      } else if (!this._destroyed) {
+        this.stream?.emit('finishBuffering')
       }
     })
 
@@ -1872,7 +1866,7 @@ class StreamAudioResource extends BaseAudioResource {
 
   _setupEventHandlers(inputStream) {
     inputStream.on('finishBuffering', () => {
-      this.stream?.emit('finishBuffering')
+      // Waiting for the pipeline to finish
     })
 
     inputStream.on('error', (err) => {
