@@ -140,7 +140,12 @@ export default class Android extends BaseClient {
           item.playlistRenderer ||
           item.compactPlaylistRenderer ||
           item.channelRenderer ||
-          item.elementRenderer
+          (item.elementRenderer &&
+            (item.elementRenderer.newElement?.type?.componentType?.model
+              ?.compactChannelModel ||
+              item.elementRenderer.newElement?.type?.componentType?.model
+                ?.compactPlaylistModel))
+
         if (isValid && count < maxResults) {
           count++
           return true
