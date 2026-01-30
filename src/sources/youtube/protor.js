@@ -1,11 +1,18 @@
-import { Buffer } from 'node:buffer'
+import { Buffer } from 'node:buffer';
+
+const TD = new TextDecoder();
+const EMPTY_U8 = new Uint8Array(0);
 
 export class ProtoWriter {
-    constructor() { this.chunks = []; }
+    constructor() { this.chunks = []; this.length = 0; }
+    _push(c) {
+        this.chunks.push(c);
+        this.length += typeof c === 'number' ? 1 : c.length;
+    }
     writeVarint(value) {
         let v = BigInt(value);
-        while (v > 127n) { this.chunks.push((Number(v & 127n) | 128)); v >>= 7n; }
-        this.chunks.push(Number(v));
+        while (v > 127n) { this._push((Number(v & 127n) | 128)); v >>= 7n; }
+        this._push(Number(v));
     }
     writeTag(fieldNumber, wireType) { this.writeVarint((fieldNumber << 3) | wireType); }
     writeString(fieldNumber, str) {
@@ -13,7 +20,7 @@ export class ProtoWriter {
         const buf = Buffer.from(str, 'utf8');
         this.writeTag(fieldNumber, 2);
         this.writeVarint(buf.length);
-        this.chunks.push(buf);
+        this._push(buf);
     }
     writeBytes(fieldNumber, buffer) {
         if (!buffer || buffer.length === 0) return; // Canonical: omit
@@ -22,7 +29,7 @@ export class ProtoWriter {
         }
         this.writeTag(fieldNumber, 2);
         this.writeVarint(buffer.length);
-        this.chunks.push(buffer);
+        this._push(buffer);
     }
     writeInt32(fieldNumber, value) {
         if (!value) return; // Canonical: omit 0, null, undefined
@@ -45,18 +52,17 @@ export class ProtoWriter {
         this.writeTag(fieldNumber, 5);
         const buf = Buffer.alloc(4);
         buf.writeFloatLE(value);
-        this.chunks.push(buf);
+        this._push(buf);
     }
     writeMessage(fieldNumber, writer) {
         const buf = writer.finish();
         if (buf.length === 0) return;
         this.writeTag(fieldNumber, 2);
         this.writeVarint(buf.length);
-        this.chunks.push(buf);
+        this._push(buf);
     }
     finish() {
-        const totalLen = this.chunks.reduce((acc, c) => acc + (typeof c === 'number' ? 1 : c.length), 0);
-        const buf = new Uint8Array(totalLen);
+        const buf = new Uint8Array(this.length);
         let offset = 0;
         for (const c of this.chunks) {
             if (typeof c === 'number') buf[offset++] = c;
@@ -80,16 +86,15 @@ export class ProtoReader {
         return result;
     }
     readString() {
-        const v = this.readVarint();
-        const len = Number(v);
+        const len = Number(this.readVarint());
         if (this.pos + len > this.buffer.length) return "";
-        const str = new TextDecoder().decode(this.buffer.subarray(this.pos, this.pos + len));
+        const str = TD.decode(this.buffer.subarray(this.pos, this.pos + len));
         this.pos += len;
         return str;
     }
     readBytes() {
         const len = Number(this.readVarint());
-        if (this.pos + len > this.buffer.length) return new Uint8Array(0);
+        if (this.pos + len > this.buffer.length) return EMPTY_U8;
         const bytes = this.buffer.subarray(this.pos, this.pos + len);
         this.pos += len;
         return bytes;
@@ -393,7 +398,7 @@ export const NextRequestPolicy = {
 function isMostlyPrintableUtf8(u8) {
     if (!u8 || !u8.length) return false;
     try {
-        const s = new TextDecoder().decode(u8);
+        const s = TD.decode(u8);
         if (!s) return false;
         let ok = 0;
         for (let i = 0; i < s.length; i++) {
@@ -430,7 +435,7 @@ function decodeProtobufObject(reader, len, depth = 2) {
         } else if (wireType === 2) {
             const b = reader.readBytes();
             const entry = { len: b.length };
-            if (isMostlyPrintableUtf8(b) && b.length <= 256) entry.utf8 = new TextDecoder().decode(b);
+            if (isMostlyPrintableUtf8(b) && b.length <= 256) entry.utf8 = TD.decode(b);
             if (depth > 0 && b.length) {
                 try {
                     const nested = decodeProtobufObject(new ProtoReader(b), b.length, depth - 1);
@@ -471,6 +476,13 @@ export const RequestIdentifier = {
 export const RequestCancellationPolicy = {
     decode(reader, len) {
         // Unknown schema; return a wire-level decoded object (numeric field keys).
+        return decodeProtobufObject(reader, len, 2);
+    }
+};
+
+export const ReloadPlaybackContext = {
+    decode(reader, len) {
+        // Unknown schema; return wire-level decoded object like other unknown messages.
         return decodeProtobufObject(reader, len, 2);
     }
 };
@@ -526,9 +538,12 @@ export const UMPPartId = {
 };
 
 export function base64ToU8(base64) {
-    const standard_base64 = base64.replace(/-/g, '+').replace(/_/g, '/');
-    const padded_base64 = standard_base64.padEnd(standard_base64.length + (4 - standard_base64.length % 4) % 4, '=');
-    return new Uint8Array(Buffer.from(padded_base64, 'base64'));
+    let s = base64;
+    if (s.includes('-')) s = s.replaceAll('-', '+');
+    if (s.includes('_')) s = s.replaceAll('_', '/');
+    const mod = s.length & 3;
+    if (mod) s += '='.repeat(4 - mod);
+    return new Uint8Array(Buffer.from(s, 'base64'));
 }
 
 export function concatenateChunks(chunks) {

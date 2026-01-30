@@ -239,12 +239,21 @@ export class PoTokenManager {
     };
   }
 
-  async initialize() {
+  async initialize(existingVisitorData) {
+    if (existingVisitorData && this.visitorData && existingVisitorData !== this.visitorData) {
+        logger('debug', 'PoToken', `VisitorData changed (old: ${this.visitorData.slice(0, 10)}..., new: ${existingVisitorData.slice(0, 10)}...). Resetting.`);
+        this.reset();
+    }
+
     if (this.botguard && this.minter) return;
 
     logger('debug', 'PoToken', 'Initializing BotGuard...');
 
-    this.visitorData = await this.fetchVisitorData();
+    if (existingVisitorData) {
+        this.visitorData = existingVisitorData;
+    } else {
+        this.visitorData = await this.fetchVisitorData();
+    }
     logger('debug', 'PoToken', `VisitorData: ${this.visitorData?.slice(0, 20)}...`);
 
     this._cleanupDom();
@@ -302,11 +311,11 @@ export class PoTokenManager {
     logger('debug', 'PoToken', 'Initialization complete');
   }
 
-  async generate(videoId) {
+  async generate(videoId, existingVisitorData) {
     try {
-      logger('debug', 'PoToken', `Generating token for videoId: ${videoId}`);
+      logger('debug', 'PoToken', `Generating token for videoId: ${videoId} with existingVisitorData: ${!!existingVisitorData}`);
 
-      await this.initialize();
+      await this.initialize(existingVisitorData);
 
       const contentPoToken = await this.minter.mintAsWebsafeString(videoId);
       logger('debug', 'PoToken', `ContentPoToken generated. Length: ${contentPoToken.length}`);

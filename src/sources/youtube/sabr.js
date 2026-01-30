@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer';
 import path from 'node:path';
 import { appendFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { logger, makeRequest } from '../../utils.js';
+import { logger } from '../../utils.js';
 import { poTokenManager } from './potoke.js';
 import {
     UMPPartId,
@@ -20,7 +20,7 @@ import {
     SabrContextSendingPolicy,
     VideoPlaybackAbrRequest,
     ProtoReader,
-    UMPWriter,
+    ReloadPlaybackContext,
     base64ToU8,
     concatenateChunks
 } from './protor.js';
@@ -62,8 +62,27 @@ function umpPartName(type) {
     }
 }
 
-function wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+function wait(ms, signal) {
+    if (ms <= 0) return Promise.resolve();
+    return new Promise((resolve) => {
+        if (signal?.aborted) return resolve();
+
+        let t;
+        const onAbort = () => {
+            if (t) clearTimeout(t);
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        };
+
+        t = setTimeout(() => {
+            signal?.removeEventListener('abort', onAbort);
+            resolve();
+        }, ms);
+
+        t.unref?.();
+
+        if (signal) signal.addEventListener('abort', onAbort);
+    });
 }
 
 function createKey(itag, xtags) {
@@ -262,7 +281,7 @@ export class SabrStream extends PassThrough {
         this.positionCallback = config.positionCallback;
         this.userAgent = config.userAgent || USER_AGENT;
 
-        this.cachedBufferedRanges = [];
+
 
         this.totalLength = 0;
         this.totalDurationMs = 0;
@@ -296,8 +315,8 @@ export class SabrStream extends PassThrough {
     }
 
     logTraffic(entry) {
-        const line = JSON.stringify(entry) + "\n";
-        void appendFile(this.trafficLogPath, line).catch(() => {});
+        if (!this.enableTrafficLog) return;
+        void appendFile(this.trafficLogPath, JSON.stringify(entry) + '\n').catch(() => {});
     }
 
     start(audioItag) {
@@ -311,9 +330,27 @@ export class SabrStream extends PassThrough {
     }
 
     async loop(audioFormat) {
+        const signal = this.abortController.signal;
         try {
             if (this.lastVirtualAdvanceAt === 0) this.lastVirtualAdvanceAt = Date.now();
             while (!this._aborted && !this.destroyed) {
+                if (this.requestNumber === 0) {
+                    try {
+                        const tokenData = await poTokenManager.generate(this.videoId, this.visitorData);
+                        if (this._aborted || this.destroyed) break;
+
+                        if (tokenData.poToken) {
+                            this.poToken = base64ToU8(tokenData.poToken);
+                            if (tokenData.visitorData && !this.visitorData) {
+                                this.visitorData = tokenData.visitorData;
+                            }
+                            logger('debug', 'SABR', `Generated PO Token for session start. Used existing VD: ${!!this.visitorData}`);
+                        }
+                    } catch (e) {
+                         logger('warn', 'SABR', `Failed to generate PO Token: ${e.message}`);
+                    }
+                }
+
                 const now = Date.now();
                 const prevPlayerTime = this.virtualPlayerTimeMs;
 
@@ -343,7 +380,7 @@ export class SabrStream extends PassThrough {
                 this.lastReportedPlayerTimeMs = reportedPlayerTime;
 
                 if (this.readableLength > MAX_BUFFER_BYTES) {
-                    await wait(250);
+                    await wait(250, signal);
                     continue;
                 }
 
@@ -353,7 +390,7 @@ export class SabrStream extends PassThrough {
 
                 if (this.lastRequestAt) {
                     const since = now - this.lastRequestAt;
-                    if (since < MIN_REQUEST_INTERVAL_MS) await wait(MIN_REQUEST_INTERVAL_MS - since);
+                    if (since < MIN_REQUEST_INTERVAL_MS) await wait(MIN_REQUEST_INTERVAL_MS - since, signal);
                 }
                 this.lastRequestAt = Date.now();
 
@@ -386,7 +423,7 @@ export class SabrStream extends PassThrough {
 
                         const currentRn = this.requestNumber;
                         while (this.requestNumber === currentRn && !this._aborted && !this.destroyed) {
-                            await wait(500);
+                            await wait(500, signal);
                         }
                         continue;
                     }
@@ -395,7 +432,7 @@ export class SabrStream extends PassThrough {
                 }
 
                 if (!this.nextRequestPolicy?.backoffTimeMs && this.initializedFormatsMap.size === 0) {
-                    await wait(250);
+                    await wait(250, signal);
                 }
             }
         } catch (e) {
@@ -422,7 +459,11 @@ export class SabrStream extends PassThrough {
             this.videoPlaybackUstreamerConfig = config.videoPlaybackUstreamerConfig;
         }
         if (config.poToken) {
-            this.poToken = typeof config.poToken === 'string' ? base64ToU8(config.poToken) : config.poToken;
+            try {
+                this.poToken = typeof config.poToken === 'string' ? base64ToU8(config.poToken) : config.poToken;
+            } catch (e) {
+                logger('error', 'SABR', `Failed to decode PO token (session update): ${e.message}`);
+            }
         }
         if (config.playbackCookie) {
             if (!this.nextRequestPolicy) this.nextRequestPolicy = {};
@@ -456,9 +497,12 @@ export class SabrStream extends PassThrough {
 
     decodePart(part, decoder) {
         try {
-            const data = concatenateChunks(part.data.chunks);
+            const chunks = part.data.chunks;
+            const data = chunks.length === 1 ? chunks[0] : concatenateChunks(chunks);
             return decoder.decode(new ProtoReader(data), data.length);
-        } catch(e) { return undefined; }
+        } catch {
+            return undefined;
+        }
     }
 
     getInitializedByFormat(format) {
@@ -674,9 +718,6 @@ export class SabrStream extends PassThrough {
                 if (segMap.has(s.segmentNumber)) {
                     logger('warn', 'SABR', `Ignoring duplicate segment ${s.segmentNumber} for itag ${itag}`);
                 } else {
-                    const sorted = Array.from(segMap.values()).sort((a, b) => a.endMs - b.endMs);
-                    const newestEndMs = sorted.length > 0 ? sorted[sorted.length - 1].endMs : 0;
-
                     let startMs = Number(s.mediaHeader.startMs || 0n);
                     if (startMs === 0 && s.mediaHeader.timeRange && s.mediaHeader.timeRange.timescale > 0) {
                         startMs = Number((BigInt(s.mediaHeader.timeRange.startTicks || 0n) * 1000n) / BigInt(s.mediaHeader.timeRange.timescale));
@@ -850,7 +891,7 @@ export class SabrStream extends PassThrough {
          if (this.nextRequestPolicy?.backoffTimeMs > 0) {
              const backoff = this.nextRequestPolicy.backoffTimeMs;
              logger('warn', 'SABR', `Waiting for backoff: ${backoff}ms`);
-             await wait(backoff);
+             await wait(backoff, this.abortController.signal);
              this.nextRequestPolicy.backoffTimeMs = 0;
          }
 
@@ -992,8 +1033,12 @@ export class SabrStream extends PassThrough {
             throw new Error(`HTTP ${res.status}: ${errorText}`);
         }
 
+        const signal = this.abortController.signal;
+
+        if (!res.body) throw new Error('Missing response body');
         const reader = res.body.getReader();
         let buffer = new CompositeBuffer();
+        const ump = new UmpReader(buffer);
         let responseBytes = 0;
         const responseHash = createHash('sha256');
         const responseDumpChunks = [];
@@ -1020,26 +1065,26 @@ export class SabrStream extends PassThrough {
 
         let activePartial = null;
 
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        try {
+            while (!this._aborted && !this.destroyed) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-            responseBytes += value.length;
-            responseHash.update(value);
+                responseBytes += value.length;
+                responseHash.update(value);
 
-            if (this.enableTrafficDump && this.trafficDumpMaxBytes > 0 && responseDumpBytes < this.trafficDumpMaxBytes) {
-                const take = Math.min(value.length, this.trafficDumpMaxBytes - responseDumpBytes);
-                if (take > 0) {
-                    responseDumpChunks.push(value.subarray(0, take));
-                    responseDumpBytes += take;
+                if (this.enableTrafficDump && this.trafficDumpMaxBytes > 0 && responseDumpBytes < this.trafficDumpMaxBytes) {
+                    const take = Math.min(value.length, this.trafficDumpMaxBytes - responseDumpBytes);
+                    if (take > 0) {
+                        responseDumpChunks.push(value.subarray(0, take));
+                        responseDumpBytes += take;
+                    }
                 }
-            }
 
-            buffer.append(value);
+                buffer.append(value);
+                ump.compositeBuffer = buffer;
 
-            const ump = new UmpReader(buffer);
-            try {
-                const res = ump.read((part) => {
+                const incomplete = ump.read((part) => {
                     if (this._aborted) return;
 
                     let handled = false;
@@ -1103,7 +1148,13 @@ export class SabrStream extends PassThrough {
                     }
                 });
 
-                if (res && res.incomplete) {
+                if (ump.compositeBuffer) {
+                    if (activePartial) {
+                         // Logic for maintaining partial state between reads
+                    }
+                     // The incomplete flag was true, so we check what's left
+                   const res = incomplete;
+                   if (res && res.incomplete) {
                     if (!activePartial) {
                         activePartial = {
                             type: res.type,
@@ -1138,12 +1189,18 @@ export class SabrStream extends PassThrough {
                         }
                     }
                 }
-            } catch (err) {
-                if (this._aborted) return;
-                throw err;
+                }
+
+                buffer = ump.compositeBuffer;
             }
-            buffer = ump.compositeBuffer;
+        } catch (err) {
+            // AbortError (or equivalent) during destroy/abort should not crash the stream.
+            if (!(this._aborted || this.destroyed || signal.aborted)) throw err;
+        } finally {
+            try { await reader.cancel(); } catch {}
+            try { reader.releaseLock(); } catch {}
         }
+
 
         const responseDump = this.enableTrafficDump && responseDumpChunks.length
             ? concatenateChunks(responseDumpChunks)
