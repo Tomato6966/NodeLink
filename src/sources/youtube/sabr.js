@@ -301,6 +301,9 @@ export class SabrStream extends PassThrough {
         this.enableTrafficDump = true;
         this.trafficDumpMaxBytes = 64 * 1024;
 
+        this.bandwidthEstimate = 5000000;
+        this.lastBandwidthLogAt = 0;
+
         this.noMediaStreak = 0;
         this.abortController = new AbortController();
 
@@ -317,6 +320,21 @@ export class SabrStream extends PassThrough {
     logTraffic(entry) {
         if (!this.enableTrafficLog) return;
         void appendFile(this.trafficLogPath, JSON.stringify(entry) + '\n').catch(() => {});
+    }
+
+    updateBandwidthEstimate(bytes, durationMs) {
+        if (bytes <= 0 || durationMs <= 0) return;
+
+        const bits = bytes * 8;
+        const throughput = (bits / durationMs) * 1000;
+
+        const alpha = 0.15;
+        this.bandwidthEstimate = (alpha * throughput) + ((1 - alpha) * this.bandwidthEstimate);
+
+        if (Date.now() - this.lastBandwidthLogAt > 2000) {
+             this.lastBandwidthLogAt = Date.now();
+             logger('debug', 'SABR', `Bandwidth Update: measured=${(throughput/1000000).toFixed(2)}Mbps est=${(this.bandwidthEstimate/1000000).toFixed(2)}Mbps`);
+        }
     }
 
     start(audioItag) {
@@ -397,7 +415,7 @@ export class SabrStream extends PassThrough {
                 try {
                     await this.fetchAndProcessSegments({
                         playerTimeMs: Math.floor(this.totalDownloadedMs),
-                        bandwidthEstimate: 15000000,
+                        bandwidthEstimate: Math.max(Math.floor(this.bandwidthEstimate), 500000),
                         enabledTrackTypesBitfield: 1,
                         audioTrackId: audioFormat.audioTrackId || "",
                         playerState: 1n,
@@ -1194,11 +1212,16 @@ export class SabrStream extends PassThrough {
                 buffer = ump.compositeBuffer;
             }
         } catch (err) {
-            // AbortError (or equivalent) during destroy/abort should not crash the stream.
             if (!(this._aborted || this.destroyed || signal.aborted)) throw err;
         } finally {
             try { await reader.cancel(); } catch {}
             try { reader.releaseLock(); } catch {}
+            const totalDuration = Date.now() - t0;
+            if (responseBytes > 0 && totalDuration > 0) {
+                if (saw.media || responseBytes > 5000) {
+                    this.updateBandwidthEstimate(responseBytes, totalDuration);
+                }
+            }
         }
 
 
