@@ -930,6 +930,8 @@ export default class YouTubeSource {
         })
 
         const stream = new PassThrough()
+        let isRecovering = false
+        let lastRecoverAt = 0
 
         sabr.on('data', (chunk) => {
           if (!stream.write(chunk)) {
@@ -940,6 +942,48 @@ export default class YouTubeSource {
 
         sabr.on('end', () => stream.end())
         sabr.on('finishBuffering', () => stream.emit('finishBuffering'))
+        sabr.on('stall', async () => {
+          if (isRecovering || stream.destroyed) return
+
+          const now = Date.now()
+          if (now - lastRecoverAt < 2000) return
+          lastRecoverAt = now
+
+          isRecovering = true
+          try {
+            logger(
+              'warn',
+              'YouTube',
+              `SABR stall detected for ${decodedTrack.title}. Refreshing session...`
+            )
+            const newUrlData = await this.getTrackUrl(decodedTrack, null, true)
+            if (!newUrlData || newUrlData.protocol !== 'sabr') {
+              throw new Error('No SABR session available for recovery')
+            }
+
+            const ad = newUrlData.additionalData || {}
+            sabr.clearBuffers()
+            sabr.updateSession({
+              serverAbrStreamingUrl: ad.serverAbrStreamingUrl || newUrlData.url,
+              videoPlaybackUstreamerConfig: ad.videoPlaybackUstreamerConfig,
+              poToken: ad.poToken,
+              visitorData: ad.visitorData,
+              clientInfo: ad.clientInfo,
+              formats: ad.formats,
+              userAgent: ad.userAgent,
+              playbackCookie: ad.playbackCookie
+            })
+          } catch (err) {
+            logger(
+              'warn',
+              'YouTube',
+              `SABR recovery failed: ${err.message}`
+            )
+            if (!stream.destroyed) stream.destroy(err)
+          } finally {
+            isRecovering = false
+          }
+        })
         sabr.on('error', async (err) => {
           logger('error', 'YouTube', `SABR stream error: ${err.message}`)
 

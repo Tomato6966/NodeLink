@@ -282,6 +282,7 @@ export class SabrStream extends PassThrough {
         this.startTime = config.startTime || 0;
         this.positionCallback = config.positionCallback;
         this.userAgent = config.userAgent || USER_AGENT;
+        this.recoveryPending = false;
 
 
 
@@ -354,6 +355,10 @@ export class SabrStream extends PassThrough {
         try {
             if (this.lastVirtualAdvanceAt === 0) this.lastVirtualAdvanceAt = Date.now();
             while (!this._aborted && !this.destroyed && !this.streamFinished) {
+                if (this.recoveryPending) {
+                    await wait(500, signal);
+                    continue;
+                }
                 if (this.requestNumber === 0) {
                     try {
                         const tokenData = await poTokenManager.generate(this.videoId, this.visitorData);
@@ -485,6 +490,18 @@ export class SabrStream extends PassThrough {
                 logger('error', 'SABR', `Failed to decode PO token (session update): ${e.message}`);
             }
         }
+        if (config.visitorData) {
+            this.visitorData = config.visitorData;
+        }
+        if (config.clientInfo) {
+            this.clientInfo = config.clientInfo;
+        }
+        if (config.formats) {
+            this.formatIds = config.formats;
+        }
+        if (config.userAgent) {
+            this.userAgent = config.userAgent;
+        }
         if (config.playbackCookie) {
             if (!this.nextRequestPolicy) this.nextRequestPolicy = {};
             this.nextRequestPolicy.playbackCookie = config.playbackCookie;
@@ -494,6 +511,7 @@ export class SabrStream extends PassThrough {
         this.requestNumber = 0;
         this.noMediaStreak = 0;
         this.pendingRangesHeaders.clear();
+        this.recoveryPending = false;
 
         logger('info', 'SABR', `Session updated. Continuing with RN=${this.requestNumber}, URL=${this.serverAbrStreamingUrl.slice(0, 50)}...`);
     }
@@ -616,6 +634,7 @@ export class SabrStream extends PassThrough {
         if (status.status === 2) {
             logger('warn', 'SABR', `Stream Protection Status: ${status.status} (Limited Playback). Triggering token refresh...`);
             poTokenManager.reset();
+            this.recoveryPending = true;
             this.emit('stall');
             return;
         }
