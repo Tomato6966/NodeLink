@@ -275,7 +275,7 @@ export default {
       gl: 'US',
       clients: {
         search: ['Android'], // Clients used for searching tracks
-        playback: ['AndroidVR', 'TV', 'WebEmbedded', 'WebParentTools', 'IOS'], // Clients used for playback/streaming
+        playback: ['AndroidVR', 'TV', 'WebEmbedded', 'WebParentTools', 'Web', 'IOS'], // Clients used for playback/streaming
         resolve: ['AndroidVR', 'TV', 'WebEmbedded', 'WebParentTools', 'IOS', 'Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
         settings: {
           TV: {
