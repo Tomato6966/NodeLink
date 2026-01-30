@@ -273,8 +273,8 @@ export default {
       gl: 'US',
       clients: {
         search: ['Android'], // Clients used for searching tracks
-        playback: ['AndroidVR', 'TV', 'WebEmbedded', 'IOS'], // Clients used for playback/streaming
-        resolve: ['AndroidVR', 'TV', 'WebEmbedded', 'IOS', 'Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
+        playback: ['AndroidVR', 'TV', 'WebEmbedded', 'WebParentTools', 'IOS'], // Clients used for playback/streaming
+        resolve: ['AndroidVR', 'TV', 'WebEmbedded', 'WebParentTools', 'IOS', 'Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
         settings: {
           TV: {
             refreshToken: [""] // You can use a string "token" or an array ["token1", "token2"] for rotation/fallback

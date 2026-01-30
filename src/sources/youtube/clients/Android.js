@@ -22,7 +22,7 @@ export default class Android extends BaseClient {
         deviceModel: 'Pixel 6',
         osName: 'Android',
         osVersion: '14',
-        androidSdkVersion: '30',
+        androidSdkVersion: '34',
         hl: context.client.hl,
         gl: context.client.gl,
         visitorData: context.client.visitorData
