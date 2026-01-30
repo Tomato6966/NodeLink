@@ -58,7 +58,9 @@ export default {
       sources: true,
       lyrics: true,
       youtube: true,
-      'youtube-cipher': true
+      'youtube-cipher': true,
+      sabr: false,
+      potoken: false
     }
   },
   connection: {

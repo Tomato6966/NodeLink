@@ -154,7 +154,15 @@ function logger(level, ...args) {
 
   if (level === 'debug') {
     const debugConfig = loggingConfig.debug || {}
-    if (!debugConfig.all && !debugConfig[category]) {
+    const categoryKey =
+      typeof category === 'string' ? category.toLowerCase() : category
+    const categoryEnabled =
+      debugConfig[category] ??
+      (categoryKey ? debugConfig[categoryKey] : undefined)
+
+    if (debugConfig.all) {
+      if (categoryEnabled === false) return
+    } else if (!categoryEnabled) {
       return
     }
   }
