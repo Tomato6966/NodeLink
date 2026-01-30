@@ -1,9 +1,9 @@
 import { logger, makeRequest } from '../../../utils.js'
 import {
   BaseClient,
-  YOUTUBE_CONSTANTS,
   buildTrack,
-  checkURLType
+  checkURLType,
+  YOUTUBE_CONSTANTS
 } from '../common.js'
 import { poTokenManager } from '../potoke.js'
 
@@ -17,7 +17,7 @@ export default class Web extends BaseClient {
     return {
       client: {
         clientName: 'WEB',
-        clientVersion: '2.20260107.01.00',
+        clientVersion: '2.20260114.01.00',
         platform: 'DESKTOP',
         userAgent:
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
@@ -33,7 +33,7 @@ export default class Web extends BaseClient {
     return true
   }
 
-  async search(query, type, context) {
+  async search(query, _type, context) {
     const sourceName = 'youtube'
 
     const requestBody = {
@@ -131,7 +131,7 @@ export default class Web extends BaseClient {
     return { loadType: 'search', data: tracks }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()
@@ -372,17 +372,18 @@ export default class Web extends BaseClient {
       query: trackInfo.identifier
     }
 
-    const { body: searchResult, error, statusCode } = await makeRequest(
-      'https://www.youtube.com/youtubei/v1/search',
-      {
-        method: 'POST',
-        headers: {
-          'User-Agent': this.getClient(context).client.userAgent
-        },
-        body: requestBody,
-        disableBodyCompression: true
-      }
-    )
+    const {
+      body: searchResult,
+      error,
+      statusCode
+    } = await makeRequest('https://www.youtube.com/youtubei/v1/search', {
+      method: 'POST',
+      headers: {
+        'User-Agent': this.getClient(context).client.userAgent
+      },
+      body: requestBody,
+      disableBodyCompression: true
+    })
 
     if (error || statusCode !== 200) {
       throw new Error(
@@ -390,8 +391,9 @@ export default class Web extends BaseClient {
       )
     }
 
-    const contents = searchResult.contents?.twoColumnSearchResultsRenderer
-      ?.primaryContents?.sectionListRenderer?.contents
+    const contents =
+      searchResult.contents?.twoColumnSearchResultsRenderer?.primaryContents
+        ?.sectionListRenderer?.contents
 
     if (!contents) return []
 
@@ -400,7 +402,10 @@ export default class Web extends BaseClient {
     for (const section of contents) {
       if (section.itemSectionRenderer) {
         for (const item of section.itemSectionRenderer.contents) {
-          if (item.videoRenderer && item.videoRenderer.videoId === trackInfo.identifier) {
+          if (
+            item.videoRenderer &&
+            item.videoRenderer.videoId === trackInfo.identifier
+          ) {
             videoRenderer = item.videoRenderer
             break
           }
@@ -411,9 +416,9 @@ export default class Web extends BaseClient {
 
     if (!videoRenderer) return []
 
-    const macroMarkersCards = videoRenderer.expandableMetadata
-      ?.expandableMetadataRenderer?.expandedContent
-      ?.horizontalCardListRenderer?.cards
+    const macroMarkersCards =
+      videoRenderer.expandableMetadata?.expandableMetadataRenderer
+        ?.expandedContent?.horizontalCardListRenderer?.cards
 
     if (!macroMarkersCards) return []
 
@@ -422,12 +427,15 @@ export default class Web extends BaseClient {
     for (const card of macroMarkersCards) {
       const renderer = card.macroMarkersListItemRenderer
       if (renderer) {
-        const title = renderer.title?.simpleText || renderer.title?.runs?.[0]?.text
-        const timeStr = renderer.timeDescription?.simpleText || renderer.timeDescription?.runs?.[0]?.text
+        const title =
+          renderer.title?.simpleText || renderer.title?.runs?.[0]?.text
+        const timeStr =
+          renderer.timeDescription?.simpleText ||
+          renderer.timeDescription?.runs?.[0]?.text
 
         let thumbnails = []
-        if (renderer.thumbnail && renderer.thumbnail.thumbnails) {
-            thumbnails = renderer.thumbnail.thumbnails
+        if (renderer.thumbnail?.thumbnails) {
+          thumbnails = renderer.thumbnail.thumbnails
         }
 
         if (title && timeStr) {

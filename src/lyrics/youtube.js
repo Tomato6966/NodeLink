@@ -49,7 +49,7 @@ export default class YouTubeLyrics {
           captionTracks.find((c) => c.kind !== 'asr') ||
           captionTracks[0]
 
-        if (defaultTrack && defaultTrack.isTranslatable) {
+        if (defaultTrack?.isTranslatable) {
           trackLang = {
             ...defaultTrack,
             languageCode: language,
@@ -101,13 +101,24 @@ export default class YouTubeLyrics {
     const lines = lyrics.events
       .map((event) => {
         const text = event.segs?.map((seg) => seg.utf8).join('') || ''
+        const words =
+          event.segs?.map((seg) => ({
+            text: seg.utf8
+              .replace(/&amp;#39;/g, "'")
+              .replace(/&quot;/g, '"')
+              .replace(/&amp;/g, '&'),
+            timestamp: event.tStartMs + (seg.tOffsetMs || 0),
+            duration: 0
+          })) || []
+
         return {
           text: text
             .replace(/&amp;#39;/g, "'")
             .replace(/&quot;/g, '"')
             .replace(/&amp;/g, '&'),
           time: event.tStartMs,
-          duration: event.dDurationMs || 0
+          duration: event.dDurationMs || 0,
+          words
         }
       })
       .filter((line) => line.text.trim().length > 0)

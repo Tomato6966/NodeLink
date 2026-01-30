@@ -1,5 +1,11 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, logger, makeRequest, http1makeRequest, loadHLSPlaylist } from '../utils.js'
+import {
+  encodeTrack,
+  http1makeRequest,
+  logger,
+  makeRequest
+} from '../utils.js'
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const DECRYPTION_KEY = 'IFYOUWANTTHEARTISTSTOGETPAIDDONOTDOWNLOADFROMMIXCLOUD'
 
@@ -22,19 +28,27 @@ export default class MixcloudSource {
 
   async _request(query) {
     const apiUrl = `https://app.mixcloud.com/graphql?query=${encodeURIComponent(query)}`
-    return makeRequest(apiUrl, {
-      method: 'GET',
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
-    }, this.nodelink)
+    return makeRequest(
+      apiUrl,
+      {
+        method: 'GET',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      },
+      this.nodelink
+    )
   }
 
   async search(query) {
     try {
       const apiUrl = `https://api.mixcloud.com/search/?q=${encodeURIComponent(query)}&type=cloudcast`
       let { body, statusCode, error } = await http1makeRequest(apiUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' },
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
         disableBodyCompression: true
       })
 
@@ -44,7 +58,11 @@ export default class MixcloudSource {
         try {
           body = JSON.parse(body)
         } catch {
-          logger('warn', 'Mixcloud', 'Failed to parse search API response as JSON')
+          logger(
+            'warn',
+            'Mixcloud',
+            'Failed to parse search API response as JSON'
+          )
           return { loadType: 'empty', data: {} }
         }
       }
@@ -56,27 +74,32 @@ export default class MixcloudSource {
 
       if (body.data.length === 0) return { loadType: 'empty', data: {} }
 
-      const tracks = body.data.map(item => {
-        const pathParts = item.url.split('mixcloud.com/')[1].split('/').filter(Boolean)
-        const trackInfo = {
-          identifier: `${pathParts[0]}_${pathParts[1]}`,
-          isSeekable: true,
-          author: item.user?.name || pathParts[0],
-          length: (item.audio_length || 0) * 1000,
-          isStream: false,
-          position: 0,
-          title: item.name,
-          uri: item.url,
-          artworkUrl: item.pictures?.large || item.pictures?.medium || null,
-          isrc: null,
-          sourceName: 'mixcloud'
-        }
-        return {
-          encoded: encodeTrack(trackInfo),
-          info: trackInfo,
-          pluginInfo: {}
-        }
-      }).slice(0, this.nodelink.options.maxSearchResults || 10)
+      const tracks = body.data
+        .map((item) => {
+          const pathParts = item.url
+            .split('mixcloud.com/')[1]
+            .split('/')
+            .filter(Boolean)
+          const trackInfo = {
+            identifier: `${pathParts[0]}_${pathParts[1]}`,
+            isSeekable: true,
+            author: item.user?.name || pathParts[0],
+            length: (item.audio_length || 0) * 1000,
+            isStream: false,
+            position: 0,
+            title: item.name,
+            uri: item.url,
+            artworkUrl: item.pictures?.large || item.pictures?.medium || null,
+            isrc: null,
+            sourceName: 'mixcloud'
+          }
+          return {
+            encoded: encodeTrack(trackInfo),
+            info: trackInfo,
+            pluginInfo: {}
+          }
+        })
+        .slice(0, this.nodelink.options.maxSearchResults || 10)
 
       return { loadType: 'search', data: tracks }
     } catch (e) {
@@ -140,7 +163,10 @@ export default class MixcloudSource {
       }
     } catch (e) {
       logger('error', 'Mixcloud', `Track resolution failed: ${e.message}`)
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 
@@ -174,13 +200,16 @@ export default class MixcloudSource {
       let hasNextPage = true
       let playlistName = 'Mixcloud Playlist'
 
-      while (hasNextPage && tracks.length < (this.config.maxAlbumPlaylistLength || 1000)) {
+      while (
+        hasNextPage &&
+        tracks.length < (this.config.maxAlbumPlaylistLength || 1000)
+      ) {
         const { body, statusCode } = await this._request(queryTemplate(cursor))
         if (statusCode !== 200 || !body.data?.playlistLookup) break
 
         const data = body.data.playlistLookup
         playlistName = data.name
-        
+
         for (const edge of data.items.edges) {
           const track = edge.node.cloudcast
           if (!track) continue
@@ -200,7 +229,10 @@ export default class MixcloudSource {
       }
     } catch (e) {
       logger('error', 'Mixcloud', `Playlist resolution failed: ${e.message}`)
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 
@@ -228,14 +260,17 @@ export default class MixcloudSource {
       let hasNextPage = true
       let userDisplayName = username
 
-      while (hasNextPage && tracks.length < (this.config.maxAlbumPlaylistLength || 1000)) {
+      while (
+        hasNextPage &&
+        tracks.length < (this.config.maxAlbumPlaylistLength || 1000)
+      ) {
         const { body, statusCode } = await this._request(queryTemplate(cursor))
         if (statusCode !== 200 || !body.data?.userLookup?.[queryType]) break
 
         const data = body.data.userLookup
         userDisplayName = data.displayName
         const list = data[queryType]
-        
+
         for (const edge of list.edges) {
           if (!edge.node.url) continue
           tracks.push(this._parseTrackData(edge.node))
@@ -254,12 +289,18 @@ export default class MixcloudSource {
       }
     } catch (e) {
       logger('error', 'Mixcloud', `User resolution failed: ${e.message}`)
-      return { loadType: 'error', data: { message: e.message, severity: 'fault' } }
+      return {
+        loadType: 'error',
+        data: { message: e.message, severity: 'fault' }
+      }
     }
   }
 
   _parseTrackData(data) {
-    const pathParts = data.url.split('mixcloud.com/')[1].split('/').filter(Boolean)
+    const pathParts = data.url
+      .split('mixcloud.com/')[1]
+      .split('/')
+      .filter(Boolean)
     const trackInfo = {
       identifier: `${pathParts[0]}_${pathParts[1]}`,
       isSeekable: true,
@@ -283,7 +324,12 @@ export default class MixcloudSource {
     }
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack, _itag, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('mixcloud', decodedTrack.identifier)
+      if (cached) return cached
+    }
+
     let { encryptedHls, encryptedUrl } = decodedTrack.pluginInfo || {}
 
     if (!encryptedHls && !encryptedUrl) {
@@ -294,40 +340,51 @@ export default class MixcloudSource {
       }
     }
 
-    if (encryptedUrl) {
-      return {
-        url: this._decrypt(encryptedUrl),
-        protocol: 'https',
-        format: 'aac'
-      }
-    }
-
     if (encryptedHls) {
       return {
         url: this._decrypt(encryptedHls),
         protocol: 'hls',
-        format: 'aac'
+        format: 'mpegts'
+      }
+    }
+
+    if (encryptedUrl) {
+      return {
+        url: this._decrypt(encryptedUrl),
+        protocol: 'https',
+        format: 'm4a'
       }
     }
 
     throw new Error('No stream URL available for Mixcloud track')
   }
 
-  async loadStream(decodedTrack, url, protocol) {
+  async loadStream(_decodedTrack, url, protocol, additionalData) {
     try {
       if (protocol === 'hls') {
-        const stream = new PassThrough()
-        loadHLSPlaylist(url, stream)
-        return { stream, type: 'aac' }
+        const stream = new HLSHandler(url, {
+          type: 'mpegts',
+          strategy: 'segmented',
+          localAddress: this.nodelink.routePlanner?.getIP(),
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://www.mixcloud.com/'
+          },
+          startTime: additionalData?.startTime || 0
+        })
+        return { stream, type: 'mpegts' }
+      }
+
+      const headers = {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        Referer: 'https://www.mixcloud.com/'
       }
 
       const options = {
         method: 'GET',
         streamOnly: true,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Referer': 'https://www.mixcloud.com/'
-        }
+        headers
       }
 
       const response = await http1makeRequest(url, options)
@@ -338,14 +395,18 @@ export default class MixcloudSource {
 
       const stream = new PassThrough()
       response.stream.on('data', (chunk) => stream.write(chunk))
-      response.stream.on('end', () => stream.emit('finishBuffering'))
+      response.stream.on('end', () => {
+        if (!stream.writableEnded) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
+      })
       response.stream.on('error', (error) => {
         logger('error', 'Mixcloud', `Upstream stream error: ${error.message}`)
-        stream.emit('error', error)
-        stream.emit('finishBuffering')
+        if (!stream.destroyed) stream.destroy(error)
       })
 
-      return { stream, type: protocol === 'hls' ? 'aac' : 'm4a' }
+      return { stream, type: 'm4a' }
     } catch (e) {
       logger('error', 'Mixcloud', `Failed to load stream: ${e.message}`)
       return { exception: { message: e.message, severity: 'fault' } }

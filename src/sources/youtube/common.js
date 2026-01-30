@@ -57,7 +57,7 @@ function formatDuration(ms) {
 }
 
 function formatNumber(num) {
-  if (!num || isNaN(num)) return '0'
+  if (!num || Number.isNaN(num)) return '0'
   if (num >= 1000000000) return `${(num / 1000000000).toFixed(1)}B`
   if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`
   if (num >= 1000) return `${(num / 1000).toFixed(1)}K`
@@ -125,7 +125,7 @@ function parsePublishedAt(publishedText) {
 
   const date = new Date(publishedText)
 
-  if (!isNaN(date.getTime())) {
+  if (!Number.isNaN(date.getTime())) {
     return _buildPublishedAtFromTimestamp(date.getTime(), publishedText)
   }
 
@@ -550,7 +550,7 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
         followRedirects: true,
         maxRedirects: 5
       })
-      if (response.finalUrl && response.finalUrl.includes('spotify.com')) {
+      if (response.finalUrl?.includes('spotify.com')) {
         resolved.spotify = response.finalUrl
 
         const match = response.finalUrl.match(
@@ -563,7 +563,7 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
           }
         }
       }
-    } catch (e) {}
+    } catch (_e) {}
   }
 
   if (
@@ -577,10 +577,10 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
         followRedirects: true,
         maxRedirects: 5
       })
-      if (response.finalUrl && response.finalUrl.includes('music.apple.com')) {
+      if (response.finalUrl?.includes('music.apple.com')) {
         resolved.appleMusic = response.finalUrl
       }
-    } catch (e) {}
+    } catch (_e) {}
   }
 
   return resolved
@@ -588,8 +588,8 @@ async function resolveExternalLinks(externalLinks, makeRequest) {
 
 function extractExternalLinks(
   description,
-  resolve = false,
-  makeRequest = null
+  _resolve = false,
+  _makeRequest = null
 ) {
   if (!description) return null
 
@@ -701,8 +701,8 @@ function extractVideoQualities(streamingData) {
   }
 
   return Array.from(qualityMap.values()).sort((a, b) => {
-    const resA = Number.parseInt(a.quality) || 0
-    const resB = Number.parseInt(b.quality) || 0
+    const resA = Number.parseInt(a.quality, 10) || 0
+    const resB = Number.parseInt(b.quality, 10) || 0
     return resA - resB
   })
 }
@@ -837,14 +837,17 @@ function getRendererFromItemData(itemData, itemType) {
   }
 
   if (itemData.elementRenderer) {
-    const model = getItemValue(itemData.elementRenderer, ['newElement.type.componentType.model'])
-    const data = model?.compactChannelModel?.compactChannelData || 
-                 model?.compactPlaylistModel?.compactPlaylistData
+    const model = getItemValue(itemData.elementRenderer, [
+      'newElement.type.componentType.model'
+    ])
+    const data =
+      model?.compactChannelModel?.compactChannelData ||
+      model?.compactPlaylistModel?.compactPlaylistData
 
     if (data) {
-      return { 
+      return {
         _type: model.compactChannelModel ? 'channel' : 'playlist',
-        ...data 
+        ...data
       }
     }
   }
@@ -869,9 +872,18 @@ export async function buildTrack(
 
   if (renderer?._type === 'channel') {
     const ch = renderer.channelRenderer || renderer
-    const channelId = ch.channelId || getItemValue(ch, ['onTap.innertubeCommand.browseEndpoint.browseId']) || getItemValue(ch, ['endpoint.innertubeCommand.browseEndpoint.browseId'])
-    const title = ch.attributedTitle?.content || (typeof ch.title === 'string' ? ch.title : getRunsText(ch.title?.runs) || ch.title?.simpleText) || getRunsText(ch.displayName?.runs) || FALLBACK_TITLE
-    
+    const channelId =
+      ch.channelId ||
+      getItemValue(ch, ['onTap.innertubeCommand.browseEndpoint.browseId']) ||
+      getItemValue(ch, ['endpoint.innertubeCommand.browseEndpoint.browseId'])
+    const title =
+      ch.attributedTitle?.content ||
+      (typeof ch.title === 'string'
+        ? ch.title
+        : getRunsText(ch.title?.runs) || ch.title?.simpleText) ||
+      getRunsText(ch.displayName?.runs) ||
+      FALLBACK_TITLE
+
     if (!channelId) return null
 
     const trackInfo = {
@@ -893,8 +905,10 @@ export async function buildTrack(
       info: trackInfo,
       pluginInfo: {
         type: 'channel_result',
-        videoCount: getRunsText(ch.videoCountText?.runs) || ch.videoCount || '0',
-        subscriberCount: getRunsText(ch.subscriberCountText?.runs) || ch.subscriberCount,
+        videoCount:
+          getRunsText(ch.videoCountText?.runs) || ch.videoCount || '0',
+        subscriberCount:
+          getRunsText(ch.subscriberCountText?.runs) || ch.subscriberCount,
         handle: ch.handle
       }
     }
@@ -903,10 +917,20 @@ export async function buildTrack(
   if (renderer?._type === 'playlist') {
     const pl = renderer
     const playlistId = pl.playlistId
-    const title = pl.attributedTitle?.content || (typeof pl.title === 'string' ? pl.title : getRunsText(pl.title?.runs) || pl.title?.simpleText) || FALLBACK_TITLE
-    const author = (typeof pl.authorName === 'string' ? pl.authorName : getRunsText(pl.longBylineText?.runs) || getRunsText(pl.shortBylineText?.runs)) || FALLBACK_AUTHOR
-    const videoCount = getRunsText(pl.videoCountText?.runs) || pl.videoCount || '0'
-    
+    const title =
+      pl.attributedTitle?.content ||
+      (typeof pl.title === 'string'
+        ? pl.title
+        : getRunsText(pl.title?.runs) || pl.title?.simpleText) ||
+      FALLBACK_TITLE
+    const author =
+      (typeof pl.authorName === 'string'
+        ? pl.authorName
+        : getRunsText(pl.longBylineText?.runs) ||
+          getRunsText(pl.shortBylineText?.runs)) || FALLBACK_AUTHOR
+    const videoCount =
+      getRunsText(pl.videoCountText?.runs) || pl.videoCount || '0'
+
     if (!playlistId) return null
 
     const trackInfo = {
@@ -956,13 +980,39 @@ export async function buildTrack(
 
   if (itemType === 'ytmusic') {
     title = safeString(
-      getRunsText(getItemValue(renderer, ['title.runs'])),
+      getRunsText(getItemValue(renderer, ['title.runs'])) ||
+        getItemValue(renderer, ['title.simpleText']),
       FALLBACK_TITLE
     )
 
+    if (title === FALLBACK_TITLE && Array.isArray(renderer.flexColumns)) {
+      title = safeString(
+        getRunsText(
+          renderer.flexColumns[0]?.musicResponsiveListItemFlexColumnRenderer
+            ?.text?.runs
+        ),
+        FALLBACK_TITLE
+      )
+    }
+
     const subtitleRuns = getItemValue(renderer, ['subtitle.runs'])
+    const longBylineRuns = getItemValue(renderer, ['longBylineText.runs'])
+    const shortBylineRuns = getItemValue(renderer, ['shortBylineText.runs'])
+
     if (Array.isArray(subtitleRuns) && subtitleRuns.length > 0) {
       author = safeString(subtitleRuns[0]?.text, FALLBACK_AUTHOR)
+    } else if (Array.isArray(longBylineRuns) && longBylineRuns.length > 0) {
+      author = safeString(longBylineRuns[0]?.text, FALLBACK_AUTHOR)
+    } else if (Array.isArray(shortBylineRuns) && shortBylineRuns.length > 0) {
+      author = safeString(shortBylineRuns[0]?.text, FALLBACK_AUTHOR)
+    }
+
+    if (author === FALLBACK_AUTHOR && Array.isArray(renderer.flexColumns)) {
+      author = safeString(
+        renderer.flexColumns[1]?.musicResponsiveListItemFlexColumnRenderer?.text
+          ?.runs?.[0]?.text,
+        FALLBACK_AUTHOR
+      )
     }
 
     let lengthText = null
@@ -971,6 +1021,26 @@ export async function buildTrack(
         (run) => run.text && /^\d{1,2}:\d{2}(:\d{2})?$/.test(run.text)
       )
       lengthText = lengthRun?.text
+    }
+
+    if (!lengthText) {
+      lengthText =
+        getItemValue(renderer, ['lengthText.simpleText']) ||
+        getRunsText(getItemValue(renderer, ['lengthText.runs']))
+    }
+
+    if (!lengthText && (Array.isArray(renderer.flexColumns) || Array.isArray(renderer.fixedColumns))) {
+      const columns = [...(renderer.flexColumns || []), ...(renderer.fixedColumns || [])]
+      for (const column of columns) {
+        const textObj = column.musicResponsiveListItemFlexColumnRenderer?.text || column.musicResponsiveListItemFixedColumnRenderer?.text
+        if (Array.isArray(textObj?.runs)) {
+          const found = textObj.runs.find((run) => run.text && /^\d{1,2}:\d{2}(:\d{2})?$/.test(run.text))
+          if (found) {
+            lengthText = found.text
+            break
+          }
+        }
+      }
     }
 
     const parsed = parseLengthAndStream(
@@ -1143,7 +1213,7 @@ export async function buildHoloTrack(
 
   let thumbnails = {}
   let viewCount = null
-  let badges = []
+  let _badges = []
   let accessibilityLabel = `${trackInfo.title} by ${trackInfo.author}`
   let publishedAt = null
   let keywords = []
@@ -1244,7 +1314,7 @@ export async function buildHoloTrack(
     accessibilityLabel = accessibilityLabel || rendererAccessibility
 
     const ownerBadges = renderer.ownerBadges || []
-    badges = ownerBadges
+    _badges = ownerBadges
       .map((b) =>
         getItemValue(b, [
           'metadataBadgeRenderer.tooltip',
@@ -1443,7 +1513,7 @@ export async function fetchEncryptedHostFlags(videoId) {
     }
     const match = body.match(/"encryptedHostFlags":"([^"]+)"/)
 
-    if (match && match[1]) {
+    if (match?.[1]) {
       logger(
         'debug',
         'fetchEncryptedHostFlags',
@@ -1500,7 +1570,7 @@ export class BaseClient {
     return {}
   }
 
-  async search(query, type) {
+  async search(_query, _type) {
     return { loadType: 'empty', data: {} }
   }
 
@@ -1532,7 +1602,7 @@ export class BaseClient {
     if (this.requirePlayerScript() && cipherManager) {
       try {
         const playerScript = await cipherManager.getCachedPlayerScript()
-        if (playerScript && playerScript.url) {
+        if (playerScript?.url) {
           const signatureTimestamp = await cipherManager.getTimestamp(
             playerScript.url
           )
@@ -1579,7 +1649,35 @@ export class BaseClient {
     return response
   }
 
-  async _handlePlayerResponse(playerResponse, sourceName, videoId, context) {
+  async _makeNextRequest(videoId, context, headers) {
+    const apiEndpoint = this.getApiEndpoint()
+    const requestBody = {
+      context: this.getClient(context),
+      videoId: videoId
+    }
+
+    const response = await makeRequest(
+      `${apiEndpoint}/youtubei/v1/next?prettyPrint=false`,
+      {
+        method: 'POST',
+        headers: {
+          'User-Agent': this.getClient(context).client.userAgent,
+          ...(this.getClient(context).client.visitorData
+            ? {
+                'X-Goog-Visitor-Id': this.getClient(context).client.visitorData
+              }
+            : {}),
+          ...headers
+        },
+        body: requestBody,
+        disableBodyCompression: true
+      }
+    )
+
+    return response
+  }
+
+  async _handlePlayerResponse(playerResponse, sourceName, videoId, _context) {
     if (!playerResponse || typeof playerResponse !== 'object') {
       logger(
         'error',
@@ -1672,7 +1770,7 @@ export class BaseClient {
     currentVideoId,
     playlistResponse,
     sourceName,
-    context
+    _context
   ) {
     if (playlistResponse?.error) {
       const errMsg =
@@ -1760,7 +1858,10 @@ export class BaseClient {
     }
 
     const playlistTitle =
-      contentsRoot.playlist?.playlist?.title || 'Unknown Playlist'
+      contentsRoot.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]
+        ?.tabRenderer?.content?.musicQueueRenderer?.header?.musicQueueHeaderRenderer?.subtitle?.runs?.[0]?.text ||
+      contentsRoot.playlist?.playlist?.title ||
+      'Unknown Playlist'
 
     return {
       loadType: 'playlist',
@@ -1776,7 +1877,7 @@ export class BaseClient {
     playlistId,
     browseResponse,
     sourceName,
-    context
+    _context
   ) {
     if (browseResponse?.error) {
       const errMsg =
@@ -1948,9 +2049,7 @@ export class BaseClient {
         }
       }
     } else {
-      const defaultFormats = formats.filter(
-        (f) => f.audioTrack && f.audioTrack.audioIsDefault
-      )
+      const defaultFormats = formats.filter((f) => f.audioTrack?.audioIsDefault)
 
       if (defaultFormats.length > 0) {
         logger('debug', `youtube-${this.name}`, `Using default audio track.`)
@@ -2204,7 +2303,7 @@ export class BaseClient {
     }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()
@@ -2328,7 +2427,7 @@ export class BaseClient {
   }
 
   async getTrackUrl(decodedTrack, context, cipherManager) {
-    const sourceName = decodedTrack.sourceName || 'youtube'
+    const _sourceName = decodedTrack.sourceName || 'youtube'
 
     const headers = this.oauth ? await this.getAuthHeaders() : {}
     const { body: playerResponse, statusCode } = await this._makePlayerRequest(

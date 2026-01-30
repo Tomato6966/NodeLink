@@ -1,5 +1,5 @@
 import myzod from 'myzod'
-import { sendResponse, sendErrorResponse } from '../utils.js'
+import { sendErrorResponse, sendResponse } from '../utils.js'
 
 function getStatus(nodelink, req, res) {
   const routePlanner = nodelink.routePlanner
@@ -64,7 +64,7 @@ function freeAddress(nodelink, req, res) {
   res.end()
 }
 
-function freeAll(nodelink, req, res) {
+function freeAll(nodelink, _req, res) {
   nodelink.routePlanner.freeAll()
   res.writeHead(204)
   res.end()
@@ -82,7 +82,7 @@ const routes = {
   }
 }
 
-function handler(nodelink, req, res, sendResponse, parsedUrl) {
+function handler(nodelink, req, res, _sendResponse, parsedUrl) {
   const route = routes[parsedUrl.pathname]
   if (route) {
     const methodHandler = route[req.method]

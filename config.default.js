@@ -9,6 +9,13 @@ export default {
     enabled: true, // active cluster (or use env CLUSTER_ENABLED)
     workers: 0, // 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
     minWorkers: 1, // Minimum workers to keep alive (improves availability during bursts)
+    specializedSourceWorker: {
+      enabled: true, // If true, source loading (search, lyrics, etc.) is delegated to dedicated workers to prevent voice worker lag
+      count: 1, // Number of separate process clusters for source operations
+      microWorkers: 2, // Number of worker threads per process cluster
+      tasksPerWorker: 32, // Number of parallel tasks each micro-worker can handle before queuing
+      silentLogs: true // If true, micro-workers will only log warnings and errors
+    },
     commandTimeout: 6000, // Timeout for heavy operations like loadTracks (6s)
     fastCommandTimeout: 4000, // Timeout for player commands like play/pause (4s)
     maxRetries: 2, // Number of retry attempts on timeout or worker failure
@@ -27,6 +34,11 @@ export default {
       queueLengthScaleUpFactor: 5, // How many commands in queue per active worker trigger scale up
       lagPenaltyLimit: 60, // Event loop lag threshold (ms) to penalize worker cost
       cpuPenaltyLimit: 0.85 // CPU usage threshold (85% of a core) to force scale up
+    },
+    endpoint: {
+      patchEnabled: true,
+      allowExternalPatch: false,
+      code: 'CAPYBARA'
     }
   },
   logging: {
@@ -63,6 +75,7 @@ export default {
   playerUpdateInterval: 2000,
   statsUpdateInterval: 30000,
   trackStuckThresholdMs: 10000,
+  eventTimeoutMs: 15000,
   zombieThresholdMs: 60000,
   enableHoloTracks: false,
   enableTrackStreamEndpoint: false,
@@ -87,7 +100,7 @@ export default {
       timescale: true
     }
   },
-  defaultSearchSource: 'youtube',
+  defaultSearchSource: ['youtube', 'soundcloud'],
   unifiedSearchSources: ['youtube', 'soundcloud'],
   sources: {
     vkmusic: {
@@ -98,7 +111,45 @@ export default {
     amazonmusic: {
       enabled: true
     },
+    bluesky: {
+      enabled: true
+    },
+    anghami: {
+      enabled: false,
+      cookies: '' // Optional: Useful for accessing restricted or private content
+    },
+    rss: {
+      enabled: true
+    },
+    songlink: {
+      enabled: true,
+      apiKey: '',
+      userCountry: 'US',
+      songIfSingle: true,
+      useApi: true,
+      useScrapeFallback: true,
+      preferredPlatforms: [
+        'spotify',
+        'appleMusic',
+        'youtubeMusic',
+        'youtube',
+        'deezer',
+        'tidal',
+        'amazonMusic',
+        'soundcloud',
+        'bandcamp',
+        'audius',
+        'audiomack',
+        'pandora',
+        'itunes',
+        'amazonStore'
+      ],
+      fallbackToAny: true
+    },
     mixcloud: {
+      enabled: true
+    },
+    audiomack: {
       enabled: true
     },
     deezer: {
@@ -120,12 +171,48 @@ export default {
     http: {
       enabled: true
     },
+    eternalbox: {
+      enabled: true,
+      baseUrl: 'https://eternalboxmirror.xyz',
+      searchResults: 30,
+      enrichSpotify: true,
+      includeAnalysis: true,
+      includeAnalysisSummary: true,
+      eternalStream: true,
+      cacheMaxBytes: 20 * 1024 * 1024,
+      maxBranches: 4,
+      maxBranchThreshold: 75,
+      branchThresholdStart: 10,
+      branchThresholdStep: 5,
+      branchTargetDivisor: 6,
+      addLastEdge: true,
+      justBackwards: false,
+      justLongBranches: false,
+      removeSequentialBranches: true,
+      useFilteredSegments: true,
+      minRandomBranchChance: 0.18,
+      maxRandomBranchChance: 0.5,
+      randomBranchChanceDelta: 0.09,
+      timbreWeight: 1,
+      pitchWeight: 10,
+      loudStartWeight: 1,
+      loudMaxWeight: 1,
+      durationWeight: 100,
+      confidenceWeight: 1,
+      infiniteStream: true,
+      maxReconnects: 0,
+      reconnectDelayMs: 1000
+    },
     vimeo: {
       // Note: not 100% of the songs are currently working (but most should.), because i need to code a different extractor for every year (2010, 2011, etc. not all are done)
       enabled: true,
     },
     telegram: {
       enabled: true
+    },
+    shazam: {
+      enabled: true,
+      allowExplicit: true
     },
     bilibili: {
       enabled: true,
@@ -151,9 +238,31 @@ export default {
       artistLoadLimit: 20
       // "secretKey": "38346591" // Optional, defaults to standard key
     },
+    gaana: {
+      enabled: true,
+      apiUrl: 'https://gaana.1lucas1apk.fun/api', // if you want to host your server https://github.com/notdeltaxd/Gaana-API
+      streamQuality: 'high',
+      playlistLoadLimit: 100,
+      albumLoadLimit: 100,
+      artistLoadLimit: 100
+    },
     "google-tts": {
       enabled: true,
       language: 'en-US'
+    },
+    // Piper TTS Configuration
+    // This source uses an external Piper TTS HTTP server.
+    // You can find the Piper HTTP server repository here:
+    // https://github.com/OHF-Voice/piper1-gpl/tree/main?tab=readme-ov-file
+    pipertts: {
+      enabled: false, // Disabled by default. Enable it to use Piper TTS.
+      url: 'http://localhost:5000', // URL of your Piper TTS server
+      // Optional settings (defaults from Piper):
+      // voice: 'en_US-lessac-medium',
+      // speaker: 0,
+      // length_scale: 1.0,
+      // noise_scale: 0.667,
+      // noise_w_scale: 0.8
     },
     youtube: {
       enabled: true,
@@ -164,8 +273,8 @@ export default {
       gl: 'US',
       clients: {
         search: ['Android'], // Clients used for searching tracks
-        playback: ['AndroidVR', 'TV', 'TVEmbedded', 'IOS'], // Clients used for playback/streaming
-        resolve: ['AndroidVR', 'TV', 'TVEmbedded', 'IOS', 'Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
+        playback: ['AndroidVR', 'TV', 'WebEmbedded', 'WebParentTools', 'IOS'], // Clients used for playback/streaming
+        resolve: ['AndroidVR', 'TV', 'WebEmbedded', 'WebParentTools', 'IOS', 'Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
         settings: {
           TV: {
             refreshToken: [""] // You can use a string "token" or an array ["token1", "token2"] for rotation/fallback
@@ -196,7 +305,8 @@ export default {
       playlistPageLoadConcurrency: 10, // How many pages to load simultaneously
       albumLoadLimit: 1, // 0 means no limit (loads all tracks), 1 = 50 tracks, 2 = 100 tracks, etc.
       albumPageLoadConcurrency: 5, // How many pages to load simultaneously
-      allowExplicit: true // If true plays the explicit version of the song, If false plays the Non-Explicit version of the song. Normal songs are not affected.
+      allowExplicit: true, // If true plays the explicit version of the song, If false plays the Non-Explicit version of the song. Normal songs are not affected.
+      sp_dc: '' // fot getting mobile token (optional) get from spotify in browser devtools -> Application -> Cookies -> sp_dc (requered for canvas)
     },
     applemusic: {
       enabled: true,
@@ -207,6 +317,14 @@ export default {
       playlistPageLoadConcurrency: 5,
       albumPageLoadConcurrency: 5,
       allowExplicit: true
+    },
+    audius: {
+      enabled: true,
+      appName: '',
+      apiKey: '', // go to https://audius.co/settings and create an app and paste the app name and api stuff into here.
+      apiSecret: '',
+      playlistLoadLimit: 100,
+      albumLoadLimit: 100
     },
     tidal: {
       enabled: true,
@@ -228,8 +346,32 @@ export default {
     reddit: {
       enabled: true
     },
+    tumblr: {
+      enabled: true
+    },
+    twitter: {
+      enabled: true
+    },
+    qobuz: {
+      enabled: true,
+      userToken: '', // (optional) get from play.qobuz.com in browser devtools -> Application -> Local Storage -> localuser -> token
+      formatId: '5', // 5 = MP3 320kbps, 6 = FLAC (requires Studio subscription), 27 = Hi-Res FLAC
+      allowExplicit: true
+    },
     lastfm: {
       enabled: true
+    },
+    letrasmus: {
+      enabled: true
+    },
+    yandexmusic: {
+      enabled: true,
+      accessToken: '',
+      allowUnavailable: false,
+      allowExplicit: true,
+      artistLoadLimit: 1, // 0 = no limit, 1 = 10 tracks, 2 = 20 tracks, etc.
+      albumLoadLimit: 1, // 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
+      playlistLoadLimit: 1 // 0 = no limit, 1 = 100 tracks, 2 = 200 tracks, etc.
     }
   },
   lyrics: {
@@ -247,18 +389,60 @@ export default {
     lrclib: {
       enabled: true
     },
+    letrasmus: {
+      enabled: true
+    },
     bilibili: {
       enabled: true
     },
-    applemusic: {
-      enabled: true,
-      advanceSearch: true // Uses YTMusic to fetch the correct title and artists instead of relying on messy YouTube video titles, improving lyrics accuracy
+    yandexmusic: {
+      enabled: true
+    }
+  },
+  meanings: {
+    letrasmus: {
+      enabled: true
+    },
+    wikipedia: {
+      enabled: true
     }
   },
   audio: {
     quality: 'high', // high, medium, low, lowest
     encryption: 'aead_aes256_gcm_rtpsize',
-    resamplingQuality: 'best' // best, medium, fastest, zero order holder, linear
+    resamplingQuality: 'best', // best, medium, fastest, zero order holder, linear
+    fading: {
+      enabled: false,
+      // curve meanings:
+      // linear = constant rate, exponential = slow start then faster,
+      // logarithmic = fast start then slower, s-curve = smooth start/end
+      trackStart: {
+        duration: 0,
+        curve: 'linear'
+      },
+      trackEnd: {
+        duration: 0,
+        curve: 'linear'
+      },
+      trackStop: {
+        duration: 0,
+        curve: 'linear'
+      },
+      seek: {
+        duration: 0,
+        curve: 'linear'
+      },
+      ducking: {
+        enabled: false,
+        duration: 0,
+        targetVolume: 0.3,
+        curve: 'linear'
+      }
+    }
+  },
+  voiceReceive: {
+    enabled: false,
+    format: 'opus' // pcm_s16le, opus
   },
   routePlanner: {
     strategy: 'RotateOnBan', // RotateOnBan, RoundRobin, LoadBalance
@@ -310,6 +494,7 @@ export default {
     enabled: true,
     authorization: {
       type: 'Bearer', // Bearer or Basic.
+      username: 'admin',
       password: '' // If empty, uses server.password
     }
   },

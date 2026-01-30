@@ -1,9 +1,9 @@
 import { logger, makeRequest } from '../../../utils.js'
 import {
   BaseClient,
-  YOUTUBE_CONSTANTS,
   buildTrack,
-  checkURLType
+  checkURLType,
+  YOUTUBE_CONSTANTS
 } from '../common.js'
 
 export default class Android extends BaseClient {
@@ -15,14 +15,14 @@ export default class Android extends BaseClient {
     return {
       client: {
         clientName: 'ANDROID',
-        clientVersion: '20.51.39',
+        clientVersion: '20.01.35',
         userAgent:
-          'com.google.android.youtube/20.51.39 (Linux; U; Android 14) identity',
+          'com.google.android.youtube/20.01.35 (Linux; U; Android 14) identity',
         deviceMake: 'Google',
         deviceModel: 'Pixel 6',
         osName: 'Android',
         osVersion: '14',
-        androidSdkVersion: '30',
+        androidSdkVersion: '34',
         hl: context.client.hl,
         gl: context.client.gl,
         visitorData: context.client.visitorData
@@ -60,7 +60,11 @@ export default class Android extends BaseClient {
           method: 'POST',
           headers: {
             'User-Agent': this.getClient(context).client.userAgent,
-            'X-Goog-Api-Format-Version': '2'
+            'X-Goog-Api-Format-Version': '2',
+            'X-Goog-Visitor-Id': context.client.visitorData,
+            'X-YouTube-Client-Name': '3',
+            'X-YouTube-Client-Version':
+              this.getClient(context).client.clientVersion
           },
           body: requestBody,
           disableBodyCompression: true
@@ -102,14 +106,17 @@ export default class Android extends BaseClient {
       }
 
       const tracks = []
-      const allSections = searchResult.contents?.sectionListRenderer?.contents || []
-      let items = []
+      const allSections =
+        searchResult.contents?.sectionListRenderer?.contents || []
+      const items = []
 
       for (const section of allSections) {
         let contents = section.itemSectionRenderer?.contents
         if (!contents) {
           const shelf = section.shelfRenderer || section.richShelfRenderer
-          contents = shelf?.content?.verticalListRenderer?.items || shelf?.content?.richGridRenderer?.contents
+          contents =
+            shelf?.content?.verticalListRenderer?.items ||
+            shelf?.content?.richGridRenderer?.contents
         }
 
         if (Array.isArray(contents)) {
@@ -131,9 +138,18 @@ export default class Android extends BaseClient {
       const maxResults = this.config.maxSearchResults || 10
       let count = 0
       const filteredItems = items.filter((item) => {
-        const isValid = item.videoRenderer || item.compactVideoRenderer ||
-                        item.playlistRenderer || item.compactPlaylistRenderer ||
-                        item.channelRenderer || item.elementRenderer
+        const isValid =
+          item.videoRenderer ||
+          item.compactVideoRenderer ||
+          item.playlistRenderer ||
+          item.compactPlaylistRenderer ||
+          item.channelRenderer ||
+          (item.elementRenderer &&
+            (item.elementRenderer.newElement?.type?.componentType?.model
+              ?.compactChannelModel ||
+              item.elementRenderer.newElement?.type?.componentType?.model
+                ?.compactPlaylistModel))
+
         if (isValid && count < maxResults) {
           count++
           return true
@@ -176,7 +192,7 @@ export default class Android extends BaseClient {
     }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = 'https://youtubei.googleapis.com'
@@ -257,7 +273,13 @@ export default class Android extends BaseClient {
         const { body: playlistResponse, statusCode } = await makeRequest(
           `${apiEndpoint}/youtubei/v1/next`,
           {
-            headers: { 'User-Agent': this.getClient(context).client.userAgent },
+            headers: {
+              'User-Agent': this.getClient(context).client.userAgent,
+              'X-Goog-Visitor-Id': context.client.visitorData,
+              'X-YouTube-Client-Name': '3',
+              'X-YouTube-Client-Version':
+                this.getClient(context).client.clientVersion
+            },
             body: requestBody,
             method: 'POST',
             disableBodyCompression: true

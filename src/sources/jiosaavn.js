@@ -1,11 +1,13 @@
-import crypto from 'node:crypto'
+import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { desEcbDecryptBase64ToUtf8 } from '../decrypters/des-ecb.js'
 
 const API_BASE = 'https://www.jiosaavn.com/api.php'
 const J_BUFFER = Buffer.from('38346591')
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
-  'Accept': 'application/json'
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36',
+  Accept: 'application/json'
 }
 const HTML_ENTITY_REGEX = /&(?:quot|amp);/g
 const ENTITY_MAP = { '&quot;': '"', '&amp;': '&' }
@@ -15,8 +17,9 @@ export default class JioSaavnSource {
     this.nodelink = nodelink
     this.config = nodelink.options.sources?.jiosaavn || {}
     this.searchTerms = ['jssearch']
+    this.recommendationTerm = ['jsrec']
     this.patterns = [
-      /https?:\/\/(?:www\.)?jiosaavn\.com\/(?:(?<type>album|featured|song|s\/playlist|artist)\/)(?:[^/]+\/)(?<id>[A-Za-z0-9_,\-]+)/
+      /https?:\/\/(?:www\.)?jiosaavn\.com\/(?:(?<type>album|featured|song|s\/playlist|artist)\/)(?:[^/]+\/)(?<id>[A-Za-z0-9_,-]+)/
     ]
     this.priority = 60
     this.playlistLoadLimit = this.config.playlistLoadLimit || 50
@@ -29,7 +32,11 @@ export default class JioSaavnSource {
     return true
   }
 
-  async search(query) {
+  async search(query, sourceTerm) {
+    if (this.recommendationTerm.includes(sourceTerm)) {
+      return this.getRecommendations(query)
+    }
+
     try {
       logger('debug', 'JioSaavn', `Searching for: ${query}`)
 
@@ -54,6 +61,87 @@ export default class JioSaavnSource {
     }
   }
 
+  async getRecommendations(query) {
+    let id = query
+    if (!/^[A-Za-z0-9_,-]+$/.test(query)) {
+      const searchRes = await this.search(query, 'jssearch')
+      if (searchRes.loadType === 'search' && searchRes.data.length > 0) {
+        id = searchRes.data[0].info.identifier
+      } else {
+        return { loadType: 'empty', data: {} }
+      }
+    }
+
+    try {
+      const encodedId = encodeURIComponent(`["${id}"]`)
+      let json = await this._getJson({
+        __call: 'webradio.createEntityStation',
+        api_version: '4',
+        ctx: 'android',
+        entity_id: encodedId,
+        entity_type: 'queue'
+      })
+
+      if (json?.stationid) {
+        const stationId = json.stationid
+        json = await this._getJson({
+          __call: 'webradio.getSong',
+          api_version: '4',
+          ctx: 'android',
+          stationid: encodeURIComponent(stationId),
+          k: '20'
+        })
+
+        if (json && !json.error) {
+          const tracks = Object.values(json)
+            .filter((item) => item && typeof item === 'object' && item.song)
+            .map((item) => this._parseTrack(item.song, true))
+
+          if (tracks.length > 0) {
+            return {
+              loadType: 'playlist',
+              data: {
+                info: { name: 'JioSaavn Recommendations', selectedTrack: 0 },
+                pluginInfo: { type: 'recommendations' },
+                tracks
+              }
+            }
+          }
+        }
+      }
+
+      const metadata = await this._fetchSongMetadata(id)
+      if (metadata?.primary_artists_id) {
+        const artistIdsJoined = metadata.primary_artists_id
+        json = await this._getJson({
+          __call: 'search.artistOtherTopSongs',
+          api_version: '4',
+          ctx: 'wap6dot0',
+          artist_ids: encodeURIComponent(artistIdsJoined),
+          song_id: encodeURIComponent(id),
+          language: 'unknown'
+        })
+
+        if (json && Array.isArray(json) && json.length > 0) {
+          const tracks = json.map((item) => this._parseTrack(item, true))
+          return {
+            loadType: 'playlist',
+            data: {
+              info: { name: 'JioSaavn Recommendations', selectedTrack: 0 },
+              pluginInfo: { type: 'recommendations' },
+              tracks
+            }
+          }
+        }
+      }
+
+      return { loadType: 'empty', data: {} }
+    } catch (e) {
+      logger('error', 'JioSaavn', `Recommendations error: ${e.message}`)
+      return { exception: { message: e.message, severity: 'fault' } }
+    }
+  }
+
   async resolve(url) {
     const match = url.match(this.patterns[0])
     if (!match) return { loadType: 'empty', data: {} }
@@ -65,7 +153,11 @@ export default class JioSaavnSource {
       if (type === 'song') {
         const trackData = await this._fetchSongMetadata(id)
         if (!trackData) {
-          logger('error', 'JioSaavn', `All resolution methods failed for song ${id}`)
+          logger(
+            'error',
+            'JioSaavn',
+            `All resolution methods failed for song ${id}`
+          )
           return { loadType: 'empty', data: {} }
         }
         return { loadType: 'track', data: this._parseTrack(trackData) }
@@ -78,18 +170,36 @@ export default class JioSaavnSource {
     }
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('jiosaavn', decodedTrack.identifier)
+      if (cached) return cached
+    }
+
+    const trackId = decodedTrack.identifier
+
     try {
-      logger('debug', 'JioSaavn', `Fetching stream for: ${decodedTrack.identifier}`)
+      logger(
+        'debug',
+        'JioSaavn',
+        `Fetching stream for: ${decodedTrack.identifier}`
+      )
 
       const trackData = await this._fetchSongMetadata(decodedTrack.identifier)
 
       if (!trackData) {
-        return { exception: { message: 'Track metadata not found', severity: 'common' } }
+        return {
+          exception: { message: 'Track metadata not found', severity: 'common' }
+        }
       }
 
       if (!trackData.encrypted_media_url) {
-        return { exception: { message: 'No encrypted_media_url found', severity: 'fault' } }
+        return {
+          exception: {
+            message: 'No encrypted_media_url found',
+            severity: 'fault'
+          }
+        }
       }
 
       let playbackUrl = this._decryptUrl(trackData.encrypted_media_url)
@@ -110,7 +220,7 @@ export default class JioSaavnSource {
     }
   }
 
-  async loadStream(track, url, protocol, additionalData) {
+  async loadStream(_track, url, _protocol, _additionalData) {
     const { stream, error, statusCode } = await http1makeRequest(url, {
       method: 'GET',
       streamOnly: true
@@ -125,7 +235,29 @@ export default class JioSaavnSource {
       }
     }
 
-    return { stream, type: 'mp4' }
+    const passthrough = new PassThrough()
+
+    stream.on('data', (chunk) => {
+      if (!passthrough.write(chunk)) stream.pause()
+    })
+
+    passthrough.on('drain', () => {
+      if (!stream.destroyed) stream.resume()
+    })
+
+    stream.on('end', () => {
+      if (!passthrough.writableEnded) {
+        passthrough.emit('finishBuffering')
+        passthrough.end()
+      }
+    })
+
+    stream.on('error', (err) => {
+      logger('error', 'JioSaavn', `Stream error: ${err.message}`)
+      if (!passthrough.destroyed) passthrough.destroy(err)
+    })
+
+    return { stream: passthrough, type: 'mp4' }
   }
 
   async _getJson(params) {
@@ -138,7 +270,6 @@ export default class JioSaavnSource {
       ...params
     }).toString()
 
-
     const { body, error, statusCode } = await http1makeRequest(url.toString(), {
       method: 'GET',
       headers: HEADERS
@@ -150,7 +281,7 @@ export default class JioSaavnSource {
 
     try {
       return typeof body === 'string' ? JSON.parse(body) : body
-    } catch (e) {
+    } catch (_e) {
       throw new Error('Failed to parse JioSaavn response')
     }
   }
@@ -161,7 +292,11 @@ export default class JioSaavnSource {
       return data[id] || data.songs[0]
     }
 
-    logger('warn', 'JioSaavn', `song.getDetails failed for ${id}. Retrying with webapi.get...`)
+    logger(
+      'warn',
+      'JioSaavn',
+      `song.getDetails failed for ${id}. Retrying with webapi.get...`
+    )
 
     data = await this._getJson({
       __call: 'webapi.get',
@@ -189,7 +324,7 @@ export default class JioSaavnSource {
 
     if (!list?.length) return { loadType: 'empty', data: {} }
 
-    const tracks = list.map(item => this._parseTrack(item))
+    const tracks = list.map((item) => this._parseTrack(item))
     let name = data.title || data.name || ''
     if (type === 'artist') name = `${name}'s Top Tracks`
 
@@ -206,9 +341,7 @@ export default class JioSaavnSource {
   }
 
   _decryptUrl(encryptedUrl) {
-    const decipher = crypto.createDecipheriv('des-ecb', J_BUFFER, null)
-    decipher.setAutoPadding(true)
-    return decipher.update(encryptedUrl, 'base64', 'utf8') + decipher.final('utf8')
+    return desEcbDecryptBase64ToUtf8(encryptedUrl, J_BUFFER)
   }
 
   _cleanString(str) {
@@ -222,19 +355,27 @@ export default class JioSaavnSource {
     const id = json.id
     const title = this._cleanString(json.title || json.song)
     const uri = json.perma_url
-    const duration = (parseInt(json.more_info?.duration || json.duration || '0', 10)) * 1000
+    const duration =
+      parseInt(json.more_info?.duration || json.duration || '0', 10) * 1000
 
     const primaryArtists = json.more_info?.artistMap?.primary_artists
     const artistList = json.more_info?.artistMap?.artists
-    const metaArtist = Array.isArray(primaryArtists) && primaryArtists.length
-      ? primaryArtists
-      : (Array.isArray(artistList) ? artistList : null)
+    const metaArtist =
+      Array.isArray(primaryArtists) && primaryArtists.length
+        ? primaryArtists
+        : Array.isArray(artistList)
+          ? artistList
+          : null
 
     let author
     if (metaArtist) {
-      author = metaArtist.map(a => a.name).join(', ')
+      author = metaArtist.map((a) => a.name).join(', ')
     } else {
-      author = json.more_info?.music || json.primary_artists || json.singers || 'Unknown Artist'
+      author =
+        json.more_info?.music ||
+        json.primary_artists ||
+        json.singers ||
+        'Unknown Artist'
     }
 
     const artworkUrl = (json.image || '').replace('150x150', '500x500')

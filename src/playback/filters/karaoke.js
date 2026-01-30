@@ -94,7 +94,7 @@ export default class Karaoke {
   }
 
   update(filters) {
-    const k = (filters && filters.karaoke) || {}
+    const k = filters?.karaoke || {}
     const level = k.level || 0
     const monoLevel = k.monoLevel || 0
 

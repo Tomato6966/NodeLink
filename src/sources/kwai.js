@@ -28,7 +28,7 @@ export default class KwaiSource {
 
   decodeUnicodeEscapes(str) {
     if (!str) return null
-    return str.replace(/\\u([\dA-Fa-f]{4})/g, (match, code) => {
+    return str.replace(/\\u([\dA-Fa-f]{4})/g, (_match, code) => {
       return String.fromCharCode(Number.parseInt(code, 16))
     })
   }
@@ -94,7 +94,7 @@ export default class KwaiSource {
     }
   }
 
-  async search(query) {
+  async search(_query) {
     throw {
       exception: {
         message: 'Search not supported for Kwai',
@@ -132,7 +132,7 @@ export default class KwaiSource {
       artworkUrl: videoData.thumbnail,
       uri: queryUrl,
       isStream: false,
-      isSeekable: false,
+      isSeekable: true,
       position: 0,
       isrc: null
     }
@@ -173,7 +173,7 @@ export default class KwaiSource {
     }
   }
 
-  async loadStream(decodedTrack, url, protocol, additionalData) {
+  async loadStream(_decodedTrack, url, _protocol, _additionalData) {
     try {
       const options = {
         method: 'GET',

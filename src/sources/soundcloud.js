@@ -1,17 +1,18 @@
-import { PassThrough, pipeline } from 'node:stream'
+import { PassThrough } from 'node:stream'
 
 import {
   encodeTrack,
   http1makeRequest,
-  loadHLS,
   logger,
   makeRequest
 } from '../utils.js'
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const BASE_URL = 'https://api-v2.soundcloud.com'
 const SOUNDCLOUD_URL = 'https://soundcloud.com'
 const ASSET_PATTERN = /https:\/\/a-v2\.sndcdn\.com\/assets\/[a-zA-Z0-9-]+\.js/g
-const CLIENT_ID_PATTERN = /(?:[?&/]?(?:client_id)[\s:=&]*"?|"data":{"id":")([A-Za-z0-9]{32})"?/
+const CLIENT_ID_PATTERN =
+  /(?:[?&/]?(?:client_id)[\s:=&]*"?|"data":{"id":")([A-Za-z0-9]{32})"?/
 const TRACK_PATTERN =
   /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:sets\/)?[^/\s]+$/
 const SEARCH_URL_PATTERN =
@@ -73,11 +74,15 @@ export default class SoundCloudSource {
       /**
        * @type {string | undefined}
        */
-      let clientId;
+      let clientId
 
-      if(mainPage.body?.match(CLIENT_ID_PATTERN)) {
+      if (mainPage.body?.match(CLIENT_ID_PATTERN)) {
         clientId = mainPage.body.match(CLIENT_ID_PATTERN)[1]
-        logger('debug', 'Sources', `SoundCloud client_id (${clientId}) Found from main page`)
+        logger(
+          'debug',
+          'Sources',
+          `SoundCloud client_id (${clientId}) Found from main page`
+        )
       }
 
       try {
@@ -94,7 +99,7 @@ export default class SoundCloudSource {
             assetMatches.map(async (match) => {
               const assetUrl = match[0]
               const asset = await http1makeRequest(assetUrl)
-              
+
               if (asset && !asset.error) {
                 const idMatch = asset.body.match(CLIENT_ID_PATTERN)
                 if (idMatch?.[1]) {
@@ -259,7 +264,6 @@ export default class SoundCloudSource {
         return this._processPlaylists(collection)
       case 'all':
         return this._processAll(collection)
-      case 'tracks':
       default:
         return this._processTracks(collection)
     }
@@ -592,9 +596,22 @@ export default class SoundCloudSource {
     }
   }
 
-  async getTrackUrl(info) {
+  async getTrackUrl(info, forceRefresh = false) {
     if (!info?.identifier) {
       return this._buildException('Invalid track info')
+    }
+
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get('soundcloud', info.identifier)
+      if (cached) {
+        const expiresMatch = cached.url.match(/expires=(\d+)/)
+        const expires = expiresMatch ? parseInt(expiresMatch[1]) * 1000 : 0
+
+        if (expires > Date.now() + 5000) {
+          logger('debug', 'Sources', `Using cached SoundCloud URL for ${info.identifier}`)
+          return cached
+        }
+      }
     }
 
     try {
@@ -617,7 +634,11 @@ export default class SoundCloudSource {
         return this._buildException(msg)
       }
 
-      return await this._selectTranscoding(req.body)
+      const result = await this._selectTranscoding(req.body)
+      if (result && !result.exception) {
+        this.nodelink.trackCacheManager.set('soundcloud', info.identifier, result, 1000 * 60 * 15)
+      }
+      return result
     } catch (err) {
       this._logError('getTrackUrl exception', err)
 
@@ -742,22 +763,38 @@ export default class SoundCloudSource {
     return {
       url: finalUrl,
       protocol,
-      format
+      format,
+      additionalData: { format }
     }
   }
 
-  async loadStream(track, url, protocol, additionalData) {
-    const stream = new PassThrough()
-
+  async loadStream(_track, url, protocol, additionalData) {
     if (protocol === 'progressive') {
+      const stream = new PassThrough()
       this._handleProgressive(url, stream)
+      return { stream }
     } else if (protocol === 'hls') {
-      this._handleHls(url, stream)
-    } else {
-      stream.destroy(new Error(`Unsupported protocol: ${protocol}`))
-    }
+      let type = additionalData?.format
 
-    return { stream }
+      if (type === 'aac_hls') {
+        type = 'fmp4'
+      } else if (type === 'mp3') {
+        type = 'mp3'
+      } else {
+        type = 'mpegts'
+      }
+
+      const stream = new HLSHandler(url, {
+        type,
+        localAddress: this.nodelink.routePlanner?.getIP(),
+        startTime: additionalData?.startTime || 0
+      })
+      return { stream, type }
+    } else {
+      const stream = new PassThrough()
+      stream.destroy(new Error(`Unsupported protocol: ${protocol}`))
+      return { stream }
+    }
   }
 
   async _handleProgressive(url, stream) {
@@ -772,17 +809,24 @@ export default class SoundCloudSource {
         return
       }
 
-      pipeline(res.stream, stream, (err) => {
-        if (err) {
-          logger(
-            'error',
-            'Sources',
-            `Progressive pipeline error: ${err.message}`
-          )
-          if (!stream.destroyed) stream.destroy(err)
-        } else {
+      res.stream.on('data', (chunk) => {
+        if (!stream.write(chunk)) res.stream.pause()
+      })
+
+      stream.on('drain', () => {
+        if (!res.stream.destroyed) res.stream.resume()
+      })
+
+      res.stream.on('end', () => {
+        if (!stream.writableEnded) {
           stream.emit('finishBuffering')
+          stream.end()
         }
+      })
+
+      res.stream.on('error', (err) => {
+        logger('error', 'Sources', `Progressive stream error: ${err.message}`)
+        if (!stream.destroyed) stream.destroy(err)
       })
     } catch (err) {
       this._logError('Progressive stream failed', err)
@@ -790,14 +834,6 @@ export default class SoundCloudSource {
     }
   }
 
-  async _handleHls(url, stream) {
-    try {
-      await loadHLS(url, stream, false, true)
-    } catch (err) {
-      this._logError('HLS stream failed', err)
-      if (!stream.destroyed) stream.destroy(err)
-    }
-  }
 
   _isValidString(val) {
     return typeof val === 'string' && val.length > 0

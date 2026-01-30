@@ -1,11 +1,15 @@
-import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.js'
-import fs from 'node:fs/promises'
 import path from 'node:path'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger
+} from '../utils.js'
 
 const API_BASE = 'https://api.music.apple.com/v1'
 const MAX_PAGE_ITEMS = 300
 const BATCH_SIZE_DEFAULT = 5
-const CACHE_VALIDITY_DAYS = 7
+const _CACHE_VALIDITY_DAYS = 7
 
 export default class AppleMusicSource {
   constructor(nodelink) {
@@ -59,12 +63,18 @@ export default class AppleMusicSource {
         return true
       }
 
-      const cachedToken = this.nodelink.credentialManager.get('apple_media_api_token')
+      const cachedToken = this.nodelink.credentialManager.get(
+        'apple_media_api_token'
+      )
       if (cachedToken) {
         this.mediaApiToken = cachedToken
         this._parseToken(this.mediaApiToken)
         if (this._isTokenValid()) {
-          logger('info', 'AppleMusic', 'Loaded valid token from CredentialManager.')
+          logger(
+            'info',
+            'AppleMusic',
+            'Loaded valid token from CredentialManager.'
+          )
           this.tokenInitialized = true
           return true
         }
@@ -76,7 +86,11 @@ export default class AppleMusicSource {
         this._parseToken(this.mediaApiToken)
         if (this._isTokenValid()) {
           logger('info', 'AppleMusic', 'Loaded valid token from config file.')
-          this.nodelink.credentialManager.set('apple_media_api_token', this.mediaApiToken, this.tokenExpiry - Date.now())
+          this.nodelink.credentialManager.set(
+            'apple_media_api_token',
+            this.mediaApiToken,
+            this.tokenExpiry - Date.now()
+          )
           this.tokenInitialized = true
           return true
         }
@@ -94,7 +108,11 @@ export default class AppleMusicSource {
         }
         this.mediaApiToken = newToken
         this._parseToken(this.mediaApiToken)
-        this.nodelink.credentialManager.set('apple_media_api_token', this.mediaApiToken, this.tokenExpiry - Date.now())
+        this.nodelink.credentialManager.set(
+          'apple_media_api_token',
+          this.mediaApiToken,
+          this.tokenExpiry - Date.now()
+        )
         this.tokenInitialized = true
         return true
       }
@@ -135,7 +153,7 @@ export default class AppleMusicSource {
       const scriptTagMatch = html.match(
         /<script\s+type="module"\s+crossorigin\s+src="([^"]+)"/
       )
-      const scriptTag = scriptTagMatch && scriptTagMatch[1]
+      const scriptTag = scriptTagMatch?.[1]
 
       if (!scriptTag) {
         throw new Error('Module script tag not found in Apple Music HTML.')
@@ -237,8 +255,7 @@ export default class AppleMusicSource {
     const isExplicit = attributes.contentRating === 'explicit'
     let trackUri = attributes.url || ''
     if (trackUri) {
-      trackUri +=
-        (trackUri.includes('?') ? '&' : '?') + `explicit=${isExplicit}`
+      trackUri += `${trackUri.includes('?') ? '&' : '?'}explicit=${isExplicit}`
     }
 
     const trackInfo = {
@@ -465,20 +482,24 @@ export default class AppleMusicSource {
           if (page?.data) results.push(...page.data)
         }
       } catch (e) {
-        logger('warn', 'AppleMusic', `Failed to fetch a batch of pages: ${e.message}`)
+        logger(
+          'warn',
+          'AppleMusic',
+          `Failed to fetch a batch of pages: ${e.message}`
+        )
       }
     }
 
     return results
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
     let isExplicit = false
     if (decodedTrack.uri) {
       try {
         const url = new URL(decodedTrack.uri)
         isExplicit = url.searchParams.get('explicit') === 'true'
-      } catch (error) {
+      } catch (_error) {
         // Ignore malformed URI
       }
     }
@@ -486,8 +507,34 @@ export default class AppleMusicSource {
     const query = this._buildSearchQuery(decodedTrack, isExplicit)
 
     try {
-      let searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
-      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+      let searchResult
+
+      if (decodedTrack.isrc) {
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          `"${decodedTrack.isrc}"`,
+          'ytmsearch'
+        )
+        if (
+          searchResult.loadType !== 'search' ||
+          searchResult.data.length === 0
+        ) {
+          searchResult = null
+        }
+      }
+
+      if (!searchResult) {
+        searchResult = await this.nodelink.sources.search(
+          'youtube',
+          query,
+          'ytmsearch'
+        )
+      }
+
+      if (
+        searchResult.loadType !== 'search' ||
+        searchResult.data.length === 0
+      ) {
         searchResult = await this.nodelink.sources.searchWithDefault(query)
       }
 
@@ -510,7 +557,7 @@ export default class AppleMusicSource {
         }
       }
 
-      const stream = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+      const stream = await this.nodelink.sources.getTrackUrl(bestMatch.info, itag, forceRefresh)
       return { newTrack: bestMatch, ...stream }
     } catch (error) {
       return { exception: { message: error.message, severity: 'fault' } }

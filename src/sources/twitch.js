@@ -1,111 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
-
-async function manageHlsStream(initialUrl, outputStream) {
-  const segmentQueue = []
-  const processedSegments = new Set()
-  let stop = false
-  const playlistUrl = initialUrl
-
-  outputStream.on('close', () => {
-    stop = true
-  })
-
-  const playlistFetcher = async () => {
-    while (!stop) {
-      try {
-        const {
-          body: playlistContent,
-          error,
-          statusCode
-        } = await http1makeRequest(playlistUrl)
-        if (error || statusCode !== 200)
-          throw new Error(`Playlist fetch failed: ${statusCode}`)
-
-        const lines = playlistContent.split('\n')
-        let targetDuration = 2
-        const targetDurationLine = lines.find((l) =>
-          l.startsWith('#EXT-X-TARGETDURATION:')
-        )
-        if (targetDurationLine)
-          targetDuration = Number.parseInt(targetDurationLine.split(':')[1], 10)
-
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].startsWith('#EXTINF:')) {
-            const segmentUrl = lines[++i]
-            if (segmentUrl && !segmentUrl.startsWith('#')) {
-              const absoluteUrl = new URL(segmentUrl, playlistUrl).toString()
-              if (!processedSegments.has(absoluteUrl)) {
-                processedSegments.add(absoluteUrl)
-                segmentQueue.push(absoluteUrl)
-              }
-            }
-          }
-        }
-
-        if (playlistContent.includes('#EXT-X-ENDLIST')) {
-          stop = true
-        }
-
-        await new Promise((resolve) =>
-          setTimeout(resolve, Math.max(1, targetDuration) * 1000)
-        )
-      } catch (e) {
-        logger('error', 'Twitch-HLS-Fetcher', `Error: ${e.message}`)
-        stop = true
-      }
-    }
-  }
-
-  const segmentDownloader = async () => {
-    while (!stop) {
-      if (segmentQueue.length === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 100))
-        continue
-      }
-
-      const segmentUrl = segmentQueue.shift()
-
-      try {
-        const {
-          stream: segmentStream,
-          error,
-          statusCode
-        } = await http1makeRequest(segmentUrl, { streamOnly: true })
-        if (error || statusCode !== 200) {
-          logger(
-            'warn',
-            'Twitch-HLS-Downloader',
-            `Failed segment ${segmentUrl}: ${statusCode}`
-          )
-          continue
-        }
-
-        if (outputStream.destroyed) break
-
-        await new Promise((resolve, reject) => {
-          segmentStream.pipe(outputStream, { end: false })
-          segmentStream.on('end', resolve)
-          segmentStream.on('error', reject)
-        })
-      } catch (e) {
-        logger(
-          'error',
-          'Twitch-HLS-Downloader',
-          `Error processing segment ${segmentUrl}: ${e.message}`
-        )
-      }
-    }
-
-    if (!outputStream.destroyed) {
-      outputStream.emit('finishBuffering')
-      outputStream.end()
-    }
-  }
-
-  playlistFetcher()
-  segmentDownloader()
-}
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
 export default class TwitchSource {
   constructor(nodelink) {
@@ -125,7 +20,11 @@ export default class TwitchSource {
     if (cachedId && cachedDevice) {
       this.clientId = cachedId
       this.deviceId = cachedDevice
-      logger('info', 'Sources', 'Loaded Twitch parameters from CredentialManager.')
+      logger(
+        'info',
+        'Sources',
+        'Loaded Twitch parameters from CredentialManager.'
+      )
       return true
     }
 
@@ -184,10 +83,18 @@ export default class TwitchSource {
       }
 
       if (this.deviceId) {
-        this.nodelink.credentialManager.set('twitch_device_id', this.deviceId, 7 * 24 * 60 * 60 * 1000)
+        this.nodelink.credentialManager.set(
+          'twitch_device_id',
+          this.deviceId,
+          7 * 24 * 60 * 60 * 1000
+        )
       }
 
-      this.nodelink.credentialManager.set('twitch_client_id', this.clientId, 7 * 24 * 60 * 60 * 1000)
+      this.nodelink.credentialManager.set(
+        'twitch_client_id',
+        this.clientId,
+        7 * 24 * 60 * 60 * 1000
+      )
 
       logger(
         'info',
@@ -533,8 +440,8 @@ export default class TwitchSource {
       for (const quality of clipData.videoQualities) {
         if (
           !bestQuality ||
-          Number.parseInt(quality.quality) >
-            Number.parseInt(bestQuality.quality)
+          Number.parseInt(quality.quality, 10) >
+            Number.parseInt(bestQuality.quality, 10)
         ) {
           bestQuality = quality
         }
@@ -642,17 +549,23 @@ export default class TwitchSource {
     return bestUrl ? { url: bestUrl } : null
   }
 
-  async loadStream(track, url, protocol) {
+  async loadStream(_track, url, protocol) {
     if (protocol === 'hls') {
-      const stream = new PassThrough()
-      manageHlsStream(url, stream)
+          const stream = new HLSHandler(url, { 
+            type: 'mpegts', 
+            localAddress: this.nodelink.routePlanner?.getIP(),
+            startTime: additionalData?.startTime || 0
+          })
+      
       return { stream, type: 'mpegts' }
     }
 
-    const { stream, error, statusCode } = await http1makeRequest(url, {
+    const { stream: resStream, error, statusCode } = await http1makeRequest(url, {
+      method: 'GET',
       streamOnly: true
     })
-    if (error || statusCode !== 200) {
+
+    if (error || statusCode !== 200 || !resStream) {
       return {
         exception: {
           message: `Failed to load stream: ${error?.message || statusCode}`,
@@ -660,10 +573,33 @@ export default class TwitchSource {
         }
       }
     }
+
+    const stream = new PassThrough()
+
+    resStream.on('data', (chunk) => {
+      if (!stream.write(chunk)) resStream.pause()
+    })
+
+    stream.on('drain', () => {
+      if (!resStream.destroyed) resStream.resume()
+    })
+
+    resStream.on('end', () => {
+      if (!stream.writableEnded) {
+        stream.emit('finishBuffering')
+        stream.end()
+      }
+    })
+
+    resStream.on('error', (err) => {
+      logger('error', 'Twitch', `External stream error: ${err.message}`)
+      if (!stream.destroyed) stream.destroy(err)
+    })
+
     return { stream, type: 'mp4' }
   }
 
-  search(query) {
+  search(_query) {
     return {
       exception: {
         message: 'Search is not supported for Twitch',
@@ -675,7 +611,7 @@ export default class TwitchSource {
   buildTrack(partialInfo) {
     const track = {
       identifier: partialInfo.identifier,
-      isSeekable: false,
+      isSeekable: !partialInfo.isStream,
       author: partialInfo.author,
       length: partialInfo.length,
       isStream: partialInfo.isStream,

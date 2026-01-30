@@ -8,8 +8,7 @@ const CLEAN_PATTERNS = [
 ]
 // this clears titles like [Official] or (Official), etc... this improves the accuary of the lyrics
 
-const FEAT_PATTERN =
-  /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
+const FEAT_PATTERN = /\s*[([]\s*(?:ft\.?|feat\.?|featuring)\s+[^)\]]+[)\]]/gi
 
 const SEPARATORS = [' - ', ' – ', ' — ']
 
@@ -44,19 +43,35 @@ export default class LRCLIBLyrics {
 
   _parseLRC(lrc) {
     const lines = []
-    // match [mm:ss.xx] text for the api resolve it
-    const regex = /\[(\d{2}):(\d{2})\.(\d{2})\]\s*(.+?)(?=\[|$)/gs
-    let match
-    while ((match = regex.exec(lrc)) !== null) {
-      const minutes = parseInt(match[1], 10)
-      const seconds = parseInt(match[2], 10)
-      const centiseconds = parseInt(match[3], 10)
-      const time = (minutes * 60 + seconds) * 1000 + centiseconds * 10
-      const text = match[4].trim()
-      if (text) {
+    const rawLines = lrc.split('\n')
+
+    for (const rawLine of rawLines) {
+      const timeTagRegex = /\[(\d+):(\d{2})(?:\.(\d{2,3}))?\]/g
+      let match
+      const times = []
+
+      while ((match = timeTagRegex.exec(rawLine)) !== null) {
+        const minutes = parseInt(match[1], 10)
+        const seconds = parseInt(match[2], 10)
+        const msStr = match[3] || '0'
+        const milliseconds = parseInt(msStr.padEnd(3, '0').slice(0, 3), 10)
+
+        times.push(minutes * 60 * 1000 + seconds * 1000 + milliseconds)
+      }
+
+      if (times.length === 0) continue
+
+      const text = rawLine.replace(timeTagRegex, '').trim()
+
+      if (!text) continue
+
+      for (const time of times) {
         lines.push({ text, time, duration: 0 })
       }
     }
+
+    lines.sort((a, b) => a.time - b.time)
+
     return lines
   }
 

@@ -1,9 +1,9 @@
-import { readFile, unlink, writeFile } from 'node:fs/promises'
+import crypto from 'node:crypto'
+import { unlink, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import crypto from 'node:crypto'
 
-import { logger, http1makeRequest } from '../utils.js'
+import { http1makeRequest, logger } from '../utils.js'
 
 const APP_ID = 'web-desktop-app-v1.0'
 const TOKEN_TTL = 55000
@@ -25,8 +25,7 @@ const CLEAN_PATTERNS = [
   /VEVO$/i
 ]
 
-const FEAT_PATTERN =
-  /\s*[\(\[]\s*(?:ft\.?|feat\.?|featuring)\s+[^\)\]]+[\)\]]/gi
+const FEAT_PATTERN = /\s*[([]\s*(?:ft\.?|feat\.?|featuring)\s+[^)\]]+[)\]]/gi
 
 const SEPARATORS = [' - ', ' – ', ' — ']
 
@@ -90,10 +89,15 @@ export default class MusixmatchLyrics {
     )
 
     if (!this.useManualToken) {
-      const cachedToken = this.nodelink.credentialManager.get('musixmatch_token')
+      const cachedToken =
+        this.nodelink.credentialManager.get('musixmatch_token')
       if (cachedToken) {
         this.tokenData = cachedToken
-        logger('info', 'Lyrics', 'Loaded Musixmatch token from CredentialManager')
+        logger(
+          'info',
+          'Lyrics',
+          'Loaded Musixmatch token from CredentialManager'
+        )
       }
     }
 
@@ -191,6 +195,25 @@ export default class MusixmatchLyrics {
     }
   }
 
+  async _readToken() {
+    try {
+      const data = await readFile(this.tokenFile, 'utf-8')
+      const parsed = JSON.parse(data)
+      if (parsed?.value && parsed?.expires) return parsed
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  async _saveToken(token, expires) {
+    try {
+      await writeFile(this.tokenFile, JSON.stringify({ value: token, expires }))
+    } catch (e) {
+      logger('warn', 'Lyrics', `Failed to save token: ${e.message}`)
+    }
+  }
+
   async _getToken(force = false) {
     const now = Date.now()
 
@@ -226,7 +249,11 @@ export default class MusixmatchLyrics {
       const token = await this._fetchToken()
       const expires = Date.now() + TOKEN_TTL
       this.tokenData = { value: token, expires }
-      this.nodelink.credentialManager.set('musixmatch_token', this.tokenData, TOKEN_TTL)
+      this.nodelink.credentialManager.set(
+        'musixmatch_token',
+        this.tokenData,
+        TOKEN_TTL
+      )
       return token
     } catch (err) {
       const isCaptcha = err.message?.toLowerCase().includes('captcha')
@@ -238,7 +265,11 @@ export default class MusixmatchLyrics {
         const token = await this._fetchToken()
         const expires = Date.now() + TOKEN_TTL
         this.tokenData = { value: token, expires }
-        this.nodelink.credentialManager.set('musixmatch_token', this.tokenData, TOKEN_TTL)
+        this.nodelink.credentialManager.set(
+          'musixmatch_token',
+          this.tokenData,
+          TOKEN_TTL
+        )
         return token
       }
 

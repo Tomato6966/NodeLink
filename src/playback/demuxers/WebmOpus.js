@@ -1,6 +1,6 @@
 import { Transform } from 'node:stream'
 import { logger } from '../../utils.js'
-import { RingBuffer } from '../RingBuffer.js'
+import { RingBuffer } from '../structs/RingBuffer.js'
 
 const TOO_SHORT = Symbol('TOO_SHORT')
 const INVALID_VINT = Symbol('INVALID_VINT')
@@ -48,7 +48,13 @@ const readVint = (buf, start, end) => {
 class WebmBaseDemuxer extends Transform {
   constructor(options = {}) {
     super({ readableObjectMode: true, ...options })
-    this.on('error', (err) => logger('error', 'WebmDemuxer', `Stream error: ${err.message} (${err.code})`))
+    this.on('error', (err) =>
+      logger(
+        'error',
+        'WebmDemuxer',
+        `Stream error: ${err.message} (${err.code})`
+      )
+    )
     this.ringBuffer = new RingBuffer(BUFFER_SIZE)
     this.total = 0n
     this.processed = 0n
@@ -211,7 +217,7 @@ class WebmBaseDemuxer extends Transform {
       try {
         this._checkHead(data)
         this.emit('head', data)
-      } catch (e) {}
+      } catch (_e) {}
     } else if (tag === 'a3') {
       if (this.currentTrack && (data[0] & 0xf) === this.currentTrack.number) {
         this.push(data.subarray(4))

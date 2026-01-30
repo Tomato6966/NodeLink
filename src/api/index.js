@@ -135,22 +135,37 @@ async function requestHandler(nodelink, req, res) {
       authType = 'Bearer'
     }
 
+    const metricsUsername = authConfig.username || 'admin' 
     const metricsPassword =
       authConfig.password || nodelink.options.server.password
 
     const authHeader = req.headers?.authorization
     const isValidAuth =
       authHeader === metricsPassword ||
-      (authType === 'Bearer' &&
-        authHeader === `${authType} ${metricsPassword}`) ||
-      (authType === 'Basic' &&
-        authHeader === `${authType} ${atob(authHeader.slice(authType.length))}`)
+      (authType === 'Bearer' && authHeader === `Bearer ${metricsPassword}`) ||
+      (authType === 'Basic' && (() => {
+        try {
+          // 1. Decode the "user:pass" string
+          const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf8')
+          
+          // 2. Split by the first colon (passwords can contain colons!)
+          const colonIndex = decoded.indexOf(':')
+          if (colonIndex === -1) return false // Invalid format
+          
+          const user = decoded.slice(0, colonIndex)
+          const pass = decoded.slice(colonIndex + 1)
+          
+          return user === metricsUsername && pass === metricsPassword  //verify both
+        } catch {
+          return false
+        }
+      })())
 
     if (!isValidAuth) {
       logger(
         'warn',
         'Metrics',
-        `Unauthorized metrics access attempt from ${clientAddress} - Invalid password provided`
+        `Unauthorized metrics access attempt from ${clientAddress} - Invalid password provided: ${authHeader || 'None'}`
       )
       res.writeHead(401, { 'Content-Type': 'text/plain' })
       res.end('Unauthorized')
@@ -218,16 +233,16 @@ async function requestHandler(nodelink, req, res) {
   }
 
   if (!isMetricsEndpoint) {
+    const authHeader = req.headers?.authorization
     if (
-      !req.headers ||
-      (req.headers.authorization !== nodelink.options.server.password &&
-        req.headers.authorization !==
-          `Bearer ${nodelink.options.server.password}`)
+      !authHeader ||
+      (authHeader !== nodelink.options.server.password &&
+        authHeader !== `Bearer ${nodelink.options.server.password}`)
     ) {
       logger(
         'warn',
         'Server',
-        `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
+        `Unauthorized connection attempt from ${clientAddress} - Invalid password provided: ${authHeader || 'None'}`
       )
 
       res.writeHead(401, { 'Content-Type': 'text/plain' })
@@ -236,13 +251,59 @@ async function requestHandler(nodelink, req, res) {
     }
   }
 
+  const MAX_BODY_SIZE = nodelink.options.server?.maxBodySize || 10 * 1024 * 1024
+
   let body = ''
   if (req.method !== 'GET') {
+    const contentLength = parseInt(req.headers['content-length'])
+    if (!isNaN(contentLength) && contentLength > MAX_BODY_SIZE) {
+      logger(
+        'warn',
+        'Server',
+        `Request rejected: Content-Length ${contentLength} exceeds limit of ${MAX_BODY_SIZE}`
+      )
+      sendErrorResponse(
+        req,
+        res,
+        413,
+        'Payload Too Large',
+        'Request body is too large.',
+        parsedUrl.pathname,
+        trace
+      )
+      req.destroy()
+      return
+    }
+
     await new Promise((resolve) => {
-      req.on('data', (chunk) => {
+      let receivedSize = 0
+
+      const onData = (chunk) => {
+        receivedSize += chunk.length
+        if (receivedSize > MAX_BODY_SIZE) {
+          logger(
+            'warn',
+            'Server',
+            `Request rejected: Body size exceeded limit of ${MAX_BODY_SIZE}`
+          )
+          req.removeListener('data', onData)
+          req.removeListener('end', onEnd)
+          sendErrorResponse(
+            req,
+            res,
+            413,
+            'Payload Too Large',
+            'Request body is too large.',
+            parsedUrl.pathname,
+            trace
+          )
+          req.destroy()
+          resolve()
+        }
         body += chunk.toString()
-      })
-      req.on('end', () => {
+      }
+
+      const onEnd = () => {
         try {
           if (
             req.headers['content-type']?.includes('application/json') &&
@@ -268,7 +329,10 @@ async function requestHandler(nodelink, req, res) {
           return
         }
         resolve()
-      })
+      }
+
+      req.on('data', onData)
+      req.on('end', onEnd)
     })
   }
   req.body = body

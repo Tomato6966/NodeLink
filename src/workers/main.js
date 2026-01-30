@@ -1,18 +1,22 @@
+import net from 'node:net'
 import os from 'node:os'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import v8 from 'node:v8'
-import { GatewayEvents } from './constants.js'
-import ConnectionManager from './managers/connectionManager.js'
-import CredentialManager from './managers/credentialManager.js'
-import LyricsManager from './managers/lyricsManager.js'
-import PluginManager from './managers/pluginManager.js'
-import RateLimitManager from './managers/rateLimitManager.js'
-import RoutePlannerManager from './managers/routePlannerManager.js'
-import SourceManager from './managers/sourceManager.js'
-import StatsManager from './managers/statsManager.js'
-import { bufferPool } from './playback/BufferPool.js'
-import { Player } from './playback/player.js'
-import { cleanupHttpAgents, initLogger, logger } from './utils.js'
+import { GatewayEvents } from '../constants.js'
+import ConnectionManager from '../managers/connectionManager.js'
+import CredentialManager from '../managers/credentialManager.js'
+import TrackCacheManager from '../managers/trackCacheManager.js'
+import LyricsManager from '../managers/lyricsManager.js'
+import MeaningManager from '../managers/meaningManager.js'
+import PluginManager from '../managers/pluginManager.js'
+import RoutePlannerManager from '../managers/routePlannerManager.js'
+import SourceManager from '../managers/sourceManager.js'
+import StatsManager from '../managers/statsManager.js'
+import { bufferPool } from '../playback/structs/BufferPool.js'
+import { Player } from '../playback/player.js'
+import { createPCMStream } from '../playback/processing/streamProcessor.js'
+import { cleanupHttpAgents, initLogger, logger } from '../utils.js'
+import { createVoiceRelay } from '../voice/voiceRelay.js'
 
 let lastCpuUsage = process.cpuUsage()
 let lastCpuTime = Date.now()
@@ -26,15 +30,15 @@ hndl.enable()
 
 try {
   os.setPriority(os.constants.priority.PRIORITY_HIGH)
-} catch (e) {
+} catch (_e) {
   // Ignore errors
 }
 
 let config
 try {
-  config = (await import('../config.js')).default
+  config = (await import('../../config.js')).default
 } catch {
-  config = (await import('../config.default.js')).default
+  config = (await import('../../config.default.js')).default
 }
 
 const HIBERNATION_ENABLED = config.cluster?.hibernation?.enabled !== false
@@ -45,24 +49,218 @@ const HIBERNATION_TIMEOUT =
 initLogger(config)
 
 const players = new Map()
-const commandQueue = []
+const guildQueues = new Map() // guildId -> { queue: [], processing: false }
+const activeStreams = new Map()
+
+let eventSocket = null
+const eventSocketPath = process.env.EVENT_SOCKET_PATH
+
+if (eventSocketPath) {
+  const connect = () => {
+    const socket = net.createConnection(eventSocketPath, () => {
+      eventSocket = socket
+      logger('info', 'Worker', 'Connected to Master event socket')
+    })
+    socket.on('error', () => {
+      eventSocket = null
+      setTimeout(connect, 1000)
+    })
+    socket.on('close', () => {
+      eventSocket = null
+      setTimeout(connect, 1000)
+    })
+  }
+  connect()
+}
+
+let commandSocket = null
+const commandSocketPath = process.env.COMMAND_SOCKET_PATH
+
+if (commandSocketPath) {
+  const connect = () => {
+    const socket = net.createConnection(commandSocketPath, () => {
+      commandSocket = socket
+      sendCommandHello()
+      logger('info', 'Worker', 'Connected to Master command socket')
+    })
+
+    let buffer = Buffer.alloc(0)
+
+    socket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk])
+
+      while (buffer.length >= 6) {
+        const idSize = buffer.readUInt8(0)
+        const type = buffer.readUInt8(1)
+        const payloadSize = buffer.readUInt32BE(2)
+        const totalSize = 6 + idSize + payloadSize
+
+        if (buffer.length < totalSize) break
+
+        const id = buffer.toString('utf8', 6, 6 + idSize)
+        const payload = buffer.subarray(6 + idSize, totalSize)
+        buffer = buffer.subarray(totalSize)
+
+        if (type === 1) {
+          try {
+            const data = v8.deserialize(payload)
+            enqueueCommand(data?.type, id, data?.payload)
+          } catch (e) {
+            logger(
+              'error',
+              'Worker',
+              `Command socket parse error: ${e.message}`
+            )
+          }
+        }
+      }
+    })
+
+    socket.on('error', () => {
+      commandSocket = null
+      setTimeout(connect, 1000)
+    })
+    socket.on('close', () => {
+      commandSocket = null
+      setTimeout(connect, 1000)
+    })
+  }
+  connect()
+}
+
+function sendEventFrame(type, data) {
+  if (!eventSocket || eventSocket.destroyed) return false
+
+  const payload = JSON.stringify(data)
+  const payloadBuf = Buffer.from(payload, 'utf8')
+
+  const header = Buffer.alloc(6)
+  header.writeUInt8(0, 0) // No ID needed for these events
+  header.writeUInt8(type, 1)
+  header.writeUInt32BE(payloadBuf.length, 2)
+
+  return eventSocket.write(Buffer.concat([header, payloadBuf]))
+}
+
+function sendEventBinaryFrame(type, payloadBuf) {
+  if (!eventSocket || eventSocket.destroyed) return false
+
+  const header = Buffer.alloc(6)
+  header.writeUInt8(0, 0)
+  header.writeUInt8(type, 1)
+  header.writeUInt32BE(payloadBuf.length, 2)
+
+  return eventSocket.write(Buffer.concat([header, payloadBuf]))
+}
+
+function sendStreamFrame(streamId, type, payloadBuf) {
+  if (!eventSocket || eventSocket.destroyed) return false
+
+  const idBuf = Buffer.from(streamId, 'utf8')
+  const header = Buffer.alloc(6)
+  header.writeUInt8(idBuf.length, 0)
+  header.writeUInt8(type, 1)
+  header.writeUInt32BE(payloadBuf.length, 2)
+
+  return eventSocket.write(Buffer.concat([header, idBuf, payloadBuf]))
+}
+
+function sendStreamChunk(streamId, chunk) {
+  const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+  sendStreamFrame(streamId, 5, payload)
+}
+
+function sendStreamEnd(streamId) {
+  sendStreamFrame(streamId, 6, Buffer.alloc(0))
+}
+
+function sendStreamError(streamId, error) {
+  const payload = Buffer.from(String(error || 'Unknown error'), 'utf8')
+  sendStreamFrame(streamId, 7, payload)
+}
+
+function sendCommandFrame(type, requestId, payloadBuf) {
+  if (!commandSocket || commandSocket.destroyed) return false
+
+  const idBuf = Buffer.from(requestId || '', 'utf8')
+  const header = Buffer.alloc(6)
+  header.writeUInt8(idBuf.length, 0)
+  header.writeUInt8(type, 1)
+  header.writeUInt32BE(payloadBuf.length, 2)
+
+  return commandSocket.write(Buffer.concat([header, idBuf, payloadBuf]))
+}
+
+function sendCommandHello() {
+  if (!commandSocket || commandSocket.destroyed) return false
+  const payload = Buffer.from(JSON.stringify({ pid: process.pid }), 'utf8')
+  return sendCommandFrame(0, '', payload)
+}
+
+function sendCommandResult(requestId, payload) {
+  const payloadBuf = v8.serialize(payload)
+  if (sendCommandFrame(2, requestId, payloadBuf)) return true
+
+  if (process.connected) {
+    try {
+      process.send({ type: 'commandResult', requestId, payload })
+      return true
+    } catch (e) {
+      logger(
+        'error',
+        'Worker-IPC',
+        `Failed to send commandResult for ${requestId}: ${e.message}`
+      )
+    }
+  }
+  return false
+}
+
+function sendCommandError(requestId, error) {
+  const payloadBuf = v8.serialize(String(error || 'Unknown error'))
+  if (sendCommandFrame(3, requestId, payloadBuf)) return true
+
+  if (process.connected) {
+    try {
+      process.send({ type: 'commandResult', requestId, error: String(error) })
+      return true
+    } catch (e) {
+      logger(
+        'error',
+        'Worker-IPC',
+        `Failed to send commandResult (error) for ${requestId}: ${e.message}`
+      )
+    }
+  }
+  return false
+}
 
 const nodelink = {
   options: config,
   logger
 }
 
+nodelink.voiceRelay = createVoiceRelay({
+  enabled: config.voiceReceive?.enabled,
+  format: config.voiceReceive?.format,
+  sendFrame: (frame) => sendEventBinaryFrame(8, frame),
+  logger
+})
+
 nodelink.statsManager = new StatsManager(nodelink)
 nodelink.credentialManager = new CredentialManager(nodelink)
+nodelink.trackCacheManager = new TrackCacheManager(nodelink)
+await nodelink.trackCacheManager.load()
 nodelink.sources = new SourceManager(nodelink)
 nodelink.lyrics = new LyricsManager(nodelink)
+nodelink.meanings = new MeaningManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(nodelink)
 nodelink.connectionManager = new ConnectionManager(nodelink)
 nodelink.pluginManager = new PluginManager(nodelink)
 nodelink.registry = null
 if (process.embedder === 'nodejs') {
   try {
-    nodelink.registry = await import('./registry.js')
+    nodelink.registry = await import('../registry.js')
   } catch (e) {
     logger('error', 'Worker', `Failed to load registry: ${e.message}`)
   }
@@ -77,7 +275,9 @@ function setEfficiencyMode(enabled) {
   try {
     os.setPriority(
       process.pid,
-      enabled ? os.constants.priority.PRIORITY_LOW : os.constants.priority.PRIORITY_HIGH
+      enabled
+        ? os.constants.priority.PRIORITY_LOW
+        : os.constants.priority.PRIORITY_HIGH
     )
     if (enabled) {
       v8.setFlagsFromString('--optimize-for-size')
@@ -217,23 +417,31 @@ function startTimers(hibernating = false) {
 
       const mem = process.memoryUsage()
 
-      if (process.connected) {
+      const stats = {
+        workerId: parseInt(process.env.NODE_UNIQUE_ID || 0, 10) + 1,
+        isHibernating,
+        players: localPlayers,
+        playingPlayers: localPlayingPlayers,
+        commandQueueLength: Array.from(guildQueues.values()).reduce(
+          (acc, curr) => acc + curr.queue.length,
+          0
+        ),
+        cpu: { nodelinkLoad },
+        eventLoopLag: hndl.mean / 1e6,
+        memory: {
+          used: mem.heapUsed,
+          allocated: mem.heapTotal
+        },
+        frameStats: localFrameStats
+      }
+
+      if (eventSocket && !eventSocket.destroyed) {
+        sendEventFrame(4, stats)
+      } else if (process.connected) {
         const success = process.send({
           type: 'workerStats',
           pid: process.pid,
-          stats: {
-            isHibernating,
-            players: localPlayers,
-            playingPlayers: localPlayingPlayers,
-            commandQueueLength: commandQueue.length,
-            cpu: { nodelinkLoad },
-            eventLoopLag: hndl.mean / 1e6,
-            memory: {
-              used: mem.heapUsed,
-              allocated: mem.heapTotal
-            },
-            frameStats: localFrameStats
-          }
+          stats
         })
 
         if (!success) {
@@ -296,11 +504,12 @@ async function initialize() {
   await nodelink.credentialManager.load()
   await nodelink.sources.loadFolder()
   await nodelink.lyrics.loadFolder()
+  await nodelink.meanings.loadFolder()
   await nodelink.statsManager.initialize()
   await nodelink.pluginManager.load('worker')
-  
+
   lastActivityTime = Date.now()
-  
+
   logger(
     'info',
     'Worker',
@@ -338,10 +547,100 @@ process.on('unhandledRejection', (reason, promise) => {
   )
 })
 
-async function processQueue() {
-  if (commandQueue.length === 0) return
+function cleanupActiveStream(streamId, entry) {
+  const current = entry || activeStreams.get(streamId)
+  if (!current) return
 
-  const { type, requestId, payload } = commandQueue.shift()
+  if (current.pcmStream && !current.pcmStream.destroyed) {
+    current.pcmStream.destroy()
+  }
+  if (current.fetched?.stream && !current.fetched.stream.destroyed) {
+    current.fetched.stream.destroy()
+  }
+
+  activeStreams.delete(streamId)
+}
+
+async function startLoadStream(streamId, payload) {
+  if (!eventSocket || eventSocket.destroyed) {
+    throw new Error('Event socket unavailable')
+  }
+
+  const trackInfo = payload?.decodedTrackInfo
+  if (!trackInfo) {
+    throw new Error('Invalid encoded track')
+  }
+
+  const urlResult = await nodelink.sources.getTrackUrl(trackInfo)
+  if (urlResult.exception) {
+    throw new Error(urlResult.exception.message || 'Failed to get track URL')
+  }
+
+  const additionalData = {
+    ...(urlResult.additionalData || {}),
+    startTime: payload?.position || 0
+  }
+
+  const fetched = await nodelink.sources.getTrackStream(
+    urlResult.newTrack?.info || trackInfo,
+    urlResult.url,
+    urlResult.protocol,
+    additionalData
+  )
+
+  if (fetched.exception) {
+    throw new Error(fetched.exception.message || 'Failed to load stream')
+  }
+
+  const pcmStream = createPCMStream(
+    fetched.stream,
+    fetched.type || urlResult.format,
+    nodelink,
+    (payload?.volume ?? 100) / 100,
+    payload?.filters || {}
+  )
+
+  const entry = { pcmStream, fetched, cancelled: false }
+  activeStreams.set(streamId, entry)
+
+  const finish = (err) => {
+    if (entry.cancelled) {
+      cleanupActiveStream(streamId, entry)
+      return
+    }
+
+    if (err) sendStreamError(streamId, err.message || err)
+    else sendStreamEnd(streamId)
+
+    cleanupActiveStream(streamId, entry)
+  }
+
+  pcmStream.on('data', (chunk) => {
+    if (!entry.cancelled) sendStreamChunk(streamId, chunk)
+  })
+
+  pcmStream.once('end', () => finish())
+  pcmStream.once('error', (err) => finish(err))
+  pcmStream.once('close', () => finish())
+}
+
+function cancelStream(streamId) {
+  const entry = activeStreams.get(streamId)
+  if (!entry) return false
+  entry.cancelled = true
+  cleanupActiveStream(streamId, entry)
+  return true
+}
+
+async function processQueue(queueKey) {
+  const queueEntry = guildQueues.get(queueKey)
+  if (!queueEntry || queueEntry.queue.length === 0) {
+    if (queueEntry) queueEntry.processing = false
+    return
+  }
+
+  queueEntry.processing = true
+  const { type, requestId, payload } = queueEntry.queue.shift()
 
   lastActivityTime = Date.now()
   if (isHibernating) {
@@ -359,13 +658,7 @@ async function processQueue() {
       try {
         const shouldBlock = await interceptor(type, payload)
         if (shouldBlock === true) {
-          if (process.connected && requestId) {
-            process.send({
-              type: 'commandResult',
-              requestId,
-              payload: { intercepted: true }
-            })
-          }
+          if (requestId) sendCommandResult(requestId, { intercepted: true })
           setImmediate(processQueue)
           return
         }
@@ -391,7 +684,9 @@ async function processQueue() {
           userId: userId,
           socket: {
             send: (data) => {
-              if (process.connected) {
+              if (eventSocket && !eventSocket.destroyed) {
+                sendEventFrame(3, { sessionId, guildId, data })
+              } else if (process.connected) {
                 try {
                   process.send({
                     type: 'playerEvent',
@@ -479,7 +774,9 @@ async function processQueue() {
           userId: userId,
           socket: {
             send: (data) => {
-              if (process.connected) {
+              if (eventSocket && !eventSocket.destroyed) {
+                sendEventFrame(3, { sessionId, guildId, data })
+              } else if (process.connected) {
                 try {
                   process.send({
                     type: 'playerEvent',
@@ -553,14 +850,19 @@ async function processQueue() {
       }
 
       case 'loadLyrics': {
-        const { decodedTrack, language } = payload
-        result = await nodelink.lyrics.loadLyrics(decodedTrack, language)
+        const { decodedTrackInfo, language } = payload
+        result = await nodelink.lyrics.loadLyrics({ info: decodedTrackInfo }, language)
+        break
+      }
+      case 'loadMeaning': {
+        const { decodedTrackInfo, language } = payload
+        result = await nodelink.meanings.loadMeaning({ info: decodedTrackInfo }, language)
         break
       }
 
       case 'loadChapters': {
-        const { decodedTrack } = payload
-        result = await nodelink.sources.getChapters(decodedTrack)
+        const { decodedTrackInfo } = payload
+        result = await nodelink.sources.getChapters({ info: decodedTrackInfo })
         break
       }
       case 'getSources': {
@@ -570,6 +872,24 @@ async function processQueue() {
       case 'getTrackUrl': {
         const { decodedTrackInfo, itag } = payload
         result = await nodelink.sources.getTrackUrl(decodedTrackInfo, itag)
+        break
+      }
+
+      case 'loadStream': {
+        const streamId = payload?.streamId || requestId
+        try {
+          await startLoadStream(streamId, payload)
+          result = { streaming: true, streamId }
+        } catch (e) {
+          sendStreamError(streamId, e.message || e)
+          result = { streaming: false, error: e.message || String(e) }
+        }
+        break
+      }
+
+      case 'cancelStream': {
+        const streamId = payload?.streamId || requestId
+        result = { cancelled: cancelStream(streamId) }
         break
       }
 
@@ -634,33 +954,32 @@ async function processQueue() {
         throw new Error(`Unknown command type: ${type}`)
     }
 
-    if (process.connected) {
-      try {
-        process.send({ type: 'commandResult', requestId, payload: result })
-      } catch (e) {
-        logger(
-          'error',
-          'Worker-IPC',
-          `Failed to send commandResult for ${requestId}: ${e.message}`
-        )
-      }
-    }
+    if (requestId) sendCommandResult(requestId, result)
   } catch (e) {
-    if (process.connected) {
-      try {
-        process.send({ type: 'commandResult', requestId, error: e.message })
-      } catch (e) {
-        logger(
-          'error',
-          'Worker-IPC',
-          `Failed to send commandResult (error) for ${requestId}: ${e.message}`
-        )
-      }
-    }
+    if (requestId) sendCommandError(requestId, e.message)
   } finally {
-    if (commandQueue.length > 0) {
-      setImmediate(processQueue)
+    const queueEntry = guildQueues.get(queueKey)
+    if (queueEntry && queueEntry.queue.length > 0) {
+      setImmediate(() => processQueue(queueKey))
+    } else {
+      if (queueEntry) queueEntry.processing = false
     }
+  }
+}
+
+function enqueueCommand(type, requestId, payload) {
+  if (!type || !requestId) return
+
+  const guildId = payload?.guildId || 'global'
+  if (!guildQueues.has(guildId)) {
+    guildQueues.set(guildId, { queue: [], processing: false })
+  }
+
+  const queueEntry = guildQueues.get(guildId)
+  queueEntry.queue.push({ type, requestId, payload })
+
+  if (!queueEntry.processing) {
+    setImmediate(() => processQueue(guildId))
   }
 }
 
@@ -678,11 +997,7 @@ process.on('message', (msg) => {
 
   if (!msg.type || !msg.requestId) return
 
-  commandQueue.push(msg)
-
-  if (commandQueue.length === 1) {
-    setImmediate(processQueue)
-  }
+  enqueueCommand(msg.type, msg.requestId, msg.payload)
 })
 
 setTimeout(() => {

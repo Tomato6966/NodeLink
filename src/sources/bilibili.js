@@ -1,17 +1,19 @@
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const MIXIN_KEY_ENC_TAB = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
-  33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40,
-  61, 26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11,
-  36, 20, 34, 44, 52
+  33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,
+  26, 17, 0, 1, 60, 51, 30, 4, 22, 25, 54, 21, 56, 59, 6, 63, 57, 62, 11, 36,
+  20, 34, 44, 52
 ]
 
 const HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Referer': 'https://www.bilibili.com/'
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  Referer: 'https://www.bilibili.com/'
 }
 
 export default class BilibiliSource {
@@ -22,19 +24,23 @@ export default class BilibiliSource {
       /https?:\/\/(?:www\.)?bilibili\.com\/bangumi\/play\/(ep|ss)(\d+)/,
       /https?:\/\/(?:www\.)?bilibili\.com\/audio\/(au|am)(\d+)/,
       /https?:\/\/live\.bilibili\.com\/(\d+)/,
-      /https?:\/\/space\.bilibili\.com\/(\d+)/ 
+      /https?:\/\/space\.bilibili\.com\/(\d+)/
     ]
     this.searchTerms = ['bilibili']
     this.priority = 100
     this.wbiKeys = null
     this.wbiKeysExpiry = 0
-    this.cookie = this.nodelink.options.sources?.bilibili?.sessdata 
-      ? `SESSDATA=${this.nodelink.options.sources.bilibili.sessdata}` 
+    this.cookie = this.nodelink.options.sources?.bilibili?.sessdata
+      ? `SESSDATA=${this.nodelink.options.sources.bilibili.sessdata}`
       : ''
   }
 
   async setup() {
-    logger('info', 'Sources', 'Loaded Bilibili source (Video, Audio, Live, Space, Lyrics, Login).')
+    logger(
+      'info',
+      'Sources',
+      'Loaded Bilibili source (Video, Audio, Live, Space, Lyrics, Login).'
+    )
     return true
   }
 
@@ -50,10 +56,13 @@ export default class BilibiliSource {
       return this.wbiKeys
     }
 
-    const { body, error } = await makeRequest('https://api.bilibili.com/x/web-interface/nav', {
-      method: 'GET',
-      headers: { ...HEADERS, Cookie: this.cookie }
-    })
+    const { body, error } = await makeRequest(
+      'https://api.bilibili.com/x/web-interface/nav',
+      {
+        method: 'GET',
+        headers: { ...HEADERS, Cookie: this.cookie }
+      }
+    )
 
     if (error || !body?.data?.wbi_img) {
       throw new Error('Failed to fetch WBI keys')
@@ -74,21 +83,25 @@ export default class BilibiliSource {
     for (const index of MIXIN_KEY_ENC_TAB) {
       if (rawKey[index]) mixinKey += rawKey[index]
     }
-    
+
     this.wbiKeys = mixinKey.slice(0, 32)
     this.wbiKeysExpiry = Date.now() + 1000 * 60 * 60
-    this.nodelink.credentialManager.set('bilibili_wbi_keys', this.wbiKeys, 1000 * 60 * 60)
-    
+    this.nodelink.credentialManager.set(
+      'bilibili_wbi_keys',
+      this.wbiKeys,
+      1000 * 60 * 60
+    )
+
     return this.wbiKeys
   }
 
   _signWbi(params, mixinKey) {
     const currTime = Math.round(Date.now() / 1000)
     const newParams = { ...params, wts: currTime }
-    
+
     const query = Object.keys(newParams)
       .sort()
-      .map(key => {
+      .map((key) => {
         const value = newParams[key].toString().replace(/[!'()*]/g, '')
         return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`
       })
@@ -105,28 +118,40 @@ export default class BilibiliSource {
   async search(query) {
     try {
       let body
-      let error
+      let _error
 
       const searchResponse = await makeRequest(
         `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(query)}`,
         {
           method: 'GET',
-          headers: { ...HEADERS, Cookie: this.cookie, Referer: 'https://search.bilibili.com/' }
+          headers: {
+            ...HEADERS,
+            Cookie: this.cookie,
+            Referer: 'https://search.bilibili.com/'
+          }
         }
       )
       body = searchResponse.body
-      error = searchResponse.error
+      _error = searchResponse.error
 
-      if (!body?.data?.result || !Array.isArray(body.data.result) || body.data.result.length === 0) {
+      if (
+        !body?.data?.result ||
+        !Array.isArray(body.data.result) ||
+        body.data.result.length === 0
+      ) {
         const allSearchResponse = await makeRequest(
           `https://api.bilibili.com/x/web-interface/search/all/v2?keyword=${encodeURIComponent(query)}`,
           {
             method: 'GET',
-            headers: { ...HEADERS, Cookie: this.cookie, Referer: 'https://search.bilibili.com/' }
+            headers: {
+              ...HEADERS,
+              Cookie: this.cookie,
+              Referer: 'https://search.bilibili.com/'
+            }
           }
         )
         body = allSearchResponse.body
-        error = allSearchResponse.error
+        _error = allSearchResponse.error
       }
 
       const results = body?.data?.result || []
@@ -136,7 +161,7 @@ export default class BilibiliSource {
         if (results[0].type === 'video') {
           videos = results
         } else {
-          const videoSection = results.find(r => r.result_type === 'video')
+          const videoSection = results.find((r) => r.result_type === 'video')
           if (videoSection?.data) {
             videos = videoSection.data
           }
@@ -151,8 +176,14 @@ export default class BilibiliSource {
       for (const item of videos) {
         const durationParts = item.duration.split(':').map(Number)
         let durationMs = 0
-        if (durationParts.length === 2) durationMs = (durationParts[0] * 60 + durationParts[1]) * 1000
-        else if (durationParts.length === 3) durationMs = (durationParts[0] * 3600 + durationParts[1] * 60 + durationParts[2]) * 1000
+        if (durationParts.length === 2)
+          durationMs = (durationParts[0] * 60 + durationParts[1]) * 1000
+        else if (durationParts.length === 3)
+          durationMs =
+            (durationParts[0] * 3600 +
+              durationParts[1] * 60 +
+              durationParts[2]) *
+            1000
 
         const trackInfo = {
           identifier: item.bvid,
@@ -163,7 +194,9 @@ export default class BilibiliSource {
           position: 0,
           title: item.title.replace(/<[^>]*>/g, ''),
           uri: item.arcurl,
-          artworkUrl: item.pic.startsWith('//') ? `https:${item.pic}` : item.pic,
+          artworkUrl: item.pic.startsWith('//')
+            ? `https:${item.pic}`
+            : item.pic,
           isrc: null,
           sourceName: 'bilibili'
         }
@@ -199,7 +232,10 @@ export default class BilibiliSource {
         })
 
         if (body.code !== 0) {
-          const errorMsg = body.message === '啥都木有' ? 'Video not found or deleted' : body.message
+          const errorMsg =
+            body.message === '啥都木有'
+              ? 'Video not found or deleted'
+              : body.message
           throw new Error(`API Error: ${errorMsg}`)
         }
 
@@ -219,13 +255,13 @@ export default class BilibiliSource {
         }
 
         if (data.pages && data.pages.length > 1) {
-          const tracks = data.pages.map(page => {
+          const tracks = data.pages.map((page) => {
             const pageTrack = { ...trackInfo }
             pageTrack.title = `${data.title} - ${page.part}`
             pageTrack.length = page.duration * 1000
             pageTrack.identifier = `${data.bvid}?p=${page.page}`
             pageTrack.uri = `https://www.bilibili.com/video/${data.bvid}?p=${page.page}`
-            
+
             return {
               encoded: encodeTrack(pageTrack),
               info: pageTrack,
@@ -259,7 +295,7 @@ export default class BilibiliSource {
     if (bangumiMatch) {
       const type = bangumiMatch[1]
       const id = bangumiMatch[2]
-      
+
       try {
         let apiUrl
         if (type === 'ep') {
@@ -272,9 +308,10 @@ export default class BilibiliSource {
           method: 'GET',
           headers: { ...HEADERS, Cookie: this.cookie }
         })
-        
-        if (body.code !== 0) throw new Error(`Bangumi API Error: ${body.message}`)
-        
+
+        if (body.code !== 0)
+          throw new Error(`Bangumi API Error: ${body.message}`)
+
         const result = body.result
         const tracks = []
 
@@ -296,12 +333,17 @@ export default class BilibiliSource {
           tracks.push({
             encoded: encodeTrack(trackInfo),
             info: trackInfo,
-            pluginInfo: { aid: ep.aid, cid: ep.cid, ep_id: ep.id, bvid: ep.bvid }
+            pluginInfo: {
+              aid: ep.aid,
+              cid: ep.cid,
+              ep_id: ep.id,
+              bvid: ep.bvid
+            }
           })
         }
 
         if (type === 'ep') {
-          const target = tracks.find(t => t.pluginInfo.ep_id == id)
+          const target = tracks.find((t) => t.pluginInfo.ep_id === id)
           if (target) {
             return {
               loadType: 'track',
@@ -317,7 +359,6 @@ export default class BilibiliSource {
             tracks
           }
         }
-
       } catch (e) {
         return { exception: { message: e.message, severity: 'fault' } }
       }
@@ -336,9 +377,9 @@ export default class BilibiliSource {
               headers: { ...HEADERS, Cookie: this.cookie }
             }
           )
-          
+
           if (body.code !== 0) throw new Error(`Audio API Error: ${body.msg}`)
-          
+
           const data = body.data
           const trackInfo = {
             identifier: `au${data.id}`,
@@ -373,7 +414,7 @@ export default class BilibiliSource {
 
           if (body.code !== 0) throw new Error(`Album API Error: ${body.msg}`)
 
-          const tracks = body.data.data.map(song => {
+          const tracks = body.data.data.map((song) => {
             const trackInfo = {
               identifier: `au${song.id}`,
               isSeekable: true,
@@ -405,7 +446,10 @@ export default class BilibiliSource {
           return {
             loadType: 'playlist',
             data: {
-              info: { name: infoBody?.data?.title || 'Bilibili Album', selectedTrack: 0 },
+              info: {
+                name: infoBody?.data?.title || 'Bilibili Album',
+                selectedTrack: 0
+              },
               tracks
             }
           }
@@ -428,7 +472,7 @@ export default class BilibiliSource {
         )
 
         if (body.code !== 0) throw new Error(`Live API Error: ${body.msg}`)
-        
+
         const data = body.data
         if (data.live_status !== 1) throw new Error('Room is not live')
 
@@ -464,13 +508,16 @@ export default class BilibiliSource {
       const mid = spaceMatch[1]
       try {
         const mixinKey = await this._getWbiKeys()
-        const query = this._signWbi({
-          mid: mid,
-          ps: 30,
-          tid: 0,
-          keyword: '',
-          order: 'pubdate'
-        }, mixinKey)
+        const query = this._signWbi(
+          {
+            mid: mid,
+            ps: 30,
+            tid: 0,
+            keyword: '',
+            order: 'pubdate'
+          },
+          mixinKey
+        )
 
         const { body } = await makeRequest(
           `https://api.bilibili.com/x/space/wbi/arc/search?${query}`,
@@ -485,11 +532,17 @@ export default class BilibiliSource {
         const list = body.data?.list?.vlist
         if (!list || list.length === 0) return { loadType: 'empty', data: {} }
 
-        const tracks = list.map(item => {
+        const tracks = list.map((item) => {
           const durationParts = item.length.split(':').map(Number)
           let durationMs = 0
-          if (durationParts.length === 2) durationMs = (durationParts[0] * 60 + durationParts[1]) * 1000
-          else if (durationParts.length === 3) durationMs = (durationParts[0] * 3600 + durationParts[1] * 60 + durationParts[2]) * 1000
+          if (durationParts.length === 2)
+            durationMs = (durationParts[0] * 60 + durationParts[1]) * 1000
+          else if (durationParts.length === 3)
+            durationMs =
+              (durationParts[0] * 3600 +
+                durationParts[1] * 60 +
+                durationParts[2]) *
+              1000
 
           const trackInfo = {
             identifier: item.bvid,
@@ -508,7 +561,7 @@ export default class BilibiliSource {
           return {
             encoded: encodeTrack(trackInfo),
             info: trackInfo,
-            pluginInfo: { aid: item.aid, bvid: item.bvid, cid: 0 } 
+            pluginInfo: { aid: item.aid, bvid: item.bvid, cid: 0 }
           }
         })
 
@@ -529,8 +582,10 @@ export default class BilibiliSource {
 
   async getTrackUrl(track) {
     try {
-      const isAudio = track.pluginInfo?.type === 'audio' || track.identifier.startsWith('au')
-      const isLive = track.pluginInfo?.type === 'live' || track.identifier.startsWith('live')
+      const isAudio =
+        track.pluginInfo?.type === 'audio' || track.identifier.startsWith('au')
+      const isLive =
+        track.pluginInfo?.type === 'live' || track.identifier.startsWith('live')
 
       if (isAudio) {
         const sid = track.pluginInfo?.sid || track.identifier.replace('au', '')
@@ -541,8 +596,9 @@ export default class BilibiliSource {
             headers: { ...HEADERS, Cookie: this.cookie }
           }
         )
-        if (body.code !== 0 || !body.data.cdns) throw new Error('Failed to get audio stream')
-        
+        if (body.code !== 0 || !body.data.cdns)
+          throw new Error('Failed to get audio stream')
+
         return {
           url: body.data.cdns[0],
           protocol: 'https',
@@ -551,8 +607,9 @@ export default class BilibiliSource {
       }
 
       if (isLive) {
-        const roomId = track.pluginInfo?.room_id || track.identifier.replace('live', '')
-        
+        const roomId =
+          track.pluginInfo?.room_id || track.identifier.replace('live', '')
+
         const { body } = await makeRequest(
           `https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo?room_id=${roomId}&protocol=0,1&format=0,2&codec=0,1&qn=10000&platform=web&pt=web&no_playurl=0&mask=0`,
           {
@@ -561,7 +618,8 @@ export default class BilibiliSource {
           }
         )
 
-        if (body.code !== 0 || !body.data?.playurl_info) throw new Error('Failed to get live stream info')
+        if (body.code !== 0 || !body.data?.playurl_info)
+          throw new Error('Failed to get live stream info')
 
         const streams = body.data.playurl_info.playurl.stream
         let targetFormat = null
@@ -570,26 +628,26 @@ export default class BilibiliSource {
 
         for (const stream of streams) {
           if (stream.protocol_name === 'http_stream') {
-             const fmt = stream.format.find(f => f.format_name === 'flv')
-             if (fmt && fmt.codec && fmt.codec.length > 0) {
-                targetFormat = fmt.codec[0]
-                formatType = 'flv'
-                protocol = 'http'
-                break
-             }
+            const fmt = stream.format.find((f) => f.format_name === 'flv')
+            if (fmt?.codec && fmt.codec.length > 0) {
+              targetFormat = fmt.codec[0]
+              formatType = 'flv'
+              protocol = 'http'
+              break
+            }
           }
         }
-        
+
         if (!targetFormat) {
-           for (const stream of streams) {
-              const fmt = stream.format[0]
-              if (fmt && fmt.codec && fmt.codec.length > 0) {
-                 targetFormat = fmt.codec[0]
-                 formatType = fmt.format_name === 'ts' ? 'mpegts' : fmt.format_name
-                 protocol = stream.protocol_name === 'http_hls' ? 'hls' : 'http'
-                 break 
-              }
-           }
+          for (const stream of streams) {
+            const fmt = stream.format[0]
+            if (fmt?.codec && fmt.codec.length > 0) {
+              targetFormat = fmt.codec[0]
+              formatType = fmt.format_name === 'ts' ? 'mpegts' : fmt.format_name
+              protocol = stream.protocol_name === 'http_hls' ? 'hls' : 'http'
+              break
+            }
+          }
         }
 
         if (targetFormat) {
@@ -599,8 +657,8 @@ export default class BilibiliSource {
             protocol: protocol,
             format: formatType,
             additionalData: {
-              headers: { 
-                ...HEADERS, 
+              headers: {
+                ...HEADERS,
                 Cookie: this.cookie,
                 Referer: `https://live.bilibili.com/${roomId}`
               }
@@ -611,7 +669,7 @@ export default class BilibiliSource {
         throw new Error('No supported stream format found')
       }
 
-      let aid = track.pluginInfo?.aid
+      let _aid = track.pluginInfo?.aid
       let cid = track.pluginInfo?.cid
       const bvid = track.pluginInfo?.bvid || track.identifier.split('?')[0]
 
@@ -623,31 +681,36 @@ export default class BilibiliSource {
             headers: { ...HEADERS, Cookie: this.cookie }
           }
         )
-        if (body.code !== 0) throw new Error('Failed to fetch video metadata for stream')
-        
-        aid = body.data.aid
-        
+        if (body.code !== 0)
+          throw new Error('Failed to fetch video metadata for stream')
+
+        _aid = body.data.aid
+
         const pMatch = track.identifier.match(/\?p=(\d+)/)
-        const pageIndex = pMatch ? parseInt(pMatch[1]) : 1
-        const page = body.data.pages.find(p => p.page === pageIndex)
+        const pageIndex = pMatch ? parseInt(pMatch[1], 10) : 1
+        const page = body.data.pages.find((p) => p.page === pageIndex)
         cid = page ? page.cid : body.data.cid
       }
 
       const mixinKey = await this._getWbiKeys()
-      const query = this._signWbi({
-        bvid: bvid,
-        cid: cid,
-        qn: 120, 
-        fnval: 16 
-      }, mixinKey)
+      const query = this._signWbi(
+        {
+          bvid: bvid,
+          cid: cid,
+          qn: 120,
+          fnval: 16
+        },
+        mixinKey
+      )
 
       const { body } = await makeRequest(
         `https://api.bilibili.com/x/player/wbi/playurl?${query}`,
         {
           method: 'GET',
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://www.bilibili.com/',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Referer: 'https://www.bilibili.com/',
             Cookie: this.cookie
           }
         }
@@ -664,10 +727,10 @@ export default class BilibiliSource {
       if (dash) {
         const audio = dash.audio ? dash.audio[0] : null
         const video = dash.video ? dash.video[0] : null
-        
+
         if (audio) {
           url = audio.base_url || audio.backup_url?.[0]
-          type = 'm4a' 
+          type = 'm4a'
         } else if (video) {
           url = video.base_url || video.backup_url?.[0]
           type = 'mp4'
@@ -685,8 +748,9 @@ export default class BilibiliSource {
         format: type,
         additionalData: {
           headers: {
-            'Referer': 'https://www.bilibili.com/',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Referer: 'https://www.bilibili.com/',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             Cookie: this.cookie
           }
         }
@@ -699,16 +763,31 @@ export default class BilibiliSource {
   async loadStream(decodedTrack, url, protocol, additionalData) {
     try {
       let type = decodedTrack.format
-      
+
       if (!type) {
         if (url.includes('.m3u8')) type = 'mpegts'
         else if (url.includes('.flv')) type = 'flv'
         else type = 'mp4'
       }
 
+      const headers = {
+        ...HEADERS,
+        ...additionalData?.headers
+      }
+
+      if (protocol === 'hls' || url.includes('.m3u8')) {
+      const stream = new HLSHandler(url, { 
+        headers: HEADERS, 
+        type: 'mpegts', 
+        localAddress: this.nodelink.routePlanner?.getIP(),
+        startTime: additionalData?.startTime || 0
+      })
+        return { stream, type: 'mpegts' }
+      }
+
       const response = await http1makeRequest(url, {
         method: 'GET',
-        headers: additionalData?.headers || {},
+        headers,
         streamOnly: true
       })
 
@@ -717,10 +796,26 @@ export default class BilibiliSource {
       }
 
       const stream = new PassThrough()
-      
-      response.stream.on('data', (chunk) => stream.write(chunk))
-      response.stream.on('end', () => stream.emit('finishBuffering'))
-      response.stream.on('error', (err) => stream.destroy(err))
+
+      response.stream.on('data', (chunk) => {
+        if (!stream.write(chunk)) response.stream.pause()
+      })
+
+      stream.on('drain', () => {
+        if (!response.stream.destroyed) response.stream.resume()
+      })
+
+      response.stream.on('end', () => {
+        if (!stream.writableEnded) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
+      })
+
+      response.stream.on('error', (err) => {
+        logger('error', 'Bilibili', `Upstream stream error: ${err.message}`)
+        if (!stream.destroyed) stream.destroy(err)
+      })
 
       return { stream: stream, type: type }
     } catch (err) {

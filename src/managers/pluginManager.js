@@ -16,7 +16,11 @@ export default class PluginManager {
   }
 
   async load(contextType) {
-    logger('info', 'PluginManager', `Initializing plugins in ${contextType} context...`)
+    logger(
+      'info',
+      'PluginManager',
+      `Initializing plugins in ${contextType} context...`
+    )
 
     try {
       await fs.access(this.pluginsDir)
@@ -35,7 +39,7 @@ export default class PluginManager {
 
   async _findPackageJson(startPath) {
     let currentDir = path.dirname(startPath)
-    
+
     while (currentDir !== path.parse(currentDir).root) {
       const pkgPath = path.join(currentDir, 'package.json')
       try {
@@ -63,7 +67,7 @@ export default class PluginManager {
 
     try {
       let entryPoint = null
-      let pluginMeta = {
+      const pluginMeta = {
         name,
         version: '0.0.0',
         author: 'Unknown',
@@ -73,16 +77,18 @@ export default class PluginManager {
       if (source === 'local') {
         const resolvedPath = path.resolve(this.pluginsDir, localPath || name)
         const stat = await fs.stat(resolvedPath)
-        
+
         if (stat.isDirectory()) {
           const pkgPath = path.join(resolvedPath, 'package.json')
           try {
             const pkgData = await fs.readFile(pkgPath, 'utf-8')
             const pkg = JSON.parse(pkgData)
-            
+
             if (pkg.version) pluginMeta.version = pkg.version
-            if (pkg.author) pluginMeta.author = typeof pkg.author === 'object' ? pkg.author.name : pkg.author
-            if (pkg.homepage || (pkg.repository && pkg.repository.url)) {
+            if (pkg.author)
+              pluginMeta.author =
+                typeof pkg.author === 'object' ? pkg.author.name : pkg.author
+            if (pkg.homepage || pkg.repository?.url) {
               pluginMeta.topic = pkg.homepage || pkg.repository.url
             }
 
@@ -101,17 +107,23 @@ export default class PluginManager {
         try {
           const pkgName = packageName || name
           entryPoint = require.resolve(pkgName)
-          
+
           const pkg = await this._findPackageJson(entryPoint)
           if (pkg) {
             if (pkg.version) pluginMeta.version = pkg.version
-            if (pkg.author) pluginMeta.author = typeof pkg.author === 'object' ? pkg.author.name : pkg.author
-            if (pkg.homepage || (pkg.repository && pkg.repository.url)) {
+            if (pkg.author)
+              pluginMeta.author =
+                typeof pkg.author === 'object' ? pkg.author.name : pkg.author
+            if (pkg.homepage || pkg.repository?.url) {
               pluginMeta.topic = pkg.homepage || pkg.repository.url
             }
           }
-        } catch (e) {
-          logger('warn', 'PluginManager', `NPM package '${packageName || name}' not found.`)
+        } catch (_e) {
+          logger(
+            'warn',
+            'PluginManager',
+            `NPM package '${packageName || name}' not found.`
+          )
           return
         }
       }
@@ -122,7 +134,9 @@ export default class PluginManager {
       const pluginModule = await import(fileUrl)
 
       if (typeof pluginModule.default !== 'function') {
-        throw new Error(`Plugin '${name}' entry point must export a default function.`)
+        throw new Error(
+          `Plugin '${name}' entry point must export a default function.`
+        )
       }
 
       this.loadedPlugins.set(name, {
@@ -137,14 +151,19 @@ export default class PluginManager {
       const author = `\x1b[36m${pluginMeta.author}\x1b[0m`
       const pluginName = `\x1b[1m\x1b[32m${name}\x1b[0m`
       const version = `\x1b[33mv${pluginMeta.version}\x1b[0m`
-      const topic = pluginMeta.topic ? ` | \x1b[34mTopic:\x1b[0m ${pluginMeta.topic}` : ''
+      const topic = pluginMeta.topic
+        ? ` | \x1b[34mTopic:\x1b[0m ${pluginMeta.topic}`
+        : ''
 
       const creditString = `[${author}] ${pluginName} ${version}${topic}`
-      
-      logger('info', 'PluginManager', `Loaded: ${creditString}`)
 
+      logger('info', 'PluginManager', `Loaded: ${creditString}`)
     } catch (error) {
-      logger('error', 'PluginManager', `Failed to load plugin '${name}': ${error.message}`)
+      logger(
+        'error',
+        'PluginManager',
+        `Failed to load plugin '${name}': ${error.message}`
+      )
     }
   }
 
@@ -160,7 +179,11 @@ export default class PluginManager {
     try {
       await pluginModule.default(this.nodelink, specificConfig, context)
     } catch (err) {
-      logger('error', 'PluginManager', `Error executing plugin '${name}' in '${contextType}' context: ${err.message}`)
+      logger(
+        'error',
+        'PluginManager',
+        `Error executing plugin '${name}' in '${contextType}' context: ${err.message}`
+      )
     }
   }
 }

@@ -24,12 +24,14 @@ const updatePlayerTrackSchema = myzod
 const updatePlayerSchema = myzod
   .object({
     track: updatePlayerTrackSchema.optional(),
+    nextTrack: updatePlayerTrackSchema.optional(),
     encodedTrack: myzod.string().nullable().optional(),
     position: myzod.number().min(0).optional(),
     endTime: myzod.number().min(0).nullable().optional(),
     volume: myzod.number().min(0).max(1000).optional(),
     paused: myzod.boolean().optional(),
     filters: filtersSchema.optional(),
+    fading: myzod.unknown().optional(),
     voice: voiceStateSchema.optional(),
     guildId: myzod.string().optional()
   })
@@ -51,6 +53,59 @@ const pathSchema = myzod.object({
     )
     .optional()
 })
+
+const sanitizeFadingConfig = (raw) => {
+  const safe = {
+    enabled: false,
+    trackStart: { duration: 0, curve: 'linear' },
+    trackEnd: { duration: 0, curve: 'linear' },
+    trackStop: { duration: 0, curve: 'linear' },
+    seek: { duration: 0, curve: 'linear' },
+    ducking: {
+      enabled: false,
+      duration: 0,
+      targetVolume: 0.3,
+      curve: 'linear'
+    }
+  }
+
+  if (!raw || typeof raw !== 'object') return safe
+  safe.enabled = raw.enabled === true
+
+  const updateSection = (key) => {
+    const section = raw[key]
+    if (!section || typeof section !== 'object') return
+    if (Number.isFinite(section.duration)) {
+      safe[key].duration = Math.max(0, section.duration)
+    }
+    if (typeof section.curve === 'string') {
+      safe[key].curve = section.curve
+    }
+  }
+
+  updateSection('trackStart')
+  updateSection('trackEnd')
+  updateSection('trackStop')
+  updateSection('seek')
+
+  if (raw.ducking && typeof raw.ducking === 'object') {
+    safe.ducking.enabled = raw.ducking.enabled === true
+    if (Number.isFinite(raw.ducking.duration)) {
+      safe.ducking.duration = Math.max(0, raw.ducking.duration)
+    }
+    if (Number.isFinite(raw.ducking.targetVolume)) {
+      safe.ducking.targetVolume = Math.max(
+        0,
+        Math.min(1, raw.ducking.targetVolume)
+      )
+    }
+    if (typeof raw.ducking.curve === 'string') {
+      safe.ducking.curve = raw.ducking.curve
+    }
+  }
+
+  return safe
+}
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const parts = parsedUrl.pathname.split('/')
@@ -191,7 +246,12 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         await session.players.create(guildId)
 
         if (payload.voice) {
-          const { endpoint, token, sessionId: voiceSessionId, channelId } = payload.voice
+          const {
+            endpoint,
+            token,
+            sessionId: voiceSessionId,
+            channelId
+          } = payload.voice
           const currentPlayer = session.players.get(guildId)
           if (
             currentPlayer &&
@@ -202,7 +262,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             logger(
               'debug',
               'PlayerUpdate',
-              `Voice payload for guild ${guildId} is identical. Skipping.`
+              `Voice payload for guild ${this.guildId} is identical. Skipping.`
             )
           } else {
             logger(
@@ -216,9 +276,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
         let trackToPlay = null
         let stopPlayer = false
-        let userData = payload.track?.userData
+        const userData = payload.track?.userData
 
         const trackPayload = payload.track
+        const nextTrackPayload = payload.nextTrack
         const legacyEncodedTrack = payload.encodedTrack
 
         if (legacyEncodedTrack) {
@@ -256,7 +317,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               trackToPlay = {
                 encoded: trackPayload.encoded,
                 info: decodedTrack.info,
-                audioTrackId: trackPayload.language || trackPayload.audioTrackId || null
+                audioTrackId:
+                  trackPayload.language || trackPayload.audioTrackId || null
               }
             }
           } else if (trackPayload.identifier) {
@@ -288,7 +350,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               trackToPlay = {
                 encoded: loadResult.data.encoded,
                 info: loadResult.data.info,
-                audioTrackId: trackPayload.language || trackPayload.audioTrackId || null
+                audioTrackId:
+                  trackPayload.language || trackPayload.audioTrackId || null
               }
             } else {
               const message =
@@ -327,9 +390,49 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           }
         }
 
+        if (nextTrackPayload) {
+          let trackToPreload = null
+
+          if (nextTrackPayload.encoded !== undefined) {
+            const decodedTrack = decodeTrack(nextTrackPayload.encoded)
+            if (decodedTrack) {
+              trackToPreload = {
+                encoded: nextTrackPayload.encoded,
+                info: decodedTrack.info,
+                audioTrackId:
+                  nextTrackPayload.language || nextTrackPayload.audioTrackId || null,
+                userData: nextTrackPayload.userData
+              }
+            }
+          } else if (nextTrackPayload.identifier) {
+            if (nodelink.loadTrack) {
+              const loadResult = await nodelink.loadTrack(nextTrackPayload.identifier)
+              if (loadResult.loadType === 'track') {
+                trackToPreload = {
+                  encoded: loadResult.data.encoded,
+                  info: loadResult.data.info,
+                  audioTrackId:
+                    nextTrackPayload.language || nextTrackPayload.audioTrackId || null,
+                  userData: nextTrackPayload.userData
+                }
+              }
+            }
+          }
+
+          if (trackToPreload) {
+            logger(
+              'debug',
+              'PlayerUpdate',
+              `Preloading track for guild ${guildId}:`,
+              { track: trackToPreload.info }
+            )
+            await session.players.preload(guildId, trackToPreload)
+          }
+        }
+
         if (stopPlayer) {
           const player = session.players.get(guildId)
-          if (player && player.isUpdatingTrack) {
+          if (player?.isUpdatingTrack) {
             logger(
               'debug',
               'PlayerUpdate',
@@ -417,6 +520,16 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             payload.filters
           )
           await session.players.setFilters(guildId, payload)
+        }
+
+        if (payload.fading !== undefined) {
+          logger(
+            'debug',
+            'PlayerUpdate',
+            `Setting fading for guild ${guildId}`
+          )
+          const sanitizedFading = sanitizeFadingConfig(payload.fading)
+          await session.players.setFading(guildId, sanitizedFading)
         }
 
         const playerJson = await session.players.toJSON(guildId)

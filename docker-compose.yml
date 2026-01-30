@@ -89,7 +89,7 @@ services:
       # NODELINK_FILTERS_ENABLED_TIMESCALE: "true"
 
       # --- Search Defaults ---
-      # NODELINK_DEFAULTSEARCHSOURCE: "youtube"
+      # NODELINK_DEFAULTSEARCHSOURCE: '["youtube", "soundcloud"]'
       # NODELINK_UNIFIEDSEARCHSOURCES: '["youtube", "soundcloud"]'
 
       # --- Sources Configuration ---
@@ -149,8 +149,8 @@ services:
       # NODELINK_SOURCES_YOUTUBE_HL: "en"
       # NODELINK_SOURCES_YOUTUBE_GL: "US"
       # NODELINK_SOURCES_YOUTUBE_CLIENTS_SEARCH: '["Android"]' # MUST be a JSON array string
-      # NODELINK_SOURCES_YOUTUBE_CLIENTS_PLAYBACK: '["AndroidVR", "TV", "TVEmbedded", "IOS"]' # MUST be a JSON array string
-      # NODELINK_SOURCES_YOUTUBE_CLIENTS_RESOLVE: '["AndroidVR", "TV", "TVEmbedded", "IOS", "Web"]' # MUST be a JSON array string
+      # NODELINK_SOURCES_YOUTUBE_CLIENTS_PLAYBACK: '["AndroidVR", "TV", "WebEmbedded", "IOS"]' # MUST be a JSON array string
+      # NODELINK_SOURCES_YOUTUBE_CLIENTS_RESOLVE: '["AndroidVR", "TV", "WebEmbedded", "IOS", "Web"]' # MUST be a JSON array string
       # NODELINK_SOURCES_YOUTUBE_CLIENTS_SETTINGS_TV_REFRESHTOKEN: '["TOKEN_HERE"]' # MUST be a JSON array string
       NODELINK_SOURCES_YOUTUBE_CIPHER_URL: "https://cipher.kikkia.dev/api"
       # NODELINK_SOURCES_YOUTUBE_CIPHER_TOKEN: ""

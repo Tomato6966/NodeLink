@@ -123,7 +123,7 @@ export default class SessionManager {
       }
     }
 
-    session.socket?.destroy()
+    session.socket?.destroy?.()
   }
 
   async shutdown(sessionId) {
@@ -137,5 +137,13 @@ export default class SessionManager {
 
   values() {
     return this.activeSessions.values()
+  }
+
+  getPlayer(guildId) {
+    for (const session of this.activeSessions.values()) {
+      const player = session.players.get(guildId)
+      if (player) return player
+    }
+    return null
   }
 }

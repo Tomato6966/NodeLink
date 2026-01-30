@@ -44,7 +44,12 @@ export class RingBuffer {
 
     const availableAtEnd = this.size - this.readOffset
     if (bytesToReadNum <= availableAtEnd) {
-      this.buffer.copy(out, 0, this.readOffset, this.readOffset + bytesToReadNum)
+      this.buffer.copy(
+        out,
+        0,
+        this.readOffset,
+        this.readOffset + bytesToReadNum
+      )
     } else {
       this.buffer.copy(out, 0, this.readOffset, this.size)
       this.buffer.copy(out, availableAtEnd, 0, bytesToReadNum - availableAtEnd)
@@ -70,7 +75,12 @@ export class RingBuffer {
 
     const availableAtEnd = this.size - this.readOffset
     if (bytesToPeekNum <= availableAtEnd) {
-      this.buffer.copy(out, 0, this.readOffset, this.readOffset + bytesToPeekNum)
+      this.buffer.copy(
+        out,
+        0,
+        this.readOffset,
+        this.readOffset + bytesToPeekNum
+      )
     } else {
       this.buffer.copy(out, 0, this.readOffset, this.size)
       this.buffer.copy(out, availableAtEnd, 0, bytesToPeekNum - availableAtEnd)
@@ -84,7 +94,10 @@ export class RingBuffer {
     const availableAtEnd = this.size - this.readOffset
 
     if (bytesToPeekNum <= availableAtEnd) {
-      return this.buffer.subarray(this.readOffset, this.readOffset + bytesToPeekNum)
+      return this.buffer.subarray(
+        this.readOffset,
+        this.readOffset + bytesToPeekNum
+      )
     }
 
     const out = Buffer.allocUnsafe(bytesToPeekNum)

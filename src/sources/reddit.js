@@ -1,5 +1,5 @@
-import { encodeTrack, makeRequest, logger } from '../utils.js'
 import { PassThrough } from 'node:stream'
+import { encodeTrack, logger, makeRequest } from '../utils.js'
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3'
@@ -180,7 +180,7 @@ export default class RedditSource {
   _buildTrack(partialInfo) {
     const track = {
       identifier: partialInfo.identifier,
-      isSeekable: false,
+      isSeekable: !partialInfo.isStream,
       author: partialInfo.author,
       length: partialInfo.length,
       isStream: partialInfo.isStream,
@@ -212,7 +212,7 @@ export default class RedditSource {
 
     return { url, protocol: 'https', format }
   }
-  async loadStream(decodedTrack, url) {
+  async loadStream(decodedTrack, url, _protocol, _additionalData) {
     logger(
       'debug',
       'Sources',

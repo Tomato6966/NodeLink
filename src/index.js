@@ -2,18 +2,16 @@ import cluster from 'node:cluster'
 import { EventEmitter } from 'node:events'
 import http from 'node:http'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { pathToFileURL } from 'node:url'
 import WebSocketServer from '@performanc/pwsl-server'
 
 import requestHandler from './api/index.js'
 import connectionManager from './managers/connectionManager.js'
 import CredentialManager from './managers/credentialManager.js'
-import lyricsManager from './managers/lyricsManager.js'
+import TrackCacheManager from './managers/trackCacheManager.js'
 import routePlannerManager from './managers/routePlannerManager.js'
 import sessionManager from './managers/sessionManager.js'
-import sourceManager from './managers/sourceManager.js'
 import statsManager from './managers/statsManager.js'
-import OAuth from './sources/youtube/OAuth.js'
 import {
   applyEnvOverrides,
   checkForUpdates,
@@ -34,6 +32,9 @@ import DosProtectionManager from './managers/dosProtectionManager.js'
 import PlayerManager from './managers/playerManager.js'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
+import SourceWorkerManager from './managers/sourceWorkerManager.js'
+import { parseVoiceFrameHeader } from './voice/voiceFrames.js'
+import { createVoiceRelay } from './voice/voiceRelay.js'
 
 let config
 
@@ -74,11 +75,11 @@ const clusterEnabled =
   (typeof config.cluster?.enabled === 'boolean' && config.cluster.enabled) ||
   false
 
-let configuredWorkers = 0
+let _configuredWorkers = 0
 if (process.env.CLUSTER_WORKERS)
-  configuredWorkers = Number(process.env.CLUSTER_WORKERS)
+  _configuredWorkers = Number(process.env.CLUSTER_WORKERS)
 else if (typeof config.cluster?.workers === 'number')
-  configuredWorkers = config.cluster.workers
+  _configuredWorkers = config.cluster.workers
 
 initLogger(config)
 
@@ -144,7 +145,7 @@ let registry = null
 if (process.embedder === 'nodejs') {
   try {
     registry = await import('./registry.js')
-  } catch (e) {}
+  } catch (_e) {}
 }
 
 class NodelinkServer extends EventEmitter {
@@ -160,20 +161,24 @@ class NodelinkServer extends EventEmitter {
     this._usingBunServer = Boolean(isBun && options?.server?.useBunServer)
 
     this.sessions = new sessionManager(this, PlayerManagerClass)
-    if (!isClusterPrimary || options.enableLoadStreamEndpoint) {
-      this.sources = new sourceManager(this)
-      this.lyrics = new lyricsManager(this)
-    } else {
-      this.sources = null
-      this.lyrics = null
-    }
+    this.sources = null
+    this.lyrics = null
+    this.meanings = null
+
+    this._sourceInitPromise = this._initSources(isClusterPrimary, options)
+
     this.routePlanner = new routePlannerManager(this)
     this.credentialManager = new CredentialManager(this)
+    this.trackCacheManager = new TrackCacheManager(this)
     this.connectionManager = new connectionManager(this)
     this.statsManager = new statsManager(this)
     this.rateLimitManager = new RateLimitManager(this)
     this.dosProtectionManager = new DosProtectionManager(this)
     this.pluginManager = new PluginManager(this)
+    this.sourceWorkerManager =
+      isClusterPrimary && options.cluster?.specializedSourceWorker?.enabled
+        ? new SourceWorkerManager(this)
+        : null
     this.registry = registry
     this.version = getVersion()
     this.gitInfo = getGitInfo()
@@ -192,6 +197,14 @@ class NodelinkServer extends EventEmitter {
       audioInterceptors: [],
       playerInterceptors: []
     }
+
+    this.voiceSockets = new Map()
+    this.voiceRelay = createVoiceRelay({
+      enabled: options.voiceReceive?.enabled,
+      format: options.voiceReceive?.format,
+      sendFrame: (frame) => this.handleVoiceFrame(frame),
+      logger
+    })
 
     this._globalUpdater = null
     this._statsUpdater = null
@@ -212,6 +225,20 @@ class NodelinkServer extends EventEmitter {
     )
   }
 
+  async _initSources(isClusterPrimary, _options) {
+    if (!isClusterPrimary) {
+      const [{ default: sourceMan }, { default: lyricsMan }, { default: meaningMan }] =
+        await Promise.all([
+          import('./managers/sourceManager.js'),
+          import('./managers/lyricsManager.js'),
+          import('./managers/meaningManager.js')
+        ])
+      this.sources = new sourceMan(this)
+      this.lyrics = new lyricsMan(this)
+      this.meanings = new meaningMan(this)
+    }
+  }
+
   _startHeartbeat() {
     if (this._heartbeatInterval) return
 
@@ -228,7 +255,7 @@ class NodelinkServer extends EventEmitter {
             } else if (typeof session.socket.ping === 'function') {
               session.socket.ping()
             }
-          } catch (e) {
+          } catch (_e) {
             logger(
               'debug',
               'Server',
@@ -245,6 +272,42 @@ class NodelinkServer extends EventEmitter {
       clearInterval(this._heartbeatInterval)
       this._heartbeatInterval = null
     }
+  }
+
+  handleVoiceFrame(frame) {
+    const header = parseVoiceFrameHeader(frame)
+    if (!header?.guildId) return
+
+    const sockets = this.voiceSockets.get(header.guildId)
+    if (!sockets || sockets.size === 0) return
+
+    for (const socket of sockets) {
+      try {
+        socket.send(frame)
+      } catch {}
+    }
+  }
+
+  registerVoiceSocket(guildId, socket) {
+    if (!guildId || !socket) return
+
+    let sockets = this.voiceSockets.get(guildId)
+    if (!sockets) {
+      sockets = new Set()
+      this.voiceSockets.set(guildId, sockets)
+    }
+
+    sockets.add(socket)
+
+    const cleanup = () => {
+      const set = this.voiceSockets.get(guildId)
+      if (!set) return
+      set.delete(socket)
+      if (set.size === 0) this.voiceSockets.delete(guildId)
+    }
+
+    socket.on('close', cleanup)
+    socket.on('error', cleanup)
   }
 
   async getSourcesFromWorker() {
@@ -345,9 +408,14 @@ class NodelinkServer extends EventEmitter {
     validateProperty(
       this.options.defaultSearchSource,
       'defaultSearchSource',
-      'key of an enabled source in config.sources',
-      (v) =>
-        typeof v === 'string' && Boolean(this.options.sources?.[v]?.enabled)
+      'key or array of keys of enabled sources in config.sources',
+      (v) => {
+        const sources = Array.isArray(v) ? v : [v]
+        return sources.every(
+          (s) =>
+            typeof s === 'string' && Boolean(this.options.sources?.[s]?.enabled)
+        )
+      }
     )
 
     validateProperty(
@@ -422,6 +490,7 @@ class NodelinkServer extends EventEmitter {
     const applemusic = this.options.sources?.applemusic
     const tidal = this.options.sources?.tidal
     const jiosaavn = this.options.sources?.jiosaavn
+    const audius = this.options.sources?.audius
 
     if (spotify?.enabled) {
       validateNonNegativeInt(
@@ -496,7 +565,40 @@ class NodelinkServer extends EventEmitter {
           (v) => typeof v === 'string' && (v === '' || v.trim().length > 0)
         )
       }
+
+    if (audius?.enabled) {
+      if (
+        audius?.appName !== undefined &&
+        typeof audius?.appName !== 'string'
+      ) {
+        throw new Error('sources.audius.appName must be a string')
+      }
+
+      if (
+        audius?.apiKey !== undefined &&
+        typeof audius?.apiKey !== 'string'
+      ) {
+        throw new Error('sources.audius.apiKey must be a string')
+      }
+
+      if (
+        audius?.apiSecret !== undefined &&
+        typeof audius?.apiSecret !== 'string'
+      ) {
+        throw new Error('sources.audius.apiSecret must be a string')
+      }
+
+      validateNonNegativeInt(
+        audius?.playlistLoadLimit,
+        'sources.audius.playlistLoadLimit'
+      )
+
+      validateNonNegativeInt(
+        audius?.albumLoadLimit,
+        'sources.audius.albumLoadLimit'
+      )
     }
+  }
 
     if (jiosaavn?.enabled) {
       validateNonNegativeInt(
@@ -718,7 +820,7 @@ class NodelinkServer extends EventEmitter {
             logger(
               'warn',
               'Server',
-              `Unauthorized connection attempt from ${clientAddress} - Invalid Password`
+              `Unauthorized connection attempt from ${clientAddress} - Invalid password provided: ${auth || 'None'}`
             )
             return new Response('Invalid password provided.', {
               status: 401,
@@ -853,12 +955,40 @@ class NodelinkServer extends EventEmitter {
             } connected from [External] (${ws.data.remoteAddress}) | \x1b[33mURL:\x1b[0m ${ws.data.url}`
           )
 
+          let eventName = '/v4/websocket'
+          let guildId = null
+          let liveId = null
+          try {
+            const url = new URL(ws.data.url)
+            const voiceMatch = url.pathname.match(
+              /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
+            )
+            const liveMatch = url.pathname.match(
+              /^\/v4\/websocket\/youtube\/live\/([^/]+)\/?$/
+            )
+
+            if (voiceMatch) {
+              if (!self.options.voiceReceive?.enabled) {
+                try {
+                  wrapper.close(1008, 'Voice receive disabled')
+                } catch {}
+                return
+              }
+              eventName = '/v4/websocket/voice'
+              guildId = voiceMatch[1]
+            } else if (liveMatch) {
+              eventName = '/v4/websocket/youtube/live'
+              liveId = liveMatch[1]
+            }
+          } catch {}
+
           self.socket.emit(
-            '/v4/websocket',
+            eventName,
             wrapper,
             reqShim,
             clientInfo,
-            sessionId
+            sessionId,
+            guildId || liveId
           )
         },
         message(ws, message) {
@@ -920,7 +1050,7 @@ class NodelinkServer extends EventEmitter {
         logger(
           'warn',
           'Server',
-          `Unauthorized connection attempt from ${clientAddress} - Invalid password provided`
+          `Unauthorized connection attempt from ${clientAddress} - Invalid password provided: ${headers.authorization || 'None'}`
         )
         return rejectUpgrade(401, 'Unauthorized', 'Invalid password provided.')
       }
@@ -953,7 +1083,14 @@ class NodelinkServer extends EventEmitter {
         request.url,
         `http://${request.headers.host}`
       )
-      if (pathname === '/v4/websocket') {
+      const voiceMatch = pathname.match(
+        /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
+      )
+      const liveMatch = pathname.match(
+        /^\/v4\/websocket\/youtube\/live\/([^/]+)\/?$/
+      )
+
+      if (pathname === '/v4/websocket' || voiceMatch || liveMatch) {
         if (!headers['user-id']) {
           logger(
             'warn',
@@ -970,6 +1107,15 @@ class NodelinkServer extends EventEmitter {
           )
           return rejectUpgrade(400, 'Bad Request', 'Invalid User-Id header.')
         }
+
+        if (voiceMatch && !this.options.voiceReceive?.enabled) {
+          return rejectUpgrade(
+            404,
+            'Not Found',
+            'Voice websocket endpoint is disabled.'
+          )
+        }
+
         request.headers = headers
 
         logger(
@@ -980,24 +1126,37 @@ class NodelinkServer extends EventEmitter {
           } connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
         )
 
+        let eventName = '/v4/websocket'
+        let routeId = null
+
+        if (voiceMatch) {
+          eventName = '/v4/websocket/voice'
+          routeId = voiceMatch[1]
+        } else if (liveMatch) {
+          eventName = '/v4/websocket/youtube/live'
+          routeId = liveMatch[1]
+        }
+
         if (isBun && !this._usingBunServer) {
           this.socket.handleUpgrade(request, socket, head, (ws) => {
             this.socket.emit(
-              '/v4/websocket',
+              eventName,
               ws,
               request,
               clientInfo,
-              sessionId
+              sessionId,
+              routeId
             )
           })
         } else {
           this.socket.handleUpgrade(request, socket, head, {}, (ws) =>
             this.socket.emit(
-              '/v4/websocket',
+              eventName,
               ws,
               request,
               clientInfo,
-              sessionId
+              sessionId,
+              routeId
             )
           )
         }
@@ -1014,6 +1173,85 @@ class NodelinkServer extends EventEmitter {
         )
       }
     })
+
+    this.socket.on(
+      '/v4/websocket/voice',
+      (socket, request, _clientInfo, _sessionId, guildId) => {
+        if (!this.options.voiceReceive?.enabled) {
+          try {
+            socket.close(1008, 'Voice receive disabled')
+          } catch {}
+          return
+        }
+
+        logger(
+          'info',
+          'Voice',
+          `Voice websocket connected from ${request.socket?.remoteAddress || 'unknown'} | guild ${guildId}`
+        )
+
+        this.registerVoiceSocket(guildId, socket)
+      }
+    )
+
+    this.socket.on(
+      '/v4/websocket/youtube/live',
+      (socket, request, _clientInfo, _sessionId, id) => {
+        let videoId = id
+
+        if (/^\d{17,20}$/.test(id)) {
+          const player = this.sessions.getPlayer(id)
+          if (player?.track?.info?.sourceName?.includes('youtube')) {
+            videoId = player.track.info.identifier
+          }
+        } 
+        else if (id.length > 50) {
+          try {
+            const decoded = decodeTrack(id)
+            if (decoded?.info?.sourceName?.includes('youtube')) {
+              videoId = decoded.info.identifier
+            }
+          } catch (_e) {}
+        }
+
+        if (!this.sourceWorkerManager) {
+          const yt = this.sources.getSource('youtube')
+          if (!yt) {
+            socket.close(1008, 'YouTube source not enabled')
+            return
+          }
+          yt.handleLiveChat(socket, videoId)
+          return
+        }
+
+        logger('info', 'YouTube-LiveChat', `Delegating live chat for video: ${videoId} to worker`)
+
+        const resShim = {
+          headersSent: false,
+          send: (data) => {
+            const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
+            socket.sendFrame(payload, { len: payload.length, fin: true, opcode: Buffer.isBuffer(data) ? 0x02 : 0x01 })
+          },
+          writeHead: (status) => {
+            if (status !== 200) socket.close(1011, 'Worker failed')
+          },
+          write: (data) => {
+            const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
+            socket.sendFrame(payload, { len: payload.length, fin: true, opcode: Buffer.isBuffer(data) ? 0x02 : 0x01 })
+          },
+          end: () => socket.close(1000, 'Finished'),
+          on: (event, cb) => socket.on(event, cb)
+        }
+
+        this.sourceWorkerManager.delegate(
+          request,
+          resShim,
+          'loadLiveChat',
+          { videoId },
+          { isWebSocket: true }
+        )
+      }
+    )
   }
 
   _listen() {
@@ -1190,10 +1428,10 @@ class NodelinkServer extends EventEmitter {
             try {
               session.socket.close(1000, 'Server shutdown')
               closedCount++
-            } catch (e) {
+            } catch (_e) {
               try {
                 session.socket.destroy()
-              } catch (destroyErr) {
+              } catch (_destroyErr) {
                 logger(
                   'debug',
                   'WebSocket',
@@ -1257,14 +1495,27 @@ class NodelinkServer extends EventEmitter {
       for (const [sessionId, guildsInSession] of sessionsToNotify.entries()) {
         const session = this.sessions.get(sessionId)
         if (session?.socket) {
+          const affected = Array.from(guildsInSession)
           session.socket.send(
             JSON.stringify({
               op: 'event',
               type: 'WorkerFailedEvent',
-              affectedGuilds: Array.from(guildsInSession),
-              message: `Players for guilds ${Array.from(guildsInSession).join(', ')} lost due to worker failure.`
+              affectedGuilds: affected,
+              message: `Players for guilds ${affected.join(', ')} lost due to worker failure.`
             })
           )
+          for (const guildId of affected) {
+            session.socket.send(
+              JSON.stringify({
+                op: 'event',
+                type: GatewayEvents.WEBSOCKET_CLOSED,
+                guildId,
+                code: 5001,
+                reason: 'worker_failed',
+                byRemote: false
+              })
+            )
+          }
         }
       }
     }
@@ -1274,16 +1525,28 @@ class NodelinkServer extends EventEmitter {
     this._validateConfig()
 
     await this.credentialManager.load()
+    await this.trackCacheManager.load()
     await this.statsManager.initialize()
+
+    // Ensure sources are initialized before proceeding
+    if (this._sourceInitPromise) await this._sourceInitPromise
+
     await this.pluginManager.load('master')
+
+    if (this.sourceWorkerManager) {
+      await this.sourceWorkerManager.start()
+    }
+
+    const specEnabled = this.options.cluster?.specializedSourceWorker?.enabled
 
     if (!startOptions.isClusterPrimary) {
       await this.pluginManager.load('worker')
     }
 
-    if (this.sources) {
+    if (this.sources && (!startOptions.isClusterPrimary || !specEnabled)) {
       await this.sources.loadFolder()
       await this.lyrics.loadFolder()
+      await this.meanings.loadFolder()
     }
 
     this._setupSocketEvents()
@@ -1301,7 +1564,7 @@ class NodelinkServer extends EventEmitter {
         try {
           try {
             handle.pause?.()
-          } catch (e) {}
+          } catch (_e) {}
           this.server.emit('connection', handle)
         } catch (err) {
           logger(
@@ -1311,7 +1574,7 @@ class NodelinkServer extends EventEmitter {
           )
           try {
             handle.destroy?.()
-          } catch (e) {}
+          } catch (_e) {}
         }
       })
     } else {
@@ -1422,7 +1685,14 @@ import WorkerManager from './managers/workerManager.js'
 
 if (clusterEnabled && cluster.isPrimary) {
   if (config.sources?.youtube?.getOAuthToken) {
+    // dynamicly import OAuth (if enabled)
+    const OAuth = (await import('./sources/youtube/OAuth.js').catch((e) => {
+      logger('error', 'youtube', `\x1b[1m\x1b[31mOAuth class not found Error: ${e.message}\x1b[0m`)
+      process.exit(1)
+    })).default
+
     const mockNodelink = { options: config }
+    mockNodelink.credentialManager = new CredentialManager(mockNodelink)
     const validator = new OAuth(mockNodelink)
     await validator.validateCurrentTokens()
 
@@ -1475,6 +1745,7 @@ if (clusterEnabled && cluster.isPrimary) {
       nserver._stopHeartbeat()
 
       await nserver.credentialManager.forceSave()
+      await nserver.trackCacheManager.forceSave()
 
       workerManager.destroy()
 
@@ -1501,7 +1772,7 @@ if (clusterEnabled && cluster.isPrimary) {
 
   await serverInstancePromise
 } else if (clusterEnabled && cluster.isWorker) {
-  await import('./worker.js')
+  await import('./workers/main.js')
 } else {
   const serverInstancePromise = (async () => {
     const nserver = new NodelinkServer(config, PlayerManager, false)
@@ -1528,6 +1799,7 @@ if (clusterEnabled && cluster.isPrimary) {
       nserver._stopHeartbeat()
 
       await nserver.credentialManager.forceSave()
+      await nserver.trackCacheManager.forceSave()
 
       await nserver._cleanupWebSocketServer()
 

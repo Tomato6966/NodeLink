@@ -1,9 +1,9 @@
 import { logger, makeRequest } from '../../../utils.js'
 import {
   BaseClient,
-  YOUTUBE_CONSTANTS,
   buildTrack,
-  checkURLType
+  checkURLType,
+  YOUTUBE_CONSTANTS
 } from '../common.js'
 
 export default class AndroidVR extends BaseClient {
@@ -35,7 +35,7 @@ export default class AndroidVR extends BaseClient {
     return false
   }
 
-  async search(query, type, context) {
+  async search(query, _type, context) {
     const sourceName = 'youtube'
 
     const requestBody = {
@@ -158,7 +158,7 @@ export default class AndroidVR extends BaseClient {
     }
   }
 
-  async resolve(url, type, context, cipherManager) {
+  async resolve(url, _type, context, cipherManager) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = 'https://youtubei.googleapis.com'

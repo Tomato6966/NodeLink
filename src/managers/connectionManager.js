@@ -100,7 +100,8 @@ export default class ConnectionManager {
               timestamp: Date.now()
             }
 
-            const shouldLog = this.config.logAllChecks || newStatus !== this.status
+            const shouldLog =
+              this.config.logAllChecks || newStatus !== this.status
             if (shouldLog) {
               if (newStatus === 'bad') {
                 logger(
@@ -129,15 +130,16 @@ export default class ConnectionManager {
 
         this.isChecking = false
         return
-      } catch (e) {
-        continue
-      }
+      } catch (_e) {}
     }
 
     this.isChecking = false
     if (this.status !== 'disconnected') {
       this.status = 'disconnected'
-      this.metrics = { error: 'All connection tests failed', timestamp: Date.now() }
+      this.metrics = {
+        error: 'All connection tests failed',
+        timestamp: Date.now()
+      }
       this.broadcastStatus()
     }
   }

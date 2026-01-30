@@ -14,7 +14,6 @@ import packageJson from '../package.json' with { type: 'json' }
 import {
   DEFAULT_MAX_REDIRECTS,
   DISCORD_ID_REGEX,
-  HLS_SEGMENT_DOWNLOAD_CONCURRENCY_LIMIT,
   REDIRECT_STATUS_CODES,
   SEMVER_PATTERN
 } from './constants.js'
@@ -203,19 +202,19 @@ function validateProperty(value, path, expected, validator) {
   if (value === undefined || value === null) {
     throw new Error(
       `Configuration error:\n` +
-      `- Property: ${path}\n` +
-      `- Problem: missing required value\n` +
-      `- Expected: ${expected}\n\n` +
-      `Please define ${path} in your config.js file.`
+        `- Property: ${path}\n` +
+        `- Problem: missing required value\n` +
+        `- Expected: ${expected}\n\n` +
+        `Please define ${path} in your config.js file.`
     )
   }
 
   if (!validator(value)) {
     throw new Error(
       `Configuration error:\n` +
-      `- Property: ${path}\n` +
-      `- Received: ${JSON.stringify(value)} (${typeof value})\n` +
-      `- Expected: ${expected}`
+        `- Property: ${path}\n` +
+        `- Received: ${JSON.stringify(value)} (${typeof value})\n` +
+        `- Expected: ${expected}`
     )
   }
 }
@@ -300,12 +299,14 @@ function sendResponse(req, res, data, status, trace = false) {
     res.end(buffer)
     return
   }
-
   const compressions = [
     { type: 'br', method: zlib.brotliCompress },
     { type: 'gzip', method: zlib.gzip },
     { type: 'deflate', method: zlib.deflate }
   ]
+  if (process.versions.node >= '22.0.0') {
+    compressions.unshift({ type: 'zstd', method: zlib.zstdCompress })
+  }
 
   for (const { type, method } of compressions) {
     if (encoding.includes(type)) {
@@ -503,119 +504,348 @@ function verifyMethod(
 }
 
 function decodeTrack(encoded) {
+  if (!encoded) throw new Error('Decode Error: Input string is null or empty')
+
   const buffer = Buffer.from(encoded, 'base64')
   let position = 0
+  let step = 'init'
 
-  const read = {
-    byte: () => buffer[position++],
-    ushort: () => {
-      const value = buffer.readUInt16BE(position)
-      position += 2
-      return value
-    },
-    int: () => {
-      const value = buffer.readInt32BE(position)
-      position += 4
-      return value
-    },
-    long: () => {
-      const value = buffer.readBigInt64BE(position)
-      position += 8
-      return value
-    },
-    utf: () => {
-      const length = read.ushort()
-      const value = buffer.toString('utf8', position, position + length)
-      position += length
-      return value
+  const ensure = (n) => {
+    if (position + n > buffer.length)
+      throw new Error(`Unexpected end of buffer (need ${n} bytes)`)
+  }
+
+  const readModifiedUTF8From = (buf, pRef) => {
+    if (pRef.value + 2 > buf.length)
+      throw new Error('Unexpected end of buffer (need 2 bytes)')
+    const utflen = buf.readUInt16BE(pRef.value)
+    pRef.value += 2
+    if (pRef.value + utflen > buf.length)
+      throw new Error(`Unexpected end of buffer (need ${utflen} bytes)`)
+
+    const end = pRef.value + utflen
+    const chars = []
+    let i = pRef.value
+
+    while (i < end) {
+      const c = buf[i] & 0xff
+
+      if (c < 0x80) {
+        i += 1
+        chars.push(String.fromCharCode(c))
+        continue
+      }
+
+      if ((c & 0xe0) === 0xc0) {
+        if (i + 1 >= end) throw new Error('Malformed utf')
+        const c2 = buf[i + 1] & 0xff
+        if ((c2 & 0xc0) !== 0x80) throw new Error('Malformed utf')
+        const ch = ((c & 0x1f) << 6) | (c2 & 0x3f)
+        i += 2
+        chars.push(String.fromCharCode(ch))
+        continue
+      }
+
+      if ((c & 0xf0) === 0xe0) {
+        if (i + 2 >= end) throw new Error('Malformed utf')
+        const c2 = buf[i + 1] & 0xff
+        const c3 = buf[i + 2] & 0xff
+        if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80)
+          throw new Error('Malformed utf')
+        const ch = ((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f)
+        i += 3
+        chars.push(String.fromCharCode(ch))
+        continue
+      }
+
+      throw new Error('Malformed utf')
+    }
+
+    pRef.value = end
+    return chars.join('')
+  }
+
+  const readNullableTextFrom = (buf, pRef) => {
+    if (pRef.value + 1 > buf.length)
+      throw new Error('Unexpected end of buffer (need 1 byte)')
+    const present = buf[pRef.value++] !== 0
+    return present ? readModifiedUTF8From(buf, pRef) : null
+  }
+
+  const decodeDetailsAsList = (detailsBuf) => {
+    let p = 0
+    const ensure2 = (n) => {
+      if (p + n > detailsBuf.length)
+        throw new Error('Unexpected end of details')
+    }
+
+    const readUTF2 = () => {
+      ensure2(2)
+      const utflen = detailsBuf.readUInt16BE(p)
+      p += 2
+      ensure2(utflen)
+
+      const end = p + utflen
+      const chars = []
+      let i = p
+
+      while (i < end) {
+        const c = detailsBuf[i] & 0xff
+
+        if (c < 0x80) {
+          i += 1
+          chars.push(String.fromCharCode(c))
+          continue
+        }
+
+        if ((c & 0xe0) === 0xc0) {
+          if (i + 1 >= end) throw new Error('Malformed utf')
+          const c2 = detailsBuf[i + 1] & 0xff
+          if ((c2 & 0xc0) !== 0x80) throw new Error('Malformed utf')
+          const ch = ((c & 0x1f) << 6) | (c2 & 0x3f)
+          i += 2
+          chars.push(String.fromCharCode(ch))
+          continue
+        }
+
+        if ((c & 0xf0) === 0xe0) {
+          if (i + 2 >= end) throw new Error('Malformed utf')
+          const c2 = detailsBuf[i + 1] & 0xff
+          const c3 = detailsBuf[i + 2] & 0xff
+          if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80)
+            throw new Error('Malformed utf')
+          const ch = ((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f)
+          i += 3
+          chars.push(String.fromCharCode(ch))
+          continue
+        }
+
+        throw new Error('Malformed utf')
+      }
+
+      p = end
+      return chars.join('')
+    }
+
+    const readNullable2 = () => {
+      ensure2(1)
+      const present = detailsBuf[p++] !== 0
+      return present ? readUTF2() : null
+    }
+
+    const out = []
+    while (p < detailsBuf.length) out.push(readNullable2())
+    while (out.length && out[out.length - 1] === null) out.pop()
+    return out
+  }
+
+  const tryParseSeekableTrailer = (buf) => {
+    let p = 0
+    try {
+      if (buf.length < 1) return { ok: false }
+      const present = buf[p++] !== 0
+      if (!present) return { ok: false }
+      const pRef = { value: p }
+      const s = readModifiedUTF8From(buf, pRef)
+      if (pRef.value !== buf.length) return { ok: false }
+      if (s === 'NLK:seekableY') return { ok: true, seekable: true }
+      if (s === 'NLK:seekableN') return { ok: true, seekable: false }
+      return { ok: false }
+    } catch {
+      return { ok: false }
     }
   }
 
-  const firstInt = read.int()
-  const isVersioned = ((firstInt & 0xc0000000) >> 30) & 1
-  const version = isVersioned ? read.byte() : 1
+  try {
+    step = 'messageHeader'
+    ensure(4)
+    const header = buffer.readInt32BE(position)
+    position += 4
 
-  return {
-    encoded: encoded,
-    info: {
-      title: read.utf(),
-      author: read.utf(),
-      length: Number(read.long()),
-      identifier: read.utf(),
-      isSeekable: !!read.byte(),
-      isStream: !!read.byte(),
-      uri: version >= 2 && read.byte() ? read.utf() : null,
-      artworkUrl: version === 3 && read.byte() ? read.utf() : null,
-      isrc: version === 3 && read.byte() ? read.utf() : null,
-      sourceName: read.utf(),
-      position: Number(read.long())
-    },
-    pluginInfo: {},
-    userData: {}
+    const flags = (header >>> 30) & 0x3
+    const messageSize = header & 0x3fffffff
+    if (messageSize === 0) throw new Error('message size: 0')
+
+    step = 'messageBody'
+    ensure(messageSize)
+    let messageBuf = buffer.subarray(position, position + messageSize)
+    position += messageSize
+
+    let seekable
+    {
+      const tailTryMax = Math.min(messageBuf.length, 512)
+      for (let cut = 1; cut <= tailTryMax; cut++) {
+        const tail = messageBuf.subarray(messageBuf.length - cut)
+        const parsed = tryParseSeekableTrailer(tail)
+        if (parsed.ok) {
+          seekable = parsed.seekable
+          messageBuf = messageBuf.subarray(0, messageBuf.length - cut)
+          break
+        }
+      }
+    }
+
+    step = 'payload'
+    const pRef = { value: 0 }
+
+    if (pRef.value + 1 > messageBuf.length)
+      throw new Error('Unexpected end of message (need 1 byte)')
+    const version = messageBuf[pRef.value++] & 0xff
+
+    const title = readModifiedUTF8From(messageBuf, pRef)
+    const author = readModifiedUTF8From(messageBuf, pRef)
+
+    if (pRef.value + 8 > messageBuf.length)
+      throw new Error('Unexpected end of message (need 8 bytes)')
+    const length = Number(messageBuf.readBigInt64BE(pRef.value))
+    pRef.value += 8
+
+    const identifier = readModifiedUTF8From(messageBuf, pRef)
+
+    if (pRef.value + 1 > messageBuf.length)
+      throw new Error('Unexpected end of message (need 1 byte)')
+    const isStream = messageBuf[pRef.value++] !== 0
+
+    const uri = version >= 2 ? readNullableTextFrom(messageBuf, pRef) : null
+    const artworkUrl =
+      version >= 3 ? readNullableTextFrom(messageBuf, pRef) : null
+    const isrc = version >= 3 ? readNullableTextFrom(messageBuf, pRef) : null
+
+    const sourceName = readModifiedUTF8From(messageBuf, pRef)
+
+    const positionOffset = messageBuf.length - 8
+    const detailsBuf = messageBuf.subarray(pRef.value, positionOffset)
+    const trackPosition = Number(messageBuf.readBigInt64BE(positionOffset))
+
+    let details = []
+    if (detailsBuf.length > 0) {
+      try {
+        details = decodeDetailsAsList(detailsBuf)
+      } catch {
+        details = []
+      }
+    }
+
+    return {
+      encoded,
+      info: {
+        title,
+        author,
+        length,
+        identifier,
+        isSeekable: typeof seekable === 'boolean' ? seekable : !isStream,
+        isStream,
+        uri,
+        artworkUrl,
+        isrc,
+        sourceName,
+        position: trackPosition
+      },
+      details,
+      pluginInfo: {},
+      userData: {},
+      messageFlags: flags
+    }
+  } catch (err) {
+    throw new Error(
+      `Decode Error at [${step}]: ${err.message} (Buffer pos: ${position}/${buffer.length})`
+    )
   }
 }
 
 function encodeTrack(track) {
-  const bufferArray = []
+  if (!track || typeof track !== 'object') {
+    throw new Error('Encode Error: Input track must be a valid object')
+  }
 
-  function write(type, value) {
-    if (type === 'byte') bufferArray.push(Buffer.from([value]))
-    if (type === 'ushort') {
-      const buf = Buffer.alloc(2)
-      buf.writeUInt16BE(value)
-      bufferArray.push(buf)
+  const encodeModifiedUTF8 = (value) => {
+    const str = String(value)
+    const bytes = []
+
+    for (let i = 0; i < str.length; i++) {
+      const ch = str.charCodeAt(i)
+
+      if (ch >= 0x0001 && ch <= 0x007f) {
+        bytes.push(ch)
+      } else if (ch === 0x0000 || (ch >= 0x0080 && ch <= 0x07ff)) {
+        bytes.push(0xc0 | ((ch >> 6) & 0x1f))
+        bytes.push(0x80 | (ch & 0x3f))
+      } else {
+        bytes.push(0xe0 | ((ch >> 12) & 0x0f))
+        bytes.push(0x80 | ((ch >> 6) & 0x3f))
+        bytes.push(0x80 | (ch & 0x3f))
+      }
     }
-    if (type === 'int') {
-      const buf = Buffer.alloc(4)
-      buf.writeInt32BE(value)
-      bufferArray.push(buf)
-    }
-    if (type === 'long') {
-      const buf = Buffer.alloc(8)
-      buf.writeBigInt64BE(BigInt(value))
-      bufferArray.push(buf)
-    }
-    if (type === 'utf') {
-      const strBuf = Buffer.from(value, 'utf8')
-      write('ushort', strBuf.length)
-      bufferArray.push(strBuf)
+
+    if (bytes.length > 65535)
+      throw new Error('Encode Error: UTF string too long')
+
+    const lenBuf = Buffer.alloc(2)
+    lenBuf.writeUInt16BE(bytes.length)
+    return Buffer.concat([lenBuf, Buffer.from(bytes)])
+  }
+
+  const chunks = []
+  const push = (b) => chunks.push(b)
+
+  const writeByte = (v) => push(Buffer.from([v & 0xff]))
+  const writeLong = (v) => {
+    const b = Buffer.alloc(8)
+    b.writeBigInt64BE(BigInt(v))
+    push(b)
+  }
+  const writeUTF = (v) => push(encodeModifiedUTF8(v))
+  const writeNullableText = (v) => {
+    if (v === undefined || v === null) {
+      writeByte(0)
+    } else {
+      writeByte(1)
+      writeUTF(String(v))
     }
   }
 
   const version = track.artworkUrl || track.isrc ? 3 : track.uri ? 2 : 1
+  const flags = 1
 
-  const isVersioned = version > 1 ? 1 : 0
-  const firstInt = isVersioned << 30
-  write('int', firstInt)
+  const seekable =
+    typeof track.isSeekable === 'boolean'
+      ? track.isSeekable
+      : typeof track?.info?.isSeekable === 'boolean'
+        ? track.info.isSeekable
+        : undefined
 
-  if (isVersioned) {
-    write('byte', version)
+  writeByte(version)
+  writeUTF(track.title)
+  writeUTF(track.author)
+  writeLong(track.length)
+  writeUTF(track.identifier)
+  writeByte(track.isStream ? 1 : 0)
+
+  if (version >= 2) writeNullableText(track.uri ?? null)
+  if (version >= 3) {
+    writeNullableText(track.artworkUrl ?? null)
+    writeNullableText(track.isrc ?? null)
   }
 
-  write('utf', track.title)
-  write('utf', track.author)
-  write('long', track.length)
-  write('utf', track.identifier)
-  write('byte', track.isSeekable ? 1 : 0)
-  write('byte', track.isStream ? 1 : 0)
+  writeUTF(track.sourceName)
 
-  if (version >= 2) {
-    write('byte', track.uri ? 1 : 0)
-    if (track.uri) write('utf', track.uri)
+  if (Array.isArray(track.details)) {
+    for (const detail of track.details) writeNullableText(detail)
   }
 
-  if (version === 3) {
-    write('byte', track.artworkUrl ? 1 : 0)
-    if (track.artworkUrl) write('utf', track.artworkUrl)
+  writeLong(track.position ?? 0)
 
-    write('byte', track.isrc ? 1 : 0)
-    if (track.isrc) write('utf', track.isrc)
+  if (typeof seekable === 'boolean') {
+    writeNullableText(seekable ? 'NLK:seekableY' : 'NLK:seekableN')
   }
 
-  write('utf', track.sourceName)
-  write('long', track.position)
+  const messageBuf = Buffer.concat(chunks)
+  const header = (messageBuf.length & 0x3fffffff) | ((flags & 0x3) << 30)
 
-  return Buffer.concat(bufferArray).toString('base64')
+  const headerBuf = Buffer.alloc(4)
+  headerBuf.writeInt32BE(header)
+
+  return Buffer.concat([headerBuf, messageBuf]).toString('base64')
 }
 
 const generateRandomLetters = (l) =>
@@ -647,15 +877,28 @@ function parseClient(agent) {
   return info
 }
 
-const httpAgent = new http.Agent({ keepAlive: true })
-const httpsAgent = new https.Agent({ keepAlive: true })
+const httpAgent = new http.Agent({
+  keepAlive: true,
+  maxFreeSockets: 32,
+  maxSockets: Infinity,
+  timeout: 60000
+})
+const httpsAgent = new https.Agent({
+  keepAlive: true,
+  maxFreeSockets: 32,
+  maxSockets: Infinity,
+  timeout: 60000
+})
 const http2FailedHosts = new Set()
 
-setInterval(() => {
-  if (http2FailedHosts.size > 0) {
-    http2FailedHosts.clear()
-  }
-}, 6 * 60 * 60 * 1000).unref()
+setInterval(
+  () => {
+    if (http2FailedHosts.size > 0) {
+      http2FailedHosts.clear()
+    }
+  },
+  6 * 60 * 60 * 1000
+).unref()
 
 async function _internalHttp1Request(urlString, options = {}) {
   const {
@@ -671,7 +914,8 @@ async function _internalHttp1Request(urlString, options = {}) {
     _redirectsFollowed = 0
   } = options
 
-  const actualLocalAddress = localAddress || global.nodelink?.routePlanner?.getIP()
+  const actualLocalAddress =
+    localAddress || global.nodelink?.routePlanner?.getIP()
 
   if (_redirectsFollowed >= maxRedirects) {
     throw new Error(`Too many redirects (${maxRedirects}) for ${urlString}`)
@@ -734,11 +978,20 @@ async function _internalHttp1Request(urlString, options = {}) {
         res.resume()
         const nextUrl = new URL(respHeaders.location, currentUrl).href
         const isGetRedirect = [301, 302, 303].includes(statusCode)
+        let nextMethod = method
+        let nextBody = body
+        if (method === 'HEAD') {
+          nextMethod = 'HEAD'
+          nextBody = undefined
+        } else if (isGetRedirect) {
+          nextMethod = 'GET'
+          nextBody = undefined
+        }
         const nextOptions = {
           ...options,
           _redirectsFollowed: _redirectsFollowed + 1,
-          method: isGetRedirect ? 'GET' : method,
-          body: isGetRedirect ? undefined : body
+          method: nextMethod,
+          body: nextBody
         }
         resolve(http1makeRequest(nextUrl, nextOptions))
         return
@@ -840,7 +1093,7 @@ async function http1makeRequest(urlString, options = {}) {
 
       if (isRetryable && attempt < maxRetries) {
         attempt++
-        const delay = 100 * Math.pow(2, attempt)
+        const delay = 100 * 2 ** attempt
         logger(
           'warn',
           'Network',
@@ -898,10 +1151,18 @@ async function makeRequest(urlString, options, nodelink) {
   try {
     const url = new URL(urlString)
     if (http2FailedHosts.has(url.host)) {
-      return http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
+      return http1makeRequest(
+        urlString,
+        { ...options, localAddress },
+        finalNodeLink
+      )
     }
-  } catch (e) {
-    return http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
+  } catch (_e) {
+    return http1makeRequest(
+      urlString,
+      { ...options, localAddress },
+      finalNodeLink
+    )
   }
 
   return new Promise((resolve, reject) => {
@@ -917,7 +1178,7 @@ async function makeRequest(urlString, options, nodelink) {
       try {
         const url = new URL(urlString)
         http2FailedHosts.add(url.host)
-      } catch (e) {}
+      } catch (_e) {}
       resolve(
         http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
       )
@@ -996,7 +1257,10 @@ async function makeRequest(urlString, options, nodelink) {
           const newLocation = new URL(headers.location, urlString).href
           let nextMethod = method
           let nextBody = body
-          if (
+          if (method === 'HEAD') {
+            nextMethod = 'HEAD'
+            nextBody = undefined
+          } else if (
             (statusCode === 301 || statusCode === 302) &&
             ['POST', 'PUT', 'DELETE'].includes(method)
           ) {
@@ -1114,7 +1378,7 @@ async function makeRequest(urlString, options, nodelink) {
       } else {
         req.end()
       }
-    } catch (err) {
+    } catch (_err) {
       if (session && !session.closed && !session.destroyed && !sessionClosed) {
         session.close()
       }
@@ -1123,11 +1387,37 @@ async function makeRequest(urlString, options, nodelink) {
   })
 }
 
-function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
-  //biome-ignore lint: no-promise-executor-return
+function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
+  // biome-ignore lint: no-promise-executor-return
   return new Promise(async (resolve) => {
     try {
+      const writeAndWait = async (chunk) => {
+        if (stream.destroyed) return false
+        const canWrite = stream.write(chunk)
+        if (!canWrite && !stream.destroyed) {
+          await new Promise((res) => {
+            const onDrain = () => {
+              stream.removeListener('close', onClose)
+              res()
+            }
+            const onClose = () => {
+              stream.removeListener('drain', onDrain)
+              res()
+            }
+            stream.once('drain', onDrain)
+            stream.once('close', onClose)
+          })
+        }
+        return !stream.destroyed
+      }
+
       const res = await http1makeRequest(url, { method: 'GET' })
+
+      if (res.error || res.statusCode !== 200) {
+        logger('warn', 'Network', `Failed to fetch HLS playlist: ${res.statusCode}`)
+        return resolve(false)
+      }
+
       const lines = res.body
         .split('\n')
         .map((l) => l.trim())
@@ -1138,11 +1428,49 @@ function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
           method: 'GET',
           streamOnly: true
         })
+
+        if (seg.error || !seg.stream) {
+          logger('warn', 'Network', `Failed to fetch direct segment: ${seg.statusCode}`)
+          return resolve(false)
+        }
+
         seg.stream.pipe(stream, { end: shouldEnd })
-        return resolve(!shouldEnd)
+        seg.stream.on('end', () => {
+          if (shouldEnd) stream.emit('finishBuffering')
+          resolve(!shouldEnd)
+        })
+        seg.stream.on('error', (err) => {
+          if (!stream.destroyed) stream.destroy(err)
+          resolve(false)
+        })
+        return
       }
 
       const base = new URL(url)
+
+      const mapTag = lines.find((l) => l.startsWith('#EXT-X-MAP:'))
+      if (mapTag) {
+        const mapUriMatch = mapTag.match(/URI="([^"]+)"/)
+        if (mapUriMatch) {
+          const initUrl = new URL(mapUriMatch[1], base).toString()
+          const initRes = await http1makeRequest(initUrl, {
+            method: 'GET',
+            responseType: 'buffer'
+          })
+
+          if (!initRes.error && initRes.body) {
+            const ok = await writeAndWait(initRes.body)
+            if (!ok) return resolve(false)
+          } else {
+            logger(
+              'warn',
+              'HLS',
+              `Failed to download initialization segment: ${initUrl}`
+            )
+          }
+        }
+      }
+
       const segs = []
       let sawEnd = false
 
@@ -1156,32 +1484,40 @@ function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
         if (lines[i].startsWith('#EXT-X-ENDLIST')) sawEnd = true
       }
 
-      for (const segUrl of segs) {
+      for (let i = 0; i < segs.length; i++) {
         if (stream.destroyed) break
 
         try {
-          const s = await http1makeRequest(segUrl, {
+          const s = await http1makeRequest(segs[i], {
             method: 'GET',
             streamOnly: true
           })
 
-          if (!s.stream) continue
+          if (s.error || !s.stream || s.statusCode >= 400) {
+            logger('warn', 'HLS', `Failed to download segment ${i} (${segs[i]}): ${s.statusCode}`)
+            continue
+          }
 
           await new Promise((res, rej) => {
-            s.stream.pipe(stream, { end: false })
-            s.stream.on('end', res)
-            s.stream.on('error', rej)
-            stream.on('error', () => {
+            const onEnd = () => {
+              stream.removeListener('error', onError)
+              res()
+            }
+            const onError = (err) => {
               s.stream.destroy()
-              rej(new Error('Destination stream destroyed'))
+              rej(err)
+            }
+            s.stream.pipe(stream, { end: false })
+            s.stream.on('end', onEnd)
+            s.stream.on('error', (err) => {
+              stream.removeListener('error', onError)
+              rej(err)
             })
+            stream.once('error', onError)
           })
         } catch (err) {
           if (!stream.destroyed) {
-            console.error(
-              '[HLS] Error downloading segment',
-              err.code || err.message
-            )
+            logger('warn', 'HLS', `Error during segment ${i}: ${err.message}`)
           }
           break
         }
@@ -1194,13 +1530,19 @@ function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
       if (!sawEnd) {
         resolve(true)
       } else {
-        shouldEnd && stream.emit('finishBuffering')
+        if (shouldEnd) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
         resolve(false)
       }
     } catch (e) {
-      console.error('[HLS] ERR →', e.code || e.message)
+      logger('warn', 'HLS', `Error during segment download: ${e.code || e.message}`)
       if (!stream.destroyed) {
-        shouldEnd && stream.emit('finishBuffering')
+        if (shouldEnd) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
       }
       resolve(false)
     }
@@ -1210,10 +1552,29 @@ function loadHLS(url, stream, onceEnded = false, shouldEnd = true) {
 async function loadHLSPlaylist(url, stream) {
   try {
     const res = await http1makeRequest(url, { method: 'GET' })
+
+    if (res.error || res.statusCode !== 200 || !res.body) {
+      logger(
+        'warn',
+        'HLS',
+        `Failed to fetch HLS playlist: ${res.statusCode || res.error || 'empty body'}`
+      )
+      stream.emit('finishBuffering')
+      stream.end()
+      return stream
+    }
+
     const lines = res.body
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean)
+
+    if (!lines.length) {
+      logger('warn', 'HLS', 'Empty HLS playlist received')
+      stream.emit('finishBuffering')
+      stream.end()
+      return stream
+    }
 
     if (lines.some((l) => l.startsWith('#EXTINF'))) {
       return loadHLS(url, stream, false, true)
@@ -1228,15 +1589,20 @@ async function loadHLSPlaylist(url, stream) {
     if (audioTags.length) {
       const defaultTag = audioTags.find((l) => /DEFAULT=YES/.test(l))
       const pickTag = defaultTag || audioTags[audioTags.length - 1]
-      const uri = pickTag.match(/URI="([^"]+)"/)[1]
-      const audioUrl = new URL(uri, url).toString()
-      return loadHLS(audioUrl, stream, false, true)
+      const uriMatch = pickTag.match(/URI="([^"]+)"/)
+      if (uriMatch && uriMatch[1]) {
+        const audioUrl = new URL(uriMatch[1], url).toString()
+        return loadHLS(audioUrl, stream, false, true)
+      }
     }
 
     return loadHLS(url, stream, false, true)
   } catch (e) {
-    console.error('[HLS-AUDIO] ERR →', e.code || e.message)
-    stream.emit('finishBuffering')
+    logger('warn', 'HLS', `Failed to load HLS playlist: ${e.code || e.message}`)
+    if (!stream.destroyed) {
+      stream.emit('finishBuffering')
+      stream.end()
+    }
     return stream
   }
 }
@@ -1313,36 +1679,57 @@ export function cleanupHttpAgents() {
 
 function applyEnvOverrides(config, prefix = 'NODELINK') {
   for (const key in config) {
-    if (Object.prototype.hasOwnProperty.call(config, key)) {
-      const envVarName = `${prefix}_${key.toUpperCase()}`;
-      const envValue = process.env[envVarName];
+    if (Object.hasOwn(config, key)) {
+      const envVarName = `${prefix}_${key.toUpperCase()}`
+      const envValue = process.env[envVarName]
 
       if (envValue !== undefined) {
         if (typeof config[key] === 'boolean') {
-          config[key] = envValue.toLowerCase() === 'true';
+          config[key] = envValue.toLowerCase() === 'true'
         } else if (typeof config[key] === 'number') {
-          const numValue = Number(envValue);
-          if (!isNaN(numValue)) {
-            config[key] = numValue;
+          const numValue = Number(envValue)
+          if (!Number.isNaN(numValue)) {
+            config[key] = numValue
           } else {
-            logger('warn', 'Config', `Environment variable ${envVarName} has non-numeric value "${envValue}"; expected a number, keeping default.`)
+            logger(
+              'warn',
+              'Config',
+              `Environment variable ${envVarName} has non-numeric value "${envValue}"; expected a number, keeping default.`
+            )
           }
         } else if (typeof config[key] === 'string') {
-          config[key] = envValue;
+          config[key] = envValue
         } else if (Array.isArray(config[key])) {
+          let newValue = null
           try {
-            const parsedArray = JSON.parse(envValue);
-            if (Array.isArray(parsedArray)) {
-              config[key] = parsedArray;
-            } else {
-              logger('warn', 'Config', `Environment variable ${envVarName} has non-array JSON value "${envValue}"; expected a JSON array, keeping default.`)
-            }
-          } catch (e) {
-            logger('warn', 'Config', `Environment variable ${envVarName} has non-JSON or invalid JSON value "${envValue}"; expected a JSON array, keeping default.`)
+            const parsedArray = JSON.parse(envValue)
+            if (Array.isArray(parsedArray)) newValue = parsedArray
+          } catch (_e) {}
+
+          if (!newValue) {
+            const splitValue = envValue
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+            if (splitValue.length > 0) newValue = splitValue
+          }
+
+          if (newValue) {
+            config[key] = newValue
+          } else {
+            logger(
+              'warn',
+              'Config',
+              `Environment variable ${envVarName} has invalid array value "${envValue}"; keeping default.`
+            )
           }
         }
-      } else if (typeof config[key] === 'object' && config[key] !== null && !Array.isArray(config[key])) {
-        applyEnvOverrides(config[key], envVarName);
+      } else if (
+        typeof config[key] === 'object' &&
+        config[key] !== null &&
+        !Array.isArray(config[key])
+      ) {
+        applyEnvOverrides(config[key], envVarName)
       }
     }
   }
@@ -1357,77 +1744,113 @@ function getBestMatch(list, original, options = {}) {
       .toLowerCase()
       .replace(/feat\.?/g, '')
       .replace(/ft\.?/g, '')
-      .replace(/\s*\([^)]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^)]*\)/gi, '')
-      .replace(/\s*\[[^\]]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^\]]*\]/gi, '')
+      .replace(
+        /\s*\([^)]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^)]*\)/gi,
+        ''
+      )
+      .replace(
+        /\s*\[[^\]]*(official|video|audio|mv|visualizer|color\s*coded|hd|4k|prod\.)[^\]]*\]/gi,
+        ''
+      )
       .replace(/[^\w\s]/g, '')
       .trim()
   }
 
-  const specKeywords = ['remix', 'orchestral', 'live', 'cover', 'acoustic', 'instrumental', 'karaoke', 'radio', 'edit', 'extended', 'slowed', 'reverb']
-  const findSpec = (str) => specKeywords.filter(k => str.toLowerCase().includes(k))
-  
+  const specKeywords = [
+    'remix',
+    'orchestral',
+    'live',
+    'cover',
+    'acoustic',
+    'instrumental',
+    'karaoke',
+    'radio',
+    'edit',
+    'extended',
+    'slowed',
+    'reverb'
+  ]
+  const findSpec = (str) =>
+    specKeywords.filter((k) => str.toLowerCase().includes(k))
+
   const originalTitle = original.title.toLowerCase()
   const originalSpec = findSpec(originalTitle)
-  const isOriginalExplicit = original.uri?.includes('explicit=true') || originalTitle.includes('explicit')
-  
+  const isOriginalExplicit =
+    original.uri?.includes('explicit=true') ||
+    originalTitle.includes('explicit')
+
   const targetDuration = original.length
   const allowedDiff = targetDuration * durationTolerance
   const normOriginalAuthor = normalize(original.author)
-  const originalWords = new Set(normalize(original.title).split(' ').filter((w) => w.length > 1))
+  const originalWords = new Set(
+    normalize(original.title)
+      .split(' ')
+      .filter((w) => w.length > 1)
+  )
 
-  const scored = list
-    .map((item) => {
-      const itemTitle = item.info.title.toLowerCase()
-      const normItemTitle = normalize(itemTitle)
-      const normItemAuthor = normalize(item.info.author)
-      const itemSpec = findSpec(itemTitle)
-      const isItemClean = itemTitle.includes('clean') || itemTitle.includes('radio edit')
-      let score = 0
+  const scored = list.map((item) => {
+    const itemTitle = item.info.title.toLowerCase()
+    const normItemTitle = normalize(itemTitle)
+    const normItemAuthor = normalize(item.info.author)
+    const itemSpec = findSpec(itemTitle)
+    const isItemClean =
+      itemTitle.includes('clean') || itemTitle.includes('radio edit')
+    let score = 0
 
-      const itemWords = normItemTitle.split(' ').filter((w) => w.length > 1)
-      const itemWordsSet = new Set(itemWords)
-      
-      let overlap = 0
-      for (const word of originalWords) {
-        if (itemWordsSet.has(word)) overlap++
-      }
-      score += (overlap / Math.max(originalWords.size, 1)) * 300
+    const itemWords = normItemTitle.split(' ').filter((w) => w.length > 1)
+    const itemWordsSet = new Set(itemWords)
 
-      for (const spec of specKeywords) {
-        const inOriginal = originalSpec.includes(spec)
-        const inItem = itemSpec.includes(spec)
-        if (inOriginal && inItem) score += 200
-        if (inOriginal !== inItem) score -= 300
-      }
+    let overlap = 0
+    for (const word of originalWords) {
+      if (itemWordsSet.has(word)) overlap++
+    }
+    score += (overlap / Math.max(originalWords.size, 1)) * 300
 
-      if (isOriginalExplicit && !allowExplicit) {
-        if (isItemClean) score += 500
-      }
+    for (const spec of specKeywords) {
+      const inOriginal = originalSpec.includes(spec)
+      const inItem = itemSpec.includes(spec)
+      if (inOriginal && inItem) score += 200
+      if (inOriginal !== inItem) score -= 300
+    }
 
-      if (normItemAuthor.includes(normOriginalAuthor) || normOriginalAuthor.includes(normItemAuthor)) {
-        score += 150
+    if (isOriginalExplicit && !allowExplicit) {
+      if (isItemClean) score += 500
+    }
+
+    if (
+      normItemAuthor.includes(normOriginalAuthor) ||
+      normOriginalAuthor.includes(normItemAuthor)
+    ) {
+      score += 150
+    } else {
+      const longer =
+        normOriginalAuthor.length > normItemAuthor.length
+          ? normOriginalAuthor
+          : normItemAuthor
+      const shorter =
+        normOriginalAuthor.length > normItemAuthor.length
+          ? normItemAuthor
+          : normOriginalAuthor
+      if (shorter.length > 2 && longer.includes(shorter)) score += 100
+    }
+
+    if (targetDuration > 0) {
+      const diff = Math.abs(item.info.length - targetDuration)
+      if (diff <= allowedDiff) {
+        score += (1 - diff / allowedDiff) * 100
       } else {
-        const longer = normOriginalAuthor.length > normItemAuthor.length ? normOriginalAuthor : normItemAuthor
-        const shorter = normOriginalAuthor.length > normItemAuthor.length ? normItemAuthor : normOriginalAuthor
-        if (shorter.length > 2 && longer.includes(shorter)) score += 100
+        score -= 100
       }
+    }
 
-      if (targetDuration > 0) {
-        const diff = Math.abs(item.info.length - targetDuration)
-        if (diff <= allowedDiff) {
-          score += (1 - diff / allowedDiff) * 100
-        } else {
-          score -= 100
-        }
-      }
+    if (itemTitle.includes('official audio') || itemTitle.includes('topic'))
+      score += 50
 
-      if (itemTitle.includes('official audio') || itemTitle.includes('topic')) score += 50
-
-      return { item, score }
-    })
+    return { item, score }
+  })
 
   scored.sort((a, b) => b.score - a.score)
-  
+
   return scored[0]?.item || list[0] || null
 }
 

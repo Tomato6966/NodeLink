@@ -1,10 +1,11 @@
-import { PassThrough } from 'node:stream'
 import { Buffer } from 'node:buffer'
-import https from 'node:https'
-import http from 'node:http'
-import zlib from 'node:zlib'
 import { spawn } from 'node:child_process'
+import http from 'node:http'
+import https from 'node:https'
+import { PassThrough } from 'node:stream'
+import zlib from 'node:zlib'
 import { encodeTrack, logger } from '../utils.js'
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const VIMEO_PATTERNS = [
   /^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)(?:|[/?#])/i,
@@ -779,7 +780,7 @@ export default class VimeoSource {
       identifier: videoId,
       isSeekable: true,
       isStream: false,
-      uri: `https://vimeo.com/${videoId}${hashParam ? '?h=' + hashParam : ''}`,
+      uri: `https://vimeo.com/${videoId}${hashParam ? `?h=${hashParam}` : ''}`,
       artworkUrl: metadata.artworkUrl || null,
       isrc: null,
       sourceName: 'vimeo',
@@ -867,6 +868,22 @@ export default class VimeoSource {
           })
       })
       return { stream }
+    }
+
+    if (protocol === 'hls') {
+      logger('debug', 'Sources', '[vimeo] Loading HLS stream')
+      return {
+        stream: new HLSHandler(url, {
+          headers: {
+            'User-Agent': USER_AGENT,
+            Referer: `${VIMEO_BASE}/`,
+            Origin: VIMEO_BASE
+          },
+          localAddress: this.nodelink.routePlanner?.getIP(),
+          type: 'mpegts'
+        }),
+        type: 'mpegts'
+      }
     }
 
     if (protocol === 'segmented') {
@@ -1244,6 +1261,19 @@ export default class VimeoSource {
       return cdns?.[def] || (cdns ? Object.values(cdns)[0] : null)
     }
 
+    const hls = files.hls
+    if (hls?.cdns) {
+      const selected = pickCdn(hls.cdns, hls.default_cdn)
+      if (selected?.url) {
+        return {
+          url: _functions.unescapeString(selected.url),
+          protocol: 'hls',
+          format: 'mpegts',
+          additionalData: { source: 'vimeo.hls' }
+        }
+      }
+    }
+
     const dash = files.dash
     if (dash?.cdns) {
       const selected = pickCdn(dash.cdns, dash.default_cdn)
@@ -1262,25 +1292,11 @@ export default class VimeoSource {
             )
           }
           if (!playlistUrl.includes('omit=')) {
-            playlistUrl +=
-              (playlistUrl.includes('?') ? '&' : '?') + 'omit=av1-hevc'
+            playlistUrl += `${playlistUrl.includes('?') ? '&' : '?'}omit=av1-hevc`
           }
           try {
             return await this._fetchPlaylist(playlistUrl, videoId)
           } catch {}
-        }
-      }
-    }
-
-    const hls = files.hls
-    if (hls?.cdns) {
-      const selected = pickCdn(hls.cdns, hls.default_cdn)
-      if (selected?.url) {
-        return {
-          url: _functions.unescapeString(selected.url),
-          protocol: 'hls',
-          format: 'hls',
-          additionalData: { source: 'vimeo.hls' }
         }
       }
     }
@@ -1315,7 +1331,7 @@ export default class VimeoSource {
     throw new Error('No playable streams in config')
   }
 
-  async _fetchPlaylist(playlistUrl, videoId) {
+  async _fetchPlaylist(playlistUrl, _videoId) {
     const response = await _functions.httpRequest(playlistUrl, {
       headers: {
         Accept: '*/*',
