@@ -12,7 +12,7 @@ import WebEmbedded from './clients/WebEmbedded.js'
 import WebRemix from './clients/Web_Remix.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
 import OAuth from './OAuth.js'
-import { SabrStream } from './sabr.js'
+import { SabrStream } from './sabr/sabr.js'
 
 import YouTubeLiveChat from './LiveChat.js'
 
@@ -692,7 +692,7 @@ export default class YouTubeSource {
         return cached
       }
     }
-    
+
     let clientList = [...this.config.clients.playback]
     clientList = ['Web', ...clientList.filter(c => c !== 'Web') || 'Android']
     const clientErrors = []
