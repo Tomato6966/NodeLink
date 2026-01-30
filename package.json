@@ -17,6 +17,7 @@
     "@performanc/voice": "github:PerformanC/voice",
     "@toddynnn/symphonia-decoder": "1.0.6",
     "@toddynnn/voice-opus": "^1.0.1",
+    "jsdom": "^27.4.0",
     "mp4box": "^2.3.0",
     "myzod": "^1.12.1"
   },

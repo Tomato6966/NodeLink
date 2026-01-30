@@ -527,6 +527,11 @@ export class Player {
     const additionalData = { ...urlData.additionalData }
     if (startTime !== undefined) additionalData.startTime = startTime
 
+    urlData.additionalData = {
+      ...urlData.additionalData,
+      positionCallback: () => this._realPosition()
+    }
+
     const track = urlData?.newTrack ? urlData?.newTrack?.info : info
     const fetched = await this.nodelink.sources.getTrackStream(
       track,
@@ -705,7 +710,9 @@ export class Player {
       ...this.track.info,
       audioTrackId: this.track.audioTrackId
     }
+
     const urlData = await this.nodelink.sources.getTrackUrl(trackInfo, null, this._isRecovering)
+    if (!this.track) return false
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
     logger('debug', 'Player', `Got track URL for guild ${this.guildId}`, {
       urlData
@@ -914,6 +921,7 @@ export class Player {
               audioTrackId: this.track.audioTrackId
             }
             const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+            if (!this.track) return false
             this.streamInfo = { ...urlData, trackInfo: this.track.info }
             logger(
               'debug',
@@ -1156,7 +1164,9 @@ export class Player {
       ...this.track.info,
       audioTrackId: this.track.audioTrackId
     }
+
     const urlData = await this.nodelink.sources.getTrackUrl(trackInfo, null, this._isRecovering)
+    if (!this.track) return false
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
 
     if (urlData.exception) {

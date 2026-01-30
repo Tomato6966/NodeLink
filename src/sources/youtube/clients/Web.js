@@ -5,10 +5,12 @@ import {
   checkURLType,
   YOUTUBE_CONSTANTS
 } from '../common.js'
+import { poTokenManager } from '../potoke.js'
 
 export default class Web extends BaseClient {
   constructor(nodelink, oauth) {
     super(nodelink, 'WEB', oauth)
+    this.poTokenManager = poTokenManager
   }
 
   getClient(context) {
@@ -18,7 +20,7 @@ export default class Web extends BaseClient {
         clientVersion: '2.20260114.01.00',
         platform: 'DESKTOP',
         userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36,gzip(gfe)',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
         hl: context.client.hl,
         gl: context.client.gl
       },
@@ -248,33 +250,120 @@ export default class Web extends BaseClient {
   }
 
   async getTrackUrl(decodedTrack, context, cipherManager, itag) {
-    const sourceName = decodedTrack.sourceName || 'youtube'
-    logger(
-      'debug',
-      'youtube-web',
-      `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`
-    )
-
-    const { body: playerResponse, statusCode } = await this._makePlayerRequest(
-      decodedTrack.identifier,
-      context,
-      {},
-      cipherManager
-    )
-
-    if (statusCode !== 200) {
-      const message = `Failed to get player data for stream. Status: ${statusCode}`
-      logger('error', 'youtube-web', message)
-      return { exception: { message, severity: 'common', cause: 'Upstream' } }
+    if (this.oauth && this.oauth.accessToken) {
+      await this.oauth.getAccessToken()
     }
 
-    return await this._extractStreamData(
-      playerResponse,
-      decodedTrack,
-      context,
-      cipherManager,
-      itag
-    )
+    const { poToken, visitorData } = await this.poTokenManager.generate(decodedTrack.identifier)
+
+    if (poToken) {
+      const client = this.getClient(context)
+      client.client.visitorData = visitorData
+
+      let signatureTimestamp = null
+      try {
+        const playerScript = await cipherManager.getCachedPlayerScript()
+        if (playerScript) {
+          signatureTimestamp = await cipherManager.getTimestamp(playerScript.url)
+        }
+      } catch (e) {
+        logger('warn', 'YouTube-Web', `Failed to get STS: ${e.message}`)
+      }
+
+      const requestBody = {
+        context: client,
+        videoId: decodedTrack.identifier,
+        contentCheckOk: true,
+        racyCheckOk: true,
+        serviceIntegrityDimensions: { poToken }
+      }
+
+      if (signatureTimestamp) {
+        requestBody.playbackContext = {
+          contentPlaybackContext: {
+            signatureTimestamp
+          }
+        }
+      }
+
+      try {
+        const { body: playerResponse } = await makeRequest(
+          'https://youtubei.googleapis.com/youtubei/v1/player?prettyPrint=false',
+          {
+            method: 'POST',
+            headers: {
+              'User-Agent': client.client.userAgent,
+              'X-Goog-Visitor-Id': visitorData,
+              'X-Youtube-Client-Name': '1',
+              'X-Youtube-Client-Version': client.client.clientVersion,
+              'Origin': 'https://www.youtube.com',
+              'Referer': `https://www.youtube.com/watch?v=${decodedTrack.identifier}`
+            },
+            body: requestBody,
+            disableBodyCompression: true
+          }
+        )
+
+        const streamingData = playerResponse.streamingData || playerResponse.streaming_data
+        const serverAbrUrl = streamingData?.serverAbrStreamingUrl || streamingData?.server_abr_streaming_url
+        const ustreamerConfig = playerResponse.playerConfig?.mediaCommonConfig?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig
+
+        if (serverAbrUrl) {
+          const playerScript = await cipherManager.getCachedPlayerScript()
+
+          let resolvedUrl = serverAbrUrl
+          if (playerScript) {
+            try {
+              resolvedUrl = await cipherManager.resolveUrl(
+                serverAbrUrl,
+                null,
+                null,
+                null,
+                playerScript,
+                context
+              )
+            } catch (e) {
+              logger('warn', 'YouTube-Web', `Failed to resolve SABR URL via cipher server: ${e.message}`)
+            }
+          }
+
+          const formats = [...(streamingData.formats || []), ...(streamingData.adaptiveFormats || streamingData.adaptive_formats || [])].map(f => ({
+            itag: f.itag,
+            lastModified: f.lastModified || f.last_modified_ms,
+            xtags: f.xtags,
+            width: f.width,
+            height: f.height,
+            mimeType: f.mimeType || f.mime_type,
+            audioQuality: f.audioQuality || f.audio_quality,
+            bitrate: f.bitrate,
+            averageBitrate: f.averageBitrate || f.average_bitrate,
+            quality: f.quality,
+            qualityLabel: f.qualityLabel || f.quality_label,
+            audioTrackId: f.audioTrack?.id,
+            approxDurationMs: f.approxDurationMs || f.approx_duration_ms,
+            contentLength: f.contentLength || f.content_length,
+            isDrc: !!f.isDrc
+          }))
+
+          return {
+            protocol: 'sabr',
+            url: resolvedUrl,
+            additionalData: {
+              serverAbrStreamingUrl: resolvedUrl,
+              videoPlaybackUstreamerConfig: ustreamerConfig,
+              poToken,
+              visitorData,
+              clientInfo: { clientName: 1, clientVersion: client.client.clientVersion },
+              formats,
+              accessToken: null,
+              userAgent: client.client.userAgent
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    return super.getTrackUrl(decodedTrack, context, cipherManager, itag)
   }
 
   async getChapters(trackInfo, context) {

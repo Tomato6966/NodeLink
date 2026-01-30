@@ -935,23 +935,27 @@ async function _internalHttp1Request(urlString, options = {}) {
 
   let payloadBuffer = null
   if (body != null && !['GET', 'HEAD'].includes(method)) {
-    const isFormUrlEncoded =
-      reqHeaders['Content-Type'] === 'application/x-www-form-urlencoded'
-    let rawPayload
-
-    if (isFormUrlEncoded && typeof body === 'string') {
-      rawPayload = body
+    if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+      payloadBuffer = Buffer.from(body)
     } else {
-      reqHeaders['Content-Type'] =
-        reqHeaders['Content-Type'] || 'application/json'
-      rawPayload = typeof body === 'string' ? body : JSON.stringify(body)
-    }
+      const isFormUrlEncoded =
+        reqHeaders['Content-Type'] === 'application/x-www-form-urlencoded'
+      let rawPayload
 
-    if (disableBodyCompression) {
-      payloadBuffer = Buffer.from(rawPayload)
-    } else {
-      reqHeaders['Content-Encoding'] = 'gzip'
-      payloadBuffer = zlib.gzipSync(rawPayload)
+      if (isFormUrlEncoded && typeof body === 'string') {
+        rawPayload = body
+      } else {
+        reqHeaders['Content-Type'] =
+          reqHeaders['Content-Type'] || 'application/json'
+        rawPayload = typeof body === 'string' ? body : JSON.stringify(body)
+      }
+
+      if (disableBodyCompression) {
+        payloadBuffer = Buffer.from(rawPayload)
+      } else {
+        reqHeaders['Content-Encoding'] = 'gzip'
+        payloadBuffer = zlib.gzipSync(rawPayload)
+      }
     }
   }
 
@@ -1349,23 +1353,27 @@ async function makeRequest(urlString, options, nodelink) {
       })
 
       if (body && !['GET', 'HEAD'].includes(method)) {
-        const payload = JSON.stringify(body)
-        if (
-          disableBodyCompression ||
-          h2Headers['content-encoding'] !== 'gzip'
-        ) {
-          req.end(payload)
+        if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+          req.end(Buffer.from(body))
         } else {
-          zlib.gzip(payload, (err, data) => {
-            if (err) {
-              req.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
-              closeSessionGracefully()
-              return reject(
-                new Error(`Gzip error for ${urlString}: ${err.message}`)
-              )
-            }
-            req.end(data)
-          })
+          const payload = JSON.stringify(body)
+          if (
+            disableBodyCompression ||
+            h2Headers['content-encoding'] !== 'gzip'
+          ) {
+            req.end(payload)
+          } else {
+            zlib.gzip(payload, (err, data) => {
+              if (err) {
+                req.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
+                closeSessionGracefully()
+                return reject(
+                  new Error(`Gzip error for ${urlString}: ${err.message}`)
+                )
+              }
+              req.end(data)
+            })
+          }
         }
       } else {
         req.end()

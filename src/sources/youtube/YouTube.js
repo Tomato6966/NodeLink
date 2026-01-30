@@ -12,6 +12,7 @@ import WebEmbedded from './clients/WebEmbedded.js'
 import WebRemix from './clients/Web_Remix.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
 import OAuth from './OAuth.js'
+import { SabrStream } from './sabr.js'
 
 import YouTubeLiveChat from './LiveChat.js'
 
@@ -691,8 +692,9 @@ export default class YouTubeSource {
         return cached
       }
     }
-
-    const clientList = this.config.clients.playback
+    
+    let clientList = [...this.config.clients.playback]
+    clientList = ['Web', ...clientList.filter(c => c !== 'Web') || 'Android']
     const clientErrors = []
 
     for (const clientName of clientList) {
@@ -723,6 +725,20 @@ export default class YouTubeSource {
             `Client ${clientName} failed: ${urlData.exception.message}`
           )
           continue
+        }
+
+        if (urlData.protocol === 'sabr') {
+          const bestAudio = urlData.formats
+            ?.filter((f) => f.mimeType?.includes('audio'))
+            .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+
+          if (bestAudio) {
+            urlData.format = bestAudio.mimeType?.includes('webm')
+              ? 'webm/opus'
+              : 'm4a'
+          }
+
+          return urlData
         }
 
         if (urlData.url) {
@@ -899,6 +915,68 @@ export default class YouTubeSource {
     this.activeStreams.set(streamKey, cancelSignal)
 
     try {
+      if (protocol === 'sabr') {
+        const sabr = new SabrStream({
+          videoId: decodedTrack.identifier,
+          accessToken: additionalData.accessToken,
+          visitorData: additionalData.visitorData,
+          serverAbrStreamingUrl: additionalData.serverAbrStreamingUrl,
+          videoPlaybackUstreamerConfig: additionalData.videoPlaybackUstreamerConfig,
+          poToken: additionalData.poToken,
+          clientInfo: additionalData.clientInfo,
+          formats: additionalData.formats,
+          startTime: additionalData.startTime || 0,
+          positionCallback: additionalData.positionCallback
+        })
+
+        const stream = new PassThrough()
+
+        sabr.on('data', (chunk) => {
+          if (!stream.write(chunk)) {
+            sabr.pause()
+          }
+        })
+        stream.on('drain', () => sabr.resume())
+
+        sabr.on('end', () => stream.end())
+        sabr.on('error', async (err) => {
+          logger('error', 'YouTube', `SABR stream error: ${err.message}`)
+
+          if ((err.message.includes('sabr.malformed_config') || err.message.includes('sabr.media_serving_enforcement_id_error')) && !isRecovering) {
+            logger('info', 'YouTube', `Known recoverable error detected (${err.message}), triggering stall recovery...`)
+            sabr.emit('stall')
+            return
+          }
+
+          if (!stream.destroyed) stream.destroy(err)
+        })
+
+        const originalDestroy = stream.destroy.bind(stream)
+        let isDestroying = false
+        stream.destroy = (err) => {
+          if (isDestroying) return
+          isDestroying = true
+          sabr.destroy(err)
+          this.activeStreams.delete(streamKey)
+          originalDestroy(err)
+        }
+
+        stream.once('close', () => {
+          if (isDestroying) return
+          isDestroying = true
+          sabr.destroy()
+          this.activeStreams.delete(streamKey)
+        })
+
+        const bestAudio = additionalData.formats.filter(f => f.mimeType?.includes('audio')).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+
+        sabr.start(bestAudio.itag)
+
+        const type = bestAudio.mimeType?.includes('webm') ? 'webm/opus' : 'm4a'
+
+        return { stream, type }
+      }
+
       if (protocol === 'hls') {
         const playerScript = await this.cipherManager.getCachedPlayerScript()
         const stream = new HLSHandler(url, {
