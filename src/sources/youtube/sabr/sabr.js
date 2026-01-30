@@ -262,6 +262,8 @@ export class SabrStream extends PassThrough {
         this._aborted = false;
         this.formatSequenceCounters = new Map(); // itag -> lastSeq
         this.downloadedSegmentsByItag = new Map(); // itag -> Map<segNum, seg>
+        this.endSegmentNumbers = new Map(); // itag -> endSegmentNumber
+        this.streamFinished = false;
 
         this.poToken = config.poToken;
         this.visitorData = config.visitorData;
@@ -351,7 +353,7 @@ export class SabrStream extends PassThrough {
         const signal = this.abortController.signal;
         try {
             if (this.lastVirtualAdvanceAt === 0) this.lastVirtualAdvanceAt = Date.now();
-            while (!this._aborted && !this.destroyed) {
+            while (!this._aborted && !this.destroyed && !this.streamFinished) {
                 if (this.requestNumber === 0) {
                     try {
                         const tokenData = await poTokenManager.generate(this.videoId, this.visitorData);
@@ -567,6 +569,12 @@ export class SabrStream extends PassThrough {
         if (!this.initializedFormatsMap.has(k)) {
             this.initializedFormatsMap.set(k, { formatInitializationMetadata: m });
             logger('debug', 'SABR', `Format init: key=${k} mime=${m.mimeType || ''} endSeg=${m.endSegmentNumber || ''}`);
+
+            const itag = m.formatId?.itag ?? m.itag;
+            if (itag && m.endSegmentNumber !== undefined && m.endSegmentNumber > 0) {
+                this.endSegmentNumbers.set(itag, m.endSegmentNumber);
+                logger('debug', 'SABR', `Tracking completion: itag=${itag} will finish at segment ${m.endSegmentNumber}`);
+            }
         }
     }
 
@@ -754,6 +762,20 @@ export class SabrStream extends PassThrough {
                     let maxEdge = this.cumulativeDownloadedMs || 0;
                     if (endMs > maxEdge) maxEdge = endMs;
                     this.cumulativeDownloadedMs = maxEdge;
+
+                    const endSegmentNumber = this.endSegmentNumbers.get(itag);
+                    if (endSegmentNumber !== undefined && s.segmentNumber >= endSegmentNumber && !this.streamFinished) {
+                        this.streamFinished = true;
+                        logger('info', 'SABR', `Stream complete: received final segment ${s.segmentNumber}/${endSegmentNumber} for itag ${itag}`);
+
+                        setImmediate(() => {
+                            if (!this.destroyed && !this._aborted) {
+                                logger('info', 'SABR', 'Emitting finishBuffering event');
+                                this.emit('finishBuffering');
+                                this.end();
+                            }
+                        });
+                    }
                 }
             }
 

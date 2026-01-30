@@ -939,6 +939,7 @@ export default class YouTubeSource {
         stream.on('drain', () => sabr.resume())
 
         sabr.on('end', () => stream.end())
+        sabr.on('finishBuffering', () => stream.emit('finishBuffering'))
         sabr.on('error', async (err) => {
           logger('error', 'YouTube', `SABR stream error: ${err.message}`)
 
