@@ -930,17 +930,34 @@ export default class YouTubeSource {
         })
 
         const stream = new PassThrough()
+        let readyResolved = false
+        let readyResolve
+        let readyReject
+        const ready = new Promise((resolve, reject) => {
+          readyResolve = resolve
+          readyReject = reject
+        })
         let isRecovering = false
         let lastRecoverAt = 0
 
         sabr.on('data', (chunk) => {
+          if (!readyResolved) {
+            readyResolved = true
+            readyResolve()
+          }
           if (!stream.write(chunk)) {
             sabr.pause()
           }
         })
         stream.on('drain', () => sabr.resume())
 
-        sabr.on('end', () => stream.end())
+        sabr.on('end', () => {
+          if (!readyResolved) {
+            readyResolved = true
+            readyReject(new Error('SABR stream ended before data'))
+          }
+          stream.end()
+        })
         sabr.on('finishBuffering', () => stream.emit('finishBuffering'))
         sabr.on('stall', async () => {
           if (isRecovering || stream.destroyed) return
@@ -986,6 +1003,10 @@ export default class YouTubeSource {
         })
         sabr.on('error', async (err) => {
           logger('error', 'YouTube', `SABR stream error: ${err.message}`)
+          if (!readyResolved) {
+            readyResolved = true
+            readyReject(err)
+          }
 
           if ((err.message.includes('sabr.malformed_config') || err.message.includes('sabr.media_serving_enforcement_id_error')) && !isRecovering) {
             logger('info', 'YouTube', `Known recoverable error detected (${err.message}), triggering stall recovery...`)
@@ -1019,6 +1040,7 @@ export default class YouTubeSource {
 
         const type = bestAudio.mimeType?.includes('webm') ? 'webm/opus' : 'm4a'
 
+        await ready
         return { stream, type }
       }
 

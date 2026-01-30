@@ -400,7 +400,8 @@ export class SabrStream extends PassThrough {
 
                 this.lastIterationAt = now;
 
-                let reportedPlayerTime = Math.floor(this.virtualPlayerTimeMs);
+                const baseTimeMs = this.startTime || 0;
+                let reportedPlayerTime = Math.floor(this.virtualPlayerTimeMs + baseTimeMs);
 
                 this.lastReportedPlayerTimeMs = reportedPlayerTime;
 
@@ -421,7 +422,7 @@ export class SabrStream extends PassThrough {
 
                 try {
                     await this.fetchAndProcessSegments({
-                        playerTimeMs: Math.floor(this.totalDownloadedMs),
+                        playerTimeMs: Math.floor(this.totalDownloadedMs + baseTimeMs),
                         bandwidthEstimate: Math.max(Math.floor(this.bandwidthEstimate), 500000),
                         enabledTrackTypesBitfield: 1,
                         audioTrackId: audioFormat.audioTrackId || "",

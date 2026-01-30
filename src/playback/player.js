@@ -941,7 +941,12 @@ export class Player {
       const source = this.nodelink.sources.getSource(sourceName)
       const canNativeSeek = sourceName === 'deezer' || (source && typeof source.loadStream === 'function')
 
-      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url && sourceName !== 'deezer' && this.streamInfo.protocol !== 'hls') {
+      if (this.streamInfo?.protocol === 'sabr') {
+        seekPromise = this._seekUsingSource(
+          seekPosition,
+          endTime !== undefined ? endTime : this.track.endTime
+        )
+      } else if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url && sourceName !== 'deezer' && this.streamInfo.protocol !== 'hls') {
         seekPromise = this._seekeableSeek(
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime
@@ -997,6 +1002,7 @@ export class Player {
 
     const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
+
 
     if (urlData.exception) {
       const err = new Error(urlData.exception.message)
