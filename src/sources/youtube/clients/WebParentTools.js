@@ -84,15 +84,28 @@ export default class WebParentTools extends BaseClient {
     )
   }
 
+  requirePlayerScript() {
+    return true
+  }
+
   async _makePlayerRequest(videoId, context, headers, cipherManager) {
     const requestBody = {
       context: this.getClient(context),
       videoId: videoId,
       contentCheckOk: true,
-      racyCheckOk: true,
-      playbackContext: {
-        contentPlaybackContext: {
-          signatureTimestamp: 19700
+      racyCheckOk: true
+    }
+
+    if (this.requirePlayerScript() && cipherManager) {
+      const playerScript = await cipherManager.getCachedPlayerScript()
+      if (playerScript?.url) {
+        const signatureTimestamp = await cipherManager.getTimestamp(
+          playerScript.url
+        )
+        requestBody.playbackContext = {
+          contentPlaybackContext: {
+            signatureTimestamp
+          }
         }
       }
     }
