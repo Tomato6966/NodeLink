@@ -694,7 +694,7 @@ export default class YouTubeSource {
     }
 
     let clientList = [...this.config.clients.playback]
-    clientList = ['Web', ...clientList.filter(c => c !== 'Web') || 'Android']
+    if (!clientList.length) clientList = ['Web']
     const clientErrors = []
 
     for (const clientName of clientList) {
