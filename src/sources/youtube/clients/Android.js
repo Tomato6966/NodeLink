@@ -15,9 +15,9 @@ export default class Android extends BaseClient {
     return {
       client: {
         clientName: 'ANDROID',
-        clientVersion: '21.02.35',
+        clientVersion: '20.01.35',
         userAgent:
-          'com.google.android.youtube/21.02.35 (Linux; U; Android 14) identity',
+          'com.google.android.youtube/20.01.35 (Linux; U; Android 14) identity',
         deviceMake: 'Google',
         deviceModel: 'Pixel 6',
         osName: 'Android',
@@ -60,7 +60,11 @@ export default class Android extends BaseClient {
           method: 'POST',
           headers: {
             'User-Agent': this.getClient(context).client.userAgent,
-            'X-Goog-Api-Format-Version': '2'
+            'X-Goog-Api-Format-Version': '2',
+            'X-Goog-Visitor-Id': context.client.visitorData,
+            'X-YouTube-Client-Name': '3',
+            'X-YouTube-Client-Version':
+              this.getClient(context).client.clientVersion
           },
           body: requestBody,
           disableBodyCompression: true
@@ -269,7 +273,13 @@ export default class Android extends BaseClient {
         const { body: playlistResponse, statusCode } = await makeRequest(
           `${apiEndpoint}/youtubei/v1/next`,
           {
-            headers: { 'User-Agent': this.getClient(context).client.userAgent },
+            headers: {
+              'User-Agent': this.getClient(context).client.userAgent,
+              'X-Goog-Visitor-Id': context.client.visitorData,
+              'X-YouTube-Client-Name': '3',
+              'X-YouTube-Client-Version':
+                this.getClient(context).client.clientVersion
+            },
             body: requestBody,
             method: 'POST',
             disableBodyCompression: true
