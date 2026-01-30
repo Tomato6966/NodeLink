@@ -5,7 +5,7 @@ import {
   checkURLType,
   YOUTUBE_CONSTANTS
 } from '../common.js'
-import { poTokenManager } from '../sabr/potoke.js'
+import { poTokenManager } from '../sabr/potoken.js'
 
 export default class Web extends BaseClient {
   constructor(nodelink, oauth) {

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { appendFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { logger } from '../../../utils.js';
-import { poTokenManager } from './potoke.js';
+import { poTokenManager } from './potoken.js';
 import {
     UMPPartId,
     FormatInitializationMetadata,
