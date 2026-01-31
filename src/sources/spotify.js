@@ -152,6 +152,82 @@ export default class SpotifySource {
     return limit === 0 ? 'unlimited' : `${limit * multiplier} tracks max`
   }
 
+  _base62ToHex(id) {
+    const alphabet = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    let bn = 0n
+    for (const char of id) {
+      bn = bn * 62n + BigInt(alphabet.indexOf(char))
+    }
+    return bn.toString(16).padStart(32, '0')
+  }
+
+  async _fetchTrackMetadata(id) {
+    const token = this.anonymousToken || this.mobileToken || this.accessToken
+    if (!token) return null
+
+    try {
+      const hexId = this._base62ToHex(id)
+      const url = `${SPOTIFY_CLIENT_API_URL}/metadata/4/track/${hexId}?market=from_token`
+      const { body, statusCode } = await http1makeRequest(url, {
+        responseType: 'buffer',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Accept': 'application/json',
+          'App-Platform': 'WebPlayer',
+          'Spotify-App-Version': '1.2.83.284.g147edeea'
+        }
+      })
+
+      if (statusCode !== 200 || !body) return null
+
+      const bodyStr = body.toString()
+      try {
+        return JSON.parse(bodyStr)
+      } catch {
+        const isrcIndex = body.indexOf('isrc')
+        if (isrcIndex !== -1) {
+          const bodyRange = body.subarray(isrcIndex, isrcIndex + 50).toString()
+          const isrcMatch = bodyRange.match(/[A-Z0-9]{12}/)
+          if (isrcMatch) return { external_id: [{ type: 'isrc', id: isrcMatch[0] }] }
+        }
+      }
+
+      return null
+    } catch (e) {
+      logger('debug', 'Spotify', `Exception in _fetchTrackMetadata for ${id}: ${e.message}`)
+      return null
+    }
+  }
+
+  _buildTrackFromMetadata(data) {
+    if (!data || !data.name) return null
+
+    const id = data.canonical_uri?.split(':').pop() || data.gid
+
+    const isExplicit = !!data.explicit
+    const trackInfo = {
+      identifier: id,
+      isSeekable: true,
+      author: data.artist?.map((a) => a.name).join(', ') || 'Unknown',
+      length: data.duration || 0,
+      isStream: false,
+      position: 0,
+      title: data.name,
+      uri: `https://open.spotify.com/track/${id}?explicit=${isExplicit}`,
+      artworkUrl: data.album?.cover_group?.image?.find(img => img.size === 'LARGE' || img.size === 'DEFAULT')?.file_id
+        ? `https://i.scdn.co/image/${data.album.cover_group.image.find(img => img.size === 'LARGE' || img.size === 'DEFAULT').file_id}`
+        : null,
+      isrc: data.external_id?.find((e) => e.type === 'isrc')?.id || null,
+      sourceName: 'spotify'
+    }
+
+    return {
+      encoded: encodeTrack(trackInfo),
+      info: trackInfo,
+      pluginInfo: {}
+    }
+  }
+
   _isTokenValid() {
     return (
       this.tokenExpiry && Date.now() < this.tokenExpiry - TOKEN_REFRESH_MARGIN
@@ -712,6 +788,20 @@ export default class SpotifySource {
             data.searchV2,
             searchType
           )
+          if (results.length > 0 && searchType === 'track') {
+            const topTrack = results[0]
+            if (!topTrack.info.isrc) {
+              const metadata = await this._fetchTrackMetadata(topTrack.info.identifier)
+              if (metadata) {
+                const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+                if (isrc) {
+                  topTrack.info.isrc = isrc
+                  topTrack.encoded = encodeTrack(topTrack.info)
+                }
+              }
+            }
+          }
+
           if (results.length > 0) {
             return { loadType: 'search', data: results }
           }
@@ -733,6 +823,21 @@ export default class SpotifySource {
 
         if (data && !data.error) {
           const results = this._processOfficialSearchResults(data, spotifyType)
+
+          if (results.length > 0 && spotifyType === 'track') {
+            const topTrack = results[0]
+            if (!topTrack.info.isrc) {
+              const metadata = await this._fetchTrackMetadata(topTrack.info.identifier)
+              if (metadata) {
+                const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+                if (isrc) {
+                  topTrack.info.isrc = isrc
+                  topTrack.encoded = encodeTrack(topTrack.info)
+                }
+              }
+            }
+          }
+
           if (results.length > 0) {
             return { loadType: 'search', data: results }
           }
@@ -1081,9 +1186,30 @@ export default class SpotifySource {
           }
         }
 
+        if (!track.info.isrc) {
+          const metadata = await this._fetchTrackMetadata(id)
+          if (metadata) {
+            const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+            if (isrc) {
+              track.info.isrc = isrc
+              track.encoded = encodeTrack(track.info)
+            }
+          }
+        }
+
         return {
           loadType: 'track',
           data: track
+        }
+      } else {
+        // GraphQL failed, try metadata endpoint as primary fallback
+        const metadata = await this._fetchTrackMetadata(id)
+        const track = this._buildTrackFromMetadata(metadata)
+        if (track) {
+          return {
+            loadType: 'track',
+            data: track
+          }
         }
       }
     }
@@ -1105,6 +1231,17 @@ export default class SpotifySource {
             if (canvasRes?.data?.canvasesList?.[0]) {
               track.pluginInfo.canvas = canvasRes.data
               this.nodelink.trackCacheManager.set('spotify-canvas', id, canvasRes.data, 1000 * 60 * 60 * 12)
+            }
+          }
+        }
+
+        if (!track.info.isrc) {
+          const metadata = await this._fetchTrackMetadata(id)
+          if (metadata) {
+            const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+            if (isrc) {
+              track.info.isrc = isrc
+              track.encoded = encodeTrack(track.info)
             }
           }
         }
@@ -1397,23 +1534,6 @@ export default class SpotifySource {
   }
 
   async getTrackUrl(decodedTrack) {
-    if (!decodedTrack.isrc && this.accessToken) {
-      try {
-        const trackData = await this._apiRequest(
-          `/tracks/${decodedTrack.identifier}?market=${this.market}`
-        )
-        if (trackData?.external_ids?.isrc) {
-          decodedTrack.isrc = trackData.external_ids.isrc
-        }
-      } catch (e) {
-        logger(
-          'debug',
-          'Spotify',
-          `Failed to fetch ISRC for ${decodedTrack.identifier} via API: ${e.message}`
-        )
-      }
-    }
-
     let isExplicit = false
     if (decodedTrack.uri) {
       try {
