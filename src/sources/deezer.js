@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
 import BlowfishCBC from '../decrypters/blowfish-cbc.js'
-import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, getBestMatch, makeRequest } from '../utils.js'
 
 const IV = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])
 
@@ -464,17 +464,17 @@ export default class DeezerSource {
 
         let i = 0
         const headers = {}
-        
+
         if (additionalData.startTime !== undefined && additionalData.FILESIZE && additionalData.DURATION) {
           const durationMs = Number(additionalData.DURATION) * 1000
           const fileSize = Number(additionalData.FILESIZE)
-          
+
           if (durationMs > 0 && fileSize > 0) {
             const byteRate = fileSize / durationMs
             const rawOffset = additionalData.startTime * byteRate
             const chunkIndex = Math.floor(rawOffset / bufferSize)
             const byteOffset = chunkIndex * bufferSize
-            
+
             if (byteOffset > 0) {
               headers.Range = `bytes=${byteOffset}-`
             }
