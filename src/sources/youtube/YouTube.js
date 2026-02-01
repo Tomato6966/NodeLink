@@ -123,18 +123,14 @@ export default class YouTubeSource {
       'yt_player_script_url'
     )
 
-    if (cachedVisitorData && cachedPlayerScript) {
-      this.ytContext.client.visitorData = cachedVisitorData
+    if (cachedPlayerScript) {
       this.cipherManager.setPlayerScriptUrl(cachedPlayerScript)
-      logger(
-        'debug',
-        'YouTube',
-        'Context and player script loaded from cache. Skipping network request.'
-      )
-      return
+      logger('debug', 'YouTube', 'Player script URL loaded from cache.')
     }
 
-    logger('debug', 'YouTube', 'Fetching visitor data...')
+    // Não vamos poder mais deixar um cache de visitorData, 1 de fevereiro, youtube mudou a forma como ele interage com o visitorData
+
+    let visitorFound = false
     let playerScriptUrl = null
 
     try {
@@ -142,8 +138,12 @@ export default class YouTubeSource {
         body: data,
         error,
         statusCode
-      } = await makeRequest('https://www.youtube.com', { method: 'GET' })
-      let visitorFound = false
+      } = await makeRequest('https://www.youtube.com/embed', {
+        method: 'GET',
+        headers: {
+          Cookie: 'YSC=cz5kYp3ZuIE; VISITOR_INFO1_LIVE=U-0T5oUyzf8;'
+        }
+      })
 
       if (!error && statusCode === 200) {
         const visitorMatch = data?.match(/"VISITOR_DATA":"([^"]+)"/)
@@ -152,9 +152,10 @@ export default class YouTubeSource {
           this.nodelink.credentialManager.set(
             'yt_visitor_data',
             visitorMatch[1],
-            24 * 60 * 60 * 1000
+            60 * 60 * 1000
           )
           visitorFound = true
+          logger('debug', 'YouTube', 'visitorData refreshed and cached.')
         }
 
         const playerScriptMatch = data?.match(/"jsUrl":"([^"]+)"/)
@@ -170,15 +171,15 @@ export default class YouTubeSource {
           )
           logger('debug', 'YouTube', `Player script URL: ${playerScriptUrl}`)
         }
-      }
-
-      if (!visitorFound) {
+      } else {
         logger(
           'warn',
           'YouTube',
-          `Failed to fetch visitor data: ${error?.message || `Status ${statusCode}`}`
+          `Embed request failed: ${error?.message || `Status ${statusCode}`}`
         )
+      }
 
+      if (!visitorFound) {
         const {
           body: guideData,
           error: guideError,
@@ -196,10 +197,32 @@ export default class YouTubeSource {
         ) {
           this.ytContext.client.visitorData =
             guideData.responseContext.visitorData
+          this.nodelink.credentialManager.set(
+            'yt_visitor_data',
+            guideData.responseContext.visitorData,
+            60 * 60 * 1000
+          )
+          visitorFound = true
+          logger(
+            'debug',
+            'YouTube',
+            'visitorData refreshed via guide and cached.'
+          )
+        } else {
+          logger(
+            'warn',
+            'YouTube',
+            'Failed to refresh visitorData via guide; using cached fallback if present.'
+          )
         }
       }
     } catch (e) {
       logger('error', 'YouTube', `Error fetching visitor data: ${e.message}`)
+      logger(
+        'warn',
+        'YouTube',
+        'Using cached visitorData fallback (if present).'
+      )
     }
 
     if (playerScriptUrl) this.cipherManager.setPlayerScriptUrl(playerScriptUrl)
@@ -921,7 +944,8 @@ export default class YouTubeSource {
           accessToken: additionalData.accessToken,
           visitorData: additionalData.visitorData,
           serverAbrStreamingUrl: additionalData.serverAbrStreamingUrl,
-          videoPlaybackUstreamerConfig: additionalData.videoPlaybackUstreamerConfig,
+          videoPlaybackUstreamerConfig:
+            additionalData.videoPlaybackUstreamerConfig,
           poToken: additionalData.poToken,
           clientInfo: additionalData.clientInfo,
           formats: additionalData.formats,
@@ -991,11 +1015,7 @@ export default class YouTubeSource {
               playbackCookie: ad.playbackCookie
             })
           } catch (err) {
-            logger(
-              'warn',
-              'YouTube',
-              `SABR recovery failed: ${err.message}`
-            )
+            logger('warn', 'YouTube', `SABR recovery failed: ${err.message}`)
             if (!stream.destroyed) stream.destroy(err)
           } finally {
             isRecovering = false
@@ -1008,8 +1028,18 @@ export default class YouTubeSource {
             readyReject(err)
           }
 
-          if ((err.message.includes('sabr.malformed_config') || err.message.includes('sabr.media_serving_enforcement_id_error')) && !isRecovering) {
-            logger('info', 'YouTube', `Known recoverable error detected (${err.message}), triggering stall recovery...`)
+          if (
+            (err.message.includes('sabr.malformed_config') ||
+              err.message.includes(
+                'sabr.media_serving_enforcement_id_error'
+              )) &&
+            !isRecovering
+          ) {
+            logger(
+              'info',
+              'YouTube',
+              `Known recoverable error detected (${err.message}), triggering stall recovery...`
+            )
             sabr.emit('stall')
             return
           }
@@ -1034,7 +1064,9 @@ export default class YouTubeSource {
           this.activeStreams.delete(streamKey)
         })
 
-        const bestAudio = additionalData.formats.filter(f => f.mimeType?.includes('audio')).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+        const bestAudio = additionalData.formats
+          .filter((f) => f.mimeType?.includes('audio'))
+          .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
 
         sabr.start(bestAudio.itag)
 

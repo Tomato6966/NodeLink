@@ -122,7 +122,8 @@ export default class WebRemix extends BaseClient {
     for (const video of videos) {
       const renderer =
         video.musicResponsiveListItemRenderer ||
-        video.musicTwoColumnItemRenderer
+        video.musicTwoColumnItemRenderer ||
+        (video.videoId ? video : null)
       if (!renderer) {
         continue
       }

@@ -1,5 +1,4 @@
 import { encodeTrack, logger, makeRequest } from '../../utils.js'
-
 export const YOUTUBE_CONSTANTS = {
   VIDEO: 0,
   PLAYLIST: 1,
@@ -817,7 +816,7 @@ function getRendererFromItemData(itemData, itemType) {
       'playlistPanelVideoRenderer',
       'musicTwoColumnItemRenderer'
     ])
-    return data ? { _type: 'track', ...data } : null
+    if (data) return { _type: 'track', ...data }
   }
 
   const rendererTypes = [
@@ -981,7 +980,8 @@ export async function buildTrack(
   if (itemType === 'ytmusic') {
     title = safeString(
       getRunsText(getItemValue(renderer, ['title.runs'])) ||
-        getItemValue(renderer, ['title.simpleText']),
+        getItemValue(renderer, ['title.simpleText']) ||
+        renderer?.title,
       FALLBACK_TITLE
     )
 
@@ -1005,6 +1005,8 @@ export async function buildTrack(
       author = safeString(longBylineRuns[0]?.text, FALLBACK_AUTHOR)
     } else if (Array.isArray(shortBylineRuns) && shortBylineRuns.length > 0) {
       author = safeString(shortBylineRuns[0]?.text, FALLBACK_AUTHOR)
+    } else {
+      author = safeString(renderer?.author, FALLBACK_AUTHOR)
     }
 
     if (author === FALLBACK_AUTHOR && Array.isArray(renderer.flexColumns)) {
@@ -1029,12 +1031,13 @@ export async function buildTrack(
         getRunsText(getItemValue(renderer, ['lengthText.runs']))
     }
 
-    if (!lengthText && (Array.isArray(renderer.flexColumns) || Array.isArray(renderer.fixedColumns))) {
-      const columns = [...(renderer.flexColumns || []), ...(renderer.fixedColumns || [])]
-      for (const column of columns) {
-        const textObj = column.musicResponsiveListItemFlexColumnRenderer?.text || column.musicResponsiveListItemFixedColumnRenderer?.text
+    if (!lengthText && Array.isArray(renderer.flexColumns)) {
+      for (const column of renderer.flexColumns) {
+        const textObj = column.musicResponsiveListItemFlexColumnRenderer?.text
         if (Array.isArray(textObj?.runs)) {
-          const found = textObj.runs.find((run) => run.text && /^\d{1,2}:\d{2}(:\d{2})?$/.test(run.text))
+          const found = textObj.runs.find(
+            (run) => run.text && /^\d{1,2}:\d{2}(:\d{2})?$/.test(run.text)
+          )
           if (found) {
             lengthText = found.text
             break
