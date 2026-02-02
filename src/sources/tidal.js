@@ -29,7 +29,7 @@ export default class TidalSource {
     this.searchTerms = ['tdsearch']
     this.recommendationTerm = ['tdrec']
     this.patterns = [
-      /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9-]+)/
+      /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9-]+)(?:\?.*)?$/
     ]
     this.priority = 90
     this.token = this.config?.token
