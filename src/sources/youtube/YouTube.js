@@ -950,7 +950,8 @@ export default class YouTubeSource {
           clientInfo: additionalData.clientInfo,
           formats: additionalData.formats,
           startTime: additionalData.startTime || 0,
-          positionCallback: additionalData.positionCallback
+          positionCallback: additionalData.positionCallback,
+          previousSession: additionalData.previousSession
         })
 
         const stream = new PassThrough()
@@ -1063,6 +1064,12 @@ export default class YouTubeSource {
           sabr.destroy()
           this.activeStreams.delete(streamKey)
         })
+
+        stream._sabrStream = sabr
+        stream.getSessionState = () => {
+          if (isDestroying || stream.destroyed) return null
+          return sabr.getSessionState()
+        }
 
         const bestAudio = additionalData.formats
           .filter((f) => f.mimeType?.includes('audio'))

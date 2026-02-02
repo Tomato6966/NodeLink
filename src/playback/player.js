@@ -994,15 +994,46 @@ export class Player {
 
     this.position = position
     this.track.endTime = endTime
+    let previousSession = null
+    let reuseUrlData = null
+
+    if (this.streamInfo?.protocol === 'sabr' && this.connection?.audioStream) {
+      const inputStream = this.connection.audioStream.pipes?.[0]
+      if (inputStream && typeof inputStream.getSessionState === 'function') {
+        previousSession = inputStream.getSessionState()
+        if (previousSession) {
+          logger(
+            'debug',
+            'Player',
+            `Extracted SABR session state: rn=${previousSession.requestNumber}, hasCookie=${!!previousSession.nextRequestPolicy?.playbackCookie}`
+          )
+
+          reuseUrlData = {
+            protocol: this.streamInfo.protocol,
+            url: this.streamInfo.url,
+            additionalData: {
+              ...this.streamInfo.additionalData,
+              previousSession,
+              startTime: position
+            }
+          }
+
+          logger(
+            'debug',
+            'Player',
+            `Reusing existing SABR streaming URL for seek to maintain session`
+          )
+        }
+      }
+    }
 
     const trackInfo = {
       ...this.track.info,
       audioTrackId: this.track.audioTrackId
     }
 
-    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+    const urlData = reuseUrlData || await this.nodelink.sources.getTrackUrl(trackInfo)
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
-
 
     if (urlData.exception) {
       const err = new Error(urlData.exception.message)
