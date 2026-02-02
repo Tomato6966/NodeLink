@@ -13,7 +13,7 @@ export default class DeezerSource {
     this.searchTerms = ['dzsearch']
     this.recommendationTerm = ['dzrec']
     this.patterns = [
-      /^https?:\/\/(?:www\.)?deezer\.com\/(?:[a-z]+(?:-[a-z]+)?\/)?(track|album|playlist|artist)\/(\d+)$/,
+      /^https?:\/\/(?:www\.)?deezer\.com\/(?:[a-z]+(?:-[a-z]+)?\/)?(track|album|playlist|artist)\/(\d+)(?:\?.*)?$/,
       /^https?:\/\/link\.deezer\.com\/s\/([a-zA-Z0-9]+)/
     ]
     this.priority = 80
