@@ -301,18 +301,21 @@ function sendResponse(req, res, data, status, trace = false) {
   const buffer = Buffer.from(jsonData)
   const encoding = req.headers['accept-encoding'] || ''
 
+
+/*
+  // https://bun.com/blog/bun-v1.3.3
   if (process.isBun) {
     headers['Content-Length'] = buffer.byteLength
     res.writeHead(status, headers)
     res.end(buffer)
     return
-  }
+  } */
   const compressions = [
     { type: 'br', method: zlib.brotliCompress },
     { type: 'gzip', method: zlib.gzip },
     { type: 'deflate', method: zlib.deflate }
   ]
-  if (process.versions.node >= '22.0.0') {
+  if (process.versions.node >= '22.0.0' || process.isBun) {
     compressions.unshift({ type: 'zstd', method: zlib.zstdCompress })
   }
 
