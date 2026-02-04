@@ -283,15 +283,26 @@ export default class AudioMackSource {
       })
 
       if (error || !body) {
-        throw new Error(
-          error?.message || 'Failed to get playback URL from Audiomack API'
-        )
-      }
+        return {
+          exception: {
+            message: error?.message || 'Failed to get playback URL from Audiomack API',
+            severity: 'fault',
+            cause: 'StreamLink'
+          }
+       };
+     }
+
 
       const json = parseJsonBody(body)
       const data = normalizeApiResult(json)
       if (!data) {
-        throw new Error('Invalid response from Audiomack API')
+        return {
+          exception: {
+            message: 'Invalid response from Audiomack API',
+            severity: 'fault',
+            cause: 'StreamLink'
+          }
+        };   
       }
 
       const streamUrl =
@@ -302,7 +313,13 @@ export default class AudioMackSource {
         data.stream_url
 
       if (!streamUrl) {
-        throw new Error('Invalid or missing streaming URL in response')
+        return {
+          exception: {
+            message: 'Invalid or missing streaming URL in response',
+            severity: 'fault',
+            cause: 'StreamLink'
+          }
+        };
       }
 
       const format = guessFormatFromUrl(streamUrl)
