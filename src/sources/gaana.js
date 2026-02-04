@@ -101,7 +101,7 @@ export default class GaanaSource {
       if (!/^\d+$/.test(String(trackId))) {
         const trackData = await this.getJson(`/api/songs/${encodeURIComponent(trackId)}`)
         if (!trackData?.track_id) {
-          throw new Error('Track metadata not found for stream.')
+          return { exception: { message: 'Track metadata not found for stream.', severity: 'common' } }
         }
         trackId = trackData.track_id
       }
@@ -111,13 +111,13 @@ export default class GaanaSource {
       )
 
       if (!streamData) {
-        throw new Error('Stream URL not found.')
+        return { exception: { message: 'Stream URL not found.', severity: 'common' } }
       }
 
       const hlsUrl = streamData.hlsUrl || streamData.hls_url || null
       const url = hlsUrl || streamData.url
       if (!url) {
-        throw new Error('No playable stream URL.')
+        return { exception: { message: 'No playable stream URL.', severity: 'common' } }
       }
 
       const segments = Array.isArray(streamData.segments)
