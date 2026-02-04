@@ -315,7 +315,7 @@ function sendResponse(req, res, data, status, trace = false) {
     { type: 'gzip', method: zlib.gzip },
     { type: 'deflate', method: zlib.deflate }
   ]
-  if (process.versions.node >= '22.0.0' || process.isBun) {
+  if (zlib?.zstdCompress) {
     compressions.unshift({ type: 'zstd', method: zlib.zstdCompress })
   }
 
@@ -328,9 +328,7 @@ function sendResponse(req, res, data, status, trace = false) {
           res.end(JSON.stringify({ error: 'Compression failed' }))
           return
         }
-        if (process.isBun) {
-          headers['Content-Length'] = result.byteLength
-        }
+        headers['Content-Length'] = result.byteLength
         res.writeHead(status, headers)
         res.end(result)
       })
@@ -346,17 +344,6 @@ function sendResponse(req, res, data, status, trace = false) {
 function getGitInfo() {
   if (typeof __BUILD_GIT_INFO__ !== 'undefined') {
     return __BUILD_GIT_INFO__
-  }
-
-  const isBun = typeof Bun !== 'undefined' && !!process.versions.bun
-  // bun is too weird
-  if (isBun) {
-    logger('info', 'Git', 'Skipping update check (compiled build).')
-    return {
-      branch: 'unknown',
-      commit: 'unknown',
-      commitTime: -1
-    }
   }
 
   if (gitInfoCache) return gitInfoCache
@@ -1619,13 +1606,6 @@ async function loadHLSPlaylist(url, stream) {
 }
 
 async function checkForUpdates() {
-  const isBun = typeof Bun !== 'undefined' && !!process.versions.bun
-  // bun is too weird
-  if (isBun) {
-    logger('info', 'Git', 'Skipping update check (compiled build).')
-    return
-  }
-
   logger('info', 'Git', 'Checking for updates...')
   try {
     execSync('git fetch', { stdio: 'ignore' })
