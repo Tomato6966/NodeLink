@@ -1,57 +1,60 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
-// Use unknown() instead of object for filters to preserve all properties
-const filtersSchema = myzod.unknown()
+const v = new Validator({ haltOnFirstError: true })
 
-const voiceStateSchema = myzod
-  .object({
-    token: myzod.string(),
-    endpoint: myzod.string(),
-    sessionId: myzod.string(),
-    channelId: myzod.string().optional()
-  })
-  .allowUnknownKeys()
+// Use unknown -> any in fastest-validator
+const filtersSchema = { type: 'any', optional: true }
 
-const updatePlayerTrackSchema = myzod
-  .object({
-    encoded: myzod.string().nullable().optional(),
-    identifier: myzod.string().optional(),
-    userData: myzod.unknown().optional()
-  })
-  .allowUnknownKeys()
+const voiceStateSchema = {
+  type: 'object',
+  props: {
+    token: { type: 'string', empty: false },
+    endpoint: { type: 'string', empty: false },
+    sessionId: { type: 'string', empty: false },
+    channelId: { type: 'string', optional: true }
+  },
+  $$strict: false
+}
 
-const updatePlayerSchema = myzod
-  .object({
-    track: updatePlayerTrackSchema.optional(),
-    nextTrack: updatePlayerTrackSchema.optional(),
-    encodedTrack: myzod.string().nullable().optional(),
-    position: myzod.number().min(0).optional(),
-    endTime: myzod.number().min(0).nullable().optional(),
-    volume: myzod.number().min(0).max(1000).optional(),
-    paused: myzod.boolean().optional(),
-    filters: filtersSchema.optional(),
-    fading: myzod.unknown().optional(),
-    voice: voiceStateSchema.optional(),
-    guildId: myzod.string().optional()
-  })
-  .allowUnknownKeys()
+const updatePlayerTrackSchema = {
+  type: 'object',
+  props: {
+    encoded: { type: 'string', nullable: true, optional: true },
+    identifier: { type: 'string', optional: true },
+    userData: { type: 'any', optional: true }
+  },
+  $$strict: false
+}
 
-const queryParamsSchema = myzod
-  .object({
-    noReplace: myzod.union([myzod.string(), myzod.null()]).optional()
-  })
-  .allowUnknownKeys()
+const updatePlayerSchema = v.compile({
+  track: { ...updatePlayerTrackSchema, optional: true },
+  nextTrack: { ...updatePlayerTrackSchema, optional: true },
+  encodedTrack: { type: 'string', nullable: true, optional: true },
+  position: { type: 'number', min: 0, optional: true },
+  endTime: { type: 'number', min: 0, nullable: true, optional: true },
+  volume: { type: 'number', min: 0, max: 1000, optional: true },
+  paused: { type: 'boolean', optional: true },
+  filters: filtersSchema,
+  fading: { type: 'any', optional: true },
+  voice: { ...voiceStateSchema, optional: true },
+  guildId: { type: 'string', optional: true },
+  $$strict: false
+})
 
-const pathSchema = myzod.object({
-  sessionId: myzod.string(),
-  guildId: myzod
-    .string()
-    .withPredicate(
-      (val) => /^\d{17,20}$/.test(val),
-      'guildId must be 17-20 digits'
-    )
-    .optional()
+const queryParamsSchema = v.compile({
+  noReplace: { type: 'string', nullable: true, optional: true },
+  $$strict: false
+})
+
+const pathSchema = v.compile({
+  sessionId: { type: 'string', empty: false },
+  guildId: {
+    type: 'string',
+    pattern: /^\d{17,20}$/,
+    optional: true,
+    messages: { stringPattern: 'guildId must be 17-20 digits' }
+  }
 })
 
 const sanitizeFadingConfig = (raw) => {
@@ -114,10 +117,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     guildId: parts[5]
   }
 
-  const pathResult = pathSchema.try(pathParams)
+  const validation = pathSchema(pathParams)
 
-  if (pathResult instanceof myzod.ValidationError) {
-    const errorMessage = pathResult.message || 'Invalid path parameters'
+  if (validation !== true) {
+    const errorMessage = validation?.[0]?.message || 'Invalid path parameters'
     logger('warn', 'PlayerUpdate', `Invalid path parameters: ${errorMessage}`)
     return sendErrorResponse(
       req,
@@ -129,7 +132,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  const { sessionId, guildId } = pathResult
+  const { sessionId, guildId } = pathParams
   const session = nodelink.sessions.get(sessionId)
 
   if (!session) {
@@ -198,10 +201,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       }
 
       if (req.method === 'PATCH') {
-        const bodyResult = updatePlayerSchema.try(req.body)
+        const bodyValidation = updatePlayerSchema(req.body)
 
-        if (bodyResult instanceof myzod.ValidationError) {
-          const errorMessage = bodyResult.message || 'Invalid payload'
+        if (bodyValidation !== true) {
+          const errorMessage = bodyValidation?.[0]?.message || 'Invalid payload'
           logger(
             'warn',
             'PlayerUpdate',
@@ -217,24 +220,24 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           )
         }
 
-        const payload = bodyResult
+        const payload = req.body
 
-        const queryResult = queryParamsSchema.try({
+        const queryValidation = queryParamsSchema({
           noReplace: parsedUrl.searchParams.get('noReplace')
         })
 
-        if (queryResult instanceof myzod.ValidationError) {
+        if (queryValidation !== true) {
           return sendErrorResponse(
             req,
             res,
             400,
             'Bad Request',
-            queryResult.message,
+            queryValidation?.[0]?.message || 'Invalid query parameters',
             parsedUrl.pathname
           )
         }
 
-        const noReplace = queryResult.noReplace === 'true'
+        const noReplace = parsedUrl.searchParams.get('noReplace') === 'true'
 
         logger(
           'debug',

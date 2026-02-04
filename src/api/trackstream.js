@@ -1,8 +1,18 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
-const trackStreamSchema = myzod.object({
-  encodedTrack: myzod.string()
+const v = new Validator({ haltOnFirstError: true })
+
+const trackStreamSchema = v.compile({
+  encodedTrack: {
+    type: 'string',
+    empty: false,
+    messages: {
+      required: 'Missing encodedTrack parameter.',
+      string: 'Missing encodedTrack parameter.',
+      stringEmpty: 'Missing encodedTrack parameter.'
+    }
+  }
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
@@ -17,16 +27,18 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  const result = trackStreamSchema.try({
-    encodedTrack: parsedUrl.searchParams.get('encodedTrack')
-  })
+  const data = {
+    encodedTrack: parsedUrl.searchParams.get('encodedTrack') ?? undefined
+  }
+
+  const validation = trackStreamSchema(data)
 
   const itag = parsedUrl.searchParams.get('itag')
     ? Number(parsedUrl.searchParams.get('itag'))
     : null
 
-  if (result instanceof myzod.ValidationError) {
-    const errorMessage = result.message || 'Missing encodedTrack parameter.'
+  if (validation !== true) {
+    const errorMessage = validation?.[0]?.message || 'Missing encodedTrack parameter.'
     return sendErrorResponse(
       req,
       res,
@@ -37,7 +49,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  const encodedTrack = result.encodedTrack.replace(/ /g, '+')
+  const encodedTrack = data.encodedTrack.replace(/ /g, '+')
 
   try {
     const decodedTrack = decodeTrack(encodedTrack)

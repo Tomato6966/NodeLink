@@ -1,12 +1,10 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { logger, makeRequest, sendErrorResponse } from '../utils.js'
 
-const CLIENT_ID =
-  '861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com'
-const CLIENT_SECRET = 'SboVhoG9s0rNafixCSGGKXAT'
+const v = new Validator({ haltOnFirstError: true })
 
-const _schema = myzod.object({
-  refreshToken: myzod.string().min(1)
+const refreshTokenSchema = v.compile({
+  refreshToken: { type: 'string', min: 1, empty: false }
 })
 
 async function handler(_nodelink, req, res, sendResponse, parsedUrl) {
@@ -21,13 +19,15 @@ async function handler(_nodelink, req, res, sendResponse, parsedUrl) {
     }
   }
 
-  if (!refreshToken) {
+  const validation = refreshTokenSchema({ refreshToken: refreshToken ?? undefined })
+
+  if (validation !== true) {
     return sendErrorResponse(
       req,
       res,
       400,
       'Bad Request',
-      'Missing refreshToken parameter.',
+      validation?.[0]?.message || 'Missing refreshToken parameter.',
       parsedUrl.pathname
     )
   }

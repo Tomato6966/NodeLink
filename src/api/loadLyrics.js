@@ -1,19 +1,23 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
-const loadLyricsSchema = myzod.object({
-  encodedTrack: myzod.string(),
-  lang: myzod.string().optional()
+const v = new Validator({ haltOnFirstError: true })
+
+const loadLyricsSchema = v.compile({
+  encodedTrack: { type: 'string', empty: false, messages: { required: 'Missing encodedTrack parameter.', stringEmpty: 'Missing encodedTrack parameter.' } },
+  lang: { type: 'string', optional: true }
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const result = loadLyricsSchema.try({
-    encodedTrack: parsedUrl.searchParams.get('encodedTrack'),
+  const data = {
+    encodedTrack: parsedUrl.searchParams.get('encodedTrack') ?? undefined,
     lang: parsedUrl.searchParams.get('lang') || undefined
-  })
+  }
 
-  if (result instanceof myzod.ValidationError) {
-    const errorMessage = result.message || 'Missing encodedTrack parameter.'
+  const validation = loadLyricsSchema(data)
+
+  if (validation !== true) {
+    const errorMessage = validation?.[0]?.message || 'Missing encodedTrack parameter.'
     logger('warn', 'Lyrics', errorMessage)
     return sendErrorResponse(
       req,
@@ -25,8 +29,8 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  const encodedTrack = result.encodedTrack.replace(/ /g, '+')
-  const language = result.lang
+  const encodedTrack = data.encodedTrack.replace(/ /g, '+')
+  const language = data.lang
 
   try {
     const decodedTrack = decodeTrack(encodedTrack)

@@ -1,5 +1,7 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { sendErrorResponse, sendResponse } from '../utils.js'
+
+const v = new Validator({ haltOnFirstError: true })
 
 function getStatus(nodelink, req, res) {
   const routePlanner = nodelink.routePlanner
@@ -38,15 +40,15 @@ function getStatus(nodelink, req, res) {
   sendResponse(req, res, status, 200)
 }
 
-const freeAddressSchema = myzod.object({
-  address: myzod.string()
+const freeAddressSchema = v.compile({
+  address: { type: 'string', empty: false }
 })
 
 function freeAddress(nodelink, req, res) {
-  const result = freeAddressSchema.try(req.body)
+  const validation = freeAddressSchema(req.body)
 
-  if (result instanceof myzod.ValidationError) {
-    const errorMessage = result.message || 'The address field is required.'
+  if (validation !== true) {
+    const errorMessage = validation?.[0]?.message || 'The address field is required.'
     return sendErrorResponse(
       req,
       res,
@@ -57,7 +59,7 @@ function freeAddress(nodelink, req, res) {
     )
   }
 
-  const { address } = result
+  const { address } = req.body
 
   nodelink.routePlanner.freeIP(address)
   res.writeHead(204)

@@ -1,29 +1,27 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
-const mixTrackSchema = myzod
-  .object({
-    encoded: myzod.string().nullable().optional(),
-    identifier: myzod.string().optional(),
-    userData: myzod.unknown().optional()
-  })
-  .allowUnknownKeys()
+const v = new Validator({ haltOnFirstError: true })
 
-const createMixSchema = myzod
-  .object({
-    track: mixTrackSchema,
-    volume: myzod.number().min(0).max(1).optional()
-  })
-  .allowUnknownKeys()
+const mixTrackSchema = {
+  type: 'object',
+  props: {
+    encoded: { type: 'string', nullable: true, optional: true },
+    identifier: { type: 'string', optional: true },
+    userData: { type: 'any', optional: true }
+  },
+  $$strict: false
+}
 
-const pathSchema = myzod.object({
-  sessionId: myzod.string(),
-  guildId: myzod
-    .string()
-    .withPredicate(
-      (val) => /^\d{17,20}$/.test(val),
-      'guildId must be 17-20 digits'
-    )
+const createMixSchema = v.compile({
+  track: mixTrackSchema,
+  volume: { type: 'number', min: 0, max: 1, optional: true },
+  $$strict: false
+})
+
+const pathSchema = v.compile({
+  sessionId: { type: 'string', empty: false },
+  guildId: { type: 'string', pattern: /^\d{17,20}$/, messages: { stringPattern: 'guildId must be 17-20 digits' } }
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
@@ -32,13 +30,9 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const sessionId = pathParts[3]
   const guildId = pathParts[5]
 
-  try {
-    pathSchema.parse({ sessionId, guildId })
-  } catch (error) {
-    if (error instanceof myzod.ValidationError) {
-      return sendErrorResponse(req, res, 400, error.message)
-    }
-    return sendErrorResponse(req, res, 400, 'Invalid path parameters')
+  const validation = pathSchema({ sessionId, guildId })
+  if (validation !== true) {
+    return sendErrorResponse(req, res, 400, validation?.[0]?.message || 'Invalid path parameters')
   }
 
   if (method === 'POST') {
@@ -70,7 +64,10 @@ async function handleCreateMix(
       }
     }
 
-    createMixSchema.parse(body)
+    const bodyValidation = createMixSchema(body)
+    if (bodyValidation !== true) {
+      return sendErrorResponse(req, res, 400, bodyValidation?.[0]?.message || 'Invalid parameters')
+    }
 
     const session = nodelink.sessions.get(sessionId)
     if (!session) {
@@ -127,9 +124,6 @@ async function handleCreateMix(
       201
     )
   } catch (error) {
-    if (error instanceof myzod.ValidationError) {
-      return sendErrorResponse(req, res, 400, error.message)
-    }
     logger('error', 'MixAPI', `Error creating mix: ${error.message}`)
     return sendErrorResponse(req, res, 500, error.message)
   }

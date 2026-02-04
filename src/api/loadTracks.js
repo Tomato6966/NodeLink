@@ -1,17 +1,29 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { logger, sendErrorResponse } from '../utils.js'
 
-const loadTracksSchema = myzod.object({
-  identifier: myzod.string()
+const v = new Validator({ haltOnFirstError: true })
+
+const loadTracksSchema = v.compile({
+  identifier: {
+    type: 'string',
+    empty: false,
+    messages: {
+      required: 'identifier parameter is required.',
+      string: 'identifier parameter is required.',
+      stringEmpty: 'identifier parameter is required.'
+    }
+  }
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const result = loadTracksSchema.try({
-    identifier: parsedUrl.searchParams.get('identifier')
-  })
+  const data = {
+    identifier: parsedUrl.searchParams.get('identifier') ?? undefined
+  }
 
-  if (result instanceof myzod.ValidationError) {
-    const errorMessage = result.message || 'identifier parameter is required.'
+  const validation = loadTracksSchema(data)
+
+  if (validation !== true) {
+    const errorMessage = validation?.[0]?.message || 'identifier parameter is required.'
     logger('warn', 'Tracks', errorMessage)
     return sendErrorResponse(
       req,
@@ -24,7 +36,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  const identifier = result.identifier.trim()
+  const identifier = data.identifier.trim()
   logger('debug', 'Tracks', `Loading tracks with identifier: "${identifier}"`)
 
   let url, source, query
