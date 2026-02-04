@@ -181,11 +181,18 @@ export default class JioSaavnSource {
       const trackData = await this._fetchSongMetadata(decodedTrack.identifier)
 
       if (!trackData) {
-        throw new Error('Track metadata not found')
+        return {
+          exception: { message: 'Track metadata not found', severity: 'common' }
+        }
       }
 
       if (!trackData.encrypted_media_url) {
-        throw new Error('No encrypted_media_url found')
+        return {
+          exception: {
+            message: 'No encrypted_media_url found',
+            severity: 'fault'
+          }
+        }
       }
 
       let playbackUrl = this._decryptUrl(trackData.encrypted_media_url)
