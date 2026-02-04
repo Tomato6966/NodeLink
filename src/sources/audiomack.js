@@ -1,4 +1,4 @@
-import { http1makeRequest, logger, encodeTrack } from '../utils.js'
+import { http1makeRequest, logger, encodeTrack , getBestMatch} from '../utils.js'
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
 
@@ -285,13 +285,13 @@ export default class AudioMackSource {
       if (error || !body) {
         return {
           exception: {
-            message:
-              error?.message || 'Failed to get playback URL from Audiomack API',
+            message: error?.message || 'Failed to get playback URL from Audiomack API',
             severity: 'fault',
             cause: 'StreamLink'
           }
-        }
-      }
+       };
+     }
+
 
       const json = parseJsonBody(body)
       const data = normalizeApiResult(json)
@@ -302,7 +302,7 @@ export default class AudioMackSource {
             severity: 'fault',
             cause: 'StreamLink'
           }
-        }
+        };   
       }
 
       const streamUrl =
@@ -319,20 +319,34 @@ export default class AudioMackSource {
             severity: 'fault',
             cause: 'StreamLink'
           }
-        }
+        };
       }
 
       const format = guessFormatFromUrl(streamUrl)
       return { url: streamUrl, protocol: 'https', format }
     } catch (e) {
+      logger(
+        'warn',
+        'Audiomack',
+        `Direct stream failed for ${track.title}: ${e.message}. Falling back to YouTube.`
+      )
+    }
+
+    const searchResult = await this.nodelink.sources.searchWithDefault(
+      `${track.title} ${track.author}`
+    )
+
+    const bestMatch = getBestMatch(searchResult.data, track)
+    if (!bestMatch)
       return {
         exception: {
-          message: e.message || 'Failed to get playback URL from Audiomack API',
-          severity: 'fault',
-          cause: 'StreamLink'
+          message: 'No suitable alternative found.',
+          severity: 'fault'
         }
       }
-    }
+
+    const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+    return { newTrack: bestMatch, ...streamInfo }
   }
 
   async loadStream(decodedTrack, url, _protocol, additionalData) {

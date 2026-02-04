@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, getBestMatch, } from '../utils.js'
 import { desEcbDecryptBase64ToUtf8 } from '../decrypters/des-ecb.js'
 
 const API_BASE = 'https://www.jiosaavn.com/api.php'
@@ -170,14 +170,7 @@ export default class JioSaavnSource {
     }
   }
 
-  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
-    if (!forceRefresh) {
-      const cached = this.nodelink.trackCacheManager.get('jiosaavn', decodedTrack.identifier)
-      if (cached) return cached
-    }
-
-    const trackId = decodedTrack.identifier
-
+  async getTrackUrl(decodedTrack) {
     try {
       logger(
         'debug',
@@ -215,9 +208,28 @@ export default class JioSaavnSource {
         additionalData: {}
       }
     } catch (e) {
-      logger('error', 'JioSaavn', `Stream load error: ${e.message}`)
-      return { exception: { message: e.message, severity: 'fault' } }
+      logger(
+        'warn',
+        'JioSaavn',
+        `Direct stream failed for ${decodedTrack.title}: ${e.message}. Falling back to YouTube.`
+      )
     }
+
+    const searchResult = await this.nodelink.sources.searchWithDefault(
+      `${decodedTrack.title} ${decodedTrack.author}`
+    )
+
+    const bestMatch = getBestMatch(searchResult.data, decodedTrack)
+    if (!bestMatch)
+      return {
+        exception: {
+          message: 'No suitable alternative found.',
+          severity: 'fault'
+        }
+      }
+
+    const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+    return { newTrack: bestMatch, ...streamInfo }
   }
 
   async loadStream(_track, url, _protocol, _additionalData) {

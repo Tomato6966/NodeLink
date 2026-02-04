@@ -2,7 +2,7 @@
 * Credits: https://github.com/southctrl; adapted for NodeLink
 */
 
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.js'
 import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const USER_AGENT =
@@ -137,9 +137,28 @@ export default class GaanaSource {
             }
       }
     } catch (e) {
-      logger('error', 'Gaana', `Stream resolve error: ${e.message}`)
-      return { exception: { message: e.message, severity: 'fault' } }
+      logger(
+        'warn',
+        'Gaana',
+        `Direct stream failed for ${decodedTrack.title}: ${e.message}. Falling back to YouTube.`
+      )
     }
+
+    const searchResult = await this.nodelink.sources.searchWithDefault(
+      `${decodedTrack.title} ${decodedTrack.author}`
+    )
+
+    const bestMatch = getBestMatch(searchResult.data, decodedTrack)
+    if (!bestMatch)
+      return {
+        exception: {
+          message: 'No suitable alternative found.',
+          severity: 'fault'
+        }
+      }
+
+    const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+    return { newTrack: bestMatch, ...streamInfo }
   }
 
   async loadStream(track, url, protocol, additionalData) {
