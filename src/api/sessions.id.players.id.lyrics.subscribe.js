@@ -1,18 +1,15 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { logger, sendErrorResponse } from '../utils.js'
 
-const querySchema = myzod.object({
-  skipTrackSource: myzod.string().optional()
+const v = new Validator({ haltOnFirstError: true })
+
+const querySchema = v.compile({
+  skipTrackSource: { type: 'string', optional: true }
 })
 
-const pathSchema = myzod.object({
-  sessionId: myzod.string(),
-  guildId: myzod
-    .string()
-    .withPredicate(
-      (val) => /^\d{17,20}$/.test(val),
-      'guildId must be 17-20 digits'
-    )
+const pathSchema = v.compile({
+  sessionId: { type: 'string', empty: false },
+  guildId: { type: 'string', pattern: /^\d{17,20}$/, messages: { stringPattern: 'guildId must be 17-20 digits' } }
 })
 
 async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
@@ -21,13 +18,9 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
   const sessionId = pathParts[3]
   const guildId = pathParts[5]
 
-  try {
-    pathSchema.parse({ sessionId, guildId })
-  } catch (error) {
-    if (error instanceof myzod.ValidationError) {
-      return sendErrorResponse(req, res, 400, error.message)
-    }
-    return sendErrorResponse(req, res, 400, 'Invalid path parameters')
+  const validation = pathSchema({ sessionId, guildId })
+  if (validation !== true) {
+    return sendErrorResponse(req, res, 400, validation?.[0]?.message || 'Invalid path parameters')
   }
 
   const session = nodelink.sessions.get(sessionId)
@@ -40,15 +33,16 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
   }
 
   if (method === 'POST') {
-    const result = querySchema.try({
-        skipTrackSource: parsedUrl.searchParams.get('skipTrackSource')
-    })
+    const queryData = {
+      skipTrackSource: parsedUrl.searchParams.get('skipTrackSource') ?? undefined
+    }
+    const queryValidation = querySchema(queryData)
 
-    if (result instanceof myzod.ValidationError) {
-        return sendErrorResponse(req, res, 400, result.message)
+    if (queryValidation !== true) {
+      return sendErrorResponse(req, res, 400, queryValidation?.[0]?.message || 'Invalid parameters')
     }
 
-    const skipTrackSource = result.skipTrackSource === 'true'
+    const skipTrackSource = queryData.skipTrackSource === 'true'
 
     try {
         await session.players.subscribeLyrics(guildId, skipTrackSource)

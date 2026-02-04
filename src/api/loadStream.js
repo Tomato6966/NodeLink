@@ -1,13 +1,15 @@
 import { pipeline } from 'node:stream'
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { createPCMStream } from '../playback/processing/streamProcessor.js'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
-const loadStreamSchema = myzod.object({
-  encodedTrack: myzod.string(),
-  volume: myzod.number().min(0).max(1000).optional(),
-  position: myzod.number().min(0).optional(),
-  filters: myzod.unknown().optional()
+const v = new Validator({ haltOnFirstError: true })
+
+const loadStreamSchema = v.compile({
+  encodedTrack: { type: 'string', empty: false },
+  volume: { type: 'number', min: 0, max: 1000, optional: true },
+  position: { type: 'number', min: 0, optional: true },
+  filters: { type: 'any', optional: true }
 })
 
 async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
@@ -22,10 +24,10 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
     )
   }
 
-  let result
+  let data
   try {
     if (req.method === 'POST') {
-      result = loadStreamSchema.try(req.body)
+      data = req.body
     } else {
       const filtersRaw = parsedUrl.searchParams.get('filters')
       let filters
@@ -37,8 +39,8 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
         }
       }
 
-      result = loadStreamSchema.try({
-        encodedTrack: parsedUrl.searchParams.get('encodedTrack'),
+      data = {
+        encodedTrack: parsedUrl.searchParams.get('encodedTrack') ?? undefined,
         volume: parsedUrl.searchParams.get('volume')
           ? Number(parsedUrl.searchParams.get('volume'))
           : undefined,
@@ -51,21 +53,23 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
               )
             : undefined,
         filters
-      })
+      }
     }
 
-    if (result instanceof myzod.ValidationError) {
+    const validation = loadStreamSchema(data)
+
+    if (validation !== true) {
       return sendErrorResponse(
         req,
         res,
         400,
         'Bad Request',
-        result.message,
+        validation?.[0]?.message || 'Invalid parameters',
         parsedUrl.pathname
       )
     }
 
-    const { encodedTrack, volume = 100, position = 0, filters = {} } = result
+    const { encodedTrack, volume = 100, position = 0, filters = {} } = data
     const decodedTrack = decodeTrack(encodedTrack.replace(/ /g, '+'))
 
     if (!decodedTrack) {

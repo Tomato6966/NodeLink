@@ -1,21 +1,17 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { logger, sendErrorResponse } from '../utils.js'
 
-const updateMixSchema = myzod
-  .object({
-    volume: myzod.number().min(0).max(1)
-  })
-  .allowUnknownKeys()
+const v = new Validator({ haltOnFirstError: true })
 
-const pathSchema = myzod.object({
-  sessionId: myzod.string(),
-  guildId: myzod
-    .string()
-    .withPredicate(
-      (val) => /^\d{17,20}$/.test(val),
-      'guildId must be 17-20 digits'
-    ),
-  mixId: myzod.string()
+const updateMixSchema = v.compile({
+  volume: { type: 'number', min: 0, max: 1, optional: false },
+  $$strict: false
+})
+
+const pathSchema = v.compile({
+  sessionId: { type: 'string', empty: false },
+  guildId: { type: 'string', pattern: /^\d{17,20}$/, messages: { stringPattern: 'guildId must be 17-20 digits' } },
+  mixId: { type: 'string', empty: false }
 })
 
 async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
@@ -25,13 +21,9 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
   const guildId = pathParts[5]
   const mixId = pathParts[7]
 
-  try {
-    pathSchema.parse({ sessionId, guildId, mixId })
-  } catch (error) {
-    if (error instanceof myzod.ValidationError) {
-      return sendErrorResponse(req, res, 400, error.message)
-    }
-    return sendErrorResponse(req, res, 400, 'Invalid path parameters')
+  const validation = pathSchema({ sessionId, guildId, mixId })
+  if (validation !== true) {
+    return sendErrorResponse(req, res, 400, validation?.[0]?.message || 'Invalid path parameters')
   }
 
   if (method === 'PATCH') {
@@ -56,7 +48,10 @@ async function handleUpdateMix(req, res, sessionId, guildId, mixId, nodelink) {
       }
     }
 
-    updateMixSchema.parse(body)
+    const bodyValidation = updateMixSchema(body)
+    if (bodyValidation !== true) {
+      return sendErrorResponse(req, res, 400, bodyValidation?.[0]?.message || 'Invalid parameters')
+    }
 
     const session = nodelink.sessions.get(sessionId)
     if (!session) {
@@ -82,9 +77,6 @@ async function handleUpdateMix(req, res, sessionId, guildId, mixId, nodelink) {
     res.writeHead(204)
     res.end()
   } catch (error) {
-    if (error instanceof myzod.ValidationError) {
-      return sendErrorResponse(req, res, 400, error.message)
-    }
     logger('error', 'MixAPI', `Error updating mix: ${error.message}`)
     return sendErrorResponse(req, res, 500, error.message)
   }

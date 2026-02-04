@@ -1,19 +1,31 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
-const meaningSchema = myzod.object({
-  encodedTrack: myzod.string(),
-  lang: myzod.string().optional()
+const v = new Validator({ haltOnFirstError: true })
+
+const meaningSchema = v.compile({
+  encodedTrack: {
+    type: 'string',
+    empty: false,
+    messages: {
+      required: 'encodedTrack parameter is required.',
+      string: 'encodedTrack parameter is required.',
+      stringEmpty: 'encodedTrack parameter is required.'
+    }
+  },
+  lang: { type: 'string', optional: true, default: 'en' }
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const result = meaningSchema.try({
-    encodedTrack: parsedUrl.searchParams.get('encodedTrack'),
-    lang: parsedUrl.searchParams.get('lang') || 'en'
-  })
+  const data = {
+    encodedTrack: parsedUrl.searchParams.get('encodedTrack') ?? undefined,
+    lang: parsedUrl.searchParams.get('lang') || undefined
+  }
 
-  if (result instanceof myzod.ValidationError) {
-    const errorMessage = result.message || 'encodedTrack parameter is required.'
+  const validation = meaningSchema(data)
+
+  if (validation !== true) {
+    const errorMessage = validation?.[0]?.message || 'encodedTrack parameter is required.'
     logger('warn', 'Meaning', errorMessage)
     return sendErrorResponse(
       req,
@@ -27,7 +39,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   }
 
   let decodedTrack
-  const targetLang = result.lang
+  const targetLang = data.lang
   try {
     decodedTrack = decodeTrack(result.encodedTrack.replace(/ /g, '+'))
   } catch (err) {

@@ -1,17 +1,21 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { encodeTrack, logger, sendErrorResponse } from '../utils.js'
 
-const encodeTrackSchema = myzod.object({
-  track: myzod.string()
+const v = new Validator({ haltOnFirstError: true })
+
+const encodeTrackSchema = v.compile({
+  track: { type: 'string', empty: false, messages: { required: 'Missing track parameter.', stringEmpty: 'Missing track parameter.' } }
 })
 
 function handler(_nodelink, req, res, sendResponse, parsedUrl) {
-  const result = encodeTrackSchema.try({
-    track: parsedUrl.searchParams.get('track')
-  })
+  const data = {
+    track: parsedUrl.searchParams.get('track') ?? undefined
+  }
 
-  if (result instanceof myzod.ValidationError) {
-    const errorMessage = result.message || 'Missing track parameter.'
+  const validation = encodeTrackSchema(data)
+
+  if (validation !== true) {
+    const errorMessage = validation?.[0]?.message || 'Missing track parameter.'
     sendErrorResponse(
       req,
       res,
@@ -24,7 +28,7 @@ function handler(_nodelink, req, res, sendResponse, parsedUrl) {
     return
   }
 
-  const track = result.track
+  const track = data.track
 
   try {
     logger('debug', 'Tracks', `Encoding track: ${track}`)
