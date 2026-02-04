@@ -283,26 +283,15 @@ export default class AudioMackSource {
       })
 
       if (error || !body) {
-        return {
-          exception: {
-            message:
-              error?.message || 'Failed to get playback URL from Audiomack API',
-            severity: 'fault',
-            cause: 'StreamLink'
-          }
-        }
+        throw new Error(
+          error?.message || 'Failed to get playback URL from Audiomack API'
+        )
       }
 
       const json = parseJsonBody(body)
       const data = normalizeApiResult(json)
       if (!data) {
-        return {
-          exception: {
-            message: 'Invalid response from Audiomack API',
-            severity: 'fault',
-            cause: 'StreamLink'
-          }
-        }
+        throw new Error('Invalid response from Audiomack API')
       }
 
       const streamUrl =
@@ -313,26 +302,34 @@ export default class AudioMackSource {
         data.stream_url
 
       if (!streamUrl) {
-        return {
-          exception: {
-            message: 'Invalid or missing streaming URL in response',
-            severity: 'fault',
-            cause: 'StreamLink'
-          }
-        }
+        throw new Error('Invalid or missing streaming URL in response')
       }
 
       const format = guessFormatFromUrl(streamUrl)
       return { url: streamUrl, protocol: 'https', format }
     } catch (e) {
+      logger(
+        'warn',
+        'Audiomack',
+        `Direct stream failed for ${track.title}: ${e.message}. Falling back to YouTube.`
+      )
+    }
+
+    const searchResult = await this.nodelink.sources.searchWithDefault(
+      `${track.title} ${track.author}`
+    )
+
+    const bestMatch = getBestMatch(searchResult.data, track)
+    if (!bestMatch)
       return {
         exception: {
-          message: e.message || 'Failed to get playback URL from Audiomack API',
-          severity: 'fault',
-          cause: 'StreamLink'
+          message: 'No suitable alternative found.',
+          severity: 'fault'
         }
       }
-    }
+
+    const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+    return { newTrack: bestMatch, ...streamInfo }
   }
 
   async loadStream(decodedTrack, url, _protocol, additionalData) {
