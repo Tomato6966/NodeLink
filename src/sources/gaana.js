@@ -2,7 +2,7 @@
 * Credits: https://github.com/southctrl; adapted for NodeLink
 */
 
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.js'
 import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const USER_AGENT =
@@ -101,7 +101,7 @@ export default class GaanaSource {
       if (!/^\d+$/.test(String(trackId))) {
         const trackData = await this.getJson(`/api/songs/${encodeURIComponent(trackId)}`)
         if (!trackData?.track_id) {
-          return { exception: { message: 'Track metadata not found for stream.', severity: 'common' } }
+          throw new Error('Track metadata not found for stream.')
         }
         trackId = trackData.track_id
       }
@@ -111,13 +111,13 @@ export default class GaanaSource {
       )
 
       if (!streamData) {
-        return { exception: { message: 'Stream URL not found.', severity: 'common' } }
+        throw new Error('Stream URL not found.')
       }
 
       const hlsUrl = streamData.hlsUrl || streamData.hls_url || null
       const url = hlsUrl || streamData.url
       if (!url) {
-        return { exception: { message: 'No playable stream URL.', severity: 'common' } }
+        throw new Error('No playable stream URL.')
       }
 
       const segments = Array.isArray(streamData.segments)
@@ -137,9 +137,28 @@ export default class GaanaSource {
             }
       }
     } catch (e) {
-      logger('error', 'Gaana', `Stream resolve error: ${e.message}`)
-      return { exception: { message: e.message, severity: 'fault' } }
+      logger(
+        'warn',
+        'Gaana',
+        `Direct stream failed for ${decodedTrack.title}: ${e.message}. Falling back to YouTube.`
+      )
     }
+
+    const searchResult = await this.nodelink.sources.searchWithDefault(
+      `${decodedTrack.title} ${decodedTrack.author}`
+    )
+
+    const bestMatch = getBestMatch(searchResult.data, decodedTrack)
+    if (!bestMatch)
+      return {
+        exception: {
+          message: 'No suitable alternative found.',
+          severity: 'fault'
+        }
+      }
+
+    const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+    return { newTrack: bestMatch, ...streamInfo }
   }
 
   async loadStream(track, url, protocol, additionalData) {
