@@ -232,7 +232,8 @@ export default class YandexMusicSource {
       const response = await http1makeRequest(url, {
         method: 'GET',
         streamOnly: true,
-        localAddress: this.nodelink.routePlanner?.getIP()
+        localAddress: this.nodelink.routePlanner?.getIP(),
+        proxy: this.config.proxy
       })
 
       if (response.error || (response.statusCode && response.statusCode !== 200 && response.statusCode !== 206)) {
@@ -599,7 +600,8 @@ export default class YandexMusicSource {
         'User-Agent': USER_AGENT,
         'X-Yandex-Music-Client': CLIENT_HEADER
       },
-      localAddress: this.nodelink.routePlanner?.getIP()
+      localAddress: this.nodelink.routePlanner?.getIP(),
+      proxy: this.config.proxy
     })
 
     if (statusCode !== 200) {

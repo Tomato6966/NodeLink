@@ -11,6 +11,7 @@ export default class HLSHandler extends PassThrough {
     this.currentUrl = url
     this.headers = options.headers || {}
     this.localAddress = options.localAddress || null
+    this.proxy = options.proxy || null
     this.onResolveUrl = options.onResolveUrl || null
     this.strategy = options.strategy || (options.type?.includes('fmp4') ? 'segmented' : 'streaming')
     this.startTime = (options.startTime || 0) / 1000
@@ -18,6 +19,7 @@ export default class HLSHandler extends PassThrough {
     this.fetcher = new SegmentFetcher({
       headers: this.headers,
       localAddress: this.localAddress,
+      proxy: this.proxy,
       onResolveUrl: this.onResolveUrl
     })
 
@@ -82,7 +84,7 @@ export default class HLSHandler extends PassThrough {
     if (this.stop) return
     try {
       const { body: playlistContent, error, statusCode } = await http1makeRequest(this.currentUrl, {
-        headers: this.headers, method: 'GET', localAddress: this.localAddress
+        headers: this.headers, method: 'GET', localAddress: this.localAddress, proxy: this.proxy
       })
 
       if (error || statusCode !== 200) {
@@ -124,8 +126,8 @@ export default class HLSHandler extends PassThrough {
           const audioRendition = group.find(r => r.default === 'YES') || group.find(r => r.autoselect === 'YES') || group[0]
 
           if (audioRendition && audioRendition.uri) {
-             this.currentUrl = audioRendition.uri
-             return setImmediate(() => this._playlistLoop())
+            this.currentUrl = audioRendition.uri
+            return setImmediate(() => this._playlistLoop())
           }
         }
 

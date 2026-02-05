@@ -235,7 +235,8 @@ export default class JioSaavnSource {
   async loadStream(_track, url, _protocol, _additionalData) {
     const { stream, error, statusCode } = await http1makeRequest(url, {
       method: 'GET',
-      streamOnly: true
+      streamOnly: true,
+      proxy: this.config.proxy
     })
 
     if (error || statusCode !== 200) {
@@ -284,7 +285,8 @@ export default class JioSaavnSource {
 
     const { body, error, statusCode } = await http1makeRequest(url.toString(), {
       method: 'GET',
-      headers: HEADERS
+      headers: HEADERS,
+      proxy: this.config.proxy
     })
 
     if (error || statusCode !== 200) {
