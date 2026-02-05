@@ -2,8 +2,8 @@
 * Credits: https://github.com/southctrl; adapted for NodeLink
 */
 
-import { PassThrough } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.js'
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36'
@@ -137,15 +137,37 @@ export default class GaanaSource {
             }
       }
     } catch (e) {
-      logger('error', 'Gaana', `Stream resolve error: ${e.message}`)
-      return { exception: { message: e.message, severity: 'fault' } }
+      logger(
+        'warn',
+        'Gaana',
+        `Direct stream failed for ${decodedTrack.title}: ${e.message}. Falling back to YouTube.`
+      )
     }
+
+    const searchResult = await this.nodelink.sources.searchWithDefault(
+      `${decodedTrack.title} ${decodedTrack.author}`
+    )
+
+    const bestMatch = getBestMatch(searchResult.data, decodedTrack)
+    if (!bestMatch)
+      return {
+        exception: {
+          message: 'No suitable alternative found.',
+          severity: 'fault'
+        }
+      }
+
+    const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+    return { newTrack: bestMatch, ...streamInfo }
   }
 
   async loadStream(track, url, protocol, additionalData) {
     if (protocol === 'hls') {
-      const stream = new PassThrough()
-      this.streamHlsPlaylist(stream, url)
+      const stream = new HLSHandler(url, {
+        type: 'mpegts',
+        localAddress: this.nodelink.routePlanner?.getIP(),
+        startTime: additionalData?.startTime || 0
+      })
       return { stream, type: 'mpegts' }
     }
 
@@ -155,35 +177,11 @@ export default class GaanaSource {
       return { stream, type: 'mp4' }
     }
 
-    const stream = new PassThrough()
-    this.streamUrl(stream, url)
-    return { stream, type: 'mp4' }
-  }
-
-  async streamUrl(outputStream, url) {
-    try {
-      const { stream, error, statusCode } = await http1makeRequest(url, { method: 'GET', streamOnly: true })
-
-      if (error || statusCode !== 200 || !stream) {
-        throw new Error(error?.message || `Stream status ${statusCode}`)
-      }
-
-      await new Promise((resolve, reject) => {
-        stream.on('data', (chunk) => {
-          if (!outputStream.destroyed) outputStream.write(chunk)
-        })
-        stream.on('end', resolve)
-        stream.on('error', reject)
-      })
-    } catch (e) {
-      logger('warn', 'Gaana', `Stream error: ${e.message}`)
-      if (!outputStream.destroyed) outputStream.emit('error', e)
-    } finally {
-      if (!outputStream.destroyed) {
-        outputStream.emit('finishBuffering')
-        outputStream.end()
-      }
+    const { stream, error, statusCode } = await http1makeRequest(url, { method: 'GET', streamOnly: true, headers: BASE_HEADERS })
+    if (error || statusCode !== 200 || !stream) {
+      throw new Error(error?.message || `Stream status ${statusCode}`)
     }
+    return { stream, type: 'mp4' }
   }
 
   async streamSegments(outputStream, initUrl, segments) {
@@ -203,79 +201,6 @@ export default class GaanaSource {
         outputStream.emit('finishBuffering')
         outputStream.end()
       }
-    }
-  }
-
-  async streamHlsPlaylist(outputStream, playlistUrl) {
-    try {
-      const playlist = await this.fetchText(playlistUrl)
-      if (!playlist) throw new Error('Empty HLS playlist')
-
-      const lines = playlist
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-
-      if (lines.some((l) => l.startsWith('#EXTINF'))) {
-        await this.streamHlsSegments(outputStream, playlistUrl, lines)
-        return
-      }
-
-      const audioTags = lines.filter(
-        (l) => l.startsWith('#EXT-X-MEDIA') && l.includes('TYPE=AUDIO') && l.includes('URI="')
-      )
-
-      if (audioTags.length) {
-        const preferred = audioTags.find((l) => /DEFAULT=YES/.test(l)) || audioTags[audioTags.length - 1]
-        const uri = preferred.match(/URI="([^"]+)"/)?.[1]
-        if (uri) {
-          const audioUrl = new URL(uri, playlistUrl).toString()
-          const audioPlaylist = await this.fetchText(audioUrl)
-          const audioLines = audioPlaylist
-            .split('\n')
-            .map((l) => l.trim())
-            .filter(Boolean)
-
-          await this.streamHlsSegments(outputStream, audioUrl, audioLines)
-          return
-        }
-      }
-
-      const variantUrl = lines.find((l) => !l.startsWith('#'))
-      if (!variantUrl) throw new Error('No HLS variant found')
-
-      const resolved = new URL(variantUrl, playlistUrl).toString()
-      const variantPlaylist = await this.fetchText(resolved)
-      const variantLines = variantPlaylist
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean)
-
-      await this.streamHlsSegments(outputStream, resolved, variantLines)
-    } catch (e) {
-      if (!outputStream.destroyed) outputStream.emit('error', e)
-    } finally {
-      if (!outputStream.destroyed) {
-        outputStream.emit('finishBuffering')
-        outputStream.end()
-      }
-    }
-  }
-
-  async streamHlsSegments(outputStream, baseUrl, lines) {
-    const segments = []
-
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('#EXTINF')) {
-        const uri = lines[i + 1]
-        if (uri && !uri.startsWith('#')) segments.push(new URL(uri, baseUrl).toString())
-      }
-    }
-
-    for (const segmentUrl of segments) {
-      if (outputStream.destroyed) break
-      const ok = await this.streamUrlChunk(outputStream, segmentUrl)
-      if (!ok) break
     }
   }
 
@@ -305,20 +230,6 @@ export default class GaanaSource {
       logger('warn', 'Gaana', `Segment stream error: ${e.message}`)
       return false
     }
-  }
-
-  async fetchText(url) {
-    const { body, statusCode, error } = await http1makeRequest(url, {
-      method: 'GET',
-      headers: BASE_HEADERS,
-      disableBodyCompression: true
-    })
-
-    if (error || statusCode !== 200 || !body) {
-      throw new Error(error?.message || `Playlist status ${statusCode}`)
-    }
-
-    return typeof body === 'string' ? body : JSON.stringify(body)
   }
 
   mapTrack(track) {

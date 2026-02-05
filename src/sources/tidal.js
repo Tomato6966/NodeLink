@@ -29,7 +29,7 @@ export default class TidalSource {
     this.searchTerms = ['tdsearch']
     this.recommendationTerm = ['tdrec']
     this.patterns = [
-      /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9-]+)/
+      /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9-]+)(?:\?.*)?$/
     ]
     this.priority = 90
     this.token = this.config?.token
@@ -301,7 +301,7 @@ export default class TidalSource {
     }
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
     const query = `${decodedTrack.title} ${decodedTrack.author}`
 
     try {
@@ -358,7 +358,7 @@ export default class TidalSource {
         }
       }
 
-      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info, itag, forceRefresh)
       return { newTrack: bestMatch, ...streamInfo }
     } catch (e) {
       logger('error', 'Tidal', `Failed to mirror track: ${e.message}`)

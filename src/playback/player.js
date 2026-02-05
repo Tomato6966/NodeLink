@@ -9,7 +9,7 @@ let createSeekeableAudioResource
 async function getStreamProcessor() {
   if (createAudioResource) return
 
-  const processor = await import('./streamProcessor.js')
+  const processor = await import('./processing/streamProcessor.js')
   createAudioResource = processor.createAudioResource
   createSeekeableAudioResource = processor.createSeekeableAudioResource
 }
@@ -31,6 +31,8 @@ export class Player {
 
     this.track = null
     this.holoTrack = null
+    this.nextTrack = null
+    this.nextResource = null
     this.isPaused = false
     this.volumePercent = this.nodelink.options?.defaultVolume ?? 100
     this.filters = {}
@@ -47,6 +49,18 @@ export class Player {
     this.lastManualReconnect = 0
     this.audioMixer = null
     this._initAudioMixer()
+    this.fading = this.nodelink.options?.audio?.fading
+    this._fadeTimers = { trackEnd: null, pause: null, stop: null }
+    this._isResuming = false
+    this._pendingTrackStartFade = false
+    this._lyricsBasePosition = 0
+    this._lyricsBasePackets = 0
+    this._lyricsMarkerTimer = null
+
+    this.isLyricsSubscribed = false
+    this.currentLyrics = null
+    this.lyricsLineIndex = -1
+    this.skipTrackSource = false
 
     logger(
       'debug',
@@ -83,14 +97,29 @@ export class Player {
       player: this.toJSON()
     })
 
-    this.waitEvent = (event, filter) =>
-      new Promise((resolve) => {
+    this.waitEvent = (
+      event,
+      filter,
+      timeout = this.nodelink.options.eventTimeoutMs ?? 15000
+    ) =>
+      new Promise((resolve, reject) => {
         const handler = (_, payload) => {
           if (!filter || filter(payload)) {
-            this.connection.off(event, handler)
+            clearTimeout(timeoutId)
+            this.connection?.off(event, handler)
             resolve(payload)
           }
         }
+
+        const timeoutId = setTimeout(() => {
+          this.connection?.off(event, handler)
+          reject(
+            new Error(
+              `Event ${event} timed out after ${timeout}ms for guild ${this.guildId}`
+            )
+          )
+        }, timeout)
+
         this.connection.on(event, handler)
       })
 
@@ -104,7 +133,7 @@ export class Player {
   }
 
   async _initAudioMixer() {
-    const { AudioMixer } = await import('./AudioMixer.js')
+    const { AudioMixer } = await import('./processing/AudioMixer.js')
     this.audioMixer = new AudioMixer(
       this.nodelink.options?.mix ?? {
         enabled: true,
@@ -167,6 +196,9 @@ export class Player {
     this.connection.on('audioStream', (audioStream) => {
       audioStream.on('data', () => {
         this._lastStreamDataTime = Date.now()
+        if (this.isLyricsSubscribed && !this.isPaused && this.track) {
+          this._syncLyrics()
+        }
       })
     })
 
@@ -240,11 +272,31 @@ export class Player {
         EndReasons.LOAD_FAILED
       ].includes(state.reason)
     ) {
-      if (this.isUpdatingTrack && state.reason === 'finished') {
+      if (state.reason === EndReasons.FINISHED && this.nextResource) {
+        const resource = this.nextResource
+        const nextTrack = this.nextTrack
+
+        this._emitTrackEnd(EndReasons.GAPLESS)
+
+        this.track = nextTrack
+        this.nextTrack = null
+        this.nextResource = null
+
+        this.position = 0
+        this._lyricsBasePosition = 0
+        this._lyricsBasePackets =
+          this.connection?.statistics?.packetsExpected ?? 0
+
+        this.connection.play(resource)
+
+        return
+      }
+
+      if ((this.isUpdatingTrack || this._isSeeking) && state.reason === 'finished') {
         logger(
           'debug',
           'Player',
-          `Ignoring spurious idle/finished event during track replacement for guild ${this.guildId}.`
+          `Ignoring spurious idle/finished event during track replacement/seek for guild ${this.guildId}.`
         )
         return
       }
@@ -269,6 +321,9 @@ export class Player {
       this.isPaused = false
 
       if (!wasResuming && !this._isRestoring) {
+        this._lyricsBasePackets =
+          this.connection?.statistics?.packetsExpected ?? 0
+        this._fading('trackStart')
         this._emitTrackStart()
       }
     } else if (state.status === 'paused') {
@@ -362,10 +417,25 @@ export class Player {
   }
 
   _resetTrack() {
+    if (this.nextResource) {
+      this.nextResource.destroy()
+      this.nextResource = null
+      this.nextTrack = null
+    }
+
     this.track = null
     this.holoTrack = null
     this.isPaused = false
     this.position = 0
+    this.currentLyrics = null
+    this.lyricsLineIndex = -1
+    this._fading('reset')
+    this._lyricsBasePosition = 0
+    this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
+    if (this._lyricsMarkerTimer) {
+      clearTimeout(this._lyricsMarkerTimer)
+      this._lyricsMarkerTimer = null
+    }
   }
 
   async _emitTrackStart() {
@@ -376,6 +446,33 @@ export class Player {
       track: trackToEmit,
       playingQuality: this.streamInfo?.format?.itag || null
     })
+
+    if (trackToEmit?.info?.sourceName === 'eternalbox') {
+      const info = trackToEmit.info
+      const pluginInfo = trackToEmit.pluginInfo || {}
+      const links = {
+        jukeboxPage: `https://eternalboxmirror.xyz/jukebox_go.html?id=${info.identifier}`,
+        analysisUrl: pluginInfo.analysisUrl || null,
+        streamUrl: pluginInfo.streamUrl || null,
+        ogAudioSource: pluginInfo.ogAudioSource || null,
+        spotifyUrl: pluginInfo.spotify?.url || info.uri || null
+      }
+
+      this.emitEvent(GatewayEvents.ETERNALBOX_INFO, {
+        track: trackToEmit,
+        eternalbox: {
+          id: info.identifier,
+          service: pluginInfo.service || null,
+          analysisSummary: pluginInfo.analysisSummary || null,
+          spotify: pluginInfo.spotify || null,
+          links
+        }
+      })
+    }
+
+    if (this.isLyricsSubscribed) {
+      this._loadLyrics()
+    }
   }
 
   _emitTrackEnd(reason) {
@@ -427,17 +524,36 @@ export class Player {
   async _fetchResource(info, urlData, startTime) {
     await getStreamProcessor()
 
-    if (startTime)
-      urlData.additionalData = { startTime, ...urlData.additionalData }
+    const additionalData = { ...urlData.additionalData }
+    if (startTime !== undefined) additionalData.startTime = startTime
+
+    urlData.additionalData = {
+      ...urlData.additionalData,
+      positionCallback: () => this._realPosition()
+    }
 
     const track = urlData?.newTrack ? urlData?.newTrack?.info : info
     const fetched = await this.nodelink.sources.getTrackStream(
       track,
       urlData.url,
       urlData.protocol,
-      urlData.additionalData
+      additionalData
     )
     if (fetched.exception) return fetched
+    if (fetched.stream?.on) {
+      fetched.stream.on('eternalboxJump', (data) => {
+        this.emitEvent(GatewayEvents.ETERNALBOX_JUMP, {
+          track: this.holoTrack || this.track,
+          eternalbox: data
+        })
+      })
+      fetched.stream.on('icyMetadata', (data) => {
+        this.emitEvent(GatewayEvents.STREAM_METADATA, {
+          track: this.holoTrack || this.track,
+          stream: data
+        })
+      })
+    }
     const resource = createAudioResource(
       fetched.stream,
       fetched.type || urlData.format,
@@ -570,6 +686,7 @@ export class Player {
     }
 
     this._lastPosition = position
+    this._syncLyrics()
 
     this.session.socket.send(
       JSON.stringify({
@@ -593,15 +710,13 @@ export class Player {
       ...this.track.info,
       audioTrackId: this.track.audioTrackId
     }
-    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+
+    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo, null, this._isRecovering)
+    if (!this.track) return false
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
     logger('debug', 'Player', `Got track URL for guild ${this.guildId}`, {
       urlData
     })
-
-    if (['mp4', 'm4a', 'mov'].includes(this.streamInfo.format)) {
-      this.track.info.isSeekable = false
-    }
 
     if (urlData.exception) {
       const err = new Error(urlData.exception.message)
@@ -663,6 +778,11 @@ export class Player {
     if (this.volumePercent !== 100) {
       resource.setVolume(this.volumePercent / 100)
     }
+    this._lyricsBasePosition = startTime
+    this._lyricsBasePackets =
+      this.connection?.statistics?.packetsExpected ?? 0
+    this._fading('trackStartArm', { resource })
+    this._fading('trackEndSchedule', { startPosition: startTime || 0 })
 
     this.setFilters(this.filters)
 
@@ -718,6 +838,7 @@ export class Player {
         }
 
         this.track = { encoded, info, endTime, userData, audioTrackId }
+        this._fading('reset')
 
         if (!this.voice.endpoint || !this.voice.token) {
           logger(
@@ -777,7 +898,7 @@ export class Player {
     this._isSeeking = true
     try {
       const sourceName = this.track.info.sourceName
-      const unsupportedSources = ['deezer', 'local']
+      const unsupportedSources = ['local']
 
       let seekPromise
       if (!this.streamInfo?.url) {
@@ -800,6 +921,7 @@ export class Player {
               audioTrackId: this.track.audioTrackId
             }
             const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+            if (!this.track) return false
             this.streamInfo = { ...urlData, trackInfo: this.track.info }
             logger(
               'debug',
@@ -815,8 +937,22 @@ export class Player {
           )
         }
       }
-      if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url) {
+
+      const source = this.nodelink.sources.getSource(sourceName)
+      const canNativeSeek = sourceName === 'deezer' || (source && typeof source.loadStream === 'function')
+
+      if (this.streamInfo?.protocol === 'sabr') {
+        seekPromise = this._seekUsingSource(
+          seekPosition,
+          endTime !== undefined ? endTime : this.track.endTime
+        )
+      } else if (!unsupportedSources.includes(sourceName) && this.streamInfo?.url && sourceName !== 'deezer' && this.streamInfo.protocol !== 'hls') {
         seekPromise = this._seekeableSeek(
+          seekPosition,
+          endTime !== undefined ? endTime : this.track.endTime
+        )
+      } else if (canNativeSeek) {
+        seekPromise = this._seekUsingSource(
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime
         )
@@ -830,11 +966,142 @@ export class Player {
       const result = await seekPromise
       if (result) {
         this.emitEvent(GatewayEvents.SEEK, { position: this.position })
+        this._lyricsBasePosition = this.position
+        this._lyricsBasePackets =
+          this.connection?.statistics?.packetsExpected ?? 0
+        if (this._lyricsMarkerTimer) {
+          clearTimeout(this._lyricsMarkerTimer)
+          this._lyricsMarkerTimer = null
+        }
+        if (this.isLyricsSubscribed) this._recalculateLyricsIndex(undefined, undefined, true)
+        this._fading('seek')
+        this._fading('trackEndSchedule', { startPosition: this.position })
       }
       return result
     } finally {
       this._isSeeking = false
     }
+  }
+
+  async _seekUsingSource(position, endTime) {
+    if (!this.track) return false
+
+    logger(
+      'debug',
+      'Player',
+      `Seeking using source (native) to ${position}ms for guild ${this.guildId}`
+    )
+
+    this.position = position
+    this.track.endTime = endTime
+    let previousSession = null
+    let reuseUrlData = null
+
+    if (this.streamInfo?.protocol === 'sabr' && this.connection?.audioStream) {
+      const inputStream = this.connection.audioStream.pipes?.[0]
+      if (inputStream && typeof inputStream.getSessionState === 'function') {
+        previousSession = inputStream.getSessionState()
+        if (previousSession) {
+          logger(
+            'debug',
+            'Player',
+            `Extracted SABR session state: rn=${previousSession.requestNumber}, hasCookie=${!!previousSession.nextRequestPolicy?.playbackCookie}`
+          )
+
+          reuseUrlData = {
+            protocol: this.streamInfo.protocol,
+            url: this.streamInfo.url,
+            additionalData: {
+              ...this.streamInfo.additionalData,
+              previousSession,
+              startTime: position
+            }
+          }
+
+          logger(
+            'debug',
+            'Player',
+            `Reusing existing SABR streaming URL for seek to maintain session`
+          )
+        }
+      }
+    }
+
+    const trackInfo = {
+      ...this.track.info,
+      audioTrackId: this.track.audioTrackId
+    }
+
+    const urlData = reuseUrlData || await this.nodelink.sources.getTrackUrl(trackInfo)
+    this.streamInfo = { ...urlData, trackInfo: this.track.info }
+
+    if (urlData.exception) {
+      const err = new Error(urlData.exception.message)
+      this._onError(err)
+      return false
+    }
+
+    if (!this.connection) {
+      this._initConnection()
+    }
+
+    if (
+      !this.connection ||
+      !this.connection.udpInfo ||
+      !this.connection.udpInfo.secretKey
+    ) {
+      await this.waitEvent(
+        'stateChange',
+        (s) => s.status === 'connected' && this.connection?.udpInfo?.secretKey
+      )
+    }
+
+    if (
+      !this.connection ||
+      !this.connection.udpInfo ||
+      !this.connection.udpInfo.secretKey
+    ) {
+      const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`
+      logger('error', 'Player', errorMessage)
+      this._onError(new Error(errorMessage))
+      return false
+    }
+
+    const fetched = await this._fetchResource(
+      this.track.info,
+      urlData,
+      position
+    )
+    if (fetched.exception) {
+      const err = new Error(fetched.exception.message)
+      this._onError(err)
+      return false
+    }
+
+    if (this.connection.audioStream) {
+      this.connection.audioStream?.destroy()
+    }
+
+    const resource = fetched.stream
+    if (this.volumePercent !== 100) {
+      resource.setVolume(this.volumePercent / 100)
+    }
+    this._fading('seekPrepare', { resource })
+
+    this.setFilters(this.filters)
+
+    logger(
+      'debug',
+      'Player',
+      `Playing resource for guild ${this.guildId} after source seek`
+    )
+    this._lyricsBasePosition = position
+    this._lyricsBasePackets =
+      this.connection?.statistics?.packetsExpected ?? 0
+    this.connection.play(resource)
+    await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
+
+    return true
   }
 
   async _seekeableSeek(position, endTime) {
@@ -880,7 +1147,12 @@ export class Player {
       if (this.volumePercent !== 100) {
         resource.setVolume(this.volumePercent / 100)
       }
+      this._fading('seekPrepare', { resource })
       resource.setFilters(this.filters)
+
+      this._lyricsBasePosition = position
+      this._lyricsBasePackets =
+        this.connection?.statistics?.packetsExpected ?? 0
 
       const oldStream = this.connection.play(resource)
       await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
@@ -929,7 +1201,9 @@ export class Player {
       ...this.track.info,
       audioTrackId: this.track.audioTrackId
     }
-    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+
+    const urlData = await this.nodelink.sources.getTrackUrl(trackInfo, null, this._isRecovering)
+    if (!this.track) return false
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
 
     if (urlData.exception) {
@@ -988,6 +1262,7 @@ export class Player {
     if (this.volumePercent !== 100) {
       resource.setVolume(this.volumePercent / 100)
     }
+    this._fading('seekPrepare', { resource })
 
     this.setFilters(this.filters)
 
@@ -996,6 +1271,9 @@ export class Player {
       'Player',
       `Playing resource for guild ${this.guildId} after legacy seek`
     )
+    this._lyricsBasePosition = position
+    this._lyricsBasePackets =
+      this.connection?.statistics?.packetsExpected ?? 0
     this.connection.play(resource)
     await this.waitEvent('playerStateChange', (s) => s.status === 'playing')
 
@@ -1006,8 +1284,16 @@ export class Player {
     this.isUpdatingTrack = true
     try {
       if (this.destroying || !this.track) return false
+
+      if (this.nextResource) {
+        this.nextResource.destroy()
+        this.nextResource = null
+        this.nextTrack = null
+      }
+
       if (this.connection && this.connStatus !== 'destroyed') {
         if (this.connection.audioStream) {
+          if (this._fading('trackStop')) return true
           this.connection.stop(EndReasons.STOPPED)
         } else {
           this._emitTrackEnd(EndReasons.STOPPED)
@@ -1020,6 +1306,46 @@ export class Player {
       return true
     } finally {
       this.isUpdatingTrack = false
+    }
+  }
+
+  async preload(payload) {
+    if (this.destroying) return false
+
+    if (this.nextResource) {
+      this.nextResource.destroy()
+      this.nextResource = null
+      this.nextTrack = null
+    }
+
+    try {
+      const trackInfo = {
+        ...payload.info,
+        audioTrackId: payload.audioTrackId
+      }
+
+      const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
+      if (urlData.exception) return false
+
+      const fetched = await this._fetchResource(payload.info, urlData, 0)
+      if (fetched.exception) return false
+
+      this.nextTrack = payload
+      this.nextResource = fetched.stream
+
+      if (this.volumePercent !== 100) {
+        this.nextResource.setVolume(this.volumePercent / 100)
+      }
+      this.nextResource.setFilters(this.filters)
+
+      return true
+    } catch (err) {
+      logger(
+        'error',
+        'Player',
+        `Preload failed for guild ${this.guildId}: ${err.message}`
+      )
+      return false
     }
   }
 
@@ -1056,6 +1382,11 @@ export class Player {
     this.volumePercent = Math.max(0, Math.min(1000, level))
     this.connection?.audioStream?.setVolume(this.volumePercent / 100)
     this.emitEvent(GatewayEvents.VOLUME_CHANGED, { volume: this.volumePercent })
+    return true
+  }
+
+  setFading(config) {
+    this.fading = config
     return true
   }
 
@@ -1238,7 +1569,7 @@ export class Player {
     const mixVolume = volume ?? mixConfig.defaultVolume
 
     const { createAudioResource: createResource } = await import(
-      './streamProcessor.js'
+      './processing/streamProcessor.js'
     )
 
     const urlData = await this.nodelink.sources.getTrackUrl(trackPayload.info)
@@ -1301,11 +1632,175 @@ export class Player {
     return this.audioMixer.getLayers()
   }
 
+  async subscribeLyrics(skipTrackSource) {
+    if (this.isLyricsSubscribed) return
+    this.isLyricsSubscribed = true
+    this.skipTrackSource = skipTrackSource === 'true' || skipTrackSource === true
+
+    if (this.track && !this.isPaused) {
+      this._loadLyrics()
+    }
+  }
+
+  unsubscribeLyrics() {
+    this.isLyricsSubscribed = false
+    this.skipTrackSource = false
+    this.currentLyrics = null
+    this.lyricsLineIndex = -1
+    if (this._lyricsMarkerTimer) {
+      clearTimeout(this._lyricsMarkerTimer)
+      this._lyricsMarkerTimer = null
+    }
+  }
+
+  async _loadLyrics() {
+    if (!this.track) return
+
+    const lyricsData = await this.nodelink.lyrics.loadLyrics(
+      { info: this.track.info },
+      undefined,
+      this.skipTrackSource
+    )
+
+    if (lyricsData && lyricsData.loadType === 'lyrics') {
+      const lines = lyricsData.data.lines.map((line) => ({
+        timestamp: line.time,
+        duration: line.duration || 0,
+        line: line.text,
+        words: line.words || [],
+        plugin: {}
+      }))
+
+      for (let i = 0; i < lines.length - 1; i++) {
+        if (lines[i].duration === 0) {
+          lines[i].duration = lines[i + 1].timestamp - lines[i].timestamp
+        }
+      }
+
+      const payload = {
+        sourceName: this.track.info.sourceName,
+        provider: lyricsData.data.provider,
+        text: lyricsData.data.lines.map((l) => l.text).join('\n'),
+        lines,
+        plugin: {}
+      }
+
+      this.currentLyrics = payload
+      this.lyricsLineIndex = -1
+      this.emitEvent('LyricsFoundEvent', { lyrics: this.currentLyrics })
+      if (this._lyricsMarkerTimer) {
+        clearTimeout(this._lyricsMarkerTimer)
+        this._lyricsMarkerTimer = null
+      }
+      this._recalculateLyricsIndex(undefined, undefined, true)
+      this._syncLyrics(true)
+    } else {
+      this.currentLyrics = null
+      this.emitEvent('LyricsNotFoundEvent')
+    }
+  }
+
+  _syncLyrics(force = false) {
+    if (!this.isLyricsSubscribed || !this.currentLyrics || !this.currentLyrics.lines) return
+    if (this._lyricsMarkerTimer && !force) return
+
+    const timescale = this.filters.filters?.timescale || {
+      speed: 1.0,
+      rate: 1.0
+    }
+    const playbackSpeed = (timescale.speed || 1.0) * (timescale.rate || 1.0)
+    const position = this._getLyricsPosition(playbackSpeed)
+    const lines = this.currentLyrics.lines
+    this._recalculateLyricsIndex(position, lines)
+
+    const nextIndex = this.lyricsLineIndex + 1
+    if (nextIndex >= lines.length) return
+
+    const nextTimestamp = lines[nextIndex].timestamp
+    const delayMs = Math.max(0, (nextTimestamp - position) / playbackSpeed)
+
+    this._lyricsMarkerTimer = setTimeout(() => {
+      this._lyricsMarkerTimer = null
+      if (!this.isLyricsSubscribed || !this.currentLyrics || !this.currentLyrics.lines) return
+      const nowPosition = this._getLyricsPosition(playbackSpeed)
+      const drift = nowPosition - nextTimestamp
+
+      if (drift < -15) {
+        this._syncLyrics(true)
+        return
+      }
+
+      if (Math.abs(drift) > 100) {
+        this._lyricsBasePosition -= drift * 0.25
+      }
+
+      this.lyricsLineIndex = nextIndex
+      this.emitEvent('LyricsLineEvent', {
+        lineIndex: nextIndex,
+        line: lines[nextIndex],
+        skipped: drift > 60
+      })
+      this._syncLyrics(true)
+    }, delayMs)
+  }
+
+  _getLyricsPosition(playbackSpeed) {
+    const stats = this.connection?.statistics
+    const packets = stats?.packetsExpected ?? this._lyricsBasePackets
+    const deltaPackets = Math.max(0, packets - this._lyricsBasePackets)
+
+    return this._lyricsBasePosition + deltaPackets * 20 * playbackSpeed
+  }
+  _recalculateLyricsIndex(positionOverride, linesOverride, allowBackward = false) {
+    if (!this.currentLyrics || !this.currentLyrics.lines) return
+
+    const lines = linesOverride || this.currentLyrics.lines
+    let position = positionOverride
+
+    if (position === undefined) {
+      const timescale = this.filters.filters?.timescale || {
+        speed: 1.0,
+        rate: 1.0
+      }
+      const playbackSpeed = (timescale.speed || 1.0) * (timescale.rate || 1.0)
+      position = this._getLyricsPosition(playbackSpeed)
+    }
+
+    let foundIndex = -1
+    // Efficiently find the current line
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].timestamp <= position) {
+        foundIndex = i
+      } else {
+        break
+      }
+    }
+
+    if (!allowBackward && foundIndex < this.lyricsLineIndex) {
+      return
+    }
+
+    if (foundIndex !== this.lyricsLineIndex) {
+      const skipped = foundIndex > this.lyricsLineIndex + 1
+      this.lyricsLineIndex = foundIndex
+
+      if (foundIndex !== -1) {
+        const line = lines[foundIndex]
+        this.emitEvent('LyricsLineEvent', {
+          lineIndex: foundIndex,
+          line: line,
+          skipped
+        })
+      }
+    }
+  }
+
   toJSON() {
     return {
       guildId: this.guildId,
       track: this.track,
       volume: this.volumePercent,
+      fading: this.fading,
       paused: this.isPaused,
       filters: this.filters,
       state: {
@@ -1316,5 +1811,119 @@ export class Player {
       },
       voice: { ...this.voice }
     }
+  }
+
+  _fading(action, payload = {}) {
+    const timers = this._fadeTimers
+    if (!timers) return false
+
+    if (action === 'reset') {
+      if (timers.trackEnd) clearTimeout(timers.trackEnd)
+      if (timers.pause) clearTimeout(timers.pause)
+      if (timers.stop) clearTimeout(timers.stop)
+      timers.trackEnd = null
+      timers.pause = null
+      timers.stop = null
+      this._pendingTrackStartFade = false
+      return false
+    }
+
+    if (action === 'trackEndSchedule' && timers.trackEnd) {
+      clearTimeout(timers.trackEnd)
+      timers.trackEnd = null
+    }
+
+    if (!this.fading || this.fading.enabled !== true) return false
+
+    let section = null
+    if (action === 'trackStart' || action === 'trackStartArm')
+      section = this.fading.trackStart
+    else if (action === 'trackEndSchedule') section = this.fading.trackEnd
+    else if (action === 'trackStop') section = this.fading.trackStop
+    else if (action === 'seek') section = this.fading.seek
+    else if (action === 'seekPrepare') section = this.fading.seek
+    else return false
+
+    if (
+      !section ||
+      !Number.isFinite(section.duration) ||
+      section.duration <= 0
+    )
+      return false
+
+    if (action === 'trackStartArm') {
+      const resource = payload.resource
+      if (!resource?.setFadeVolume) return false
+      resource.setFadeVolume(0)
+      this._pendingTrackStartFade = true
+      return true
+    }
+
+    if (action === 'trackStart') {
+      if (!this._pendingTrackStartFade) return false
+      const stream = payload.resource || this.connection?.audioStream
+      if (!stream?.fadeTo) return false
+      this._pendingTrackStartFade = false
+      stream.fadeTo(1, section.duration, section.curve)
+      return true
+    }
+
+    if (action === 'seekPrepare') {
+      const resource = payload.resource
+      if (!resource?.setFadeVolume) return false
+      resource.setFadeVolume(0)
+      return true
+    }
+
+    if (action === 'seek') {
+      const stream = this.connection?.audioStream
+      if (!stream?.setFadeVolume) return false
+      stream.setFadeVolume(0)
+      stream.fadeTo(1, section.duration, section.curve)
+      return true
+    }
+
+    if (action === 'trackStop') {
+      const stream = this.connection?.audioStream
+      if (!stream?.fadeTo) return false
+      if (timers.stop) clearTimeout(timers.stop)
+      stream.fadeTo(0, section.duration, section.curve)
+      timers.stop = setTimeout(() => {
+        this.connection?.stop(EndReasons.STOPPED)
+        if (timers.stop) {
+          clearTimeout(timers.stop)
+          timers.stop = null
+        }
+      }, section.duration)
+      return true
+    }
+
+    if (action === 'trackEndSchedule') {
+      if (!this.track?.info) return false
+      const total =
+        this.track.endTime && this.track.endTime > 0
+          ? this.track.endTime
+          : this.track.info.length || 0
+      if (!Number.isFinite(total) || total <= 0) return false
+
+      const startPosition = payload.startPosition || 0
+      const remaining = Math.max(0, total - startPosition)
+      const fadeDuration = Math.min(section.duration, remaining)
+      const delay = Math.max(0, remaining - fadeDuration)
+
+      timers.trackEnd = setTimeout(() => {
+        const stream = this.connection?.audioStream
+        if (stream?.fadeTo) {
+          stream.fadeTo(0, fadeDuration, section.curve)
+        }
+        if (timers.trackEnd) {
+          clearTimeout(timers.trackEnd)
+          timers.trackEnd = null
+        }
+      }, delay)
+      return true
+    }
+
+    return false
   }
 }

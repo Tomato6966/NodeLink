@@ -6,14 +6,16 @@ import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js'
 import { SeekError, seekableStream } from '@ecliptia/seekable-stream'
 import { SymphoniaDecoder } from '@toddynnn/symphonia-decoder'
 import * as MP4Box from 'mp4box'
-import { normalizeFormat, SupportedFormats } from '../constants.js'
-import { logger } from '../utils.js'
-import FlvDemuxer from './demuxers/Flv.js'
-import WebmOpusDemuxer from './demuxers/WebmOpus.js'
+import { normalizeFormat, SupportedFormats } from '../../constants.js'
+import { logger } from '../../utils.js'
+import FlvDemuxer from '../demuxers/Flv.js'
+import WebmOpusDemuxer from '../demuxers/WebmOpus.js'
 import { FiltersManager } from './filtersManager.js'
-import { Decoder as OpusDecoder, Encoder as OpusEncoder } from './opus/Opus.js'
-import { RingBuffer } from './RingBuffer.js'
+import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.js'
+import { RingBuffer } from '../structs/RingBuffer.js'
+import { FadeTransformer } from './FadeTransformer.js'
 import { VolumeTransformer } from './VolumeTransformer.js'
+import { FlowController } from './FlowController.js'
 
 const AUDIO_CONFIG = Object.freeze({
   sampleRate: 48000,
@@ -38,7 +40,9 @@ const AUDIO_CONSTANTS = Object.freeze({
 const MPEGTS_CONFIG = Object.freeze({
   syncByte: 0x47,
   packetSize: 188,
-  aacStreamType: 0x0f
+  aacStreamType: 0x0f,
+  mp3StreamType: 0x03,
+  mp3StreamType2: 0x04
 })
 
 const _DOWNMIX_COEFFICIENTS = Object.freeze({
@@ -207,6 +211,12 @@ class BaseAudioResource {
   setVolume(volume) {
     if (!this.pipes) return
 
+    const flowController = this.pipes.find((p) => p instanceof FlowController)
+    if (flowController) {
+      flowController.setVolume(volume)
+      return
+    }
+
     const volumeTransformer = this.pipes.find(
       (p) => p instanceof VolumeTransformer
     )
@@ -221,12 +231,58 @@ class BaseAudioResource {
   setFilters(filters) {
     if (!this.pipes) return
 
+    const flowController = this.pipes.find((p) => p instanceof FlowController)
+    if (flowController) {
+      flowController.setFilters(filters)
+      return
+    }
+
     const filterManager = this.pipes.find((p) => p instanceof FiltersManager)
 
     if (filterManager) {
       filterManager.update(filters)
     } else {
       throw new Error('Filters not found in the pipeline.')
+    }
+  }
+
+  setFadeVolume(volume) {
+    if (!this.pipes) return
+
+    const flowController = this.pipes.find((p) => p instanceof FlowController)
+    if (flowController) {
+      flowController.setFadeVolume(volume)
+      return
+    }
+
+    const fadeTransformer = this.pipes.find(
+      (p) => p instanceof FadeTransformer
+    )
+
+    if (fadeTransformer) {
+      fadeTransformer.setGain(volume)
+    } else {
+      throw new Error('FadeTransformer not found in the pipeline.')
+    }
+  }
+
+  fadeTo(volume, durationMs, curve) {
+    if (!this.pipes) return
+
+    const flowController = this.pipes.find((p) => p instanceof FlowController)
+    if (flowController) {
+      flowController.fadeTo(volume, durationMs, curve)
+      return
+    }
+
+    const fadeTransformer = this.pipes.find(
+      (p) => p instanceof FadeTransformer
+    )
+
+    if (fadeTransformer) {
+      fadeTransformer.fadeTo(volume, durationMs, curve)
+    } else {
+      throw new Error('FadeTransformer not found in the pipeline.')
     }
   }
 
@@ -328,10 +384,19 @@ class SymphoniaDecoderStream extends Transform {
       this._loopScheduled ||
       this._isDecoding ||
       !this._isDecoderValid() ||
-      this.readableFlowing === false ||
-      this.readableLength >= this.readableHighWaterMark
+      this.readableFlowing === false
     )
       return
+
+    if (this.readableLength >= this.readableHighWaterMark) {
+      this._loopScheduled = true
+      this._timeoutId = setTimeout(() => {
+        this._timeoutId = null
+        this._loopScheduled = false
+        if (this._isDecoderValid()) this._scheduleDecode()
+      }, AUDIO_CONSTANTS.decodeIntervalMs)
+      return
+    }
 
     this._loopScheduled = true
 
@@ -522,7 +587,7 @@ class SymphoniaDecoderStream extends Transform {
   }
 }
 
-class MPEGTSToAACStream extends Transform {
+class MPEGTSDemuxer extends Transform {
   constructor(options) {
     super({
       ...options,
@@ -531,31 +596,26 @@ class MPEGTSToAACStream extends Transform {
 
     this.ringBuffer = new RingBuffer(BUFFER_THRESHOLDS.maxCompressed)
     this.patPmtId = null
-    this.aacPid = null
-    this.aacData = []
-    this.aacPidFound = false
+    this.audioPid = null
+    this.audioPidFound = false
     this._aborted = false
+    this.pesBuffer = Buffer.alloc(0)
+    this.pesRemaining = 0
   }
 
   abort() {
     this._aborted = true
     this.ringBuffer.clear()
-    this.aacData = []
+    this.pesBuffer = Buffer.alloc(0)
   }
 
   _transform(chunk, _encoding, callback) {
-    if (this._aborted) {
-      callback()
-      return
-    }
+    if (this._aborted) return callback()
 
     try {
       this.ringBuffer.write(chunk)
 
-      while (
-        this.ringBuffer.length >= MPEGTS_CONFIG.packetSize &&
-        !this._aborted
-      ) {
+      while (this.ringBuffer.length >= MPEGTS_CONFIG.packetSize && !this._aborted) {
         const head = this.ringBuffer.peek(1)
         if (head[0] !== MPEGTS_CONFIG.syncByte) {
           this.ringBuffer.read(1)
@@ -563,94 +623,91 @@ class MPEGTSToAACStream extends Transform {
         }
 
         const packet = this.ringBuffer.read(MPEGTS_CONFIG.packetSize)
-
-        const payloadUnitStartIndicator = !!(packet[1] & 0x40)
-        const pid = ((packet[1] & 0x1f) << 8) + packet[2]
-        const adaptationFieldControl = (packet[3] & 0x30) >> 4
+        const pusi = !!(packet[1] & 0x40)
+        const pid = ((packet[1] & 0x1f) << 8) | packet[2]
+        const afc = (packet[3] & 0x30) >> 4
 
         let offset = 4
-        if (adaptationFieldControl > 1) {
+        if (afc > 1) {
           offset = 5 + packet[4]
-          if (offset >= MPEGTS_CONFIG.packetSize) {
-            continue
-          }
+          if (offset >= MPEGTS_CONFIG.packetSize) continue
         }
 
-        this._processPacket(packet, pid, payloadUnitStartIndicator, offset)
+        if (pid === 0 && pusi) {
+          this._processPAT(packet, offset)
+        } else if (this.patPmtId && pid === this.patPmtId && pusi) {
+          this._processPMT(packet, offset)
+        } else if (this.audioPid && pid === this.audioPid) {
+          this._processAudioPacket(packet, pusi, offset)
+        }
       }
-
       callback()
     } catch {
       callback()
     }
   }
 
-  _processPacket(packet, pid, pusi, offset) {
-    if (pid === 0 && pusi) {
-      this._processPAT(packet, offset)
-    } else if (this.patPmtId && pid === this.patPmtId && pusi) {
-      this._processPMT(packet, offset)
-    } else if (this.aacPid && pid === this.aacPid) {
-      this._processAACPacket(packet, pusi, offset)
-    }
-  }
-
   _processPAT(packet, offset) {
     offset += packet[offset] + 1
-    this.patPmtId = ((packet[offset + 10] & 0x1f) << 8) | packet[offset + 11]
+    if (offset + 11 < MPEGTS_CONFIG.packetSize) {
+      this.patPmtId = ((packet[offset + 10] & 0x1f) << 8) | packet[offset + 11]
+    }
   }
 
   _processPMT(packet, offset) {
     offset += packet[offset] + 1
-
-    const sectionLength =
-      ((packet[offset + 1] & 0x0f) << 8) | packet[offset + 2]
+    const sectionLength = ((packet[offset + 1] & 0x0f) << 8) | packet[offset + 2]
     const tableEnd = offset + 3 + sectionLength - 4
-    const programInfoLength =
-      ((packet[offset + 10] & 0x0f) << 8) | packet[offset + 11]
-
+    const programInfoLength = ((packet[offset + 10] & 0x0f) << 8) | packet[offset + 11]
     offset += 12 + programInfoLength
 
     while (offset < tableEnd && offset < MPEGTS_CONFIG.packetSize) {
       const streamType = packet[offset]
-      const elementaryPid =
-        ((packet[offset + 1] & 0x1f) << 8) | packet[offset + 2]
-      const esInfoLength =
-        ((packet[offset + 3] & 0x0f) << 8) | packet[offset + 4]
+      const elementaryPid = ((packet[offset + 1] & 0x1f) << 8) | packet[offset + 2]
 
-      if (streamType === MPEGTS_CONFIG.aacStreamType && !this.aacPidFound) {
-        this.aacPid = elementaryPid
-        this.aacPidFound = true
+      if ((streamType === MPEGTS_CONFIG.aacStreamType || streamType === MPEGTS_CONFIG.mp3StreamType || streamType === MPEGTS_CONFIG.mp3StreamType2) && !this.audioPidFound) {
+        this.audioPid = elementaryPid
+        this.audioPidFound = true
         return
       }
-
-      offset += 5 + esInfoLength
+      const esInfoLen = ((packet[offset + 3] & 0x0f) << 8) | packet[offset + 4]
+      offset += 5 + esInfoLen
     }
   }
 
-  _processAACPacket(packet, pusi, offset) {
+  _processAudioPacket(packet, pusi, offset) {
     if (pusi) {
-      if (this.aacData.length > 0 && !this._aborted) {
-        this.push(Buffer.concat(this.aacData))
-        this.aacData = []
+      if (this.pesBuffer.length > 0) {
+        this._emitPES(this.pesBuffer)
+        this.pesBuffer = Buffer.alloc(0)
       }
-
-      const pesHeaderLength = packet[offset + 8]
-      offset += 9 + pesHeaderLength
-
-      if (offset >= MPEGTS_CONFIG.packetSize) return
     }
 
-    if (!this._aborted) {
-      this.aacData.push(packet.subarray(offset))
+    const payload = packet.subarray(offset)
+    if (payload.length > 0) {
+      this.pesBuffer = Buffer.concat([this.pesBuffer, payload])
+    }
+  }
+
+  _emitPES(buffer) {
+    if (buffer.length < 9) return
+
+    // Check for PES start code 00 00 01
+    if (buffer[0] === 0x00 && buffer[1] === 0x00 && buffer[2] === 0x01) {
+      const headerLength = buffer[8]
+      const payloadOffset = 9 + headerLength
+
+      if (payloadOffset < buffer.length) {
+        this.push(buffer.subarray(payloadOffset))
+      }
     }
   }
 
   _flush(callback) {
-    if (this.aacData.length > 0 && !this._aborted) {
-      this.push(Buffer.concat(this.aacData))
+    if (this.pesBuffer.length > 0) {
+      this._emitPES(this.pesBuffer)
     }
-    this.aacData = []
+    this.pesBuffer = Buffer.alloc(0)
     this.ringBuffer.clear()
     callback()
   }
@@ -658,7 +715,7 @@ class MPEGTSToAACStream extends Transform {
   _destroy(err, callback) {
     this._aborted = true
     this.ringBuffer.dispose()
-    this.aacData = []
+    this.pesBuffer = Buffer.alloc(0)
     super._destroy(err, callback)
   }
 }
@@ -1001,10 +1058,7 @@ class MP4ToAACStream extends Transform {
   _emitSampleWithADTS(sample) {
     const { profile, samplingIndex, channelCount } = this.audioConfig
 
-    const sampleData =
-      sample.data instanceof ArrayBuffer
-        ? Buffer.from(sample.data)
-        : Buffer.from(sample.data.buffer || sample.data)
+    const sampleData = Buffer.from(sample.data)
 
     this.push(
       _createAdtsHeader(
@@ -1032,13 +1086,8 @@ class MP4ToAACStream extends Transform {
       if (codecParts.length >= 3) {
         const objectType = Number.parseInt(codecParts[2], 10)
 
-        if (objectType === 5) {
-          const coreSamplingIndex = SAMPLE_RATES.indexOf(
-            track.audio.sample_rate / 2
-          )
-          if (coreSamplingIndex !== -1) {
-            samplingIndex = coreSamplingIndex
-          }
+        if (objectType === 5 || objectType === 29) {
+          profile = 2
         } else {
           profile = objectType
         }
@@ -1110,10 +1159,15 @@ class MP4ToAACStream extends Transform {
  * WARNING: Do not edit this section; changes here will break the decoding pipeline.
  **********************************************************************/
 class FMP4ToAACStream extends Transform {
-  constructor(options) {
+  constructor(options = {}) {
     super(options)
     this.audioConfig = null
     this.initSegmentProcessed = false
+    // Quando for true, buffers dados e processa boxes completos (SoundCloud por exemplo)
+    // Quando for false (padrão), espera segmentos completos por chunk (NicoVideo por exemplo)
+    this.bufferMode = options.bufferMode || false
+    this.buffer = Buffer.alloc(0)
+    this._pendingMoof = null
   }
 
   _parseBoxes(buffer, offset = 0) {
@@ -1273,22 +1327,208 @@ class FMP4ToAACStream extends Transform {
     return null
   }
 
-  _transform(chunk, _encoding, callback) {
-    try {
-      if (!this.initSegmentProcessed && chunk.length > 8) {
-        const boxType = chunk.toString('ascii', 4, 8)
-        if (boxType === 'ftyp') {
-          this.audioConfig = this._extractAudioConfigFromInit(chunk)
-          this.initSegmentProcessed = true
-          callback()
-          return
+  // Aqui processa os dados bufferizados, que vai ser retornando quando o bufferMode for true
+  _processBuffer() {
+    while (this.buffer.length > 0) {
+      if (!this._streamState) {
+        this._streamState = {
+          mode: 'READ_HEADER',
+          offset: 0,
+          boxSize: 0,
+          boxType: '',
+          headerSize: 8,
+          moofBuffer: Buffer.alloc(0),
+          samples: []
         }
       }
 
-      if (this.audioConfig) {
-        const aacData = this._extractAACFromSegment(chunk)
-        if (aacData) {
-          this.push(aacData)
+      if (this._streamState.mode === 'READ_HEADER') {
+        if (this.buffer.length < 8) break
+
+        const size32 = this.buffer.readUInt32BE(0)
+        const type = this.buffer.toString('ascii', 4, 8)
+
+        let size = size32
+        let headerSize = 8
+
+        if (size === 1) {
+             if (this.buffer.length < 16) break
+             size = Number(this.buffer.readBigUInt64BE(8))
+             headerSize = 16
+        }
+
+        if (size === 0 || (size < headerSize && size !== 0)) {
+             this.buffer = this.buffer.subarray(1)
+             continue
+        }
+
+        this._streamState.boxSize = size
+        this._streamState.boxType = type
+        this._streamState.headerSize = headerSize
+
+        this.buffer = this.buffer.subarray(headerSize)
+        this._streamState.boxSize -= headerSize
+
+        if (type === 'mdat') {
+          this._streamState.mode = 'STREAM_MDAT'
+        } else {
+          this._streamState.mode = 'READ_BODY'
+        }
+
+      } else if (this._streamState.mode === 'READ_BODY') {
+        if (this.buffer.length < this._streamState.boxSize) break
+
+        const body = this.buffer.subarray(0, this._streamState.boxSize)
+        this.buffer = this.buffer.subarray(this._streamState.boxSize)
+
+        const type = this._streamState.boxType
+
+        if (type === 'moov') {
+           if (!this.initSegmentProcessed) {
+             const header = Buffer.alloc(8)
+             header.writeUInt32BE(body.length + 8, 0)
+             header.write('moov', 4)
+             const fullBox = Buffer.concat([header, body])
+
+             const config = this._extractAudioConfigFromInit(fullBox)
+             if (config) {
+               this.audioConfig = config
+               this.initSegmentProcessed = true
+             } else {
+               logger('warn', 'FMP4', 'Failed to extract audio config from moov')
+             }
+           }
+        } else if (type === 'ftyp') {
+           // O ftyp geralmente não contém configuração de áudio, mas às vezes o segmento de inicialização é passado como um único bloco
+           // Neste parser de streaming, lidamos box por box.
+           // Podemos ignorar o ftyp aqui, aqui vai aguardar o moov.
+        } else if (type === 'moof') {
+           const sizes = this._parseMoof(body)
+           if (sizes && sizes.length > 0) {
+             this._streamState.samples = sizes
+           } else {
+            // logger('debug', 'FMP4', 'moof parsed but 0 samples found')
+           }
+        }
+
+        this._streamState.mode = 'READ_HEADER'
+
+      } else if (this._streamState.mode === 'STREAM_MDAT') {
+         const samples = this._streamState.samples
+
+         if (samples.length === 0) {
+           const toSkip = Math.min(this.buffer.length, this._streamState.boxSize)
+           this.buffer = this.buffer.subarray(toSkip)
+           this._streamState.boxSize -= toSkip
+         } else {
+           while (samples.length > 0 && this.buffer.length >= samples[0]) {
+              const sampleSize = samples[0]
+              const sampleData = this.buffer.subarray(0, sampleSize)
+              this.buffer = this.buffer.subarray(sampleSize)
+
+              if (this.audioConfig) {
+                 const adts = this._createAdtsHeader(sampleSize, this.audioConfig)
+                 this.push(Buffer.concat([adts, sampleData]))
+              }
+
+              this._streamState.boxSize -= sampleSize
+              samples.shift()
+           }
+         }
+
+         if (this._streamState.boxSize <= 0) {
+             this._streamState.mode = 'READ_HEADER'
+             this._streamState.samples = []
+         } else if (samples.length > 0 && this.buffer.length < samples[0]) {
+             break
+         }
+      }
+    }
+  }
+
+  _parseMoof(moofData) {
+    const boxes = this._parseBoxes(moofData)
+    const trafs = boxes.filter((b) => b.type === 'traf')
+    const sizes = []
+
+    for (const traf of trafs) {
+      const trafBoxes = this._parseBoxes(traf.data)
+      const tfhd = trafBoxes.find((b) => b.type === 'tfhd')
+      if (!tfhd || tfhd.data.length < 8) continue
+
+      const trackId = tfhd.data.readUInt32BE(4)
+
+      if (trafs.length > 1 && this.audioConfig && trackId !== this.audioConfig.trackId) {
+        continue
+      }
+      if (!this.audioConfig) continue
+
+      const tfhdFlags = (tfhd.data[1] << 16) | (tfhd.data[2] << 8) | tfhd.data[3]
+      let currentDefaultSize = this.audioConfig.defaultSampleSize || 0
+
+      let offset = 8
+      if (tfhdFlags & 0x01) offset += 8
+      if (tfhdFlags & 0x02) offset += 4
+      if (tfhdFlags & 0x08) offset += 4
+      if ((tfhdFlags & 0x10) && offset + 4 <= tfhd.data.length) {
+        currentDefaultSize = tfhd.data.readUInt32BE(offset)
+        offset += 4
+      }
+
+      const truns = trafBoxes.filter((b) => b.type === 'trun')
+      for (const trun of truns) {
+        const data = trun.data
+        if (data.length < 8) continue
+        const flags = (data[1] << 16) | (data[2] << 8) | data[3]
+        const count = data.readUInt32BE(4)
+
+        let trunOffset = 8
+        if (flags & 0x01) trunOffset += 4
+        if (flags & 0x04) trunOffset += 4
+
+        const hasDuration = flags & 0x100
+        const hasSize = flags & 0x200
+        const hasFlags = flags & 0x400
+        const hasCtOffset = flags & 0x800
+
+        for (let i = 0; i < count; i++) {
+          let sSize = currentDefaultSize
+          if (hasDuration) trunOffset += 4
+          if (hasSize && trunOffset + 4 <= data.length) {
+            sSize = data.readUInt32BE(trunOffset)
+            trunOffset += 4
+          }
+          if (hasFlags) trunOffset += 4
+          if (hasCtOffset) trunOffset += 4
+
+          if (sSize > 0) sizes.push(sSize)
+        }
+      }
+    }
+    return sizes
+  }
+
+  _transform(chunk, _encoding, callback) {
+    try {
+      if (this.bufferMode) {
+        // quando bufferMode for true, vai ser modo streaming, ou seja, vai processar o chunk imediatamente
+        this.buffer = Buffer.concat([this.buffer, chunk])
+        this._processBuffer()
+      } else {
+        // quando bufferMode for false, vai ser modo simples, ou seja, vai processar o chunk quando tiver todos os dados
+        if (!this.initSegmentProcessed && chunk.length > 8) {
+          const boxType = chunk.toString('ascii', 4, 8)
+          if (boxType === 'ftyp') {
+            this.audioConfig = this._extractAudioConfigFromInit(chunk)
+            this.initSegmentProcessed = true
+            callback()
+            return
+          }
+        }
+
+        if (this.audioConfig) {
+          const aacData = this._extractAACFromSegment(chunk)
+          if (aacData) this.push(aacData)
         }
       }
 
@@ -1299,6 +1539,11 @@ class FMP4ToAACStream extends Transform {
   }
 
   _flush(callback) {
+    if (this.bufferMode) {
+      try {
+        this._processBuffer()
+      } catch (_err) {}
+    }
     callback()
   }
 }
@@ -1365,31 +1610,6 @@ class FLVToAACStream extends Transform {
 
   _flush(callback) {
     this.demuxer.end(callback)
-  }
-}
-
-class MixerTransform extends Transform {
-  constructor(audioMixer) {
-    super()
-    this.audioMixer = audioMixer
-  }
-
-  _transform(mainChunk, _encoding, callback) {
-    if (
-      !this.audioMixer ||
-      !this.audioMixer.enabled ||
-      !this.audioMixer.hasActiveLayers()
-    ) {
-      return callback(null, mainChunk)
-    }
-
-    try {
-      const layerChunks = this.audioMixer.readLayerChunks(mainChunk.length)
-      const mixed = this.audioMixer.mixBuffers(mainChunk, layerChunks)
-      callback(null, mixed)
-    } catch (_error) {
-      callback(null, mainChunk)
-    }
   }
 }
 
@@ -1484,11 +1704,28 @@ class StreamAudioResource extends BaseAudioResource {
     const streams = [stream]
 
     if (_isFmp4Format(lowerType)) {
-      const demuxer = new FMP4ToAACStream()
+      // como eu coloquei options = {} no fmp4, ele aceita isso como o bufferMode, se incluir, vai passar true, se nao, vai passar false
+      const bufferMode = lowerType.includes('fmp4-buffered')
+      const demuxer = new FMP4ToAACStream({ bufferMode })
       streams.push(demuxer)
     } else if (_isMpegtsFormat(lowerType)) {
-      const demuxer = new MPEGTSToAACStream()
+      const demuxer = new MPEGTSDemuxer()
       streams.push(demuxer)
+
+      if (lowerType.includes('mp3') || lowerType.includes('mpeg')) {
+        const decoder = new SymphoniaDecoderStream({ resamplingQuality })
+        streams.push(decoder)
+
+        this.pipes.push(...streams.slice(1))
+
+        pipeline(streams, (err) => {
+          if (err && !this._destroyed) {
+            this.stream?.emit('error', err)
+          }
+        })
+
+        return decoder
+      }
     } else if (_isMp4Format(lowerType)) {
       const demuxer = new MP4ToAACStream()
       streams.push(demuxer)
@@ -1555,8 +1792,17 @@ class StreamAudioResource extends BaseAudioResource {
     volume,
     audioMixer = null
   ) {
-    const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
     const filters = new FiltersManager(nodelink, initialFilters)
+    const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
+    const fadeTransformer = new FadeTransformer({
+      type: 's16le',
+      volume: 1.0,
+      sampleRate: AUDIO_CONFIG.sampleRate,
+      channels: AUDIO_CONFIG.channels
+    })
+
+    const flowController = new FlowController(filters, volumeTransformer, fadeTransformer, audioMixer)
+
     const opusEncoder = new OpusEncoder({
       rate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels,
@@ -1565,17 +1811,8 @@ class StreamAudioResource extends BaseAudioResource {
 
     opusEncoder.setDTX(false)
 
-    const streams = [pcmStream, volumeTransformer]
-    this.pipes.push(volumeTransformer)
-
-    if (audioMixer && (nodelink.options?.mix?.enabled ?? true)) {
-      const mixer = new MixerTransform(audioMixer)
-      streams.push(mixer)
-      this.pipes.push(mixer)
-    }
-
-    streams.push(filters)
-    this.pipes.push(filters)
+    const streams = [pcmStream, flowController]
+    this.pipes.push(flowController)
 
     // Inject Audio Interceptors (Low-level stream manipulation)
     if (nodelink.extensions?.audioInterceptors) {
@@ -1602,6 +1839,8 @@ class StreamAudioResource extends BaseAudioResource {
     pipeline(streams, (err) => {
       if (err && !this._destroyed) {
         opusEncoder.emit('error', err)
+      } else if (!this._destroyed) {
+        this.stream?.emit('finishBuffering')
       }
     })
 
@@ -1627,7 +1866,7 @@ class StreamAudioResource extends BaseAudioResource {
 
   _setupEventHandlers(inputStream) {
     inputStream.on('finishBuffering', () => {
-      this.stream?.emit('finishBuffering')
+      // Waiting for the pipeline to finish
     })
 
     inputStream.on('error', (err) => {
@@ -1743,8 +1982,19 @@ export const createPCMStream = (
     case SupportedFormats.AAC: {
       const lowerType = type.toLowerCase()
 
-      if (_isFmp4Format(lowerType)) streams.push(new FMP4ToAACStream())
-      else if (_isMpegtsFormat(lowerType)) streams.push(new MPEGTSToAACStream())
+      if (_isFmp4Format(lowerType)) {
+        // como eu coloquei options = {} no fmp4, ele aceita isso como o bufferMode, se incluir, vai passar true, se nao, vai passar false
+        const bufferMode = lowerType.includes('fmp4-buffered')
+        streams.push(new FMP4ToAACStream({ bufferMode }))
+      }
+      else if (_isMpegtsFormat(lowerType)) {
+        streams.push(new MPEGTSDemuxer())
+
+        if (lowerType.includes('mp3') || lowerType.includes('mpeg')) {
+          streams.push(new SymphoniaDecoderStream({ resamplingQuality }))
+          break
+        }
+      }
       else if (_isMp4Format(lowerType)) streams.push(new MP4ToAACStream())
 
       streams.push(new AACDecoderStream({ resamplingQuality }))

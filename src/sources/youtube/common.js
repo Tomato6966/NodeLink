@@ -1,5 +1,4 @@
 import { encodeTrack, logger, makeRequest } from '../../utils.js'
-
 export const YOUTUBE_CONSTANTS = {
   VIDEO: 0,
   PLAYLIST: 1,
@@ -817,7 +816,7 @@ function getRendererFromItemData(itemData, itemType) {
       'playlistPanelVideoRenderer',
       'musicTwoColumnItemRenderer'
     ])
-    return data ? { _type: 'track', ...data } : null
+    if (data) return { _type: 'track', ...data }
   }
 
   const rendererTypes = [
@@ -981,9 +980,20 @@ export async function buildTrack(
   if (itemType === 'ytmusic') {
     title = safeString(
       getRunsText(getItemValue(renderer, ['title.runs'])) ||
-        getItemValue(renderer, ['title.simpleText']),
+        getItemValue(renderer, ['title.simpleText']) ||
+        renderer?.title,
       FALLBACK_TITLE
     )
+
+    if (title === FALLBACK_TITLE && Array.isArray(renderer.flexColumns)) {
+      title = safeString(
+        getRunsText(
+          renderer.flexColumns[0]?.musicResponsiveListItemFlexColumnRenderer
+            ?.text?.runs
+        ),
+        FALLBACK_TITLE
+      )
+    }
 
     const subtitleRuns = getItemValue(renderer, ['subtitle.runs'])
     const longBylineRuns = getItemValue(renderer, ['longBylineText.runs'])
@@ -995,6 +1005,16 @@ export async function buildTrack(
       author = safeString(longBylineRuns[0]?.text, FALLBACK_AUTHOR)
     } else if (Array.isArray(shortBylineRuns) && shortBylineRuns.length > 0) {
       author = safeString(shortBylineRuns[0]?.text, FALLBACK_AUTHOR)
+    } else {
+      author = safeString(renderer?.author, FALLBACK_AUTHOR)
+    }
+
+    if (author === FALLBACK_AUTHOR && Array.isArray(renderer.flexColumns)) {
+      author = safeString(
+        renderer.flexColumns[1]?.musicResponsiveListItemFlexColumnRenderer?.text
+          ?.runs?.[0]?.text,
+        FALLBACK_AUTHOR
+      )
     }
 
     let lengthText = null
@@ -1009,6 +1029,21 @@ export async function buildTrack(
       lengthText =
         getItemValue(renderer, ['lengthText.simpleText']) ||
         getRunsText(getItemValue(renderer, ['lengthText.runs']))
+    }
+
+    if (!lengthText && Array.isArray(renderer.flexColumns)) {
+      for (const column of renderer.flexColumns) {
+        const textObj = column.musicResponsiveListItemFlexColumnRenderer?.text
+        if (Array.isArray(textObj?.runs)) {
+          const found = textObj.runs.find(
+            (run) => run.text && /^\d{1,2}:\d{2}(:\d{2})?$/.test(run.text)
+          )
+          if (found) {
+            lengthText = found.text
+            break
+          }
+        }
+      }
     }
 
     const parsed = parseLengthAndStream(
@@ -1617,6 +1652,34 @@ export class BaseClient {
     return response
   }
 
+  async _makeNextRequest(videoId, context, headers) {
+    const apiEndpoint = this.getApiEndpoint()
+    const requestBody = {
+      context: this.getClient(context),
+      videoId: videoId
+    }
+
+    const response = await makeRequest(
+      `${apiEndpoint}/youtubei/v1/next?prettyPrint=false`,
+      {
+        method: 'POST',
+        headers: {
+          'User-Agent': this.getClient(context).client.userAgent,
+          ...(this.getClient(context).client.visitorData
+            ? {
+                'X-Goog-Visitor-Id': this.getClient(context).client.visitorData
+              }
+            : {}),
+          ...headers
+        },
+        body: requestBody,
+        disableBodyCompression: true
+      }
+    )
+
+    return response
+  }
+
   async _handlePlayerResponse(playerResponse, sourceName, videoId, _context) {
     if (!playerResponse || typeof playerResponse !== 'object') {
       logger(
@@ -1798,7 +1861,10 @@ export class BaseClient {
     }
 
     const playlistTitle =
-      contentsRoot.playlist?.playlist?.title || 'Unknown Playlist'
+      contentsRoot.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]
+        ?.tabRenderer?.content?.musicQueueRenderer?.header?.musicQueueHeaderRenderer?.subtitle?.runs?.[0]?.text ||
+      contentsRoot.playlist?.playlist?.title ||
+      'Unknown Playlist'
 
     return {
       loadType: 'playlist',

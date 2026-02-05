@@ -15,14 +15,14 @@ export default class Android extends BaseClient {
     return {
       client: {
         clientName: 'ANDROID',
-        clientVersion: '21.02.35',
+        clientVersion: '20.01.35',
         userAgent:
-          'com.google.android.youtube/21.02.35 (Linux; U; Android 14) identity',
+          'com.google.android.youtube/20.01.35 (Linux; U; Android 14) identity',
         deviceMake: 'Google',
         deviceModel: 'Pixel 6',
         osName: 'Android',
         osVersion: '14',
-        androidSdkVersion: '30',
+        androidSdkVersion: '34',
         hl: context.client.hl,
         gl: context.client.gl,
         visitorData: context.client.visitorData
@@ -60,7 +60,11 @@ export default class Android extends BaseClient {
           method: 'POST',
           headers: {
             'User-Agent': this.getClient(context).client.userAgent,
-            'X-Goog-Api-Format-Version': '2'
+            'X-Goog-Api-Format-Version': '2',
+            'X-Goog-Visitor-Id': context.client.visitorData,
+            'X-YouTube-Client-Name': '3',
+            'X-YouTube-Client-Version':
+              this.getClient(context).client.clientVersion
           },
           body: requestBody,
           disableBodyCompression: true
@@ -140,7 +144,12 @@ export default class Android extends BaseClient {
           item.playlistRenderer ||
           item.compactPlaylistRenderer ||
           item.channelRenderer ||
-          item.elementRenderer
+          (item.elementRenderer &&
+            (item.elementRenderer.newElement?.type?.componentType?.model
+              ?.compactChannelModel ||
+              item.elementRenderer.newElement?.type?.componentType?.model
+                ?.compactPlaylistModel))
+
         if (isValid && count < maxResults) {
           count++
           return true
@@ -264,7 +273,13 @@ export default class Android extends BaseClient {
         const { body: playlistResponse, statusCode } = await makeRequest(
           `${apiEndpoint}/youtubei/v1/next`,
           {
-            headers: { 'User-Agent': this.getClient(context).client.userAgent },
+            headers: {
+              'User-Agent': this.getClient(context).client.userAgent,
+              'X-Goog-Visitor-Id': context.client.visitorData,
+              'X-YouTube-Client-Name': '3',
+              'X-YouTube-Client-Version':
+                this.getClient(context).client.clientVersion
+            },
             body: requestBody,
             method: 'POST',
             disableBodyCompression: true
@@ -319,6 +334,46 @@ export default class Android extends BaseClient {
       const message = `Failed to get player data for stream. Status: ${statusCode}`
       logger('error', 'youtube-android', message)
       return { exception: { message, severity: 'common', cause: 'Upstream' } }
+    }
+
+    const streamingData = playerResponse.streamingData || playerResponse.streaming_data
+    const serverAbrUrl = streamingData?.serverAbrStreamingUrl || streamingData?.server_abr_streaming_url
+    const ustreamerConfig = playerResponse.playerConfig?.mediaCommonConfig?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig
+
+    if (serverAbrUrl) {
+      logger('debug', 'YouTube-Android', `SABR URL found for ${decodedTrack.identifier}. Using SABR protocol.`)
+
+      const formats = [...(streamingData.formats || []), ...(streamingData.adaptiveFormats || streamingData.adaptive_formats || [])].map(f => ({
+        itag: f.itag,
+        lastModified: f.lastModified || f.last_modified_ms,
+        xtags: f.xtags,
+        width: f.width,
+        height: f.height,
+        mimeType: f.mimeType || f.mime_type,
+        audioQuality: f.audioQuality || f.audio_quality,
+        bitrate: f.bitrate,
+        averageBitrate: f.averageBitrate || f.average_bitrate,
+        quality: f.quality,
+        qualityLabel: f.qualityLabel || f.quality_label,
+        audioTrackId: f.audioTrack?.id,
+        approxDurationMs: f.approxDurationMs || f.approx_duration_ms,
+        contentLength: f.contentLength || f.content_length,
+        isDrc: !!f.isDrc
+      }))
+
+      return {
+        protocol: 'sabr',
+        url: serverAbrUrl,
+        additionalData: {
+          serverAbrStreamingUrl: serverAbrUrl,
+          videoPlaybackUstreamerConfig: ustreamerConfig,
+          visitorData: this.getClient(context).client.visitorData,
+          clientInfo: { clientName: 3, clientVersion: '20.51.39' },
+          formats,
+          accessToken: null,
+          userAgent: this.getClient(context).client.userAgent
+        }
+      }
     }
 
     return await this._extractStreamData(

@@ -10,6 +10,8 @@ import { URL } from 'node:url'
 import util from 'node:util'
 import zlib from 'node:zlib'
 
+const hasZstd = !!zlib.createZstdDecompress
+
 import packageJson from '../package.json' with { type: 'json' }
 import {
   DEFAULT_MAX_REDIRECTS,
@@ -154,7 +156,15 @@ function logger(level, ...args) {
 
   if (level === 'debug') {
     const debugConfig = loggingConfig.debug || {}
-    if (!debugConfig.all && !debugConfig[category]) {
+    const categoryKey =
+      typeof category === 'string' ? category.toLowerCase() : category
+    const categoryEnabled =
+      debugConfig[category] ??
+      (categoryKey ? debugConfig[categoryKey] : undefined)
+
+    if (debugConfig.all) {
+      if (categoryEnabled === false) return
+    } else if (!categoryEnabled) {
       return
     }
   }
@@ -293,18 +303,24 @@ function sendResponse(req, res, data, status, trace = false) {
   const buffer = Buffer.from(jsonData)
   const encoding = req.headers['accept-encoding'] || ''
 
+
+/*
+  // https://bun.com/blog/bun-v1.3.3
   if (process.isBun) {
     headers['Content-Length'] = buffer.byteLength
     res.writeHead(status, headers)
     res.end(buffer)
     return
-  }
-
+  } */
   const compressions = [
     { type: 'br', method: zlib.brotliCompress },
     { type: 'gzip', method: zlib.gzip },
     { type: 'deflate', method: zlib.deflate }
   ]
+  if (hasZstd) {
+    compressions.unshift({ type: 'zstd', method: zlib.zstdCompress })
+  }
+
 
   for (const { type, method } of compressions) {
     if (encoding.includes(type)) {
@@ -315,9 +331,7 @@ function sendResponse(req, res, data, status, trace = false) {
           res.end(JSON.stringify({ error: 'Compression failed' }))
           return
         }
-        if (process.isBun) {
-          headers['Content-Length'] = result.byteLength
-        }
+        headers['Content-Length'] = result.byteLength
         res.writeHead(status, headers)
         res.end(result)
       })
@@ -333,17 +347,6 @@ function sendResponse(req, res, data, status, trace = false) {
 function getGitInfo() {
   if (typeof __BUILD_GIT_INFO__ !== 'undefined') {
     return __BUILD_GIT_INFO__
-  }
-
-  const isBun = typeof Bun !== 'undefined' && !!process.versions.bun
-  // bun is too weird
-  if (isBun) {
-    logger('info', 'Git', 'Skipping update check (compiled build).')
-    return {
-      branch: 'unknown',
-      commit: 'unknown',
-      commitTime: -1
-    }
   }
 
   if (gitInfoCache) return gitInfoCache
@@ -711,12 +714,8 @@ function decodeTrack(encoded) {
 
     const sourceName = readModifiedUTF8From(messageBuf, pRef)
 
-    if (messageBuf.length - pRef.value < 8)
-      throw new Error('Unexpected end of message (need 8 bytes for position)')
     const positionOffset = messageBuf.length - 8
-
     const detailsBuf = messageBuf.subarray(pRef.value, positionOffset)
-
     const trackPosition = Number(messageBuf.readBigInt64BE(positionOffset))
 
     let details = []
@@ -831,6 +830,10 @@ function encodeTrack(track) {
 
   writeUTF(track.sourceName)
 
+  if (Array.isArray(track.details)) {
+    for (const detail of track.details) writeNullableText(detail)
+  }
+
   writeLong(track.position ?? 0)
 
   if (typeof seekable === 'boolean') {
@@ -924,8 +927,11 @@ async function _internalHttp1Request(urlString, options = {}) {
   const lib = isHttps ? https : http
   const agent = customAgent || (isHttps ? httpsAgent : httpAgent)
 
+  const acceptEncoding = ['br', 'gzip', 'deflate']
+  if (hasZstd) acceptEncoding.unshift('zstd')
+
   const reqHeaders = {
-    'Accept-Encoding': 'br, gzip, deflate',
+    'Accept-Encoding': acceptEncoding.join(', '),
     'User-Agent':
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     ...customHeaders
@@ -933,23 +939,27 @@ async function _internalHttp1Request(urlString, options = {}) {
 
   let payloadBuffer = null
   if (body != null && !['GET', 'HEAD'].includes(method)) {
-    const isFormUrlEncoded =
-      reqHeaders['Content-Type'] === 'application/x-www-form-urlencoded'
-    let rawPayload
-
-    if (isFormUrlEncoded && typeof body === 'string') {
-      rawPayload = body
+    if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+      payloadBuffer = Buffer.from(body)
     } else {
-      reqHeaders['Content-Type'] =
-        reqHeaders['Content-Type'] || 'application/json'
-      rawPayload = typeof body === 'string' ? body : JSON.stringify(body)
-    }
+      const isFormUrlEncoded =
+        reqHeaders['Content-Type'] === 'application/x-www-form-urlencoded'
+      let rawPayload
 
-    if (disableBodyCompression) {
-      payloadBuffer = Buffer.from(rawPayload)
-    } else {
-      reqHeaders['Content-Encoding'] = 'gzip'
-      payloadBuffer = zlib.gzipSync(rawPayload)
+      if (isFormUrlEncoded && typeof body === 'string') {
+        rawPayload = body
+      } else {
+        reqHeaders['Content-Type'] =
+          reqHeaders['Content-Type'] || 'application/json'
+        rawPayload = typeof body === 'string' ? body : JSON.stringify(body)
+      }
+
+      if (disableBodyCompression) {
+        payloadBuffer = Buffer.from(rawPayload)
+      } else {
+        reqHeaders['Content-Encoding'] = 'gzip'
+        payloadBuffer = zlib.gzipSync(rawPayload)
+      }
     }
   }
 
@@ -972,11 +982,20 @@ async function _internalHttp1Request(urlString, options = {}) {
         res.resume()
         const nextUrl = new URL(respHeaders.location, currentUrl).href
         const isGetRedirect = [301, 302, 303].includes(statusCode)
+        let nextMethod = method
+        let nextBody = body
+        if (method === 'HEAD') {
+          nextMethod = 'HEAD'
+          nextBody = undefined
+        } else if (isGetRedirect) {
+          nextMethod = 'GET'
+          nextBody = undefined
+        }
         const nextOptions = {
           ...options,
           _redirectsFollowed: _redirectsFollowed + 1,
-          method: isGetRedirect ? 'GET' : method,
-          body: isGetRedirect ? undefined : body
+          method: nextMethod,
+          body: nextBody
         }
         resolve(http1makeRequest(nextUrl, nextOptions))
         return
@@ -984,7 +1003,9 @@ async function _internalHttp1Request(urlString, options = {}) {
 
       let finalStream = res
       const encoding = (respHeaders['content-encoding'] || '').toLowerCase()
-      if (encoding === 'br') {
+      if (encoding === 'zstd' && hasZstd) {
+        finalStream = res.pipe(zlib.createZstdDecompress())
+      } else if (encoding === 'br') {
         finalStream = res.pipe(zlib.createBrotliDecompress())
       } else if (encoding === 'gzip') {
         finalStream = res.pipe(zlib.createGunzip())
@@ -1193,7 +1214,9 @@ async function makeRequest(urlString, options, nodelink) {
         ':path': currentUrl.pathname + currentUrl.search,
         ':scheme': currentUrl.protocol.slice(0, -1),
         ':authority': currentUrl.host,
-        'accept-encoding': 'br, gzip, deflate',
+        'accept-encoding': hasZstd
+          ? 'zstd, br, gzip, deflate'
+          : 'br, gzip, deflate',
         'user-agent': 'Mozilla/5.0 (Node.js Http2Client)',
         dnt: '1',
         ...customHeaders
@@ -1242,7 +1265,10 @@ async function makeRequest(urlString, options, nodelink) {
           const newLocation = new URL(headers.location, urlString).href
           let nextMethod = method
           let nextBody = body
-          if (
+          if (method === 'HEAD') {
+            nextMethod = 'HEAD'
+            nextBody = undefined
+          } else if (
             (statusCode === 301 || statusCode === 302) &&
             ['POST', 'PUT', 'DELETE'].includes(method)
           ) {
@@ -1277,7 +1303,9 @@ async function makeRequest(urlString, options, nodelink) {
 
         let responseStream = req
         const encoding = headers['content-encoding']
-        if (encoding === 'br')
+        if (encoding === 'zstd' && hasZstd)
+          responseStream = req.pipe(zlib.createZstdDecompress())
+        else if (encoding === 'br')
           responseStream = req.pipe(zlib.createBrotliDecompress())
         else if (encoding === 'gzip')
           responseStream = req.pipe(zlib.createGunzip())
@@ -1335,23 +1363,27 @@ async function makeRequest(urlString, options, nodelink) {
       })
 
       if (body && !['GET', 'HEAD'].includes(method)) {
-        const payload = JSON.stringify(body)
-        if (
-          disableBodyCompression ||
-          h2Headers['content-encoding'] !== 'gzip'
-        ) {
-          req.end(payload)
+        if (Buffer.isBuffer(body) || body instanceof Uint8Array) {
+          req.end(Buffer.from(body))
         } else {
-          zlib.gzip(payload, (err, data) => {
-            if (err) {
-              req.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
-              closeSessionGracefully()
-              return reject(
-                new Error(`Gzip error for ${urlString}: ${err.message}`)
-              )
-            }
-            req.end(data)
-          })
+          const payload = JSON.stringify(body)
+          if (
+            disableBodyCompression ||
+            h2Headers['content-encoding'] !== 'gzip'
+          ) {
+            req.end(payload)
+          } else {
+            zlib.gzip(payload, (err, data) => {
+              if (err) {
+                req.close(http2.constants.NGHTTP2_INTERNAL_ERROR)
+                closeSessionGracefully()
+                return reject(
+                  new Error(`Gzip error for ${urlString}: ${err.message}`)
+                )
+              }
+              req.end(data)
+            })
+          }
         }
       } else {
         req.end()
@@ -1366,10 +1398,36 @@ async function makeRequest(urlString, options, nodelink) {
 }
 
 function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
-  //biome-ignore lint: no-promise-executor-return
+  // biome-ignore lint: no-promise-executor-return
   return new Promise(async (resolve) => {
     try {
+      const writeAndWait = async (chunk) => {
+        if (stream.destroyed) return false
+        const canWrite = stream.write(chunk)
+        if (!canWrite && !stream.destroyed) {
+          await new Promise((res) => {
+            const onDrain = () => {
+              stream.removeListener('close', onClose)
+              res()
+            }
+            const onClose = () => {
+              stream.removeListener('drain', onDrain)
+              res()
+            }
+            stream.once('drain', onDrain)
+            stream.once('close', onClose)
+          })
+        }
+        return !stream.destroyed
+      }
+
       const res = await http1makeRequest(url, { method: 'GET' })
+
+      if (res.error || res.statusCode !== 200) {
+        logger('warn', 'Network', `Failed to fetch HLS playlist: ${res.statusCode}`)
+        return resolve(false)
+      }
+
       const lines = res.body
         .split('\n')
         .map((l) => l.trim())
@@ -1380,11 +1438,49 @@ function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
           method: 'GET',
           streamOnly: true
         })
+
+        if (seg.error || !seg.stream) {
+          logger('warn', 'Network', `Failed to fetch direct segment: ${seg.statusCode}`)
+          return resolve(false)
+        }
+
         seg.stream.pipe(stream, { end: shouldEnd })
-        return resolve(!shouldEnd)
+        seg.stream.on('end', () => {
+          if (shouldEnd) stream.emit('finishBuffering')
+          resolve(!shouldEnd)
+        })
+        seg.stream.on('error', (err) => {
+          if (!stream.destroyed) stream.destroy(err)
+          resolve(false)
+        })
+        return
       }
 
       const base = new URL(url)
+
+      const mapTag = lines.find((l) => l.startsWith('#EXT-X-MAP:'))
+      if (mapTag) {
+        const mapUriMatch = mapTag.match(/URI="([^"]+)"/)
+        if (mapUriMatch) {
+          const initUrl = new URL(mapUriMatch[1], base).toString()
+          const initRes = await http1makeRequest(initUrl, {
+            method: 'GET',
+            responseType: 'buffer'
+          })
+
+          if (!initRes.error && initRes.body) {
+            const ok = await writeAndWait(initRes.body)
+            if (!ok) return resolve(false)
+          } else {
+            logger(
+              'warn',
+              'HLS',
+              `Failed to download initialization segment: ${initUrl}`
+            )
+          }
+        }
+      }
+
       const segs = []
       let sawEnd = false
 
@@ -1398,32 +1494,40 @@ function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
         if (lines[i].startsWith('#EXT-X-ENDLIST')) sawEnd = true
       }
 
-      for (const segUrl of segs) {
+      for (let i = 0; i < segs.length; i++) {
         if (stream.destroyed) break
 
         try {
-          const s = await http1makeRequest(segUrl, {
+          const s = await http1makeRequest(segs[i], {
             method: 'GET',
             streamOnly: true
           })
 
-          if (!s.stream) continue
+          if (s.error || !s.stream || s.statusCode >= 400) {
+            logger('warn', 'HLS', `Failed to download segment ${i} (${segs[i]}): ${s.statusCode}`)
+            continue
+          }
 
           await new Promise((res, rej) => {
-            s.stream.pipe(stream, { end: false })
-            s.stream.on('end', res)
-            s.stream.on('error', rej)
-            stream.on('error', () => {
+            const onEnd = () => {
+              stream.removeListener('error', onError)
+              res()
+            }
+            const onError = (err) => {
               s.stream.destroy()
-              rej(new Error('Destination stream destroyed'))
+              rej(err)
+            }
+            s.stream.pipe(stream, { end: false })
+            s.stream.on('end', onEnd)
+            s.stream.on('error', (err) => {
+              stream.removeListener('error', onError)
+              rej(err)
             })
+            stream.once('error', onError)
           })
         } catch (err) {
           if (!stream.destroyed) {
-            console.error(
-              '[HLS] Error downloading segment',
-              err.code || err.message
-            )
+            logger('warn', 'HLS', `Error during segment ${i}: ${err.message}`)
           }
           break
         }
@@ -1436,13 +1540,19 @@ function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
       if (!sawEnd) {
         resolve(true)
       } else {
-        shouldEnd && stream.emit('finishBuffering')
+        if (shouldEnd) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
         resolve(false)
       }
     } catch (e) {
-      console.error('[HLS] ERR →', e.code || e.message)
+      logger('warn', 'HLS', `Error during segment download: ${e.code || e.message}`)
       if (!stream.destroyed) {
-        shouldEnd && stream.emit('finishBuffering')
+        if (shouldEnd) {
+          stream.emit('finishBuffering')
+          stream.end()
+        }
       }
       resolve(false)
     }
@@ -1452,10 +1562,29 @@ function loadHLS(url, stream, _onceEnded = false, shouldEnd = true) {
 async function loadHLSPlaylist(url, stream) {
   try {
     const res = await http1makeRequest(url, { method: 'GET' })
+
+    if (res.error || res.statusCode !== 200 || !res.body) {
+      logger(
+        'warn',
+        'HLS',
+        `Failed to fetch HLS playlist: ${res.statusCode || res.error || 'empty body'}`
+      )
+      stream.emit('finishBuffering')
+      stream.end()
+      return stream
+    }
+
     const lines = res.body
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean)
+
+    if (!lines.length) {
+      logger('warn', 'HLS', 'Empty HLS playlist received')
+      stream.emit('finishBuffering')
+      stream.end()
+      return stream
+    }
 
     if (lines.some((l) => l.startsWith('#EXTINF'))) {
       return loadHLS(url, stream, false, true)
@@ -1470,27 +1599,25 @@ async function loadHLSPlaylist(url, stream) {
     if (audioTags.length) {
       const defaultTag = audioTags.find((l) => /DEFAULT=YES/.test(l))
       const pickTag = defaultTag || audioTags[audioTags.length - 1]
-      const uri = pickTag.match(/URI="([^"]+)"/)[1]
-      const audioUrl = new URL(uri, url).toString()
-      return loadHLS(audioUrl, stream, false, true)
+      const uriMatch = pickTag.match(/URI="([^"]+)"/)
+      if (uriMatch && uriMatch[1]) {
+        const audioUrl = new URL(uriMatch[1], url).toString()
+        return loadHLS(audioUrl, stream, false, true)
+      }
     }
 
     return loadHLS(url, stream, false, true)
   } catch (e) {
-    console.error('[HLS-AUDIO] ERR →', e.code || e.message)
-    stream.emit('finishBuffering')
+    logger('warn', 'HLS', `Failed to load HLS playlist: ${e.code || e.message}`)
+    if (!stream.destroyed) {
+      stream.emit('finishBuffering')
+      stream.end()
+    }
     return stream
   }
 }
 
 async function checkForUpdates() {
-  const isBun = typeof Bun !== 'undefined' && !!process.versions.bun
-  // bun is too weird
-  if (isBun) {
-    logger('info', 'Git', 'Skipping update check (compiled build).')
-    return
-  }
-
   logger('info', 'Git', 'Checking for updates...')
   try {
     execSync('git fetch', { stdio: 'ignore' })

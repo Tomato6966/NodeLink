@@ -58,6 +58,20 @@ class SourceWorkerManager {
             } else if (type === 1) {
               request.res.end()
               this._cleanupRequest(id, request)
+            } else if (type === 3) {
+              if (request.timeout) {
+                clearTimeout(request.timeout)
+                request.timeout = null
+              }
+              if (!request.res.headersSent && request.options?.isWebSocket) {
+                request.res.send(payload)
+              } else if (!request.res.headersSent) {
+                request.res.setHeader('Content-Type', 'application/json')
+                request.res.writeHead(200)
+                request.res.write(payload)
+              } else {
+                request.res.write(payload)
+              }
             } else if (type === 2) {
               const errorMsg = payload.toString('utf8')
               if (!request.res.headersSent) {
@@ -100,7 +114,7 @@ class SourceWorkerManager {
 
     const processCount =
       this.nodelink.options.cluster?.specializedSourceWorker?.count || 1
-    cluster.setupPrimary({ exec: './src/sourceWorker.js' })
+    cluster.setupPrimary({ exec: './src/workers/source.js' })
 
     for (let i = 0; i < processCount; i++) {
       this._forkWorker()
@@ -117,10 +131,10 @@ class SourceWorkerManager {
         `Source worker manager ${worker.process.pid} exited. Respawning...`
       )
       const index = this.workers.indexOf(worker)
-      if (index !== -1) this.workers.splice(index, 1)
+      this.workers.splice(index, 1)
       this.workerLoads.delete(worker.id)
 
-      cluster.setupPrimary({ exec: './src/sourceWorker.js' })
+      cluster.setupPrimary({ exec: './src/workers/source.js' })
       this._forkWorker()
       cluster.setupPrimary({ exec: './src/index.js' })
     })
@@ -150,6 +164,20 @@ class SourceWorkerManager {
     if (!request || request.cleaned) return
     request.cleaned = true
     if (request.timeout) clearTimeout(request.timeout)
+
+    if (request.task === 'loadLiveChat') {
+      const worker = this.workers.find((w) => w.id === request.workerId)
+      if (worker) {
+        worker.send({
+          type: 'sourceTask',
+          payload: {
+            task: 'cancelLiveChat',
+            payload: { id }
+          }
+        })
+      }
+    }
+
     this._decrementLoad(request.workerId)
     this.requests.delete(id)
   }
@@ -173,6 +201,7 @@ class SourceWorkerManager {
     const request = {
       req,
       res,
+      task,
       timeout: null,
       workerId: bestWorker.id,
       options,

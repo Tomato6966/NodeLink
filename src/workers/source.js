@@ -7,16 +7,16 @@ import {
   Worker,
   workerData
 } from 'node:worker_threads'
-import * as utils from './utils.js'
+import * as utils from '../utils.js'
 
 const __filename = fileURLToPath(import.meta.url)
 
 if (isMainThread) {
   let config
   try {
-    config = (await import('../config.js')).default
+    config = (await import('../../config.js')).default
   } catch {
-    config = (await import('../config.default.js')).default
+    config = (await import('../../config.default.js')).default
   }
 
   const specConfig = config.cluster?.specializedSourceWorker || {}
@@ -64,6 +64,8 @@ if (isMainThread) {
         processNextTask()
       } else if (msg.type === 'stream') {
         sendStreamChunk(msg.socketPath, msg.id, msg.chunk)
+      } else if (msg.type === 'chatAction') {
+        sendChatAction(msg.socketPath, msg.id, msg.data)
       } else if (msg.type === 'end') {
         sendStreamEnd(msg.socketPath, msg.id)
         worker.load = Math.max(0, worker.load - 1)
@@ -132,6 +134,11 @@ if (isMainThread) {
   function sendStreamChunk(socketPath, id, chunk) {
     const payload = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     withSocket(socketPath, (socket) => sendFrame(socket, id, 0, payload))
+  }
+
+  function sendChatAction(socketPath, id, data) {
+    const payload = Buffer.from(JSON.stringify(data), 'utf8')
+    withSocket(socketPath, (socket) => sendFrame(socket, id, 3, payload))
   }
 
   function sendStreamEnd(socketPath, id) {
@@ -206,27 +213,37 @@ if (isMainThread) {
     { createPCMStream },
     { default: SourceManager },
     { default: LyricsManager },
+    { default: MeaningManager },
     { default: CredentialManager },
+    { default: TrackCacheManager },
     { default: RoutePlannerManager },
     { default: StatsManager }
   ] = await Promise.all([
-    import('./playback/streamProcessor.js'),
-    import('./managers/sourceManager.js'),
-    import('./managers/lyricsManager.js'),
-    import('./managers/credentialManager.js'),
-    import('./managers/routePlannerManager.js'),
-    import('./managers/statsManager.js')
+    import('../playback/processing/streamProcessor.js'),
+    import('../managers/sourceManager.js'),
+    import('../managers/lyricsManager.js'),
+    import('../managers/meaningManager.js'),
+    import('../managers/credentialManager.js'),
+    import('../managers/trackCacheManager.js'),
+    import('../managers/routePlannerManager.js'),
+    import('../managers/statsManager.js')
   ])
 
   nodelink.statsManager = new StatsManager(nodelink)
   nodelink.credentialManager = new CredentialManager(nodelink)
+  nodelink.trackCacheManager = new TrackCacheManager(nodelink)
   nodelink.routePlanner = new RoutePlannerManager(nodelink)
   nodelink.sources = new SourceManager(nodelink)
   nodelink.lyrics = new LyricsManager(nodelink)
+  nodelink.meanings = new MeaningManager(nodelink)
 
   await nodelink.credentialManager.load()
+  await nodelink.trackCacheManager.load()
   await nodelink.sources.loadFolder()
   await nodelink.lyrics.loadFolder()
+  await nodelink.meanings.loadFolder()
+
+  const activeChats = new Map()
 
   parentPort.postMessage({ type: 'ready' })
 
@@ -245,6 +262,48 @@ if (isMainThread) {
       socketPath,
       error: String(error || 'Unknown error')
     })
+  }
+
+  const handleLiveChat = async (id, socketPath, payload) => {
+    const videoId = payload.videoId
+    const yt = nodelink.sources.getSource('youtube')
+    if (!yt) throw new Error('YouTube source not available in worker')
+
+    activeChats.set(id, true)
+
+    try {
+      const chat = await yt.liveChat.getLiveChat(videoId)
+      if (!chat) throw new Error('Could not initialize live chat')
+
+      const pollLoop = async () => {
+        while (activeChats.has(id)) {
+          try {
+            const result = await chat.poll()
+            if (!result) break
+
+            const { actions, timeoutMs } = result
+
+            if (actions.length > 0 && activeChats.has(id)) {
+              utils.logger('debug', 'SourceWorker', `[${id}] Sending ${actions.length} actions for ${videoId}`)
+              parentPort.postMessage({ type: 'chatAction', id, socketPath, data: { op: 'actions', actions } })
+            }
+
+            await new Promise(resolve => setTimeout(resolve, timeoutMs || 5000))
+          } catch (e) {
+            utils.logger('error', 'SourceWorker', `[${id}] Polling exception for ${videoId}: ${e.message}`)
+            break
+          }
+        }
+      }
+
+      await pollLoop()
+
+      parentPort.postMessage({ type: 'end', id, socketPath })
+    } catch (e) {
+      sendStreamErrorFromWorker(id, socketPath, e.message)
+    } finally {
+      activeChats.delete(id)
+    }
   }
 
   const handleLoadStream = async (id, socketPath, payload) => {
@@ -329,6 +388,20 @@ if (isMainThread) {
       return
     }
 
+    if (task === 'loadLiveChat') {
+      try {
+        await handleLiveChat(id, socketPath, payload)
+      } catch (e) {
+        sendStreamErrorFromWorker(id, socketPath, e.message || e)
+      }
+      return
+    }
+
+    if (task === 'cancelLiveChat') {
+      activeChats.delete(payload.id)
+      return
+    }
+
     try {
       let result
       switch (task) {
@@ -343,6 +416,12 @@ if (isMainThread) {
           break
         case 'loadLyrics':
           result = await nodelink.lyrics.loadLyrics(
+            { info: payload.decodedTrackInfo },
+            payload.language
+          )
+          break
+        case 'loadMeaning':
+          result = await nodelink.meanings.loadMeaning(
             { info: payload.decodedTrackInfo },
             payload.language
           )

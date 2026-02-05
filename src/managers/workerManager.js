@@ -410,6 +410,12 @@ export default class WorkerManager {
                   100
                 )
               }
+            } else if (type === 9) {
+              if (global.nodelink)
+                global.nodelink.handleIPCMessage({
+                  type: 'liveChatAction',
+                  payload: data
+                })
             }
           } catch (e) {
             logger('error', 'Cluster', `Socket event parse error: ${e.message}`)

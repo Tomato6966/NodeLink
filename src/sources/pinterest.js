@@ -128,7 +128,7 @@ export default class PinterestSource {
     }
   }
 
-  async loadStream(_decodedTrack, url) {
+  async loadStream(_decodedTrack, url, _protocol, _additionalData) {
     try {
       const options = {
         method: 'GET',

@@ -1,13 +1,14 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import OAuth from '../sources/youtube/OAuth.js'
 import { logger, sendErrorResponse } from '../utils.js'
 
-const configSchema = myzod
-  .object({
-    refreshToken: myzod.string().min(1).optional(),
-    visitorData: myzod.string().min(1).optional()
-  })
-  .allowUnknownKeys()
+const v = new Validator({ haltOnFirstError: true })
+
+const configSchema = v.compile({
+  refreshToken: { type: 'string', min: 1, optional: true },
+  visitorData: { type: 'string', min: 1, optional: true },
+  $$strict: false
+})
 
 function maskString(str, visibleChars = 5) {
   if (!str) return null
@@ -70,20 +71,20 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   }
 
   if (req.method === 'PATCH') {
-    const result = configSchema.try(req.body)
+    const validation = configSchema(req.body)
 
-    if (result instanceof myzod.ValidationError) {
+    if (validation !== true) {
       return sendErrorResponse(
         req,
         res,
         400,
         'Bad Request',
-        result.message,
+        validation?.[0]?.message || 'Invalid parameters',
         parsedUrl.pathname
       )
     }
 
-    const { refreshToken, visitorData } = result
+    const { refreshToken, visitorData } = req.body
 
     if (!refreshToken && !visitorData) {
       return sendErrorResponse(

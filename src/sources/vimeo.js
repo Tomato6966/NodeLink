@@ -5,6 +5,7 @@ import https from 'node:https'
 import { PassThrough } from 'node:stream'
 import zlib from 'node:zlib'
 import { encodeTrack, logger } from '../utils.js'
+import HLSHandler from '../playback/hls/HLSHandler.js'
 
 const VIMEO_PATTERNS = [
   /^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)(?:|[/?#])/i,
@@ -869,6 +870,22 @@ export default class VimeoSource {
       return { stream }
     }
 
+    if (protocol === 'hls') {
+      logger('debug', 'Sources', '[vimeo] Loading HLS stream')
+      return {
+        stream: new HLSHandler(url, {
+          headers: {
+            'User-Agent': USER_AGENT,
+            Referer: `${VIMEO_BASE}/`,
+            Origin: VIMEO_BASE
+          },
+          localAddress: this.nodelink.routePlanner?.getIP(),
+          type: 'mpegts'
+        }),
+        type: 'mpegts'
+      }
+    }
+
     if (protocol === 'segmented') {
       const videoId = decodedTrack?.identifier
       const hashParam = decodedTrack?.userData?.vimeo?.h || ''
@@ -1244,6 +1261,19 @@ export default class VimeoSource {
       return cdns?.[def] || (cdns ? Object.values(cdns)[0] : null)
     }
 
+    const hls = files.hls
+    if (hls?.cdns) {
+      const selected = pickCdn(hls.cdns, hls.default_cdn)
+      if (selected?.url) {
+        return {
+          url: _functions.unescapeString(selected.url),
+          protocol: 'hls',
+          format: 'mpegts',
+          additionalData: { source: 'vimeo.hls' }
+        }
+      }
+    }
+
     const dash = files.dash
     if (dash?.cdns) {
       const selected = pickCdn(dash.cdns, dash.default_cdn)
@@ -1267,19 +1297,6 @@ export default class VimeoSource {
           try {
             return await this._fetchPlaylist(playlistUrl, videoId)
           } catch {}
-        }
-      }
-    }
-
-    const hls = files.hls
-    if (hls?.cdns) {
-      const selected = pickCdn(hls.cdns, hls.default_cdn)
-      if (selected?.url) {
-        return {
-          url: _functions.unescapeString(selected.url),
-          protocol: 'hls',
-          format: 'hls',
-          additionalData: { source: 'vimeo.hls' }
         }
       }
     }

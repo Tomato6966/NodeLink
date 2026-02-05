@@ -1,56 +1,114 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
-// Use unknown() instead of object for filters to preserve all properties
-const filtersSchema = myzod.unknown()
+const v = new Validator({ haltOnFirstError: true })
 
-const voiceStateSchema = myzod
-  .object({
-    token: myzod.string(),
-    endpoint: myzod.string(),
-    sessionId: myzod.string(),
-    channelId: myzod.string().optional()
-  })
-  .allowUnknownKeys()
+// Use unknown -> any in fastest-validator
+const filtersSchema = { type: 'any', optional: true }
 
-const updatePlayerTrackSchema = myzod
-  .object({
-    encoded: myzod.string().nullable().optional(),
-    identifier: myzod.string().optional(),
-    userData: myzod.unknown().optional()
-  })
-  .allowUnknownKeys()
+const voiceStateSchema = {
+  type: 'object',
+  props: {
+    token: { type: 'string', empty: false },
+    endpoint: { type: 'string', empty: false },
+    sessionId: { type: 'string', empty: false },
+    channelId: { type: 'string', optional: true }
+  },
+  $$strict: false
+}
 
-const updatePlayerSchema = myzod
-  .object({
-    track: updatePlayerTrackSchema.optional(),
-    encodedTrack: myzod.string().nullable().optional(),
-    position: myzod.number().min(0).optional(),
-    endTime: myzod.number().min(0).nullable().optional(),
-    volume: myzod.number().min(0).max(1000).optional(),
-    paused: myzod.boolean().optional(),
-    filters: filtersSchema.optional(),
-    voice: voiceStateSchema.optional(),
-    guildId: myzod.string().optional()
-  })
-  .allowUnknownKeys()
+const updatePlayerTrackSchema = {
+  type: 'object',
+  props: {
+    encoded: { type: 'string', nullable: true, optional: true },
+    identifier: { type: 'string', optional: true },
+    userData: { type: 'any', optional: true }
+  },
+  $$strict: false
+}
 
-const queryParamsSchema = myzod
-  .object({
-    noReplace: myzod.union([myzod.string(), myzod.null()]).optional()
-  })
-  .allowUnknownKeys()
-
-const pathSchema = myzod.object({
-  sessionId: myzod.string(),
-  guildId: myzod
-    .string()
-    .withPredicate(
-      (val) => /^\d{17,20}$/.test(val),
-      'guildId must be 17-20 digits'
-    )
-    .optional()
+const updatePlayerSchema = v.compile({
+  track: { ...updatePlayerTrackSchema, optional: true },
+  nextTrack: { ...updatePlayerTrackSchema, optional: true },
+  encodedTrack: { type: 'string', nullable: true, optional: true },
+  position: { type: 'number', min: 0, optional: true },
+  endTime: { type: 'number', min: 0, nullable: true, optional: true },
+  volume: { type: 'number', min: 0, max: 1000, optional: true },
+  paused: { type: 'boolean', optional: true },
+  filters: filtersSchema,
+  fading: { type: 'any', optional: true },
+  voice: { ...voiceStateSchema, optional: true },
+  guildId: { type: 'string', optional: true },
+  $$strict: false
 })
+
+const queryParamsSchema = v.compile({
+  noReplace: { type: 'string', nullable: true, optional: true },
+  $$strict: false
+})
+
+const pathSchema = v.compile({
+  sessionId: { type: 'string', empty: false },
+  guildId: {
+    type: 'string',
+    pattern: /^\d{17,20}$/,
+    optional: true,
+    messages: { stringPattern: 'guildId must be 17-20 digits' }
+  }
+})
+
+const sanitizeFadingConfig = (raw) => {
+  const safe = {
+    enabled: false,
+    trackStart: { duration: 0, curve: 'linear' },
+    trackEnd: { duration: 0, curve: 'linear' },
+    trackStop: { duration: 0, curve: 'linear' },
+    seek: { duration: 0, curve: 'linear' },
+    ducking: {
+      enabled: false,
+      duration: 0,
+      targetVolume: 0.3,
+      curve: 'linear'
+    }
+  }
+
+  if (!raw || typeof raw !== 'object') return safe
+  safe.enabled = raw.enabled === true
+
+  const updateSection = (key) => {
+    const section = raw[key]
+    if (!section || typeof section !== 'object') return
+    if (Number.isFinite(section.duration)) {
+      safe[key].duration = Math.max(0, section.duration)
+    }
+    if (typeof section.curve === 'string') {
+      safe[key].curve = section.curve
+    }
+  }
+
+  updateSection('trackStart')
+  updateSection('trackEnd')
+  updateSection('trackStop')
+  updateSection('seek')
+
+  if (raw.ducking && typeof raw.ducking === 'object') {
+    safe.ducking.enabled = raw.ducking.enabled === true
+    if (Number.isFinite(raw.ducking.duration)) {
+      safe.ducking.duration = Math.max(0, raw.ducking.duration)
+    }
+    if (Number.isFinite(raw.ducking.targetVolume)) {
+      safe.ducking.targetVolume = Math.max(
+        0,
+        Math.min(1, raw.ducking.targetVolume)
+      )
+    }
+    if (typeof raw.ducking.curve === 'string') {
+      safe.ducking.curve = raw.ducking.curve
+    }
+  }
+
+  return safe
+}
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const parts = parsedUrl.pathname.split('/')
@@ -59,10 +117,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     guildId: parts[5]
   }
 
-  const pathResult = pathSchema.try(pathParams)
+  const validation = pathSchema(pathParams)
 
-  if (pathResult instanceof myzod.ValidationError) {
-    const errorMessage = pathResult.message || 'Invalid path parameters'
+  if (validation !== true) {
+    const errorMessage = validation?.[0]?.message || 'Invalid path parameters'
     logger('warn', 'PlayerUpdate', `Invalid path parameters: ${errorMessage}`)
     return sendErrorResponse(
       req,
@@ -74,7 +132,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  const { sessionId, guildId } = pathResult
+  const { sessionId, guildId } = pathParams
   const session = nodelink.sessions.get(sessionId)
 
   if (!session) {
@@ -143,10 +201,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       }
 
       if (req.method === 'PATCH') {
-        const bodyResult = updatePlayerSchema.try(req.body)
+        const bodyValidation = updatePlayerSchema(req.body)
 
-        if (bodyResult instanceof myzod.ValidationError) {
-          const errorMessage = bodyResult.message || 'Invalid payload'
+        if (bodyValidation !== true) {
+          const errorMessage = bodyValidation?.[0]?.message || 'Invalid payload'
           logger(
             'warn',
             'PlayerUpdate',
@@ -162,24 +220,24 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           )
         }
 
-        const payload = bodyResult
+        const payload = req.body
 
-        const queryResult = queryParamsSchema.try({
+        const queryValidation = queryParamsSchema({
           noReplace: parsedUrl.searchParams.get('noReplace')
         })
 
-        if (queryResult instanceof myzod.ValidationError) {
+        if (queryValidation !== true) {
           return sendErrorResponse(
             req,
             res,
             400,
             'Bad Request',
-            queryResult.message,
+            queryValidation?.[0]?.message || 'Invalid query parameters',
             parsedUrl.pathname
           )
         }
 
-        const noReplace = queryResult.noReplace === 'true'
+        const noReplace = parsedUrl.searchParams.get('noReplace') === 'true'
 
         logger(
           'debug',
@@ -207,7 +265,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             logger(
               'debug',
               'PlayerUpdate',
-              `Voice payload for guild ${guildId} is identical. Skipping.`
+              `Voice payload for guild ${this.guildId} is identical. Skipping.`
             )
           } else {
             logger(
@@ -224,6 +282,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         const userData = payload.track?.userData
 
         const trackPayload = payload.track
+        const nextTrackPayload = payload.nextTrack
         const legacyEncodedTrack = payload.encodedTrack
 
         if (legacyEncodedTrack) {
@@ -334,6 +393,46 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           }
         }
 
+        if (nextTrackPayload) {
+          let trackToPreload = null
+
+          if (nextTrackPayload.encoded !== undefined) {
+            const decodedTrack = decodeTrack(nextTrackPayload.encoded)
+            if (decodedTrack) {
+              trackToPreload = {
+                encoded: nextTrackPayload.encoded,
+                info: decodedTrack.info,
+                audioTrackId:
+                  nextTrackPayload.language || nextTrackPayload.audioTrackId || null,
+                userData: nextTrackPayload.userData
+              }
+            }
+          } else if (nextTrackPayload.identifier) {
+            if (nodelink.loadTrack) {
+              const loadResult = await nodelink.loadTrack(nextTrackPayload.identifier)
+              if (loadResult.loadType === 'track') {
+                trackToPreload = {
+                  encoded: loadResult.data.encoded,
+                  info: loadResult.data.info,
+                  audioTrackId:
+                    nextTrackPayload.language || nextTrackPayload.audioTrackId || null,
+                  userData: nextTrackPayload.userData
+                }
+              }
+            }
+          }
+
+          if (trackToPreload) {
+            logger(
+              'debug',
+              'PlayerUpdate',
+              `Preloading track for guild ${guildId}:`,
+              { track: trackToPreload.info }
+            )
+            await session.players.preload(guildId, trackToPreload)
+          }
+        }
+
         if (stopPlayer) {
           const player = session.players.get(guildId)
           if (player?.isUpdatingTrack) {
@@ -424,6 +523,16 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             payload.filters
           )
           await session.players.setFilters(guildId, payload)
+        }
+
+        if (payload.fading !== undefined) {
+          logger(
+            'debug',
+            'PlayerUpdate',
+            `Setting fading for guild ${guildId}`
+          )
+          const sanitizedFading = sanitizeFadingConfig(payload.fading)
+          await session.players.setFading(guildId, sanitizedFading)
         }
 
         const playerJson = await session.players.toJSON(guildId)

@@ -86,6 +86,217 @@ docker run -p 2333:2333 nodelink
 
 ---
 
+### Diagram
+
+```mermaid
+flowchart TD
+%% =========================
+%% NODELINK / LAVALINK STACK
+%% Detailed, GitHub-compatible
+%% =========================
+
+subgraph L1["Layer 1: Client Access"]
+  direction LR
+  Bot["Discord Bot\nCommands/Events"]
+  Lib["Lavalink Client\nWS + REST"]
+  API["API Gateway\nHTTP + WS termination"]
+  RecvClient["Voice Receive Client\n(Recorder)"]
+  PCMClient["Direct PCM Client\n(HTTP PCM)"]
+
+  Bot -- "control + intents" --> Lib
+  Lib -- "REST: /loadtracks /sessions /players" --> API
+  Lib -- "WS: opcodes (play/pause/seek/filters)" --> API
+  RecvClient -- "WS voice receive" --> API
+  PCMClient -- "HTTP POST PCM" --> API
+end
+
+subgraph L2["Layer 2: Master Orchestrator"]
+  direction TB
+
+  API_In["REST Handlers\nValidation + streaming limits"]
+  WS_GW["WebSocket Gateway\nClient Control"]
+  VoiceWS["Voice Receive WS Router\nIngest frames/events"]
+
+  SessionMgr["Session Manager\nPlayer/session lifecycle"]
+
+  subgraph Managers["Resource & Control Managers"]
+    direction LR
+    WorkerMgr["Worker Manager\nVoice workers"]
+    SourceMgr["Source Worker Manager\nSearch/Resolve/Decrypt"]
+    StatsMgr["Stats Manager\nPrometheus/Metrics"]
+    PluginMgr["Plugin Manager\nHooks/Providers"]
+  end
+
+  API --> API_In
+  API --> WS_GW
+  API --> VoiceWS
+
+  API_In --> SessionMgr
+  WS_GW --> SessionMgr
+  VoiceWS --> SessionMgr
+
+  SessionMgr --> WorkerMgr
+  SessionMgr --> SourceMgr
+  SessionMgr -. "metrics/logs" .-> StatsMgr
+  SessionMgr -. "plugin hooks" .-> PluginMgr
+
+  API_In -. "task delegation" .-> Managers
+end
+
+subgraph BUS["Binary Socket Bus"]
+  direction LR
+  VCmd["Command Pipe\nv8 serialization"]
+  VEvt["Event Pipe\nbinary stream"]
+  SMeta["Metadata Pipe\ncustom framing"]
+end
+
+subgraph L3["Layer 3: Execution Plane"]
+  direction TB
+
+  subgraph SrcCluster["Source Worker Cluster"]
+    direction TB
+    SW_IPC["IPC Task In\nprocess.send()"]
+    SW_Q["Priority Task Queue\nresolve/search/decrypt"]
+
+    subgraph SWPool["Micro-Worker Thread Pool"]
+      direction LR
+      T1["Thread 1"]
+      T2["Thread 2"]
+      TN["Thread 32"]
+    end
+
+    SW_Net["Source Network Interface\nHTTP(S) fetch / CDN"]
+    SW_Sock["Socket Client\nmetadata out"]
+
+    SW_IPC --> SW_Q
+    SW_Q -- "dispatch" --> SWPool
+    SWPool -- "network I/O" --> SW_Net
+    SW_Net -- "metadata + timing + headers" --> SW_Sock
+  end
+
+  subgraph VoiceCluster["Voice Worker Cluster"]
+    direction TB
+
+    VW_Sock["Socket Listener\ncommands in"]
+    InternalMgr["Internal Source Manager\nper-player stream control"]
+
+    subgraph DSP["DSP Pipeline"]
+      direction TB
+      PipeIn["StreamProcessor\npull stream"]
+      Demux["Demux / Decode"]
+      Resample["Resampler\n48 kHz"]
+      Ring["RingBuffer"]
+      MixLayers["Mix Layers"]
+      Mixer["AudioMixer"]
+      BPool["BufferPool"]
+      Filters["Filters / Volume"]
+      Encoder["Opus Encoder\n20ms frames"]
+
+      PipeIn --> Demux --> Resample --> Ring
+      MixLayers -.-> Ring
+      Ring --> Mixer
+      BPool -.-> Mixer
+      Mixer --> Filters --> Encoder
+    end
+
+    subgraph DAVE["DAVE Security Engine"]
+      direction LR
+      UDPIn["UDP Socket In\nDiscord voice recv"]
+      DDec["DAVE AEAD Decryptor"]
+      VRelay["Voice Receive Bus\nframes/events"]
+      DEnc["DAVE AEAD Encryptor"]
+
+      UDPIn --> DDec --> VRelay
+    end
+
+    VW_Sock --> InternalMgr
+    InternalMgr -- "stream url / seek / stop" --> PipeIn
+    Encoder --> DEnc
+  end
+end
+
+subgraph L4["Layer 4: Output Plane"]
+  direction LR
+  Discord["Discord Voice Gateway"]
+end
+
+subgraph SUP["Infrastructure & Support Services"]
+  direction LR
+  Route["RoutePlanner\nIP rotation/bind"]
+  Creds["CredentialManager\nAES-256-GCM storage"]
+  Log["Logger / Audit"]
+  Err["ErrorHandler\nsendErrorResponse"]
+end
+
+%% Inter-layer connections
+Lib -- "WS control" --> WS_GW
+Lib -- "REST control" --> API_In
+
+RecvClient -- "WS voice frames/events" --> VoiceWS
+VRelay -- "voice frames/events" --> VoiceWS
+
+PCMClient -- "HTTP PCM stream" --> API_In
+
+SourceMgr -- "IPC tasks: resolve/search/decrypt" --> SW_IPC
+
+SW_Sock -- "metadata packet" --> SMeta
+SMeta -- "track metadata, duration, headers, hints" --> SourceMgr
+
+WorkerMgr -- "net.write(command)" --> VCmd
+VCmd -- "command" --> VW_Sock
+
+VRelay -- "internal feedback (health/seq/rtp)" --> VEvt
+VEvt -- "events" --> WorkerMgr
+
+DEnc == "Encrypted Opus (AEAD)" ==> Discord
+
+API_In -. "warn/error" .-> Log
+WS_GW -. "warn/error" .-> Log
+VoiceWS -. "warn/error" .-> Log
+
+API_In -. "413/400/etc" .-> Err
+WS_GW -. "close codes" .-> Err
+
+Creds -. "inject credentials" .-> Managers
+Creds -. "inject keys (DAVE/ARL/etc)" .-> SrcCluster
+Creds -. "inject voice keys/session" .-> VoiceCluster
+
+Route -. "bind outbound ip" .-> SW_Net
+Route -. "bind outbound ip" .-> PipeIn
+
+PluginMgr -. "source hooks" .-> SourceMgr
+PluginMgr -. "voice hooks" .-> WorkerMgr
+PluginMgr -. "rest/ws hooks" .-> API_In
+
+StatsMgr -. "record metrics" .-> Managers
+StatsMgr -. "record metrics" .-> SrcCluster
+StatsMgr -. "record metrics" .-> VoiceCluster
+
+%% Layout anchors
+L1 ~~~ L2
+L2 ~~~ BUS
+BUS ~~~ L3
+L3 ~~~ L4
+L4 ~~~ SUP
+
+%% Styling (GitHub supports classDef/class)
+classDef layer fill:#0f172a,stroke:#334155,color:#cbd5e1
+classDef component fill:#1e293b,stroke:#475569,color:#f1f5f9
+classDef focus fill:#1e1b4b,stroke:#818cf8,color:#e0e7ff
+classDef critical fill:#064e3b,stroke:#34d399,color:#ecfdf5
+classDef infra fill:#312e81,stroke:#6366f1,color:#e0e7ff,stroke-dasharray: 5 5
+classDef manager fill:#1e3a8a,stroke:#3b82f6,color:#ffffff
+
+class L1,L2,L3,L4,SUP layer
+class Bot,API,API_In,WS_GW,VoiceWS,StatsMgr,PluginMgr,SW_Q,SW_Net,UDPIn,VRelay,Log,Err,T1,T2,TN,RecvClient,PCMClient,Demux,Resample,Ring,MixLayers,Filters component
+class Lib,SW_IPC,SW_Sock,VW_Sock,PipeIn,Encoder,Mixer focus
+class DDec,DEnc,Discord critical
+class BUS,VCmd,VEvt,SMeta,Route,Creds,BPool infra
+class SessionMgr,WorkerMgr,SourceMgr manager
+```
+
+---
+
 ## Usage
 
 NodeLink is compatible with most Lavalink clients, as it implements nearly the entire original API.
@@ -223,7 +434,7 @@ Questions, feedback, or contributions are always welcome:
 
 ## License
 
-NodeLink is open-source software released under the **BSD 2-Clause License**.
+NodeLink is open-source software released under the **GNU General Public License v3.0**.
 See [LICENSE](LICENSE) for full details.
 
 ---
@@ -232,6 +443,18 @@ See [LICENSE](LICENSE) for full details.
 
 NodeLink was born from a simple desire: to understand and master every detail of an audio server — without relying on closed, heavy, or complicated solutions.
 The goal is to make audio accessible, transparent, and fun to build.
+
+---
+
+## Star History
+
+<a href="https://www.star-history.com/#PerformanC/NodeLink&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=PerformanC/NodeLink&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=PerformanC/NodeLink&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=PerformanC/NodeLink&type=date&legend=top-left" />
+ </picture>
+</a>
 
 ---
 

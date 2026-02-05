@@ -1,6 +1,6 @@
 import { Transform } from 'node:stream'
 import { logger } from '../../utils.js'
-import { RingBuffer } from '../RingBuffer.js'
+import { RingBuffer } from '../structs/RingBuffer.js'
 
 const STATE_HEADER = 0
 const STATE_TAG_HEADER = 1

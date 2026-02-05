@@ -4,6 +4,8 @@ import {
   http1makeRequest,
   logger
 } from '../utils.js'
+import { fetchCanvas } from '../modules/spotifyCanvas.js'
+import { getLocalToken } from '../modules/spotifyAuth.js'
 
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1'
 const SPOTIFY_CLIENT_API_URL = 'https://spclient.wg.spotify.com'
@@ -28,6 +30,10 @@ const QUERIES = {
   getArtist: {
     name: 'queryArtistOverview',
     hash: '35648a112beb1794e39ab931365f6ae4a8d45e65396d641eeda94e4003d41497'
+  },
+  getRecommendations: {
+    name: 'internalLinkRecommenderTrack',
+    hash: 'c77098ee9d6ee8ad3eb844938722db60570d040b49f41f5ec6e7be9160a7c86b'
   },
   searchDesktop: {
     name: 'searchDesktop',
@@ -59,6 +65,8 @@ export default class SpotifySource {
     this.tokenInitialized = false
     this.allowExplicit = true
     this.anonymousToken = null
+    this.mobileToken = null
+    this.spDc = null
   }
 
   async setup() {
@@ -68,11 +76,16 @@ export default class SpotifySource {
     this.anonymousToken = this.nodelink.credentialManager.get(
       'spotify_anonymous_token'
     )
+    this.mobileToken = this.nodelink.credentialManager.get(
+      'spotify_mobile_token'
+    )
 
     const hasOfficialConfig =
       this.config.sources.spotify?.clientId &&
       this.config.sources.spotify?.clientSecret
-    const hasAnonymousConfig = this.config.sources.spotify?.externalAuthUrl
+    const hasAnonymousConfig =
+      this.config.sources.spotify?.externalAuthUrl ||
+      this.config.sources.spotify?.sp_dc
 
     const missingOfficial = hasOfficialConfig && !this.accessToken
     const missingAnonymous = hasAnonymousConfig && !this.anonymousToken
@@ -80,6 +93,12 @@ export default class SpotifySource {
     if (!missingOfficial && !missingAnonymous) {
       if (this.accessToken || this.anonymousToken) {
         this.tokenInitialized = true
+
+        if (this.config.sources.spotify?.sp_dc) {
+          this.spDc = this.config.sources.spotify.sp_dc
+          if (!this.mobileToken) await this._refreshMobileToken()
+        }
+
         return true
       }
     }
@@ -88,6 +107,7 @@ export default class SpotifySource {
       this.clientId = this.config.sources.spotify?.clientId
       this.clientSecret = this.config.sources.spotify?.clientSecret
       this.externalAuthUrl = this.config.sources.spotify?.externalAuthUrl
+      this.spDc = this.config.sources.spotify?.sp_dc
       this.playlistLoadLimit =
         this.config.sources.spotify?.playlistLoadLimit ?? 0
       this.playlistPageLoadConcurrency =
@@ -100,11 +120,11 @@ export default class SpotifySource {
       this.market = this.config.sources.spotify?.market || 'US'
       this.allowExplicit = this.config.sources.spotify?.allowExplicit ?? true
 
-      if (!this.externalAuthUrl && (!this.clientId || !this.clientSecret)) {
+      if (!this.externalAuthUrl && !this.spDc && (!this.clientId || !this.clientSecret)) {
         logger(
           'warn',
           'Spotify',
-          'Neither externalAuthUrl nor Client ID/Secret provided. Disabling source.'
+          'Neither externalAuthUrl, sp_dc nor Client ID/Secret provided. Disabling source.'
         )
         return false
       }
@@ -114,7 +134,7 @@ export default class SpotifySource {
         logger(
           'info',
           'Spotify',
-          `Tokens initialized successfully. Official: ${!!this.accessToken}, Anonymous: ${!!this.anonymousToken}`
+          `Tokens initialized successfully. Official: ${!!this.accessToken}, Anonymous: ${!!this.anonymousToken}, Mobile: ${!!this.mobileToken}`
         )
       }
       return success
@@ -132,25 +152,122 @@ export default class SpotifySource {
     return limit === 0 ? 'unlimited' : `${limit * multiplier} tracks max`
   }
 
+  _base62ToHex(id) {
+    const alphabet = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    let bn = 0n
+    for (const char of id) {
+      bn = bn * 62n + BigInt(alphabet.indexOf(char))
+    }
+    return bn.toString(16).padStart(32, '0')
+  }
+
+  async _fetchTrackMetadata(id) {
+    const token = this.anonymousToken || this.mobileToken || this.accessToken
+    if (!token) return null
+
+    try {
+      const hexId = this._base62ToHex(id)
+      const url = `${SPOTIFY_CLIENT_API_URL}/metadata/4/track/${hexId}?market=from_token`
+      const { body, statusCode } = await http1makeRequest(url, {
+        responseType: 'buffer',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Accept': 'application/json',
+          'App-Platform': 'WebPlayer',
+          'Spotify-App-Version': '1.2.83.284.g147edeea'
+        }
+      })
+
+      if (statusCode !== 200 || !body) return null
+
+      const bodyStr = body.toString()
+      try {
+        return JSON.parse(bodyStr)
+      } catch {
+        const isrcIndex = body.indexOf('isrc')
+        if (isrcIndex !== -1) {
+          const bodyRange = body.subarray(isrcIndex, isrcIndex + 50).toString()
+          const isrcMatch = bodyRange.match(/[A-Z0-9]{12}/)
+          if (isrcMatch) return { external_id: [{ type: 'isrc', id: isrcMatch[0] }] }
+        }
+      }
+
+      return null
+    } catch (e) {
+      logger('debug', 'Spotify', `Exception in _fetchTrackMetadata for ${id}: ${e.message}`)
+      return null
+    }
+  }
+
+  _buildTrackFromMetadata(data) {
+    if (!data || !data.name) return null
+
+    const id = data.canonical_uri?.split(':').pop() || data.gid
+
+    const isExplicit = !!data.explicit
+    const trackInfo = {
+      identifier: id,
+      isSeekable: true,
+      author: data.artist?.map((a) => a.name).join(', ') || 'Unknown',
+      length: data.duration || 0,
+      isStream: false,
+      position: 0,
+      title: data.name,
+      uri: `https://open.spotify.com/track/${id}?explicit=${isExplicit}`,
+      artworkUrl: data.album?.cover_group?.image?.find(img => img.size === 'LARGE' || img.size === 'DEFAULT')?.file_id
+        ? `https://i.scdn.co/image/${data.album.cover_group.image.find(img => img.size === 'LARGE' || img.size === 'DEFAULT').file_id}`
+        : null,
+      isrc: data.external_id?.find((e) => e.type === 'isrc')?.id || null,
+      sourceName: 'spotify'
+    }
+
+    return {
+      encoded: encodeTrack(trackInfo),
+      info: trackInfo,
+      pluginInfo: {}
+    }
+  }
+
   _isTokenValid() {
     return (
       this.tokenExpiry && Date.now() < this.tokenExpiry - TOKEN_REFRESH_MARGIN
     )
   }
 
+  async _refreshMobileToken() {
+    if (!this.spDc) return
+
+    try {
+      const { getLocalToken } = await import('../modules/spotifyAuth.js')
+      const tokenData = await getLocalToken(this.spDc, 'mobile-web-player')
+      if (tokenData?.accessToken) {
+        this.mobileToken = tokenData.accessToken
+        const expiresMs = tokenData.accessTokenExpirationTimestampMs
+          ? tokenData.accessTokenExpirationTimestampMs - Date.now()
+          : 3600000
+
+        this.nodelink.credentialManager.set(
+          'spotify_mobile_token',
+          this.mobileToken,
+          Math.max(expiresMs, 60000)
+        )
+        logger('debug', 'Spotify', 'Canvas token (mobile) refreshed successfully')
+      }
+    } catch (e) {
+      logger('warn', 'Spotify', `Mobile token refresh failed: ${e.message}`)
+    }
+  }
+
   async _refreshToken() {
     let success = false
 
-    if (this.externalAuthUrl && !this.anonymousToken) {
+    if (!this.anonymousToken) {
+      this.nodelink.credentialManager.set('spotify_anonymous_token', null)
+
       try {
-        const response = await http1makeRequest(this.externalAuthUrl, {
-          headers: { Accept: 'application/json' },
-          disableBodyCompression: true
-        })
+        const tokenData = await getLocalToken(null, 'web-player')
 
-        const { body: tokenData, error, statusCode } = response
-
-        if (!error && statusCode === 200 && tokenData?.accessToken) {
+        if (tokenData?.accessToken) {
           this.anonymousToken = tokenData.accessToken
           const expiresMs = tokenData.accessTokenExpirationTimestampMs
             ? tokenData.accessTokenExpirationTimestampMs - Date.now()
@@ -166,19 +283,55 @@ export default class SpotifySource {
             Math.max(expiresMs, 60000)
           )
           success = true
-        } else {
-          logger(
-            'warn',
-            'Spotify',
-            `Failed to fetch anonymous token: ${statusCode}`
-          )
+          logger('debug', 'Spotify', 'Generated local anonymous token')
         }
       } catch (e) {
         logger(
-          'error',
+          'warn',
           'Spotify',
-          `Anonymous token refresh failed: ${e.message}`
+          `Local anonymous token generation failed: ${e.message}`
         )
+      }
+
+      if (!this.anonymousToken && this.externalAuthUrl) {
+        try {
+          const response = await http1makeRequest(this.externalAuthUrl, {
+            headers: { Accept: 'application/json' },
+            disableBodyCompression: true
+          })
+
+          const { body: tokenData, error, statusCode } = response
+
+          if (!error && statusCode === 200 && tokenData?.accessToken) {
+            this.anonymousToken = tokenData.accessToken
+            const expiresMs = tokenData.accessTokenExpirationTimestampMs
+              ? tokenData.accessTokenExpirationTimestampMs - Date.now()
+              : 3600000
+
+            if (!this.accessToken) {
+              this.tokenExpiry = Date.now() + Math.max(expiresMs, 60000)
+            }
+
+            this.nodelink.credentialManager.set(
+              'spotify_anonymous_token',
+              this.anonymousToken,
+              Math.max(expiresMs, 60000)
+            )
+            success = true
+          } else {
+            logger(
+              'warn',
+              'Spotify',
+              `Failed to fetch anonymous token from external URL: ${statusCode}`
+            )
+          }
+        } catch (e) {
+          logger(
+            'error',
+            'Spotify',
+            `External anonymous token refresh failed: ${e.message}`
+          )
+        }
       }
     } else if (this.anonymousToken) {
       success = true
@@ -231,18 +384,26 @@ export default class SpotifySource {
       success = true
     }
 
-    if (!this.accessToken && this.anonymousToken) {
-      this.accessToken = this.anonymousToken
+    if (this.spDc) {
+      await this._refreshMobileToken()
+
+      if (!this.externalAuthUrl && this.mobileToken) {
+        this.anonymousToken = this.mobileToken
+      }
     }
 
-    this.tokenInitialized = success
-    return success
+    this.tokenInitialized = success || !!this.mobileToken
+    return this.tokenInitialized
   }
 
-  async _apiRequest(path) {
+  async _apiRequest(path, retryCount = 0) {
+    if (!this.accessToken) return null
+
     if (!this.tokenInitialized || !this._isTokenValid()) {
       await this.setup()
     }
+
+    if (!this.accessToken) return null
 
     try {
       const url = path.startsWith('http')
@@ -256,16 +417,32 @@ export default class SpotifySource {
       })
 
       if (statusCode === 429) {
+        if (retryCount >= 3) {
+          logger('error', 'Spotify', `Rate limit retry cap reached for ${path}. Skipping.`)
+          return null
+        }
+
         const retryAfter = headers['retry-after']
           ? parseInt(headers['retry-after'], 10)
           : 5
+
         logger(
           'warn',
           'Spotify',
-          `Rate limited. Retrying after ${retryAfter} seconds.`
+          `Rate limited (Attempt ${retryCount + 1}/3). Requesting new token...`
         )
-        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000))
-        return this._apiRequest(path)
+
+        if (this.externalAuthUrl) {
+          this.anonymousToken = null
+          this.accessToken = null
+          this.tokenInitialized = false
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)))
+          const refreshed = await this._refreshToken()
+          if (refreshed) return this._apiRequest(path, retryCount + 1)
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, Math.min(retryAfter, 10) * 1000))
+        return this._apiRequest(path, retryCount + 1)
       }
 
       if (statusCode === 401) {
@@ -285,7 +462,7 @@ export default class SpotifySource {
     }
   }
 
-  async _internalApiRequest(operation, variables) {
+  async _internalApiRequest(operation, variables, retryCount = 0) {
     if (!this.tokenInitialized || !this._isTokenValid()) {
       await this.setup()
     }
@@ -293,7 +470,7 @@ export default class SpotifySource {
     const token = this.anonymousToken || this.accessToken
 
     if (!token) {
-      throw new Error('No token available for internal API request.')
+      return null
     }
 
     try {
@@ -322,16 +499,32 @@ export default class SpotifySource {
       )
 
       if (statusCode === 429) {
+        if (retryCount >= 3) {
+          logger('error', 'Spotify', `Internal API Rate limit retry cap reached. Skipping.`)
+          return null
+        }
+
         const retryAfter = headers['retry-after']
           ? parseInt(headers['retry-after'], 10)
           : 5
+
         logger(
           'warn',
           'Spotify',
-          `Internal API Rate limited. Retrying after ${retryAfter} seconds.`
+          `Internal API Rate limited (Attempt ${retryCount + 1}/3). Requesting new token...`
         )
-        await new Promise((resolve) => setTimeout(resolve, retryAfter * 1000))
-        return this._internalApiRequest(operation, variables)
+
+        if (this.externalAuthUrl) {
+          this.anonymousToken = null
+          this.accessToken = null
+          this.tokenInitialized = false
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)))
+          const refreshed = await this._refreshToken()
+          if (refreshed) return this._internalApiRequest(operation, variables, retryCount + 1)
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, Math.min(retryAfter, 10) * 1000))
+        return this._internalApiRequest(operation, variables, retryCount + 1)
       }
 
       if (statusCode === 401) {
@@ -544,6 +737,33 @@ export default class SpotifySource {
     return allItems
   }
 
+  async _fetchFullTracks(ids) {
+    if (!this.clientId || !this.clientSecret || !this.accessToken || ids.length === 0) return []
+
+    const batches = []
+    for (let i = 0; i < ids.length; i += 50) {
+      batches.push(ids.slice(i, i + 50))
+    }
+
+    const aggregatedTracks = []
+    const fetchPromises = batches.map((batch) =>
+      this._apiRequest(`/tracks?ids=${encodeURIComponent(batch.join(','))}`)
+    )
+
+    try {
+      const results = await Promise.all(fetchPromises)
+      for (const data of results) {
+        if (Array.isArray(data?.tracks)) {
+          aggregatedTracks.push(...data.tracks)
+        }
+      }
+    } catch (e) {
+      logger('warn', 'Spotify', `Failed to fetch full track details: ${e.message}`)
+    }
+
+    return aggregatedTracks
+  }
+
   async search(query, sourceTerm, searchType = 'track') {
     if (this.recommendationTerm.includes(sourceTerm)) {
       return this.getRecommendations(query)
@@ -552,7 +772,7 @@ export default class SpotifySource {
     try {
       const limit = this.config.maxSearchResults || 10
 
-      if (this.externalAuthUrl) {
+      if (this.externalAuthUrl || this.anonymousToken) {
         const data = await this._internalApiRequest(QUERIES.searchDesktop, {
           searchTerm: query,
           offset: 0,
@@ -563,44 +783,68 @@ export default class SpotifySource {
           includePreReleases: false
         })
 
-        if (!data?.searchV2) {
-          return { loadType: 'empty', data: {} }
-        }
+        if (data?.searchV2) {
+          const results = this._processInternalSearchResults(
+            data.searchV2,
+            searchType
+          )
+          if (results.length > 0 && searchType === 'track') {
+            const topTrack = results[0]
+            if (!topTrack.info.isrc) {
+              const metadata = await this._fetchTrackMetadata(topTrack.info.identifier)
+              if (metadata) {
+                const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+                if (isrc) {
+                  topTrack.info.isrc = isrc
+                  topTrack.encoded = encodeTrack(topTrack.info)
+                }
+              }
+            }
+          }
 
-        const results = this._processInternalSearchResults(
-          data.searchV2,
-          searchType
-        )
-        return results.length === 0
-          ? { loadType: 'empty', data: {} }
-          : { loadType: 'search', data: results }
-      }
-
-      const typeMap = {
-        track: 'track',
-        album: 'album',
-        playlist: 'playlist',
-        artist: 'artist'
-      }
-      const spotifyType = typeMap[searchType] || 'track'
-
-      const data = await this._apiRequest(
-        `/search?q=${encodeURIComponent(query)}&type=${spotifyType}&limit=${limit}&market=${this.market}`
-      )
-
-      if (!data || data.error) {
-        return {
-          exception: {
-            message: data?.error?.message || 'Search failed on Spotify.',
-            severity: 'common'
+          if (results.length > 0) {
+            return { loadType: 'search', data: results }
           }
         }
       }
 
-      const results = this._processOfficialSearchResults(data, spotifyType)
-      return results.length === 0
-        ? { loadType: 'empty', data: {} }
-        : { loadType: 'search', data: results }
+      if (this.clientId && this.clientSecret) {
+        const typeMap = {
+          track: 'track',
+          album: 'album',
+          playlist: 'playlist',
+          artist: 'artist'
+        }
+        const spotifyType = typeMap[searchType] || 'track'
+
+        const data = await this._apiRequest(
+          `/search?q=${encodeURIComponent(query)}&type=${spotifyType}&limit=${limit}&market=${this.market}`
+        )
+
+        if (data && !data.error) {
+          const results = this._processOfficialSearchResults(data, spotifyType)
+
+          if (results.length > 0 && spotifyType === 'track') {
+            const topTrack = results[0]
+            if (!topTrack.info.isrc) {
+              const metadata = await this._fetchTrackMetadata(topTrack.info.identifier)
+              if (metadata) {
+                const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+                if (isrc) {
+                  topTrack.info.isrc = isrc
+                  topTrack.encoded = encodeTrack(topTrack.info)
+                }
+              }
+            }
+          }
+
+          if (results.length > 0) {
+            return { loadType: 'search', data: results }
+          }
+        }
+      }
+
+      return { loadType: 'empty', data: {} }
     } catch (e) {
       return {
         exception: { message: e.message, severity: 'fault' }
@@ -610,6 +854,39 @@ export default class SpotifySource {
 
   async getRecommendations(query) {
     try {
+      if (this.externalAuthUrl || this.anonymousToken) {
+        let trackId = query
+        if (!/^[a-zA-Z0-9]{22}$/.test(query) && !query.includes('=')) {
+          const searchResult = await this.search(query, 'spsearch', 'track')
+          if (searchResult.loadType === 'search' && searchResult.data.length > 0) {
+            trackId = searchResult.data[0].info.identifier
+          }
+        }
+
+        if (/^[a-zA-Z0-9]{22}$/.test(trackId)) {
+          const data = await this._internalApiRequest(QUERIES.getRecommendations, {
+            uri: `spotify:track:${trackId}`,
+            limit: 20
+          })
+
+          const items = data?.internalLinkRecommenderTrack?.items || data?.seoRecommendedTrack?.items
+          if (items?.length > 0) {
+            const tracks = items
+              .map((it) => this._buildTrackFromInternal(it.content?.data || it.data))
+              .filter(Boolean)
+
+            return {
+              loadType: 'playlist',
+              data: {
+                info: { name: 'Spotify Recommendations', selectedTrack: 0 },
+                pluginInfo: { type: 'recommendations' },
+                tracks
+              }
+            }
+          }
+        }
+      }
+
       if (query.startsWith('mix:') || !query.includes('=')) {
         let seedType = 'track'
         let seed = query
@@ -886,28 +1163,94 @@ export default class SpotifySource {
   }
 
   async _resolveTrack(id) {
-    if (this.externalAuthUrl) {
+    if (this.externalAuthUrl || this.anonymousToken) {
       const data = await this._internalApiRequest(QUERIES.getTrack, {
         uri: `spotify:track:${id}`
       })
-      if (!data?.trackUnion || data.trackUnion.__typename === 'NotFound') {
-        return {
-          exception: { message: 'Track not found.', severity: 'common' }
+      if (data?.trackUnion && data.trackUnion.__typename !== 'NotFound') {
+        const track = this._buildTrackFromInternal(data.trackUnion)
+
+        if (this.mobileToken && track) {
+          const cachedCanvas = this.nodelink.trackCacheManager.get('spotify-canvas', id)
+          if (cachedCanvas) {
+            track.pluginInfo.canvas = cachedCanvas
+          } else {
+            const canvasRes = await fetchCanvas(
+              `spotify:track:${id}`,
+              this.mobileToken
+            )
+            if (canvasRes?.data?.canvasesList?.[0]) {
+              track.pluginInfo.canvas = canvasRes.data
+              this.nodelink.trackCacheManager.set('spotify-canvas', id, canvasRes.data, 1000 * 60 * 60 * 12)
+            }
+          }
         }
-      }
-      return {
-        loadType: 'track',
-        data: this._buildTrackFromInternal(data.trackUnion)
+
+        if (!track.info.isrc) {
+          const metadata = await this._fetchTrackMetadata(id)
+          if (metadata) {
+            const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+            if (isrc) {
+              track.info.isrc = isrc
+              track.encoded = encodeTrack(track.info)
+            }
+          }
+        }
+
+        return {
+          loadType: 'track',
+          data: track
+        }
+      } else {
+        // GraphQL failed, try metadata endpoint as primary fallback
+        const metadata = await this._fetchTrackMetadata(id)
+        const track = this._buildTrackFromMetadata(metadata)
+        if (track) {
+          return {
+            loadType: 'track',
+            data: track
+          }
+        }
       }
     }
 
-    const data = await this._apiRequest(`/tracks/${id}?market=${this.market}`)
-    if (!data) {
-      return {
-        exception: { message: 'Track not found.', severity: 'common' }
+    if (this.clientId && this.clientSecret) {
+      const data = await this._apiRequest(`/tracks/${id}?market=${this.market}`)
+      if (data) {
+        const track = this._buildTrack(data)
+
+        if (this.mobileToken && track) {
+          const cachedCanvas = this.nodelink.trackCacheManager.get('spotify-canvas', id)
+          if (cachedCanvas) {
+            track.pluginInfo.canvas = cachedCanvas
+          } else {
+            const canvasRes = await fetchCanvas(
+              `spotify:track:${id}`,
+              this.mobileToken
+            )
+            if (canvasRes?.data?.canvasesList?.[0]) {
+              track.pluginInfo.canvas = canvasRes.data
+              this.nodelink.trackCacheManager.set('spotify-canvas', id, canvasRes.data, 1000 * 60 * 60 * 12)
+            }
+          }
+        }
+
+        if (!track.info.isrc) {
+          const metadata = await this._fetchTrackMetadata(id)
+          if (metadata) {
+            const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+            if (isrc) {
+              track.info.isrc = isrc
+              track.encoded = encodeTrack(track.info)
+            }
+          }
+        }
+
+        return { loadType: 'track', data: track }
       }
     }
-    return { loadType: 'track', data: this._buildTrack(data) }
+
+    return { loadType: 'empty', data: {} }
   }
 
   async _resolveAlbum(id) {
@@ -1009,7 +1352,9 @@ export default class SpotifySource {
   }
 
   async _resolvePlaylist(id) {
-    if (this.externalAuthUrl) {
+    const isAutogenerated = id.startsWith('37i9dQZF') || id.startsWith('37i9dQZE')
+
+    if (this.externalAuthUrl || isAutogenerated) {
       const data = await this._internalApiRequest(QUERIES.getPlaylist, {
         uri: `spotify:playlist:${id}`,
         offset: 0,
@@ -1017,34 +1362,60 @@ export default class SpotifySource {
         enableWatchFeedEntrypoint: false
       })
 
-      if (!data?.playlistV2 || data.playlistV2.__typename === 'NotFound') {
+      if (data?.playlistV2 && data.playlistV2.__typename !== 'NotFound') {
+        const allItems = [...(data.playlistV2.content?.items || [])]
+        const totalTracks = data.playlistV2.content?.totalCount || allItems.length
+
+        if (totalTracks > 100) {
+          const additionalItems = await this._fetchInternalPaginatedData(
+            QUERIES.getPlaylist,
+            `spotify:playlist:${id}`,
+            totalTracks,
+            100,
+            this.playlistLoadLimit,
+            this.playlistPageLoadConcurrency,
+            { enableWatchFeedEntrypoint: false }
+          )
+          allItems.push(...additionalItems)
+        }
+
+        const trackIds = allItems
+          .map((it) => it.itemV2?.data?.uri?.split(':').pop())
+          .filter(Boolean)
+
+        let tracks = []
+        const hasOfficial = this.clientId && this.clientSecret
+
+        if (hasOfficial && trackIds.length > 0) {
+          const fullTracks = await this._fetchFullTracks(trackIds)
+          if (fullTracks.length > 0) {
+            tracks = fullTracks
+              .map((t) => this._buildTrack(t))
+              .filter(Boolean)
+          }
+        }
+
+        if (tracks.length === 0) {
+          tracks = allItems
+            .map((item) => this._buildTrackFromInternal(item.itemV2?.data))
+            .filter(Boolean)
+        }
+
         return {
-          exception: { message: 'Playlist not found.', severity: 'common' }
+          loadType: 'playlist',
+          data: {
+            info: { name: data.playlistV2.name, selectedTrack: 0 },
+            tracks
+          }
         }
       }
 
-      const allItems = [...data.playlistV2.content.items]
-      const totalTracks = data.playlistV2.content.totalCount
-      const additionalItems = await this._fetchInternalPaginatedData(
-        QUERIES.getPlaylist,
-        `spotify:playlist:${id}`,
-        totalTracks,
-        100,
-        this.playlistLoadLimit,
-        this.playlistPageLoadConcurrency,
-        { enableWatchFeedEntrypoint: false }
-      )
-      allItems.push(...additionalItems)
-
-      const tracks = allItems
-        .map((item) => this._buildTrackFromInternal(item.itemV2.data))
-        .filter(Boolean)
-
-      return {
-        loadType: 'playlist',
-        data: {
-          info: { name: data.playlistV2.name, selectedTrack: 0 },
-          tracks
+      if (isAutogenerated && !this.externalAuthUrl) {
+        return {
+          exception: {
+            message: 'Autogenerated playlists require externalAuthUrl to be configured.',
+            severity: 'common'
+          }
         }
       }
     }
@@ -1163,23 +1534,6 @@ export default class SpotifySource {
   }
 
   async getTrackUrl(decodedTrack) {
-    if (!decodedTrack.isrc && this.accessToken) {
-      try {
-        const trackData = await this._apiRequest(
-          `/tracks/${decodedTrack.identifier}?market=${this.market}`
-        )
-        if (trackData?.external_ids?.isrc) {
-          decodedTrack.isrc = trackData.external_ids.isrc
-        }
-      } catch (e) {
-        logger(
-          'debug',
-          'Spotify',
-          `Failed to fetch ISRC for ${decodedTrack.identifier} via API: ${e.message}`
-        )
-      }
-    }
-
     let isExplicit = false
     if (decodedTrack.uri) {
       try {

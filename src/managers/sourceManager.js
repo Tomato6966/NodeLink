@@ -282,9 +282,9 @@ export default class SourcesManager {
     await this.loadFolder()
   }
 
-  async getTrackUrl(track, itag) {
+  async getTrackUrl(track, itag, ...args) {
     const instance = this.sourceMap.get(track.sourceName)
-    return await instance.getTrackUrl(track, itag)
+    return await instance.getTrackUrl(track, itag, ...args)
   }
 
   async getTrackStream(track, url, protocol, additionalData) {

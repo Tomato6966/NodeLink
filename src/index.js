@@ -8,6 +8,7 @@ import WebSocketServer from '@performanc/pwsl-server'
 import requestHandler from './api/index.js'
 import connectionManager from './managers/connectionManager.js'
 import CredentialManager from './managers/credentialManager.js'
+import TrackCacheManager from './managers/trackCacheManager.js'
 import routePlannerManager from './managers/routePlannerManager.js'
 import sessionManager from './managers/sessionManager.js'
 import statsManager from './managers/statsManager.js'
@@ -162,11 +163,13 @@ class NodelinkServer extends EventEmitter {
     this.sessions = new sessionManager(this, PlayerManagerClass)
     this.sources = null
     this.lyrics = null
+    this.meanings = null
 
     this._sourceInitPromise = this._initSources(isClusterPrimary, options)
 
     this.routePlanner = new routePlannerManager(this)
     this.credentialManager = new CredentialManager(this)
+    this.trackCacheManager = new TrackCacheManager(this)
     this.connectionManager = new connectionManager(this)
     this.statsManager = new statsManager(this)
     this.rateLimitManager = new RateLimitManager(this)
@@ -224,13 +227,15 @@ class NodelinkServer extends EventEmitter {
 
   async _initSources(isClusterPrimary, _options) {
     if (!isClusterPrimary) {
-      const [{ default: sourceMan }, { default: lyricsMan }] =
+      const [{ default: sourceMan }, { default: lyricsMan }, { default: meaningMan }] =
         await Promise.all([
           import('./managers/sourceManager.js'),
-          import('./managers/lyricsManager.js')
+          import('./managers/lyricsManager.js'),
+          import('./managers/meaningManager.js')
         ])
       this.sources = new sourceMan(this)
       this.lyrics = new lyricsMan(this)
+      this.meanings = new meaningMan(this)
     }
   }
 
@@ -485,6 +490,7 @@ class NodelinkServer extends EventEmitter {
     const applemusic = this.options.sources?.applemusic
     const tidal = this.options.sources?.tidal
     const jiosaavn = this.options.sources?.jiosaavn
+    const audius = this.options.sources?.audius
 
     if (spotify?.enabled) {
       validateNonNegativeInt(
@@ -559,7 +565,40 @@ class NodelinkServer extends EventEmitter {
           (v) => typeof v === 'string' && (v === '' || v.trim().length > 0)
         )
       }
+
+    if (audius?.enabled) {
+      if (
+        audius?.appName !== undefined &&
+        typeof audius?.appName !== 'string'
+      ) {
+        throw new Error('sources.audius.appName must be a string')
+      }
+
+      if (
+        audius?.apiKey !== undefined &&
+        typeof audius?.apiKey !== 'string'
+      ) {
+        throw new Error('sources.audius.apiKey must be a string')
+      }
+
+      if (
+        audius?.apiSecret !== undefined &&
+        typeof audius?.apiSecret !== 'string'
+      ) {
+        throw new Error('sources.audius.apiSecret must be a string')
+      }
+
+      validateNonNegativeInt(
+        audius?.playlistLoadLimit,
+        'sources.audius.playlistLoadLimit'
+      )
+
+      validateNonNegativeInt(
+        audius?.albumLoadLimit,
+        'sources.audius.albumLoadLimit'
+      )
     }
+  }
 
     if (jiosaavn?.enabled) {
       validateNonNegativeInt(
@@ -918,11 +957,16 @@ class NodelinkServer extends EventEmitter {
 
           let eventName = '/v4/websocket'
           let guildId = null
+          let liveId = null
           try {
             const url = new URL(ws.data.url)
             const voiceMatch = url.pathname.match(
               /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
             )
+            const liveMatch = url.pathname.match(
+              /^\/v4\/websocket\/youtube\/live\/([^/]+)\/?$/
+            )
+
             if (voiceMatch) {
               if (!self.options.voiceReceive?.enabled) {
                 try {
@@ -932,6 +976,9 @@ class NodelinkServer extends EventEmitter {
               }
               eventName = '/v4/websocket/voice'
               guildId = voiceMatch[1]
+            } else if (liveMatch) {
+              eventName = '/v4/websocket/youtube/live'
+              liveId = liveMatch[1]
             }
           } catch {}
 
@@ -941,7 +988,7 @@ class NodelinkServer extends EventEmitter {
             reqShim,
             clientInfo,
             sessionId,
-            guildId
+            guildId || liveId
           )
         },
         message(ws, message) {
@@ -1039,8 +1086,11 @@ class NodelinkServer extends EventEmitter {
       const voiceMatch = pathname.match(
         /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
       )
+      const liveMatch = pathname.match(
+        /^\/v4\/websocket\/youtube\/live\/([^/]+)\/?$/
+      )
 
-      if (pathname === '/v4/websocket' || voiceMatch) {
+      if (pathname === '/v4/websocket' || voiceMatch || liveMatch) {
         if (!headers['user-id']) {
           logger(
             'warn',
@@ -1076,8 +1126,16 @@ class NodelinkServer extends EventEmitter {
           } connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
         )
 
-        const eventName = voiceMatch ? '/v4/websocket/voice' : '/v4/websocket'
-        const guildId = voiceMatch ? voiceMatch[1] : null
+        let eventName = '/v4/websocket'
+        let routeId = null
+
+        if (voiceMatch) {
+          eventName = '/v4/websocket/voice'
+          routeId = voiceMatch[1]
+        } else if (liveMatch) {
+          eventName = '/v4/websocket/youtube/live'
+          routeId = liveMatch[1]
+        }
 
         if (isBun && !this._usingBunServer) {
           this.socket.handleUpgrade(request, socket, head, (ws) => {
@@ -1087,7 +1145,7 @@ class NodelinkServer extends EventEmitter {
               request,
               clientInfo,
               sessionId,
-              guildId
+              routeId
             )
           })
         } else {
@@ -1098,7 +1156,7 @@ class NodelinkServer extends EventEmitter {
               request,
               clientInfo,
               sessionId,
-              guildId
+              routeId
             )
           )
         }
@@ -1133,6 +1191,65 @@ class NodelinkServer extends EventEmitter {
         )
 
         this.registerVoiceSocket(guildId, socket)
+      }
+    )
+
+    this.socket.on(
+      '/v4/websocket/youtube/live',
+      (socket, request, _clientInfo, _sessionId, id) => {
+        let videoId = id
+
+        if (/^\d{17,20}$/.test(id)) {
+          const player = this.sessions.getPlayer(id)
+          if (player?.track?.info?.sourceName?.includes('youtube')) {
+            videoId = player.track.info.identifier
+          }
+        } 
+        else if (id.length > 50) {
+          try {
+            const decoded = decodeTrack(id)
+            if (decoded?.info?.sourceName?.includes('youtube')) {
+              videoId = decoded.info.identifier
+            }
+          } catch (_e) {}
+        }
+
+        if (!this.sourceWorkerManager) {
+          const yt = this.sources.getSource('youtube')
+          if (!yt) {
+            socket.close(1008, 'YouTube source not enabled')
+            return
+          }
+          yt.handleLiveChat(socket, videoId)
+          return
+        }
+
+        logger('info', 'YouTube-LiveChat', `Delegating live chat for video: ${videoId} to worker`)
+
+        const resShim = {
+          headersSent: false,
+          send: (data) => {
+            const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
+            socket.sendFrame(payload, { len: payload.length, fin: true, opcode: Buffer.isBuffer(data) ? 0x02 : 0x01 })
+          },
+          writeHead: (status) => {
+            if (status !== 200) socket.close(1011, 'Worker failed')
+          },
+          write: (data) => {
+            const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
+            socket.sendFrame(payload, { len: payload.length, fin: true, opcode: Buffer.isBuffer(data) ? 0x02 : 0x01 })
+          },
+          end: () => socket.close(1000, 'Finished'),
+          on: (event, cb) => socket.on(event, cb)
+        }
+
+        this.sourceWorkerManager.delegate(
+          request,
+          resShim,
+          'loadLiveChat',
+          { videoId },
+          { isWebSocket: true }
+        )
       }
     )
   }
@@ -1408,6 +1525,7 @@ class NodelinkServer extends EventEmitter {
     this._validateConfig()
 
     await this.credentialManager.load()
+    await this.trackCacheManager.load()
     await this.statsManager.initialize()
 
     // Ensure sources are initialized before proceeding
@@ -1428,6 +1546,7 @@ class NodelinkServer extends EventEmitter {
     if (this.sources && (!startOptions.isClusterPrimary || !specEnabled)) {
       await this.sources.loadFolder()
       await this.lyrics.loadFolder()
+      await this.meanings.loadFolder()
     }
 
     this._setupSocketEvents()
@@ -1626,6 +1745,7 @@ if (clusterEnabled && cluster.isPrimary) {
       nserver._stopHeartbeat()
 
       await nserver.credentialManager.forceSave()
+      await nserver.trackCacheManager.forceSave()
 
       workerManager.destroy()
 
@@ -1652,7 +1772,7 @@ if (clusterEnabled && cluster.isPrimary) {
 
   await serverInstancePromise
 } else if (clusterEnabled && cluster.isWorker) {
-  await import('./worker.js')
+  await import('./workers/main.js')
 } else {
   const serverInstancePromise = (async () => {
     const nserver = new NodelinkServer(config, PlayerManager, false)
@@ -1679,6 +1799,7 @@ if (clusterEnabled && cluster.isPrimary) {
       nserver._stopHeartbeat()
 
       await nserver.credentialManager.forceSave()
+      await nserver.trackCacheManager.forceSave()
 
       await nserver._cleanupWebSocketServer()
 

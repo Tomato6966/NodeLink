@@ -1,17 +1,29 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { logger, sendErrorResponse } from '../utils.js'
 
-const loadTracksSchema = myzod.object({
-  identifier: myzod.string()
+const v = new Validator({ haltOnFirstError: true })
+
+const loadTracksSchema = v.compile({
+  identifier: {
+    type: 'string',
+    empty: false,
+    messages: {
+      required: 'identifier parameter is required.',
+      string: 'identifier parameter is required.',
+      stringEmpty: 'identifier parameter is required.'
+    }
+  }
 })
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
-  const result = loadTracksSchema.try({
-    identifier: parsedUrl.searchParams.get('identifier')
-  })
+  const data = {
+    identifier: parsedUrl.searchParams.get('identifier') ?? undefined
+  }
 
-  if (result instanceof myzod.ValidationError) {
-    const errorMessage = result.message || 'identifier parameter is required.'
+  const validation = loadTracksSchema(data)
+
+  if (validation !== true) {
+    const errorMessage = validation?.[0]?.message || 'identifier parameter is required.'
     logger('warn', 'Tracks', errorMessage)
     return sendErrorResponse(
       req,
@@ -24,29 +36,32 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     )
   }
 
-  const identifier = result.identifier
+  const identifier = data.identifier.trim()
   logger('debug', 'Tracks', `Loading tracks with identifier: "${identifier}"`)
-
-  const re =
-    /^(?:(?<url>(?:https?|ftts):\/\/\S+)|(?<source>(?![A-Z]:\\)[A-Za-z0-9]+):(?<query>(?!\/\/).+)|(?<local>(?:\/|[A-Z]:\\|\\).+))$/i
-  const match = re.exec(identifier)
 
   let url, source, query
 
-  if (match) {
-    url = match.groups.url
-    source = match.groups.source
-    query = match.groups.query
-
-    if (match.groups.local) {
-      source = 'local'
-      query = match.groups.local
-    }
+  if (/^(?:https?|ftts):\/\//i.test(identifier)) {
+    url = identifier
   } else {
-    source = Array.isArray(nodelink.options.defaultSearchSource)
-      ? nodelink.options.defaultSearchSource[0]
-      : nodelink.options.defaultSearchSource
-    query = identifier
+    const re =
+      /^(?:(?<source>(?![A-Z]:\\)[A-Za-z0-9]+):(?<query>(?!\/\/).+)|(?<local>(?:\/|[A-Z]:\\|\\).+))$/i
+    const match = re.exec(identifier)
+
+    if (match) {
+      source = match.groups.source
+      query = match.groups.query
+
+      if (match.groups.local) {
+        source = 'local'
+        query = match.groups.local
+      }
+    } else {
+      source = Array.isArray(nodelink.options.defaultSearchSource)
+        ? nodelink.options.defaultSearchSource[0]
+        : nodelink.options.defaultSearchSource
+      query = identifier
+    }
   }
 
   try {

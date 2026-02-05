@@ -25,14 +25,18 @@ export const GatewayEvents = {
   PLAYER_RECONNECTING: 'PlayerReconnectingEvent',
   PLAYER_CONNECTED: 'PlayerConnectedEvent',
   MIX_STARTED: 'MixStartedEvent',
-  MIX_ENDED: 'MixEndedEvent'
+  MIX_ENDED: 'MixEndedEvent',
+  ETERNALBOX_INFO: 'EternalBoxInfoEvent',
+  ETERNALBOX_JUMP: 'EternalBoxJumpEvent',
+  STREAM_METADATA: 'StreamMetadataEvent'
 }
 export const EndReasons = {
   STOPPED: 'stopped',
   FINISHED: 'finished',
   LOAD_FAILED: 'loadFailed',
   REPLACED: 'replaced',
-  CLEANUP: 'cleanup'
+  CLEANUP: 'cleanup',
+  GAPLESS: 'gapless'
 }
 
 export const SupportedFormats = {

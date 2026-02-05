@@ -1,378 +1,25 @@
 import { PassThrough } from 'node:stream'
 import { http1makeRequest, logger, makeRequest } from '../../utils.js'
+import HLSHandler from '../../playback/hls/HLSHandler.js'
 import CipherManager from './CipherManager.js'
 import Android from './clients/Android.js'
 import AndroidVR from './clients/AndroidVR.js'
 import IOS from './clients/IOS.js'
 import Music from './clients/Music.js'
 import TV from './clients/TV.js'
-import TVEmbedded from './clients/TVEmbedded.js'
 import Web from './clients/Web.js'
+import WebEmbedded from './clients/WebEmbedded.js'
+import WebRemix from './clients/Web_Remix.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
 import OAuth from './OAuth.js'
+import { SabrStream } from './sabr/sabr.js'
+
+import YouTubeLiveChat from './LiveChat.js'
 
 const CHUNK_SIZE = 64 * 1024
 const MAX_RETRIES = 3
 const MAX_URL_REFRESH = 10
 const VISITOR_DATA_INTERVAL = 3600000
-const PLAYLIST_FALLBACK_SEGMENTS = 3
-
-async function _manageYoutubeHlsStream(
-  hlsManifestUrl,
-  outputStream,
-  cancelSignal,
-  streamKey,
-  source
-) {
-  const segmentQueue = []
-  const processedSegments = new Set()
-  const MAX_PROCESSED_TRACK = 100
-  const processedOrder = new Array(MAX_PROCESSED_TRACK)
-  let processedIndex = 0
-  let cleanedUp = false
-  let playlistEnded = false
-  const MAX_LIVE_QUEUE_SIZE = 15
-
-  const rememberSegment = (key) => {
-    if (processedSegments.has(key)) return false
-
-    const old = processedOrder[processedIndex]
-    if (old !== undefined) processedSegments.delete(old)
-
-    processedSegments.add(key)
-    processedOrder[processedIndex] = key
-    processedIndex = (processedIndex + 1) % MAX_PROCESSED_TRACK
-
-    return true
-  }
-
-  const cleanup = () => {
-    if (cleanedUp) return
-    cleanedUp = true
-    cancelSignal.aborted = true
-    outputStream.stopHls = null
-    outputStream.removeListener('close', cleanup)
-    outputStream.removeListener('error', cleanup)
-
-    if (source?.activeStreams && streamKey) {
-      source.activeStreams.delete(streamKey)
-    }
-
-    segmentQueue.length = 0
-    processedSegments.clear()
-    processedOrder.length = 0
-  }
-
-  outputStream.once('close', cleanup)
-  outputStream.once('error', cleanup)
-  outputStream.stopHls = cleanup
-
-  const fetchWithUserAgent = (url) => http1makeRequest(url, { method: 'GET' })
-
-  const playlistFetcher = async (playlistUrl, isLive = false) => {
-    let isFirstFetch = true
-    let lastMediaSequence = -1
-
-    try {
-      while (!cancelSignal.aborted) {
-        const {
-          body: playlistContent,
-          error,
-          statusCode
-        } = await fetchWithUserAgent(playlistUrl)
-
-        if (error || statusCode !== 200) {
-          logger(
-            'error',
-            'YouTube-HLS-Fetcher',
-            `Playlist fetch failed: ${statusCode} - ${error?.message}`
-          )
-          return
-        }
-
-        const lines = playlistContent.split('\n').map((l) => l.trim())
-
-        let targetDuration = 2
-        let mediaSequence = 0
-
-        const targetDurationLine = lines.find((l) =>
-          l.startsWith('#EXT-X-TARGETDURATION:')
-        )
-        if (targetDurationLine) {
-          const parts = targetDurationLine.split(':')
-          if (parts[1]) {
-            const parsed = Number.parseInt(parts[1], 10)
-            if (!Number.isNaN(parsed)) targetDuration = parsed
-          }
-        }
-
-        const mediaSequenceLine = lines.find((l) =>
-          l.startsWith('#EXT-X-MEDIA-SEQUENCE:')
-        )
-        if (mediaSequenceLine) {
-          const parts = mediaSequenceLine.split(':')
-          if (parts[1]) {
-            const parsed = Number.parseInt(parts[1], 10)
-            if (!Number.isNaN(parsed)) mediaSequence = parsed
-          }
-        }
-
-        const currentSegments = []
-        let segIdx = 0
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].startsWith('#EXTINF:')) {
-            const segmentUrl = lines[i + 1]
-            if (segmentUrl && !segmentUrl.startsWith('#')) {
-              const url = new URL(segmentUrl, playlistUrl).toString()
-              const seq = mediaSequence + segIdx++
-              currentSegments.push({ url, seq })
-            }
-          }
-        }
-
-        if (!isFirstFetch && isLive && mediaSequence > lastMediaSequence + 30) {
-          logger(
-            'warn',
-            'YouTube-HLS-Fetcher',
-            `Fell behind live edge (gap: ${mediaSequence - lastMediaSequence}), resetting buffer`
-          )
-          segmentQueue.length = 0
-          processedSegments.clear()
-          processedOrder.length = 0
-          isFirstFetch = true
-        }
-
-        lastMediaSequence = mediaSequence
-
-        if (isFirstFetch) {
-          const segmentsToTake = isLive ? 3 : PLAYLIST_FALLBACK_SEGMENTS
-          const startIdx = Math.max(0, currentSegments.length - segmentsToTake)
-          for (let i = startIdx; i < currentSegments.length; i++) {
-            const seg = currentSegments[i]
-            const key = isLive ? seg.seq : seg.url
-            if (rememberSegment(key)) {
-              segmentQueue.push(seg)
-            }
-          }
-          isFirstFetch = false
-        } else {
-          for (const seg of currentSegments) {
-            const key = isLive ? seg.seq : seg.url
-
-            if (!processedSegments.has(key)) {
-              if (isLive && segmentQueue.length >= MAX_LIVE_QUEUE_SIZE) {
-                segmentQueue.shift()
-              }
-
-              if (rememberSegment(key)) {
-                segmentQueue.push(seg)
-              }
-            }
-          }
-        }
-
-        if (playlistContent.includes('#EXT-X-ENDLIST')) {
-          playlistEnded = true
-          return
-        }
-
-        await new Promise((resolve) => {
-          const timeout = setTimeout(
-            resolve,
-            Math.max(1, targetDuration) * 1000
-          )
-          if (typeof timeout.unref === 'function') timeout.unref()
-        })
-      }
-    } finally {
-      playlistEnded = true
-    }
-  }
-
-  const segmentDownloader = async () => {
-    let nextSegmentPromise = null // { url, promise }
-
-    while (true) {
-      if (
-        cancelSignal.aborted ||
-        (playlistEnded && segmentQueue.length === 0 && !nextSegmentPromise)
-      )
-        break
-
-      if (segmentQueue.length === 0 && !nextSegmentPromise) {
-        await new Promise((resolve) => {
-          const timeout = setTimeout(resolve, 50)
-          if (typeof timeout.unref === 'function') timeout.unref()
-        })
-        continue
-      }
-
-      try {
-        let segmentUrl = null
-
-        let res
-        if (nextSegmentPromise) {
-          segmentUrl = nextSegmentPromise.url
-          res = await nextSegmentPromise.promise
-          nextSegmentPromise = null
-        } else {
-          const seg = segmentQueue.shift()
-          if (!seg) continue
-          segmentUrl = seg.url
-          res = await http1makeRequest(segmentUrl, { streamOnly: true })
-        }
-
-        if (
-          segmentQueue.length > 0 &&
-          !nextSegmentPromise &&
-          !cancelSignal.aborted
-        ) {
-          const nextSeg = segmentQueue.shift()
-          if (nextSeg) {
-            nextSegmentPromise = {
-              url: nextSeg.url,
-              promise: http1makeRequest(nextSeg.url, { streamOnly: true })
-            }
-          }
-        }
-
-        if (res.error || res.statusCode !== 200) {
-          if (res.stream) res.stream.destroy()
-
-          let retryCount = 0
-          let success = false
-          while (retryCount < 3 && !cancelSignal.aborted) {
-            retryCount++
-            const retryRes = await http1makeRequest(segmentUrl, {
-              streamOnly: true
-            })
-            if (!retryRes.error && retryRes.statusCode === 200) {
-              res = retryRes
-              success = true
-              break
-            }
-            if (retryRes.stream) retryRes.stream.destroy()
-            await new Promise((r) => setTimeout(r, 500 * retryCount))
-          }
-
-          if (!success) {
-            logger(
-              'warn',
-              'YouTube-HLS-Downloader',
-              `Failed segment after retries: ${res.statusCode}`
-            )
-            continue
-          }
-        }
-
-        if (outputStream.destroyed || cancelSignal.aborted) {
-          if (res.stream && !res.stream.destroyed) res.stream.destroy()
-          break
-        }
-
-        await new Promise((resolve, reject) => {
-          res.stream.pipe(outputStream, { end: false })
-          res.stream.on('end', resolve)
-          res.stream.on('error', (err) => {
-            if (err.message === 'aborted' || err.code === 'ECONNRESET') {
-              resolve()
-            } else {
-              reject(err)
-            }
-          })
-        })
-      } catch (e) {
-        if (!cancelSignal.aborted && e.message !== 'aborted') {
-          logger(
-            'error',
-            'YouTube-HLS-Downloader',
-            `Error processing segment: ${e.message}`
-          )
-        }
-      }
-    }
-
-    if (!outputStream.destroyed && !outputStream.writableEnded) {
-      outputStream.emit('finishBuffering')
-      outputStream.end()
-    }
-  }
-
-  try {
-    const {
-      body: masterPlaylistContent,
-      error: masterError,
-      statusCode: masterStatusCode
-    } = await fetchWithUserAgent(hlsManifestUrl)
-
-    if (masterError || masterStatusCode !== 200) {
-      throw new Error(
-        `Master playlist fetch failed: ${masterStatusCode} - ${masterError?.message}`
-      )
-    }
-
-    const lines = masterPlaylistContent.split('\n').map((l) => l.trim())
-    let bestStreamUrl = null
-    let bestAudioOnlyUrl = null
-    let bestBandwidth = 0
-    let bestAudioOnlyBandwidth = 0
-    const isLive =
-      masterPlaylistContent.includes('yt_live_broadcast') ||
-      masterPlaylistContent.includes('live/1')
-
-    if (isLive) {
-      logger(
-        'debug',
-        'YouTube-HLS',
-        'Live stream detected, remember that this is still experimental (for performance reasons)'
-      )
-    }
-
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
-        const streamInf = lines[i]
-        const streamUrl = lines[i + 1]
-
-        if (streamUrl && !streamUrl.startsWith('#')) {
-          const bandwidthMatch = streamInf.match(/BANDWIDTH=(\d+)/)
-          const codecsMatch = streamInf.match(/CODECS="([^"]+)"/)
-
-          const bandwidth = bandwidthMatch
-            ? Number.parseInt(bandwidthMatch[1], 10)
-            : 0
-          const codecs = codecsMatch ? codecsMatch[1] : ''
-
-          if (codecs.includes('avc1') && codecs.includes('mp4a')) {
-            if (bandwidth > bestBandwidth) {
-              bestBandwidth = bandwidth
-              bestStreamUrl = new URL(streamUrl, hlsManifestUrl).toString()
-            }
-          } else if (codecs.includes('mp4a') || codecs.includes('opus')) {
-            if (bandwidth > bestAudioOnlyBandwidth) {
-              bestAudioOnlyBandwidth = bandwidth
-              bestAudioOnlyUrl = new URL(streamUrl, hlsManifestUrl).toString()
-            }
-          }
-        }
-      }
-    }
-
-    const selectedPlaylistUrl = bestStreamUrl || bestAudioOnlyUrl
-    if (!selectedPlaylistUrl) throw new Error('No suitable HLS stream found')
-
-    logger('debug', 'YouTube-HLS', `Selected stream: ${selectedPlaylistUrl}`)
-
-    await Promise.all([
-      playlistFetcher(selectedPlaylistUrl, isLive),
-      segmentDownloader()
-    ])
-  } catch (e) {
-    logger('error', 'YouTube-HLS', `Error managing HLS stream: ${e.message}`)
-    if (!outputStream.destroyed) outputStream.destroy(e)
-  } finally {
-    cleanup()
-  }
-}
 
 export default class YouTubeSource {
   constructor(nodelink) {
@@ -392,6 +39,7 @@ export default class YouTubeSource {
     this.oauth = null
     this.visitorDataInterval = null
     this.cipherManager = new CipherManager(nodelink)
+    this.liveChat = new YouTubeLiveChat(nodelink, this)
     this.activeStreams = new Map()
     this.ytContext = {
       client: {
@@ -416,9 +64,10 @@ export default class YouTubeSource {
       AndroidVR,
       IOS,
       Music,
+      WebRemix,
       TV,
-      TVEmbedded,
-      Web
+      Web,
+      WebEmbedded
     }
 
     for (const clientName in clientClasses) {
@@ -474,18 +123,14 @@ export default class YouTubeSource {
       'yt_player_script_url'
     )
 
-    if (cachedVisitorData && cachedPlayerScript) {
-      this.ytContext.client.visitorData = cachedVisitorData
+    if (cachedPlayerScript) {
       this.cipherManager.setPlayerScriptUrl(cachedPlayerScript)
-      logger(
-        'debug',
-        'YouTube',
-        'Context and player script loaded from cache. Skipping network request.'
-      )
-      return
+      logger('debug', 'YouTube', 'Player script URL loaded from cache.')
     }
 
-    logger('debug', 'YouTube', 'Fetching visitor data...')
+    // Não vamos poder mais deixar um cache de visitorData, 1 de fevereiro, youtube mudou a forma como ele interage com o visitorData
+
+    let visitorFound = false
     let playerScriptUrl = null
 
     try {
@@ -493,8 +138,12 @@ export default class YouTubeSource {
         body: data,
         error,
         statusCode
-      } = await makeRequest('https://www.youtube.com', { method: 'GET' })
-      let visitorFound = false
+      } = await makeRequest('https://www.youtube.com/embed', {
+        method: 'GET',
+        headers: {
+          Cookie: 'YSC=cz5kYp3ZuIE; VISITOR_INFO1_LIVE=U-0T5oUyzf8;'
+        }
+      })
 
       if (!error && statusCode === 200) {
         const visitorMatch = data?.match(/"VISITOR_DATA":"([^"]+)"/)
@@ -503,9 +152,10 @@ export default class YouTubeSource {
           this.nodelink.credentialManager.set(
             'yt_visitor_data',
             visitorMatch[1],
-            24 * 60 * 60 * 1000
+            60 * 60 * 1000
           )
           visitorFound = true
+          logger('debug', 'YouTube', 'visitorData refreshed and cached.')
         }
 
         const playerScriptMatch = data?.match(/"jsUrl":"([^"]+)"/)
@@ -521,15 +171,15 @@ export default class YouTubeSource {
           )
           logger('debug', 'YouTube', `Player script URL: ${playerScriptUrl}`)
         }
-      }
-
-      if (!visitorFound) {
+      } else {
         logger(
           'warn',
           'YouTube',
-          `Failed to fetch visitor data: ${error?.message || `Status ${statusCode}`}`
+          `Embed request failed: ${error?.message || `Status ${statusCode}`}`
         )
+      }
 
+      if (!visitorFound) {
         const {
           body: guideData,
           error: guideError,
@@ -547,10 +197,32 @@ export default class YouTubeSource {
         ) {
           this.ytContext.client.visitorData =
             guideData.responseContext.visitorData
+          this.nodelink.credentialManager.set(
+            'yt_visitor_data',
+            guideData.responseContext.visitorData,
+            60 * 60 * 1000
+          )
+          visitorFound = true
+          logger(
+            'debug',
+            'YouTube',
+            'visitorData refreshed via guide and cached.'
+          )
+        } else {
+          logger(
+            'warn',
+            'YouTube',
+            'Failed to refresh visitorData via guide; using cached fallback if present.'
+          )
         }
       }
     } catch (e) {
       logger('error', 'YouTube', `Error fetching visitor data: ${e.message}`)
+      logger(
+        'warn',
+        'YouTube',
+        'Using cached visitorData fallback (if present).'
+      )
     }
 
     if (playerScriptUrl) this.cipherManager.setPlayerScriptUrl(playerScriptUrl)
@@ -564,7 +236,7 @@ export default class YouTubeSource {
     let clientList = this.config.clients.search
 
     if (type === 'ytmsearch') {
-      clientList = ['Music']
+      clientList = ['WebRemix', 'Music']
     }
 
     const clientErrors = []
@@ -637,9 +309,18 @@ export default class YouTubeSource {
       const automixId = `RD${videoId}`
       let automixRes = null
 
-      if (this.clients.Music) {
+      // Try WebRemix first, then Music
+      if (this.clients.WebRemix || this.clients.Music) {
         try {
-          automixRes = await this.clients.Music.resolve(
+          const musicClient = this.clients.WebRemix || this.clients.Music
+          const clientName = this.clients.WebRemix ? 'WebRemix' : 'Music'
+          logger(
+            'debug',
+            'YouTube',
+            `Attempting recommendations with ${clientName} client`
+          )
+
+          automixRes = await musicClient.resolve(
             `https://music.youtube.com/playlist?list=${automixId}`,
             'ytmusic',
             this.ytContext,
@@ -656,7 +337,7 @@ export default class YouTubeSource {
 
       if (
         (!automixRes || automixRes.loadType !== 'playlist') &&
-        this.clients.TV
+        (this.clients.TV || this.clients.WebRemix)
       ) {
         try {
           automixRes = await this.clients.TV.resolve(
@@ -725,13 +406,17 @@ export default class YouTubeSource {
     const urlType = checkURLType(processUrl, sourceType)
 
     if (isMusicUrl) {
-      const musicClient = this.clients.Music
-      if (musicClient) {
+      const musicClients = ['WebRemix', 'Music']
+
+      for (const clientName of musicClients) {
+        const musicClient = this.clients[clientName]
+        if (!musicClient) continue
+
         try {
           logger(
             'debug',
             'YouTube',
-            'Attempting to resolve YouTube Music URL with Music client.'
+            `Attempting to resolve YouTube Music URL with ${clientName} client.`
           )
           const result = await musicClient.resolve(
             processUrl,
@@ -739,6 +424,7 @@ export default class YouTubeSource {
             this.ytContext,
             this.cipherManager
           )
+
           if (
             result &&
             (result.loadType === 'track' || result.loadType === 'playlist')
@@ -746,104 +432,94 @@ export default class YouTubeSource {
             logger(
               'debug',
               'YouTube',
-              'Successfully resolved YouTube Music URL with Music client.'
+              `Successfully resolved YouTube Music URL with ${clientName} client.`
             )
             return result
           }
 
-          const listIdMatch = url.match(/[?&]list=([\w-]+)/)
-          const videoIdMatch = url.match(/[?&]v=([\w-]+)/)
-          const listId = listIdMatch ? listIdMatch[1] : null
-          const videoId = videoIdMatch ? videoIdMatch[1] : null
-          const fallbackId = listId || videoId
+          if (
+            result?.loadType === 'error' &&
+            result.data?.cause === 'UpstreamPlayability'
+          ) {
+            const listIdMatch = url.match(/[?&]list=([\w-]+)/)
+            const videoIdMatch = url.match(/[?&]v=([\w-]+)/)
+            const listId = listIdMatch ? listIdMatch[1] : null
+            const videoId = videoIdMatch ? videoIdMatch[1] : null
+            const fallbackId = listId || videoId
 
-          if (fallbackId) {
-            logger(
-              'warn',
-              'YouTube',
-              `Music client failed for ${fallbackId}. Attempting fallback to standard YouTube client.`
-            )
-            let fallbackUrl
-            if (listId) {
-              fallbackUrl = `https://www.youtube.com/playlist?list=${listId}`
-              if (videoId) {
-                fallbackUrl += `&v=${videoId}`
+            if (fallbackId) {
+              logger(
+                'warn',
+                'YouTube',
+                `${clientName} client returned Playability Error for ${fallbackId}. Attempting fallback to standard YouTube client.`
+              )
+              let fallbackUrl
+              if (listId) {
+                fallbackUrl = `https://www.youtube.com/playlist?list=${listId}`
+                if (videoId) {
+                  fallbackUrl += `&v=${videoId}`
+                }
+              } else {
+                fallbackUrl = `https://www.youtube.com/watch?v=${videoId}`
               }
-            } else {
-              fallbackUrl = `https://www.youtube.com/watch?v=${videoId}`
-            }
-            const fallbackResult = await this.resolve(fallbackUrl, 'youtube')
+              const fallbackResult = await this.resolve(fallbackUrl, 'youtube')
 
-            if (
-              fallbackResult &&
-              (fallbackResult.loadType === 'track' ||
-                fallbackResult.loadType === 'playlist')
-            ) {
               if (
-                fallbackResult.loadType === 'track' &&
-                fallbackResult.data?.info
+                fallbackResult &&
+                (fallbackResult.loadType === 'track' ||
+                  fallbackResult.loadType === 'playlist' ||
+                  fallbackResult.loadType === 'empty')
               ) {
-                fallbackResult.data.info.sourceName = 'ytmusic'
-                fallbackResult.data.info.uri = url
-              } else if (
-                fallbackResult.loadType === 'playlist' &&
-                fallbackResult.data?.tracks
-              ) {
-                for (const track of fallbackResult.data.tracks) {
-                  if (track.info) {
-                    track.info.sourceName = 'ytmusic'
-                    const trackVideoId = track.info.identifier
-                    track.info.uri = `https://music.youtube.com/watch?v=${trackVideoId}`
+                if (
+                  fallbackResult.loadType === 'track' &&
+                  fallbackResult.data?.info
+                ) {
+                  fallbackResult.data.info.sourceName = 'ytmusic'
+                  fallbackResult.data.info.uri = url
+                } else if (
+                  fallbackResult.loadType === 'playlist' &&
+                  fallbackResult.data?.tracks
+                ) {
+                  for (const track of fallbackResult.data.tracks) {
+                    if (track.info) {
+                      track.info.sourceName = 'ytmusic'
+                      const trackVideoId = track.info.identifier
+                      track.info.uri = `https://music.youtube.com/watch?v=${trackVideoId}`
+                    }
                   }
                 }
+                return fallbackResult
               }
-              return fallbackResult
             }
           }
-          clientErrors.push({
-            client: 'Music',
-            message:
-              'Music client failed or fallback unsuccessful for direct Music URL.'
-          })
+
+          const errorMessage =
+            result?.data?.message ||
+            `${clientName} client returned empty or failed.`
+          clientErrors.push({ client: clientName, message: errorMessage })
           logger(
-            'error',
+            'debug',
             'YouTube',
-            'Music client failed for direct Music URL and no fallback yielded a track.'
+            `${clientName} client returned empty or failed for Music URL.`
           )
-          return {
-            exception: {
-              message:
-                'Music client failed for direct Music URL and no fallback yielded a track.',
-              severity: 'fault',
-              cause: 'MusicClientFailure',
-              errors: clientErrors
-            }
-          }
         } catch (e) {
-          clientErrors.push({ client: 'Music', message: e.message })
+          clientErrors.push({ client: clientName, message: e.message })
           logger(
             'warn',
             'YouTube',
-            `Music client threw an exception during direct Music URL resolve: ${e.message}`
+            `${clientName} client threw an exception during Music URL resolve: ${e.message}`
           )
-          return {
-            exception: {
-              message: `Music client failed for direct Music URL: ${e.message}`,
-              severity: 'fault',
-              cause: 'MusicClientException',
-              errors: clientErrors
-            }
-          }
         }
       }
-      const msg = 'Music client not available for direct Music URL.'
-      clientErrors.push({ client: 'Music', message: msg })
+
+      // If we get here, both clients failed
+      const msg = 'All music clients failed for direct Music URL.'
       logger('error', 'YouTube', msg)
       return {
         exception: {
           message: msg,
           severity: 'fault',
-          cause: 'MusicClientNotAvailable',
+          cause: 'MusicClientsFailure',
           errors: clientErrors
         }
       }
@@ -937,64 +613,6 @@ export default class YouTubeSource {
         )
 
         if (
-          isMusicUrl &&
-          clientName === 'Music' &&
-          result?.loadType === 'error' &&
-          result.data?.cause === 'UpstreamPlayability'
-        ) {
-          const listIdMatch = url.match(/[?&]list=([\w-]+)/)
-          const videoIdMatch = url.match(/[?&]v=([\w-]+)/)
-          const listId = listIdMatch ? listIdMatch[1] : null
-          const videoId = videoIdMatch ? videoIdMatch[1] : null
-          const fallbackId = listId || videoId
-
-          if (fallbackId) {
-            logger(
-              'warn',
-              'YouTube',
-              `Music client returned Playability Error for ${fallbackId}. Attempting fallback to standard YouTube client.`
-            )
-            let fallbackUrl
-            if (listId) {
-              fallbackUrl = `https://www.youtube.com/playlist?list=${listId}`
-              if (videoId) {
-                fallbackUrl += `&v=${videoId}`
-              }
-            } else {
-              fallbackUrl = `https://www.youtube.com/watch?v=${videoId}`
-            }
-            const fallbackResult = await this.resolve(fallbackUrl, 'youtube')
-
-            if (
-              fallbackResult &&
-              (fallbackResult.loadType === 'track' ||
-                fallbackResult.loadType === 'playlist' ||
-                fallbackResult.loadType === 'empty')
-            ) {
-              if (
-                fallbackResult.loadType === 'track' &&
-                fallbackResult.data?.info
-              ) {
-                fallbackResult.data.info.sourceName = 'ytmusic'
-                fallbackResult.data.info.uri = url
-              } else if (
-                fallbackResult.loadType === 'playlist' &&
-                fallbackResult.data?.tracks
-              ) {
-                for (const track of fallbackResult.data.tracks) {
-                  if (track.info) {
-                    track.info.sourceName = 'ytmusic'
-                    const trackVideoId = track.info.identifier
-                    track.info.uri = `https://music.youtube.com/watch?v=${trackVideoId}`
-                  }
-                }
-              }
-              return fallbackResult
-            }
-          }
-        }
-
-        if (
           result &&
           (result.loadType === 'track' ||
             result.loadType === 'playlist' ||
@@ -1082,8 +700,24 @@ export default class YouTubeSource {
     }
   }
 
-  async getTrackUrl(decodedTrack, itag) {
-    const clientList = this.config.clients.playback
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+    if (!forceRefresh) {
+      const cached = this.nodelink.trackCacheManager.get(
+        'youtube',
+        decodedTrack.identifier
+      )
+      if (cached) {
+        logger(
+          'debug',
+          'YouTube',
+          `Using cached URL for ${decodedTrack.identifier}`
+        )
+        return cached
+      }
+    }
+
+    let clientList = [...this.config.clients.playback]
+    if (!clientList.length) clientList = ['Web']
     const clientErrors = []
 
     for (const clientName of clientList) {
@@ -1116,6 +750,20 @@ export default class YouTubeSource {
           continue
         }
 
+        if (urlData.protocol === 'sabr') {
+          const bestAudio = urlData.formats
+            ?.filter((f) => f.mimeType?.includes('audio'))
+            .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+
+          if (bestAudio) {
+            urlData.format = bestAudio.mimeType?.includes('webm')
+              ? 'webm/opus'
+              : 'm4a'
+          }
+
+          return urlData
+        }
+
         if (urlData.url) {
           const check = await http1makeRequest(urlData.url, {
             method: 'GET',
@@ -1146,7 +794,14 @@ export default class YouTubeSource {
               'YouTube',
               `URL pre-flight check successful for client ${clientName}.`
             )
-            return { ...urlData, additionalData: { contentLength } }
+            const result = { ...urlData, additionalData: { contentLength } }
+            this.nodelink.trackCacheManager.set(
+              'youtube',
+              decodedTrack.identifier,
+              result,
+              1000 * 60 * 60 * 5
+            )
+            return result
           }
 
           const errorMessage = `URL pre-flight failed. Status: ${check.statusCode}, Error: ${check.error?.message}`
@@ -1179,7 +834,18 @@ export default class YouTubeSource {
                 'YouTube',
                 `HLS fallback check successful for client ${clientName}.`
               )
-              return { url: urlData.hlsUrl, protocol: 'hls', format: 'mpegts' }
+              const result = {
+                url: urlData.hlsUrl,
+                protocol: 'hls',
+                format: 'mpegts'
+              }
+              this.nodelink.trackCacheManager.set(
+                'youtube',
+                decodedTrack.identifier,
+                result,
+                1000 * 60 * 60 * 5
+              )
+              return result
             }
 
             const hlsError = `HLS fallback failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
@@ -1204,7 +870,18 @@ export default class YouTubeSource {
               'YouTube',
               `HLS-only check successful for client ${clientName}.`
             )
-            return { url: urlData.hlsUrl, protocol: 'hls', format: 'mpegts' }
+            const result = {
+              url: urlData.hlsUrl,
+              protocol: 'hls',
+              format: 'mpegts'
+            }
+            this.nodelink.trackCacheManager.set(
+              'youtube',
+              decodedTrack.identifier,
+              result,
+              1000 * 60 * 60 * 5
+            )
+            return result
           }
 
           const hlsError = `HLS-only check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`
@@ -1261,12 +938,190 @@ export default class YouTubeSource {
     this.activeStreams.set(streamKey, cancelSignal)
 
     try {
-      if (protocol === 'hls') {
+      if (protocol === 'sabr') {
+        const sabr = new SabrStream({
+          videoId: decodedTrack.identifier,
+          accessToken: additionalData.accessToken,
+          visitorData: additionalData.visitorData,
+          serverAbrStreamingUrl: additionalData.serverAbrStreamingUrl,
+          videoPlaybackUstreamerConfig:
+            additionalData.videoPlaybackUstreamerConfig,
+          poToken: additionalData.poToken,
+          clientInfo: additionalData.clientInfo,
+          formats: additionalData.formats,
+          startTime: additionalData.startTime || 0,
+          positionCallback: additionalData.positionCallback,
+          previousSession: additionalData.previousSession
+        })
+
         const stream = new PassThrough()
-        _manageYoutubeHlsStream(url, stream, cancelSignal, streamKey, this)
+        let readyResolved = false
+        let readyResolve
+        let readyReject
+        const ready = new Promise((resolve, reject) => {
+          readyResolve = resolve
+          readyReject = reject
+        })
+        let isRecovering = false
+        let lastRecoverAt = 0
+
+        sabr.on('data', (chunk) => {
+          if (!readyResolved) {
+            readyResolved = true
+            readyResolve()
+          }
+          if (!stream.write(chunk)) {
+            sabr.pause()
+          }
+        })
+        stream.on('drain', () => sabr.resume())
+
+        sabr.on('end', () => {
+          if (!readyResolved) {
+            readyResolved = true
+            readyReject(new Error('SABR stream ended before data'))
+          }
+          stream.end()
+        })
+        sabr.on('finishBuffering', () => stream.emit('finishBuffering'))
+        sabr.on('stall', async () => {
+          if (isRecovering || stream.destroyed) return
+
+          const now = Date.now()
+          if (now - lastRecoverAt < 2000) return
+          lastRecoverAt = now
+
+          isRecovering = true
+          try {
+            logger(
+              'warn',
+              'YouTube',
+              `SABR stall detected for ${decodedTrack.title}. Refreshing session...`
+            )
+            const newUrlData = await this.getTrackUrl(decodedTrack, null, true)
+            if (!newUrlData || newUrlData.protocol !== 'sabr') {
+              throw new Error('No SABR session available for recovery')
+            }
+
+            const ad = newUrlData.additionalData || {}
+            sabr.clearBuffers()
+            sabr.updateSession({
+              serverAbrStreamingUrl: ad.serverAbrStreamingUrl || newUrlData.url,
+              videoPlaybackUstreamerConfig: ad.videoPlaybackUstreamerConfig,
+              poToken: ad.poToken,
+              visitorData: ad.visitorData,
+              clientInfo: ad.clientInfo,
+              formats: ad.formats,
+              userAgent: ad.userAgent,
+              playbackCookie: ad.playbackCookie
+            })
+          } catch (err) {
+            logger('warn', 'YouTube', `SABR recovery failed: ${err.message}`)
+            if (!stream.destroyed) stream.destroy(err)
+          } finally {
+            isRecovering = false
+          }
+        })
+        sabr.on('error', async (err) => {
+          logger('error', 'YouTube', `SABR stream error: ${err.message}`)
+          if (!readyResolved) {
+            readyResolved = true
+            readyReject(err)
+          }
+
+          if (
+            (err.message.includes('sabr.malformed_config') ||
+              err.message.includes(
+                'sabr.media_serving_enforcement_id_error'
+              )) &&
+            !isRecovering
+          ) {
+            logger(
+              'info',
+              'YouTube',
+              `Known recoverable error detected (${err.message}), triggering stall recovery...`
+            )
+            sabr.emit('stall')
+            return
+          }
+
+          if (!stream.destroyed) stream.destroy(err)
+        })
+
+        const originalDestroy = stream.destroy.bind(stream)
+        let isDestroying = false
+        stream.destroy = (err) => {
+          if (isDestroying) return
+          isDestroying = true
+          sabr.destroy(err)
+          this.activeStreams.delete(streamKey)
+          originalDestroy(err)
+        }
+
+        stream.once('close', () => {
+          if (isDestroying) return
+          isDestroying = true
+          sabr.destroy()
+          this.activeStreams.delete(streamKey)
+        })
+
+        stream._sabrStream = sabr
+        stream.getSessionState = () => {
+          if (isDestroying || stream.destroyed) return null
+          return sabr.getSessionState()
+        }
+
+        const bestAudio = additionalData.formats
+          .filter((f) => f.mimeType?.includes('audio'))
+          .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0]
+
+        sabr.start(bestAudio.itag)
+
+        const type = bestAudio.mimeType?.includes('webm') ? 'webm/opus' : 'm4a'
+
+        await ready
+        return { stream, type }
+      }
+
+      if (protocol === 'hls') {
+        const playerScript = await this.cipherManager.getCachedPlayerScript()
+        const stream = new HLSHandler(url, {
+          type: 'mpegts',
+          localAddress: this.nodelink.routePlanner?.getIP(),
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            Referer: 'https://www.youtube.com/',
+            Origin: 'https://www.youtube.com'
+          },
+          onResolveUrl: async (segmentUrl) => {
+            if (segmentUrl.includes('/n/')) {
+              const nToken = segmentUrl.match(/\/n\/([^/]+)/)?.[1]
+              if (nToken && playerScript) {
+                try {
+                  return await this.cipherManager.resolveUrl(
+                    segmentUrl,
+                    null,
+                    nToken,
+                    null,
+                    playerScript
+                  )
+                } catch (err) {
+                  logger(
+                    'warn',
+                    'YouTube',
+                    `Failed to resolve n-token: ${err.message}`
+                  )
+                }
+              }
+            }
+            return null
+          }
+        })
 
         const originalDestroy = stream.destroy.bind(stream)
         stream.destroy = (err) => {
+          if (cancelSignal.aborted) return
           cancelSignal.aborted = true
           this.activeStreams.delete(streamKey)
           originalDestroy(err)
@@ -1645,7 +1500,7 @@ export default class YouTubeSource {
       }
 
       try {
-        const newUrlData = await this.getTrackUrl(decodedTrack)
+        const newUrlData = await this.getTrackUrl(decodedTrack, null, true)
 
         if (destroyed || cancelSignal.aborted) return
 
@@ -1708,5 +1563,9 @@ export default class YouTubeSource {
       logger('error', 'YouTube', `Failed to fetch chapters: ${e.message}`)
       return []
     }
+  }
+
+  async handleLiveChat(socket, id) {
+    return this.liveChat.handleConnection(socket, id)
   }
 }

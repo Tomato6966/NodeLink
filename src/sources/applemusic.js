@@ -493,7 +493,7 @@ export default class AppleMusicSource {
     return results
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
     let isExplicit = false
     if (decodedTrack.uri) {
       try {
@@ -557,7 +557,7 @@ export default class AppleMusicSource {
         }
       }
 
-      const stream = await this.nodelink.sources.getTrackUrl(bestMatch.info)
+      const stream = await this.nodelink.sources.getTrackUrl(bestMatch.info, itag, forceRefresh)
       return { newTrack: bestMatch, ...stream }
     } catch (error) {
       return { exception: { message: error.message, severity: 'fault' } }

@@ -12,7 +12,7 @@ export default class TV extends BaseClient {
         clientName: 'TVHTML5',
         clientVersion: '7.20260113.16.00',
         userAgent:
-          'Mozilla/5.0(SMART-TV; Linux; Tizen 4.0.0.2) AppleWebkit/605.1.15 (KHTML, like Gecko) SamsungBrowser/9.2 TV Safari/605.1.15',
+          'Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 CrKey/1.54.248666',
         hl: context.client.hl,
         gl: context.client.gl
       },

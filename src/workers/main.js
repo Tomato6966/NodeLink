@@ -2,19 +2,21 @@ import net from 'node:net'
 import os from 'node:os'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import v8 from 'node:v8'
-import { GatewayEvents } from './constants.js'
-import ConnectionManager from './managers/connectionManager.js'
-import CredentialManager from './managers/credentialManager.js'
-import LyricsManager from './managers/lyricsManager.js'
-import PluginManager from './managers/pluginManager.js'
-import RoutePlannerManager from './managers/routePlannerManager.js'
-import SourceManager from './managers/sourceManager.js'
-import StatsManager from './managers/statsManager.js'
-import { bufferPool } from './playback/BufferPool.js'
-import { Player } from './playback/player.js'
-import { createPCMStream } from './playback/streamProcessor.js'
-import { cleanupHttpAgents, initLogger, logger } from './utils.js'
-import { createVoiceRelay } from './voice/voiceRelay.js'
+import { GatewayEvents } from '../constants.js'
+import ConnectionManager from '../managers/connectionManager.js'
+import CredentialManager from '../managers/credentialManager.js'
+import TrackCacheManager from '../managers/trackCacheManager.js'
+import LyricsManager from '../managers/lyricsManager.js'
+import MeaningManager from '../managers/meaningManager.js'
+import PluginManager from '../managers/pluginManager.js'
+import RoutePlannerManager from '../managers/routePlannerManager.js'
+import SourceManager from '../managers/sourceManager.js'
+import StatsManager from '../managers/statsManager.js'
+import { bufferPool } from '../playback/structs/BufferPool.js'
+import { Player } from '../playback/player.js'
+import { createPCMStream } from '../playback/processing/streamProcessor.js'
+import { cleanupHttpAgents, initLogger, logger } from '../utils.js'
+import { createVoiceRelay } from '../voice/voiceRelay.js'
 
 let lastCpuUsage = process.cpuUsage()
 let lastCpuTime = Date.now()
@@ -34,9 +36,9 @@ try {
 
 let config
 try {
-  config = (await import('../config.js')).default
+  config = (await import('../../config.js')).default
 } catch {
-  config = (await import('../config.default.js')).default
+  config = (await import('../../config.default.js')).default
 }
 
 const HIBERNATION_ENABLED = config.cluster?.hibernation?.enabled !== false
@@ -247,15 +249,18 @@ nodelink.voiceRelay = createVoiceRelay({
 
 nodelink.statsManager = new StatsManager(nodelink)
 nodelink.credentialManager = new CredentialManager(nodelink)
+nodelink.trackCacheManager = new TrackCacheManager(nodelink)
+await nodelink.trackCacheManager.load()
 nodelink.sources = new SourceManager(nodelink)
 nodelink.lyrics = new LyricsManager(nodelink)
+nodelink.meanings = new MeaningManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(nodelink)
 nodelink.connectionManager = new ConnectionManager(nodelink)
 nodelink.pluginManager = new PluginManager(nodelink)
 nodelink.registry = null
 if (process.embedder === 'nodejs') {
   try {
-    nodelink.registry = await import('./registry.js')
+    nodelink.registry = await import('../registry.js')
   } catch (e) {
     logger('error', 'Worker', `Failed to load registry: ${e.message}`)
   }
@@ -499,6 +504,7 @@ async function initialize() {
   await nodelink.credentialManager.load()
   await nodelink.sources.loadFolder()
   await nodelink.lyrics.loadFolder()
+  await nodelink.meanings.loadFolder()
   await nodelink.statsManager.initialize()
   await nodelink.pluginManager.load('worker')
 
@@ -846,6 +852,11 @@ async function processQueue(queueKey) {
       case 'loadLyrics': {
         const { decodedTrackInfo, language } = payload
         result = await nodelink.lyrics.loadLyrics({ info: decodedTrackInfo }, language)
+        break
+      }
+      case 'loadMeaning': {
+        const { decodedTrackInfo, language } = payload
+        result = await nodelink.meanings.loadMeaning({ info: decodedTrackInfo }, language)
         break
       }
 

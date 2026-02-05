@@ -1,12 +1,13 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { logger, sendErrorResponse } from '../utils.js'
 
-const sessionPatchSchema = myzod
-  .object({
-    resuming: myzod.boolean().optional(),
-    timeout: myzod.number().min(0).optional()
-  })
-  .allowUnknownKeys()
+const v = new Validator({ haltOnFirstError: true })
+
+const sessionPatchSchema = v.compile({
+  resuming: { type: 'boolean', optional: true },
+  timeout: { type: 'number', min: 0, optional: true },
+  $$strict: false
+})
 
 async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   const parts = parsedUrl.pathname.split('/')
@@ -27,10 +28,10 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
     parsedUrl.pathname === `/v4/sessions/${sessionId}` &&
     req.method === 'PATCH'
   ) {
-    const result = sessionPatchSchema.try(req.body)
+    const validation = sessionPatchSchema(req.body)
 
-    if (result instanceof myzod.ValidationError) {
-      const errorMessage = result.message || 'Invalid PATCH payload'
+    if (validation !== true) {
+      const errorMessage = validation?.[0]?.message || 'Invalid PATCH payload'
       logger(
         'warn',
         'Session',
@@ -46,7 +47,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
       )
     }
 
-    const payload = result
+    const payload = req.body
     logger(
       'debug',
       'Session',

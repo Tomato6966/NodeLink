@@ -1,23 +1,31 @@
-import myzod from 'myzod'
+import Validator from 'fastest-validator'
 import { encodeTrack, logger, sendErrorResponse } from '../utils.js'
 
-const encodedTracksSchema = myzod
-  .array(
-    myzod
-      .object({
-        encoded: myzod.string(),
-        info: myzod.object({}).allowUnknownKeys()
-      })
-      .allowUnknownKeys()
-  )
-  .min(1)
+const v = new Validator({ haltOnFirstError: true })
+
+const encodedTracksSchema = v.compile({
+  $$root: true,
+  type: 'array',
+  min: 1,
+  items: {
+    type: 'object',
+    props: {
+      encoded: { type: 'string', empty: false },
+      info: { type: 'object', optional: false }
+    },
+    $$strict: false
+  },
+  messages: {
+    arrayMin: 'tracks parameter must be an array and cannot be empty.'
+  }
+})
 
 function handler(_nodelink, req, res, sendResponse, parsedUrl) {
-  const result = encodedTracksSchema.try(req.body)
+  const validation = encodedTracksSchema(req.body)
 
-  if (result instanceof myzod.ValidationError) {
+  if (validation !== true) {
     const errorMessage =
-      result.message || 'tracks parameter must be an array and cannot be empty.'
+      validation?.[0]?.message || 'tracks parameter must be an array and cannot be empty.'
     sendErrorResponse(
       req,
       res,
@@ -30,7 +38,7 @@ function handler(_nodelink, req, res, sendResponse, parsedUrl) {
     return
   }
 
-  const tracks = result
+  const tracks = req.body
 
   const encodedTracks = []
   logger('debug', 'Tracks', `Encoding ${tracks.length} tracks.`)

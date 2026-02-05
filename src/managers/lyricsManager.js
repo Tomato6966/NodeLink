@@ -2,6 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { logger } from '../utils.js'
+import { alignLyrics } from '../modules/lyricsAligner.js'
 
 let lyricRegistry
 try {
@@ -84,7 +85,7 @@ export default class LyricsManager {
     }
   }
 
-  async loadLyrics(decodedTrack, language) {
+  async loadLyrics(decodedTrack, language, skipTrackSource = false) {
     if (
       !decodedTrack ||
       !decodedTrack.info?.sourceName ||
@@ -131,26 +132,73 @@ export default class LyricsManager {
     const trackInfo = reliableTrackData.data?.info || reliableTrackData.data
     const sourceName = trackInfo?.sourceName
     const lyricsSource = this.lyricsSources.get(sourceName)
+    const isYouTube = sourceName === 'youtube' || sourceName === 'ytmusic'
 
-    if (lyricsSource) {
-      const lyrics = await lyricsSource.getLyrics(trackInfo, language)
-      if (lyrics && lyrics.loadType !== 'empty') {
-        return lyrics
+    let youtubeCaptions = null
+
+    if (lyricsSource && !skipTrackSource) {
+      if (isYouTube) {
+        try {
+          const result = await lyricsSource.getLyrics(trackInfo, language)
+          if (result && result.loadType === 'lyrics') {
+            youtubeCaptions = result
+          }
+        } catch (e) {
+          logger(
+            'warn',
+            'Lyrics',
+            `Failed to fetch YouTube captions for alignment: ${e.message}`
+          )
+        }
+      } else {
+        const lyrics = await lyricsSource.getLyrics(trackInfo, language)
+        if (lyrics && lyrics.loadType !== 'empty') {
+          lyrics.data.provider = sourceName
+          return lyrics
+        }
       }
     }
 
     for (const [name, source] of this.lyricsSources) {
-      if (name !== sourceName) {
-        logger(
-          'debug',
-          'Lyrics',
-          `Trying lyrics source ${name} for ${trackInfo?.title || 'Unknown Title'}.`
-        )
-        const lyrics = await source.getLyrics(trackInfo, language)
-        if (lyrics && lyrics.loadType !== 'empty') {
-          return lyrics
+      if (name === sourceName) continue
+
+      logger(
+        'debug',
+        'Lyrics',
+        `Trying lyrics source ${name} for ${trackInfo?.title || 'Unknown Title'}.`
+      )
+      const lyrics = await source.getLyrics(trackInfo, language)
+
+      if (lyrics && lyrics.loadType !== 'empty') {
+        if (isYouTube && youtubeCaptions && lyrics.data.synced) {
+          try {
+            logger(
+              'debug',
+              'Lyrics',
+              `Aligning ${name} lyrics with YouTube timing...`
+            )
+            const alignedLines = alignLyrics(
+              lyrics.data.lines,
+              youtubeCaptions.data
+            )
+            lyrics.data.lines = alignedLines
+          } catch (alignErr) {
+            logger(
+              'warn',
+              'Lyrics',
+              `Failed to align lyrics: ${alignErr.message}`
+            )
+          }
         }
+
+        lyrics.data.provider = name
+        return lyrics
       }
+    }
+
+    if (isYouTube && youtubeCaptions) {
+      youtubeCaptions.data.provider = sourceName
+      return youtubeCaptions
     }
 
     logger(
