@@ -20,6 +20,13 @@ import {
   SEMVER_PATTERN
 } from './constants.js'
 
+let ProxyAgent
+try {
+  const mod = await import('proxy-agent')
+  ProxyAgent = mod.ProxyAgent || mod.default
+} catch { }
+
+
 let loggingConfig = {}
 const logLevels = {
   debug: 0,
@@ -212,19 +219,19 @@ function validateProperty(value, path, expected, validator) {
   if (value === undefined || value === null) {
     throw new Error(
       `Configuration error:\n` +
-        `- Property: ${path}\n` +
-        `- Problem: missing required value\n` +
-        `- Expected: ${expected}\n\n` +
-        `Please define ${path} in your config.js file.`
+      `- Property: ${path}\n` +
+      `- Problem: missing required value\n` +
+      `- Expected: ${expected}\n\n` +
+      `Please define ${path} in your config.js file.`
     )
   }
 
   if (!validator(value)) {
     throw new Error(
       `Configuration error:\n` +
-        `- Property: ${path}\n` +
-        `- Received: ${JSON.stringify(value)} (${typeof value})\n` +
-        `- Expected: ${expected}`
+      `- Property: ${path}\n` +
+      `- Received: ${JSON.stringify(value)} (${typeof value})\n` +
+      `- Expected: ${expected}`
     )
   }
 }
@@ -304,14 +311,14 @@ function sendResponse(req, res, data, status, trace = false) {
   const encoding = req.headers['accept-encoding'] || ''
 
 
-/*
-  // https://bun.com/blog/bun-v1.3.3
-  if (process.isBun) {
-    headers['Content-Length'] = buffer.byteLength
-    res.writeHead(status, headers)
-    res.end(buffer)
-    return
-  } */
+  /*
+    // https://bun.com/blog/bun-v1.3.3
+    if (process.isBun) {
+      headers['Content-Length'] = buffer.byteLength
+      res.writeHead(status, headers)
+      res.end(buffer)
+      return
+    } */
   const compressions = [
     { type: 'br', method: zlib.brotliCompress },
     { type: 'gzip', method: zlib.gzip },
@@ -492,13 +499,13 @@ function verifyMethod(
       `Method not allowed: ${req.method} ${parsedUrl.pathname} from ${clientAddress}`
     )
     sendResponse(req, res, {
-        timestamp: Date.now(),
-        status: 405,
-        error: 'Method Not Allowed',
-        message: `Method must be one of ${methods.join(', ')}`,
-        path: parsedUrl.pathname,
-        trace: new Error().stack
-      }, 405, trace)
+      timestamp: Date.now(),
+      status: 405,
+      error: 'Method Not Allowed',
+      message: `Method must be one of ${methods.join(', ')}`,
+      path: parsedUrl.pathname,
+      trace: new Error().stack
+    }, 405, trace)
     return false
   }
   return true
@@ -1072,18 +1079,39 @@ async function _internalHttp1Request(urlString, options = {}) {
 }
 
 async function http1makeRequest(urlString, options = {}) {
-  const { maxRetries = 3 } = options
+  const { maxRetries = 3, proxy } = options
   let attempt = 0
 
   while (true) {
     try {
-      const isHttps = new URL(urlString).protocol === 'https:'
-      const useKeepAlive = !options.streamOnly
-      const agent = useKeepAlive
-        ? isHttps
-          ? httpsAgent
-          : httpAgent
-        : new (isHttps ? https : http).Agent({ keepAlive: false })
+      const url = new URL(urlString)
+      const isHttps = url.protocol === 'https:'
+      let agent = options.agent
+
+      if (!agent) {
+        if (proxy && proxy.url) {
+          if (ProxyAgent) {
+            const proxyUrl = new URL(proxy.url)
+            if (proxy.username && proxy.password) {
+              proxyUrl.username = proxy.username
+              proxyUrl.password = proxy.password
+            }
+            agent = new ProxyAgent({ getProxyForUrl: () => proxyUrl.href })
+            logger('debug', 'Network', `Using proxy for ${url.hostname}: ${proxy.url}`)
+          } else {
+            logger('warn', 'Network', 'Proxy configured but proxy-agent not installed.')
+          }
+        }
+
+        if (!agent) {
+          const useKeepAlive = !options.streamOnly
+          agent = useKeepAlive
+            ? isHttps
+              ? httpsAgent
+              : httpAgent
+            : new (isHttps ? https : http).Agent({ keepAlive: false })
+        }
+      }
 
       const newOptions = { ...options, agent }
 
@@ -1152,6 +1180,12 @@ async function makeRequest(urlString, options, nodelink) {
       new Error(`Too many redirects (${maxRedirects}) for ${urlString}`)
     )
   }
+
+
+  if (options.proxy) {
+    return http1makeRequest(urlString, options, finalNodeLink)
+  }
+
   const localAddress = finalNodeLink?.routePlanner?.getIP()
 
   try {
@@ -1184,7 +1218,7 @@ async function makeRequest(urlString, options, nodelink) {
       try {
         const url = new URL(urlString)
         http2FailedHosts.add(url.host)
-      } catch (_e) {}
+      } catch (_e) { }
       resolve(
         http1makeRequest(urlString, { ...options, localAddress }, finalNodeLink)
       )
@@ -1707,7 +1741,7 @@ function applyEnvOverrides(config, prefix = 'NODELINK') {
           try {
             const parsedArray = JSON.parse(envValue)
             if (Array.isArray(parsedArray)) newValue = parsedArray
-          } catch (_e) {}
+          } catch (_e) { }
 
           if (!newValue) {
             const splitValue = envValue

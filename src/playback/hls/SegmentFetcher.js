@@ -22,6 +22,7 @@ export default class SegmentFetcher {
   constructor(options = {}) {
     this.headers = options.headers || {}
     this.localAddress = options.localAddress || null
+    this.proxy = options.proxy || null
     this.onResolveUrl = options.onResolveUrl || null
     this.keyMap = new Map()
   }
@@ -37,25 +38,25 @@ export default class SegmentFetcher {
     }
 
     const { body, error, statusCode } = await http1makeRequest(url, {
-      headers: this.headers, responseType: 'buffer', localAddress: this.localAddress
+      headers: this.headers, responseType: 'buffer', localAddress: this.localAddress, proxy: this.proxy
     })
 
-        if (error || statusCode !== 200 || !body || body.length === 0) {
-          logger('error', 'SegmentFetcher', `Key fetch failed for ${keyInfo.uri}: Status ${statusCode}, Error: ${error?.message || 'Empty Body'}`)
-          throw new Error(`Key fetch failed: ${statusCode}`)
-        }
-        if (this.keyMap.size >= 20) {
-          const firstKey = this.keyMap.keys().next().value
-          this.keyMap.delete(firstKey)
-        }
-        this.keyMap.set(keyInfo.uri, body)
+    if (error || statusCode !== 200 || !body || body.length === 0) {
+      logger('error', 'SegmentFetcher', `Key fetch failed for ${keyInfo.uri}: Status ${statusCode}, Error: ${error?.message || 'Empty Body'}`)
+      throw new Error(`Key fetch failed: ${statusCode}`)
+    }
+    if (this.keyMap.size >= 20) {
+      const firstKey = this.keyMap.keys().next().value
+      this.keyMap.delete(firstKey)
+    }
+    this.keyMap.set(keyInfo.uri, body)
     return body
   }
 
   async fetchMap(mapInfo, keyInfo = null) {
     if (!mapInfo) return null
     const { body, error, statusCode } = await http1makeRequest(mapInfo.uri, {
-      headers: this.headers, responseType: 'buffer', localAddress: this.localAddress
+      headers: this.headers, responseType: 'buffer', localAddress: this.localAddress, proxy: this.proxy
     })
     if (error || statusCode !== 200) throw new Error(`Map fetch failed: ${statusCode}`)
     if (keyInfo?.iv && body.length % 16 === 0) {
@@ -86,6 +87,7 @@ export default class SegmentFetcher {
       responseType: options.stream ? undefined : 'buffer',
       streamOnly: options.stream,
       localAddress: this.localAddress,
+      proxy: this.proxy,
       timeout: 15000
     })
 
