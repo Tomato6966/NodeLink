@@ -253,10 +253,22 @@ export default class AppleMusicSource {
     const attributes = item.attributes || {}
     const artwork = artworkOverride || this._parseArtwork(attributes.artwork)
     const isExplicit = attributes.contentRating === 'explicit'
+
     let trackUri = attributes.url || ''
     if (trackUri) {
       trackUri += `${trackUri.includes('?') ? '&' : '?'}explicit=${isExplicit}`
     }
+
+    const artistUrl = item.artistUrl || null
+    const albumName = attributes.albumName || null
+
+    let albumUrl = null
+    if (trackUri) {
+      const paramIndex = trackUri.indexOf('?')
+      albumUrl = paramIndex === -1 ? null : trackUri.substring(0, paramIndex)
+    }
+
+    const previewUrl = attributes.previews?.[0]?.url || null
 
     const trackInfo = {
       identifier: item.id,
@@ -272,10 +284,16 @@ export default class AppleMusicSource {
       sourceName: 'applemusic'
     }
 
+    const pluginInfo = {}
+    if (albumName) pluginInfo.albumName = albumName
+    if (albumUrl) pluginInfo.albumUrl = albumUrl
+    if (artistUrl) pluginInfo.artistUrl = artistUrl
+    if (previewUrl) pluginInfo.previewUrl = previewUrl
+
     return {
       encoded: encodeTrack(trackInfo),
       info: trackInfo,
-      pluginInfo: {}
+      pluginInfo
     }
   }
 
@@ -286,19 +304,123 @@ export default class AppleMusicSource {
       .replace('{h}', artworkData.height)
   }
 
-  async search(query) {
+  async search(query, sourceName, searchType = 'track') {
     try {
       const limit = this.config.maxSearchResults || 10
       const encodedQuery = encodeURIComponent(query)
+
+      const typeMap = {
+        track: 'songs',
+        album: 'albums',
+        playlist: 'playlists',
+        artist: 'artists'
+      }
+
+      const apiType = typeMap[searchType] || 'songs'
+
       const data = await this._apiRequest(
-        `/catalog/${this.country}/search?term=${encodedQuery}&limit=${limit}&types=songs&extend=artistUrl`
+        `/catalog/${this.country}/search?term=${encodedQuery}&limit=${limit}&types=${apiType}&extend=artistUrl`
       )
 
-      const songs = data?.results?.songs?.data || []
-      if (!songs.length) return { loadType: 'empty', data: {} }
+      const results = []
 
-      const tracks = songs.map((item) => this._buildTrack(item)).filter(Boolean)
-      return { loadType: 'search', data: tracks }
+      if (searchType === 'track') {
+        const songs = data?.results?.songs?.data || []
+        for (const item of songs) {
+          const track = this._buildTrack(item)
+          if (track) results.push(track)
+        }
+      } 
+      else if (searchType === 'album' && data?.results?.albums?.data) {
+        for (const album of data.results.albums.data) {
+          if (!album?.id) continue
+
+          const artwork = this._parseArtwork(album.attributes?.artwork)
+
+          const info = {
+            title: album.attributes?.name || 'Unknown Album',
+            author: album.attributes?.artistName || 'Unknown Artist',
+            length: 0,
+            identifier: album.id,
+            isSeekable: true,
+            isStream: false,
+            uri: album.attributes?.url || '',
+            artworkUrl: artwork,
+            isrc: null,
+            sourceName: 'applemusic',
+            position: 0
+          }
+          results.push({
+            encoded: encodeTrack(info),
+            info,
+            pluginInfo: {
+              type: 'album',
+              trackCount: album.attributes?.trackCount || null
+            }
+          })
+        }
+      } 
+      else if (searchType === 'playlist' && data?.results?.playlists?.data) {
+        for (const playlist of data.results.playlists.data) {
+          if (!playlist?.id) continue
+
+          const artwork = this._parseArtwork(playlist.attributes?.artwork)
+
+          const info = {
+            title: playlist.attributes?.name || 'Unknown Playlist',
+            author: playlist.attributes?.curatorName || 'Apple Music',
+            length: 0,
+            identifier: playlist.id,
+            isSeekable: true,
+            isStream: false,
+            uri: playlist.attributes?.url || '',
+            artworkUrl: artwork,
+            isrc: null,
+            sourceName: 'applemusic',
+            position: 0
+          }
+          results.push({
+            encoded: encodeTrack(info),
+            info,
+            pluginInfo: {
+              type: 'playlist',
+              trackCount: playlist.attributes?.trackCount || null
+            }
+          })
+        }
+      } 
+      else if (searchType === 'artist' && data?.results?.artists?.data) {
+        for (const artist of data.results.artists.data) {
+          if (!artist?.id) continue
+
+          const artwork = this._parseArtwork(artist.attributes?.artwork)
+
+          const info = {
+            title: artist.attributes?.name || 'Unknown Artist',
+            author: 'Apple Music',
+            length: 0,
+            identifier: artist.id,
+            isSeekable: false,
+            isStream: false,
+            uri: artist.attributes?.url || '',
+            artworkUrl: artwork,
+            isrc: null,
+            sourceName: 'applemusic',
+            position: 0
+          }
+          results.push({
+            encoded: encodeTrack(info),
+            info,
+            pluginInfo: { type: 'artist' }
+          })
+        }
+      }
+
+      if (results.length === 0) {
+        return { loadType: 'empty', data: {} }
+      }
+
+      return { loadType: 'search', data: results }
     } catch (error) {
       return { exception: { message: error.message, severity: 'fault' } }
     }
