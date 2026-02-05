@@ -113,7 +113,7 @@ export default class DeezerSource {
     }
   }
 
-  async search(query, sourceTerm) {
+  async search(query, sourceTerm, searchType = 'track') {
     if (this.recommendationTerm.includes(sourceTerm)) {
       return this.getRecommendations(query)
     }
@@ -133,10 +133,18 @@ export default class DeezerSource {
       return { loadType: 'search', data: [this.buildTrack(track)] }
     }
 
-    logger('debug', 'Sources', `Searching Deezer for: "${query}"`)
+    logger('debug', 'Sources', `Searching Deezer for: "${query}" (type: ${searchType})`)
 
+    const typeMap = {
+      track: 'track',
+      album: 'album',
+      playlist: 'playlist',
+      artist: 'artist'
+    }
+
+    const apiType = typeMap[searchType] || 'track'
     const { body, error } = await makeRequest(
-      `https://api.deezer.com/2.0/search?q=${encodeURI(query)}`,
+      `https://api.deezer.com/2.0/search/${apiType}?q=${encodeURIComponent(query)}`,
       { method: 'GET' }
     )
 
@@ -153,12 +161,96 @@ export default class DeezerSource {
       return { loadType: 'empty', data: {} }
     }
 
-    const tracks = body.data
-      .filter((item) => item.type === 'track')
-      .slice(0, this.config.maxSearchResults || 10)
-      .map((item) => this.buildTrack(item))
+    const results = []
+    const items = body.data.slice(0, this.config.maxSearchResults || 10)
 
-    return { loadType: 'search', data: tracks }
+    if (searchType === 'track') {
+      for (const item of items) {
+        if (item.type === 'track' && item.readable !== false) {
+          results.push(this.buildTrack(item))
+        }
+      }
+    } 
+    else if (searchType === 'album') {
+      for (const album of items) {
+        if (!album?.id) continue
+
+        const info = {
+          title: album.title || 'Unknown Album',
+          author: album.artist?.name || 'Unknown Artist',
+          length: 0,
+          identifier: album.id.toString(),
+          isSeekable: true,
+          isStream: false,
+          uri: album.link || `https://www.deezer.com/album/${album.id}`,
+          artworkUrl: album.cover_xl || album.cover_big || album.cover_medium || null,
+          isrc: null,
+          sourceName: 'deezer',
+          position: 0
+        }
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: {
+            type: 'album',
+            trackCount: album.nb_tracks || null
+          }
+        })
+      }
+    } 
+    else if (searchType === 'playlist') {
+      for (const playlist of items) {
+        if (!playlist?.id) continue
+
+        const info = {
+          title: playlist.title || 'Unknown Playlist',
+          author: playlist.user?.name || playlist.creator?.name || 'Deezer',
+          length: 0,
+          identifier: playlist.id.toString(),
+          isSeekable: true,
+          isStream: false,
+          uri: playlist.link || `https://www.deezer.com/playlist/${playlist.id}`,
+          artworkUrl: playlist.picture_xl || playlist.picture_big || playlist.picture_medium || null,
+          isrc: null,
+          sourceName: 'deezer',
+          position: 0
+        }
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: {
+            type: 'playlist',
+            trackCount: playlist.nb_tracks || null
+          }
+        })
+      }
+    } 
+    else if (searchType === 'artist') {
+      for (const artist of items) {
+        if (!artist?.id) continue
+
+        const info = {
+          title: artist.name || 'Unknown Artist',
+          author: 'Deezer',
+          length: 0,
+          identifier: artist.id.toString(),
+          isSeekable: false,
+          isStream: false,
+          uri: artist.link || `https://www.deezer.com/artist/${artist.id}`,
+          artworkUrl: artist.picture_xl || artist.picture_big || artist.picture_medium || null,
+          isrc: null,
+          sourceName: 'deezer',
+          position: 0
+        }
+        results.push({
+          encoded: encodeTrack(info),
+          info,
+          pluginInfo: { type: 'artist' }
+        })
+      }
+    }
+
+    return { loadType: 'search', data: results }
   }
 
   async getRecommendations(query) {
@@ -350,24 +442,39 @@ export default class DeezerSource {
   }
 
   buildTrack(item, artworkUrl = null) {
+    const albumName = item.album?.title || null
+    const albumId = item.album?.id || null
+    const artistId = item.artist?.id || null
+    const albumUrl = albumId ? `https://www.deezer.com/album/${albumId}` : null
+    const artistUrl = artistId ? `https://www.deezer.com/artist/${artistId}` : null
+    const artistArtworkUrl = item.artist?.picture_xl || null
+    const previewUrl = item.preview || null
+
     const trackInfo = {
       identifier: item.id.toString(),
       isSeekable: true,
-      author: item.artist.name,
+      author: item.artist?.name || 'Unknown',
       length: item.duration * 1000,
       isStream: false,
       position: 0,
-      title: item.title,
-      uri: item.link,
+      title: item.title || 'Unknown',
+      uri: item.link || `https://www.deezer.com/track/${item.id}`,
       artworkUrl: artworkUrl || item.album?.cover_xl || null,
       isrc: item.isrc || null,
       sourceName: 'deezer'
     }
 
+    const pluginInfo = {}
+    if (albumName) pluginInfo.albumName = albumName
+    if (albumUrl) pluginInfo.albumUrl = albumUrl
+    if (artistUrl) pluginInfo.artistUrl = artistUrl
+    if (artistArtworkUrl) pluginInfo.artistArtworkUrl = artistArtworkUrl
+    if (previewUrl) pluginInfo.previewUrl = previewUrl
+
     return {
       encoded: encodeTrack(trackInfo),
       info: trackInfo,
-      pluginInfo: {}
+      pluginInfo
     }
   }
 
