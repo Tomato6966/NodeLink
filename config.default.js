@@ -242,7 +242,6 @@ export default {
     },
     gaana: {
       enabled: true,
-      apiUrl: 'https://gaana.1lucas1apk.fun/api', // if you want to host your server https://github.com/notdeltaxd/Gaana-API
       streamQuality: 'high',
       playlistLoadLimit: 100,
       albumLoadLimit: 100,
