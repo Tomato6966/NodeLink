@@ -1,5 +1,6 @@
 import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.js'
 import HLSHandler from '../playback/hls/HLSHandler.js'
+import PlaylistParser from '../playback/hls/PlaylistParser.js'
 import { PassThrough } from 'node:stream'
 import { createDecipheriv } from 'node:crypto'
 
@@ -322,7 +323,7 @@ export default class GaanaSource {
 
       const firstSegment = manifest.segments[0].url
       let format = 'mp4'
-      if (firstSegment.includes('.m4s')) format = 'm4s'
+      if (firstSegment.includes('.m4s')) format = 'fmp4'
       else if (firstSegment.includes('.mp4')) format = 'mp4'
       else if (firstSegment.includes('.ts')) format = 'mpegts'
       else if (firstSegment.includes('.aac')) format = 'aac'
@@ -332,7 +333,7 @@ export default class GaanaSource {
         protocol: 'hls',
         format: format === 'mpegts' ? 'mpegts' : 'mp4',
         additionalData: {
-          initUrl: manifest.initSegmentUrl,
+          initUrl: manifest.segments[0]?.map?.uri,
           segments: manifest.segments,
           format
         }
@@ -381,64 +382,20 @@ export default class GaanaSource {
     const { body: text } = await http1makeRequest(url, { headers: this._getHeaders() })
     if (!text) throw new Error('Empty manifest')
 
-    const lines = text.split('\n').map(l => l.trim())
-    const baseUrl = this.getBaseUrl(url)
-
-    let streamUrl = lines.find(l => !l.startsWith('#') && l.endsWith('.m3u8'))
-    if (streamUrl) {
-      const { body: streamText } = await http1makeRequest(this.resolveUrl(baseUrl, streamUrl), { headers: this._getHeaders() })
-      return this.processPlaylist(streamText, this.getBaseUrl(this.resolveUrl(baseUrl, streamUrl)))
+    let manifest = PlaylistParser.parse(text, url)
+    if (manifest.isMaster) {
+      const bestVariant = manifest.variants[0]
+      const { body: variantText } = await http1makeRequest(bestVariant.url, { headers: this._getHeaders() })
+      manifest = PlaylistParser.parse(variantText, bestVariant.url)
     }
 
-    return this.processPlaylist(text, baseUrl)
-  }
-
-  processPlaylist(text, baseUrl) {
-    if (!text) throw new Error('Empty playlist')
-    const lines = text.split('\n').map(l => l.trim())
-    const segments = []
-    let initSegmentUrl = null
-    let currentDuration = 0
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      if (line.startsWith('#EXT-X-MAP:')) {
-        const match = line.match(/URI="([^"]+)"/)
-        if (match) initSegmentUrl = this.resolveUrl(baseUrl, match[1])
-      } else if (line.startsWith('#EXTINF:')) {
-        currentDuration = parseFloat(line.split(':')[1].split(',')[0])
-      } else if (!line.startsWith('#') && line) {
-        segments.push({
-          url: this.resolveUrl(baseUrl, line),
-          duration: currentDuration
-        })
-        currentDuration = 0
-      }
-    }
-
-    return { initSegmentUrl, segments }
-  }
-
-  getBaseUrl(url) {
-    const parts = url.split('?')[0].split('/')
-    parts.pop()
-    return parts.join('/') + '/'
-  }
-
-  resolveUrl(base, relative) {
-    if (relative.startsWith('http')) return relative
-    if (relative.startsWith('/')) {
-      const parts = base.split('://')
-      const host = parts[1].split('/')[0]
-      return `${parts[0]}://${host}${relative}`
-    }
-    return base + relative
+    return manifest
   }
 
   async loadStream(track, url, protocol, additionalData) {
     if (protocol === 'hls') {
       const stream = new HLSHandler(url, {
-        type: additionalData?.format === 'mpegts' ? 'mpegts' : 'mpegts', // Default to mpegts for HLS
+        type: 'mpegts',
         localAddress: this.nodelink.routePlanner?.getIP(),
         startTime: additionalData?.startTime || 0,
         headers: this._getHeaders()
