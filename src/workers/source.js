@@ -194,8 +194,11 @@ if (isMainThread) {
     taskQueue.push(msg.payload)
     processNextTask()
   })
-
+  try {
   process.send({ type: 'ready', pid: process.pid })
+  } catch {
+    // ignore
+  }
 } else {
   const { config, silentLogs, threadId } = workerData
 
