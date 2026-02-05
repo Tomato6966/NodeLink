@@ -108,7 +108,12 @@ export default {
     vkmusic: {
       enabled: true,
       userToken: '', // (optional) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> response -> access_token
-      userCookie: '' // (required without userToken) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> request -> cookie (copy full cookie header)
+      userCookie: '', // (required without userToken) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> request -> cookie (copy full cookie header)
+      proxy: {
+        url: '',
+        username: '',
+        password: ''
+      }
     },
     amazonmusic: {
       enabled: true
@@ -237,7 +242,12 @@ export default {
     jiosaavn: {
       enabled: true,
       playlistLoadLimit: 50,
-      artistLoadLimit: 20
+      artistLoadLimit: 20,
+      proxy: {
+        url: '',
+        username: '',
+        password: ''
+      }
       // "secretKey": "38346591" // Optional, defaults to standard key
     },
     gaana: {
@@ -245,7 +255,12 @@ export default {
       streamQuality: 'high',
       playlistLoadLimit: 100,
       albumLoadLimit: 100,
-      artistLoadLimit: 100
+      artistLoadLimit: 100,
+      proxy: {
+        url: '', // The HTTP/HTTPS proxy to use
+        username: '', // Optional username
+        password: '' // Optional password
+      }
     },
     "google-tts": {
       enabled: true,
@@ -372,7 +387,12 @@ export default {
       allowExplicit: true,
       artistLoadLimit: 1, // 0 = no limit, 1 = 10 tracks, 2 = 20 tracks, etc.
       albumLoadLimit: 1, // 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
-      playlistLoadLimit: 1 // 0 = no limit, 1 = 100 tracks, 2 = 200 tracks, etc.
+      playlistLoadLimit: 1, // 0 = no limit, 1 = 100 tracks, 2 = 200 tracks, etc.
+      proxy: {
+        url: '',
+        username: '',
+        password: ''
+      }
     }
   },
   lyrics: {

@@ -48,7 +48,8 @@ export default class GaanaSource {
     const { body, statusCode, error } = await http1makeRequest(url, {
       method: 'POST',
       headers: this._getHeaders(query),
-      disableBodyCompression: true
+      disableBodyCompression: true,
+      proxy: this.config.proxy
     })
 
     if (error || statusCode !== 200 || !body) return null
@@ -309,7 +310,8 @@ export default class GaanaSource {
         ...this._getHeaders(),
         'Content-Type': 'application/x-www-form-urlencoded'
       },
-      body: params.toString()
+      body: params.toString(),
+      proxy: this.config.proxy
     })
 
     if (error || statusCode !== 200 || data?.api_status !== 'success' || !data?.data?.stream_path) return null
@@ -379,13 +381,13 @@ export default class GaanaSource {
   }
 
   async parseHlsManifest(url) {
-    const { body: text } = await http1makeRequest(url, { headers: this._getHeaders() })
+    const { body: text } = await http1makeRequest(url, { headers: this._getHeaders(), proxy: this.config.proxy })
     if (!text) throw new Error('Empty manifest')
 
     let manifest = PlaylistParser.parse(text, url)
     if (manifest.isMaster) {
       const bestVariant = manifest.variants[0]
-      const { body: variantText } = await http1makeRequest(bestVariant.url, { headers: this._getHeaders() })
+      const { body: variantText } = await http1makeRequest(bestVariant.url, { headers: this._getHeaders(), proxy: this.config.proxy })
       manifest = PlaylistParser.parse(variantText, bestVariant.url)
     }
 
@@ -398,7 +400,8 @@ export default class GaanaSource {
         type: 'mpegts',
         localAddress: this.nodelink.routePlanner?.getIP(),
         startTime: additionalData?.startTime || 0,
-        headers: this._getHeaders()
+        headers: this._getHeaders(),
+        proxy: this.config.proxy
       })
       return { stream, type: 'mpegts' }
     }
@@ -427,7 +430,7 @@ export default class GaanaSource {
       return { stream, type }
     }
 
-    const { stream, error, statusCode } = await http1makeRequest(url, { method: 'GET', streamOnly: true, headers: this._getHeaders() })
+    const { stream, error, statusCode } = await http1makeRequest(url, { method: 'GET', streamOnly: true, headers: this._getHeaders(), proxy: this.config.proxy })
     if (error || statusCode !== 200 || !stream) {
       throw new Error(error?.message || `Stream status ${statusCode}`)
     }
@@ -464,7 +467,8 @@ export default class GaanaSource {
       const { stream, statusCode, error } = await http1makeRequest(url, {
         method: 'GET',
         streamOnly: true,
-        headers: this._getHeaders()
+        headers: this._getHeaders(),
+        proxy: this.config.proxy
       })
 
       if (error || statusCode !== 200 || !stream) {
