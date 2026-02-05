@@ -1770,7 +1770,10 @@ if (clusterEnabled && cluster.isPrimary) {
     return nserver
   })()
 
-  await serverInstancePromise
+  await serverInstancePromise.catch((err) => {
+    logger('error', 'Server', `Fatal error during primary startup: ${err.message}`, err)
+    process.exit(1)
+  })
 } else if (clusterEnabled && cluster.isWorker) {
   await import('./workers/main.js')
 } else {
@@ -1832,5 +1835,8 @@ if (clusterEnabled && cluster.isPrimary) {
     return nserver
   })()
 
-  await serverInstancePromise
+  await serverInstancePromise.catch((err) => {
+    logger('error', 'Server', `Fatal error during single-process startup: ${err.message}`, err)
+    process.exit(1)
+  })
 }

@@ -141,7 +141,9 @@ class SourceWorkerManager {
   }
 
   _forkWorker() {
-    const worker = cluster.fork()
+    const worker = cluster.fork({
+      WORKER_TYPE: 'source'
+    })
     worker.workerType = 'source'
     worker.on('message', (msg) => {
       if (msg.type === 'ready')
@@ -150,6 +152,13 @@ class SourceWorkerManager {
           'SourceCluster',
           `Source worker manager ${msg.pid} ready`
         )
+    })
+    worker.on('error', (err) => {
+      logger(
+        'error',
+        'SourceCluster',
+        `Source worker ${worker.id} error: ${err.message}`
+      )
     })
     this.workers.push(worker)
     this.workerLoads.set(worker.id, 0)

@@ -698,7 +698,8 @@ export default class WorkerManager {
     cluster.setupPrimary({ exec: './src/index.js' })
     const worker = cluster.fork({
       EVENT_SOCKET_PATH: this.socketPath,
-      COMMAND_SOCKET_PATH: this.commandSocketPath
+      COMMAND_SOCKET_PATH: this.commandSocketPath,
+      WORKER_TYPE: 'playback'
     })
     worker.workerType = 'playback'
 
