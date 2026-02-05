@@ -743,6 +743,10 @@ export default class SoundCloudSource {
     if (!finalUrl) {
       return this._buildException('Failed to resolve stream URL')
     }
+    
+    if (finalUrl.includes('cf-preview-media.sndcdn.com') || finalUrl.includes('/preview/')) {
+  return this._buildException('Track only has preview URL')
+    }
 
     const mimeType = selected.format?.mime_type?.toLowerCase() ?? ''
     const protocol = selected.format?.protocol ?? 'progressive'
