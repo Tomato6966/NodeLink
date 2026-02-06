@@ -5,13 +5,13 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import WebSocketServer from '@performanc/pwsl-server'
 
-import requestHandler from './api/index.js'
-import connectionManager from './managers/connectionManager.js'
+import RequestHandler from './api/index.js'
+import ConnectionManager from './managers/connectionManager.js'
 import CredentialManager from './managers/credentialManager.js'
 import TrackCacheManager from './managers/trackCacheManager.js'
-import routePlannerManager from './managers/routePlannerManager.js'
-import sessionManager from './managers/sessionManager.js'
-import statsManager from './managers/statsManager.js'
+import RoutePlannerManager from './managers/routePlannerManager.js'
+import SessionManager from './managers/sessionManager.js'
+import StatsManager from './managers/statsManager.js'
 import {
   applyEnvOverrides,
   checkForUpdates,
@@ -24,19 +24,28 @@ import {
   logger,
   parseClient,
   validateProperty,
-  verifyDiscordID
+  verifyDiscordID,
+  decodeTrack
 } from './utils.js'
 import 'dotenv/config'
+import type { ServerWebSocket } from 'bun'
 import { GatewayEvents } from './constants.js'
 import DosProtectionManager from './managers/dosProtectionManager.js'
 import PlayerManager from './managers/playerManager.js'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.js'
 import SourceWorkerManager from './managers/sourceWorkerManager.js'
+import WorkerManager from './managers/workerManager.js'
+import SourcesManager from './managers/sourceManager.js'
+import LyricsManager from './managers/lyricsManager.js'
+import MeaningManager from './managers/meaningManager.js'
+
+import type { ClientInfo, IPCMessage, ReqShim, ResShim, Extension, TrackModifier, WebSocketInterceptor, AudioInterceptor, PlayerInterceptor } from './types.js'
 import { parseVoiceFrameHeader } from './voice/voiceFrames.js'
 import { createVoiceRelay } from './voice/voiceRelay.js'
 
-let config
+export type NodelinkConfig = typeof import('../config.default.js').default
+let config: NodelinkConfig
 
 const isSEA = process.embedder === 'nodejs'
 const executableDir = path.dirname(process.execPath)
@@ -46,7 +55,7 @@ try {
     ? pathToFileURL(path.join(executableDir, 'config.js')).href
     : '../config.js'
   config = (await import(configPath)).default
-} catch (e) {
+} catch (e: any) {
   if (e.code === 'ERR_MODULE_NOT_FOUND' || e.code === 'ENOENT') {
     try {
       const defaultConfigPath = isSEA
@@ -56,7 +65,7 @@ try {
       console.log(
         '[WARN] Config: config.js not found, using config.default.js. It is recommended to create a config.js file for your own configuration.'
       )
-    } catch (e2) {
+    } catch (e2: any) {
       console.error(
         '[ERROR] Config: Failed to load config.default.js. Please make sure it exists.'
       )
@@ -71,13 +80,13 @@ try {
 applyEnvOverrides(config)
 
 const clusterEnabled =
-  process.env.CLUSTER_ENABLED?.toLowerCase() === 'true' ||
+  process.env['CLUSTER_ENABLED']?.toLowerCase() === 'true' ||
   (typeof config.cluster?.enabled === 'boolean' && config.cluster.enabled) ||
   false
 
 let _configuredWorkers = 0
-if (process.env.CLUSTER_WORKERS)
-  _configuredWorkers = Number(process.env.CLUSTER_WORKERS)
+if (process.env['CLUSTER_WORKERS'])
+  _configuredWorkers = Number(process.env['CLUSTER_WORKERS'])
 else if (typeof config.cluster?.workers === 'number')
   _configuredWorkers = config.cluster.workers
 
@@ -99,14 +108,26 @@ if (!cluster.isWorker) {
 
 await checkForUpdates()
 
+interface BunSocketData {
+  clientInfo: any
+  sessionId: string | null
+  reqHeaders: Record<string, any>
+  remoteAddress: string
+  url: string
+  wrapper?: BunSocketWrapper
+}
+
 class BunSocketWrapper extends EventEmitter {
-  constructor(ws) {
+  ws: ServerWebSocket<BunSocketData>
+  remoteAddress: BunSocketData['remoteAddress']
+
+  constructor(ws: ServerWebSocket<BunSocketData>) {
     super()
     this.ws = ws
     this.remoteAddress = ws?.data?.remoteAddress
   }
 
-  send(data) {
+  send(data: any) {
     try {
       const r = this.ws.send(data)
       return r !== 0
@@ -115,7 +136,7 @@ class BunSocketWrapper extends EventEmitter {
     }
   }
 
-  ping(data) {
+  ping(data: any) {
     try {
       this.ws.ping?.(data)
       return true
@@ -124,32 +145,92 @@ class BunSocketWrapper extends EventEmitter {
     }
   }
 
-  close(code, reason) {
-    this.ws.close(code, reason)
+  /**
+   * Closes the connection.
+   *
+   * Here is a list of close codes:
+   * - `1000` means "normal closure" **(default)**
+   * - `1009` means a message was too big and was rejected
+   * - `1011` means the server encountered an error
+   * - `1012` means the server is restarting
+   * - `1013` means the server is too busy or the client is rate-limited
+   * - `4000` through `4999` are reserved for applications (you can use it!)
+   *
+   * To close the connection abruptly, use `terminate()`.
+   *
+   * @param code The close code to send
+   * @param reason The close reason to send
+   */
+  close(...args: Parameters<ServerWebSocket<BunSocketData>['close']>) {
+    this.ws.close(...args)
   }
 
   terminate() {
     this.ws.close(1000, 'Terminated')
   }
 
-  _handleMessage(message) {
+  _handleMessage(message: any) {
     this.emit('message', message)
   }
 
-  _handleClose(code, reason) {
+  _handleClose(code: any, reason: any) {
     this.emit('close', code, reason)
   }
 }
 
-let registry = null
+let registry: any = null
 if (process.embedder === 'nodejs') {
   try {
+    // @ts-ignore
     registry = await import('./registry.js')
-  } catch (_e) {}
+  } catch (_e: any) { }
 }
 
 class NodelinkServer extends EventEmitter {
-  constructor(options, PlayerManagerClass, isClusterPrimary = false) {
+  options: NodelinkConfig
+  logger: typeof logger
+  server: import('bun').Server<BunSocketData> | http.Server | null;
+  socket:
+    (typeof this._usingBunServer extends true ? EventEmitter : WebSocketServer)
+    | null;
+  _usingBunServer: boolean;
+  sessions: SessionManager;
+  sources: SourcesManager | null;
+  lyrics: LyricsManager | null;
+  meanings: MeaningManager | null;
+  _sourceInitPromise: Promise<void>;
+  routePlanner: RoutePlannerManager;
+  credentialManager: CredentialManager;
+  trackCacheManager: TrackCacheManager;
+  connectionManager: ConnectionManager;
+  statsManager: StatsManager;
+  rateLimitManager: RateLimitManager;
+  dosProtectionManager: DosProtectionManager;
+  pluginManager: PluginManager;
+  sourceWorkerManager: SourceWorkerManager | null;
+  workerManager: WorkerManager | null;
+  registry: any;
+  version: any;
+  gitInfo: any;
+  statistics: { players: number; playingPlayers: number };
+  extensions: {
+    sources: Map<string, any>;
+    filters: Map<string, any>;
+    routes: Extension[];
+    middlewares: any[];
+    trackModifiers: TrackModifier[];
+    wsInterceptors: WebSocketInterceptor[];
+    audioInterceptors: AudioInterceptor[];
+    playerInterceptors: PlayerInterceptor[];
+  }
+  voiceSockets: Map<string, Set<any>>;
+  voiceRelay: any;
+  _globalUpdater: NodeJS.Timeout | null;
+  _statsUpdater: NodeJS.Timeout | null;
+  supportedSourcesCache: string[] | null;
+  _heartbeatInterval: NodeJS.Timeout | null;
+
+  constructor(options: NodelinkConfig, PlayerManagerClass: any, isClusterPrimary = false) {
     super()
     if (!options || Object.keys(options).length === 0)
       throw new Error('Configuration file not found or empty')
@@ -158,20 +239,20 @@ class NodelinkServer extends EventEmitter {
     this.server = null
     this.socket = null
 
-    this._usingBunServer = Boolean(isBun && options?.server?.useBunServer)
+    this._usingBunServer = (Boolean(isBun && options?.server?.useBunServer)) as true | false;
 
-    this.sessions = new sessionManager(this, PlayerManagerClass)
+    this.sessions = new SessionManager(this, PlayerManagerClass)
     this.sources = null
     this.lyrics = null
     this.meanings = null
 
     this._sourceInitPromise = this._initSources(isClusterPrimary, options)
 
-    this.routePlanner = new routePlannerManager(this)
+    this.routePlanner = new RoutePlannerManager(this)
     this.credentialManager = new CredentialManager(this)
     this.trackCacheManager = new TrackCacheManager(this)
-    this.connectionManager = new connectionManager(this)
-    this.statsManager = new statsManager(this)
+    this.connectionManager = new ConnectionManager(this)
+    this.statsManager = new StatsManager(this)
     this.rateLimitManager = new RateLimitManager(this)
     this.dosProtectionManager = new DosProtectionManager(this)
     this.pluginManager = new PluginManager(this)
@@ -179,6 +260,7 @@ class NodelinkServer extends EventEmitter {
       isClusterPrimary && options.cluster?.specializedSourceWorker?.enabled
         ? new SourceWorkerManager(this)
         : null
+    this.workerManager = null
     this.registry = registry
     this.version = getVersion()
     this.gitInfo = getGitInfo()
@@ -202,7 +284,7 @@ class NodelinkServer extends EventEmitter {
     this.voiceRelay = createVoiceRelay({
       enabled: options.voiceReceive?.enabled,
       format: options.voiceReceive?.format,
-      sendFrame: (frame) => this.handleVoiceFrame(frame),
+      sendFrame: (frame: any) => this.handleVoiceFrame(frame),
       logger
     })
 
@@ -212,6 +294,7 @@ class NodelinkServer extends EventEmitter {
     this._heartbeatInterval = null
 
     if (this._usingBunServer) {
+      // @ts-ignore TODO: Look into this TS Error - idk why is there a EventEmitter here.
       this.socket = new EventEmitter()
     } else {
       this.socket = new WebSocketServer({ noServer: true })
@@ -225,7 +308,7 @@ class NodelinkServer extends EventEmitter {
     )
   }
 
-  async _initSources(isClusterPrimary, _options) {
+  async _initSources(isClusterPrimary: boolean, _options: any) {
     if (!isClusterPrimary) {
       const [{ default: sourceMan }, { default: lyricsMan }, { default: meaningMan }] =
         await Promise.all([
@@ -274,7 +357,7 @@ class NodelinkServer extends EventEmitter {
     }
   }
 
-  handleVoiceFrame(frame) {
+  handleVoiceFrame(frame: any) {
     const header = parseVoiceFrameHeader(frame)
     if (!header?.guildId) return
 
@@ -284,11 +367,11 @@ class NodelinkServer extends EventEmitter {
     for (const socket of sockets) {
       try {
         socket.send(frame)
-      } catch {}
+      } catch { }
     }
   }
 
-  registerVoiceSocket(guildId, socket) {
+  registerVoiceSocket(guildId: string, socket: any) {
     if (!guildId || !socket) return
 
     let sockets = this.voiceSockets.get(guildId)
@@ -324,69 +407,69 @@ class NodelinkServer extends EventEmitter {
   }
 
   _validateConfig() {
-    const validateNonNegativeInt = (value, path) =>
+    const validateNonNegativeInt = (value: any, path: any) =>
       validateProperty(
         value,
         path,
         'integer >= 0',
-        (v) => Number.isInteger(v) && v >= 0
+        (v: any) => Number.isInteger(v) && v >= 0
       )
 
-    const validatePositiveInt = (value, path) =>
+    const validatePositiveInt = (value: any, path: any) =>
       validateProperty(
         value,
         path,
         'integer > 0',
-        (v) => Number.isInteger(v) && v > 0
+        (v: any) => Number.isInteger(v) && v > 0
       )
 
     validateProperty(
       this.options.server.port,
       'server.port',
       'integer between 1 and 65535',
-      (value) => Number.isInteger(value) && value >= 1 && value <= 65535
+      (value: any) => Number.isInteger(value) && value >= 1 && value <= 65535
     )
 
     validateProperty(
       this.options.server.host,
       'server.host',
       'string',
-      (value) => typeof value === 'string'
+      (value: any) => typeof value === 'string'
     )
 
     validateProperty(
       this.options.playerUpdateInterval,
       'playerUpdateInterval',
       'integer between 250 and 60000 (milliseconds)',
-      (value) => Number.isInteger(value) && value >= 250 && value <= 60000
+      (value: any) => Number.isInteger(value) && value >= 250 && value <= 60000
     )
 
     validateProperty(
       this.options.maxSearchResults,
       'maxSearchResults',
       'integer between 1 and 100',
-      (value) => Number.isInteger(value) && value >= 1 && value <= 100
+      (value: any) => Number.isInteger(value) && value >= 1 && value <= 100
     )
 
     validateProperty(
       this.options.maxAlbumPlaylistLength,
       'maxAlbumPlaylistLength',
       'integer between 1 and 500',
-      (value) => Number.isInteger(value) && value >= 1 && value <= 500
+      (value: any) => Number.isInteger(value) && value >= 1 && value <= 500
     )
 
     validateProperty(
       this.options.trackStuckThresholdMs,
       'trackStuckThresholdMs',
       'integer >= 1000 (milliseconds)',
-      (value) => Number.isInteger(value) && value >= 1000
+      (value: any) => Number.isInteger(value) && value >= 1000
     )
 
     validateProperty(
       this.options.zombieThresholdMs,
       'zombieThresholdMs',
       `integer > trackStuckThresholdMs (${this.options.trackStuckThresholdMs})`,
-      (value) =>
+      (value: any) =>
         Number.isInteger(value) && value > this.options.trackStuckThresholdMs
     )
 
@@ -398,7 +481,7 @@ class NodelinkServer extends EventEmitter {
       this.options.cluster.workers === 0
         ? 'integer >= 0 (workers auto-scaled)'
         : `integer between 0 and ${this.options.cluster.workers}`,
-      (value) =>
+      (value: any) =>
         Number.isInteger(value) &&
         value >= 0 &&
         (this.options.cluster.workers === 0 ||
@@ -409,10 +492,10 @@ class NodelinkServer extends EventEmitter {
       this.options.defaultSearchSource,
       'defaultSearchSource',
       'key or array of keys of enabled sources in config.sources',
-      (v) => {
+      (v: any) => {
         const sources = Array.isArray(v) ? v : [v]
         return sources.every(
-          (s) =>
+          (s: keyof NodelinkConfig["sources"]) =>
             typeof s === 'string' && Boolean(this.options.sources?.[s]?.enabled)
         )
       }
@@ -422,42 +505,42 @@ class NodelinkServer extends EventEmitter {
       this.options.audio.quality,
       'audio.quality',
       "one of ['high', 'medium', 'low', 'lowest']",
-      (v) => ['high', 'medium', 'low', 'lowest'].includes(v)
+      (v: any) => ['high', 'medium', 'low', 'lowest'].includes(v)
     )
 
     validateProperty(
       this.options.audio.resamplingQuality,
       'audio.resamplingQuality',
       "one of ['best', 'medium', 'fastest', 'zero', 'linear']",
-      (v) => ['best', 'medium', 'fastest', 'zero', 'linear'].includes(v)
+      (v: any) => ['best', 'medium', 'fastest', 'zero', 'linear'].includes(v)
     )
 
     validateProperty(
       this.options.audio.loudnessNormalizer,
       'audio.loudnessNormalizer',
       'boolean',
-      (v) => typeof v === 'boolean'
+      (v: any) => typeof v === 'boolean'
     )
 
     validateProperty(
       this.options.audio.lookaheadMs,
       'audio.lookaheadMs',
       'number >= 0',
-      (v) => typeof v === 'number' && v >= 0
+      (v: any) => typeof v === 'number' && v >= 0
     )
 
     validateProperty(
       this.options.audio.gateThresholdLUFS,
       'audio.gateThresholdLUFS',
       'number <= 0',
-      (v) => typeof v === 'number' && v <= 0
+      (v: any) => typeof v === 'number' && v <= 0
     )
 
     validateProperty(
       this.options.routePlanner?.strategy,
       'routePlanner.strategy',
       "one of ['RotateOnBan', 'RoundRobin', 'LoadBalance']",
-      (v) =>
+      (v: any) =>
         typeof v === 'string' &&
         ['RotateOnBan', 'RoundRobin', 'LoadBalance'].includes(v)
     )
@@ -469,11 +552,11 @@ class NodelinkServer extends EventEmitter {
       )
     }
 
-    const rateLimitSections = ['global', 'perIp', 'perUserId', 'perGuildId']
+    const rateLimitSections = ['global', 'perIp', 'perUserId', 'perGuildId'] as const
 
     if (this.options.rateLimit?.enabled !== false) {
       for (let i = 0; i < rateLimitSections.length; i++) {
-        const section = rateLimitSections[i]
+        const section = rateLimitSections[i] as (typeof rateLimitSections)[number];
         const config = this.options.rateLimit?.[section]
 
         if (!config) continue
@@ -490,7 +573,7 @@ class NodelinkServer extends EventEmitter {
 
         if (i === 0) continue
 
-        const parentSection = rateLimitSections[i - 1]
+        const parentSection = rateLimitSections[i - 1] as (typeof rateLimitSections)[number];
         const parentConfig = this.options.rateLimit?.[parentSection]
 
         if (!parentConfig) continue
@@ -499,7 +582,7 @@ class NodelinkServer extends EventEmitter {
           config.maxRequests,
           `rateLimit.${section}.maxRequests`,
           `integer <= rateLimit.${parentSection}.maxRequests (${parentConfig.maxRequests})`,
-          (value) =>
+          (value: any) =>
             Number.isInteger(value) &&
             value > 0 &&
             value <= parentConfig.maxRequests
@@ -541,7 +624,7 @@ class NodelinkServer extends EventEmitter {
         credsComplete,
         'sources.spotify.credentials',
         'clientId and clientSecret must be set together',
-        (v) => v === true
+        (v: any) => v === true
       )
     }
 
@@ -583,43 +666,43 @@ class NodelinkServer extends EventEmitter {
           tidal.token,
           'sources.tidal.token',
           'string (non-whitespace if provided)',
-          (v) => typeof v === 'string' && (v === '' || v.trim().length > 0)
+          (v: any) => typeof v === 'string' && (v === '' || v.trim().length > 0)
         )
       }
 
-    if (audius?.enabled) {
-      if (
-        audius?.appName !== undefined &&
-        typeof audius?.appName !== 'string'
-      ) {
-        throw new Error('sources.audius.appName must be a string')
+      if (audius?.enabled) {
+        if (
+          audius?.appName !== undefined &&
+          typeof audius?.appName !== 'string'
+        ) {
+          throw new Error('sources.audius.appName must be a string')
+        }
+
+        if (
+          audius?.apiKey !== undefined &&
+          typeof audius?.apiKey !== 'string'
+        ) {
+          throw new Error('sources.audius.apiKey must be a string')
+        }
+
+        if (
+          audius?.apiSecret !== undefined &&
+          typeof audius?.apiSecret !== 'string'
+        ) {
+          throw new Error('sources.audius.apiSecret must be a string')
+        }
+
+        validateNonNegativeInt(
+          audius?.playlistLoadLimit,
+          'sources.audius.playlistLoadLimit'
+        )
+
+        validateNonNegativeInt(
+          audius?.albumLoadLimit,
+          'sources.audius.albumLoadLimit'
+        )
       }
-
-      if (
-        audius?.apiKey !== undefined &&
-        typeof audius?.apiKey !== 'string'
-      ) {
-        throw new Error('sources.audius.apiKey must be a string')
-      }
-
-      if (
-        audius?.apiSecret !== undefined &&
-        typeof audius?.apiSecret !== 'string'
-      ) {
-        throw new Error('sources.audius.apiSecret must be a string')
-      }
-
-      validateNonNegativeInt(
-        audius?.playlistLoadLimit,
-        'sources.audius.playlistLoadLimit'
-      )
-
-      validateNonNegativeInt(
-        audius?.albumLoadLimit,
-        'sources.audius.albumLoadLimit'
-      )
     }
-  }
 
     if (jiosaavn?.enabled) {
       validateNonNegativeInt(
@@ -636,23 +719,25 @@ class NodelinkServer extends EventEmitter {
         jiosaavn.playlistLoadLimit,
         'sources.jiosaavn.playlistLoadLimit',
         `integer >= artistLoadLimit (${jiosaavn.artistLoadLimit})`,
-        (v) => v >= jiosaavn.artistLoadLimit
+        (v: any) => v >= jiosaavn.artistLoadLimit
       )
     }
   }
 
   _setupSocketEvents() {
-    this.socket.on('error', (error) => {
+    if (!this.socket) return;
+
+    this.socket.on('error', (error: any) => {
       logger('error', 'WebSocket', `WebSocket server error: ${error.message}`)
     })
 
     this.socket.on(
       '/v4/websocket',
-      (socket, request, clientInfo, oldSessionId) => {
+      (socket: any, request: any, clientInfo: any, oldSessionId: any) => {
         const originalOn = socket.on.bind(socket)
-        socket.on = (event, listener) => {
+        socket.on = (event: any, listener: any) => {
           if (event === 'message') {
-            return originalOn(event, async (data) => {
+            return originalOn(event, async (data: any) => {
               const interceptors = this.extensions?.wsInterceptors
               if (interceptors && Array.isArray(interceptors)) {
                 let parsedData
@@ -690,15 +775,14 @@ class NodelinkServer extends EventEmitter {
             logger(
               'info',
               'Server',
-              `\x1b[36m${clientInfo.name}\x1b[0m${
-                clientInfo.version
-                  ? `/\x1b[32mv${clientInfo.version}\x1b[0m`
-                  : ''
+              `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version
+                ? `/\x1b[32mv${clientInfo.version}\x1b[0m`
+                : ''
               } resumed session with ID: ${oldSessionId}`
             )
             this.statsManager.incrementSessionResume(clientInfo.name, true)
 
-            socket.on('close', (code, reason) => {
+            socket.on('close', (code: any, reason: any) => {
               if (!this.sessions.has(oldSessionId)) return
 
               const session = this.sessions.get(oldSessionId)
@@ -707,10 +791,8 @@ class NodelinkServer extends EventEmitter {
               logger(
                 'info',
                 'Server',
-                `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${
-                  clientInfo.version
-                }\x1b[0m disconnected with code ${code} and reason: ${
-                  reason || 'without reason'
+                `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version
+                }\x1b[0m disconnected with code ${code} and reason: ${reason || 'without reason'
                 }`
               )
 
@@ -765,7 +847,7 @@ class NodelinkServer extends EventEmitter {
           const sessionCount = this.sessions.activeSessions?.size || 0
           this.statsManager.setWebsocketConnections(sessionCount)
 
-          socket.on('close', (code, reason) => {
+          socket.on('close', (code: any, reason: any) => {
             if (!this.sessions.has(sessionId)) return
 
             const session = this.sessions.get(sessionId)
@@ -774,12 +856,10 @@ class NodelinkServer extends EventEmitter {
             logger(
               'info',
               'Server',
-              `\x1b[36m${clientInfo.name}\x1b[0m${
-                clientInfo.version
-                  ? `/\x1b[32mv${clientInfo.version}\x1b[0m`
-                  : ''
-              } disconnected with code ${code} and reason: ${
-                reason || 'without reason'
+              `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version
+                ? `/\x1b[32mv${clientInfo.version}\x1b[0m`
+                : ''
+              } disconnected with code ${code} and reason: ${reason || 'without reason'
               }`
             )
 
@@ -869,7 +949,7 @@ class NodelinkServer extends EventEmitter {
             })
           }
 
-          const clientInfo = parseClient(clientName)
+          const clientInfo: any = parseClient(clientName)
           if (!clientInfo) {
             logger(
               'warn',
@@ -897,20 +977,20 @@ class NodelinkServer extends EventEmitter {
         }
 
         return new Promise((resolve) => {
-          const reqShim = {
+          const reqShim: any = {
             method: req.method,
             url: url.pathname + url.search,
             headers: Object.fromEntries(req.headers),
             socket: { remoteAddress: server.requestIP(req)?.address },
-            on: (event, cb) => {
+            on: (event: any, cb: any) => {
               if (event === 'data') {
                 req
                   .arrayBuffer()
-                  .then((buf) => {
+                  .then((buf: any) => {
                     cb(Buffer.from(buf))
                     if (reqShim._endCb) reqShim._endCb()
                   })
-                  .catch(() => {})
+                  .catch(() => { })
               }
               if (event === 'end') reqShim._endCb = cb
             }
@@ -918,19 +998,19 @@ class NodelinkServer extends EventEmitter {
 
           const resShim = {
             _status: 200,
-            _headers: {},
-            _body: [],
-            writeHead(status, headers) {
+            _headers: {} as any,
+            _body: [] as any[],
+            writeHead(status: any, headers: any) {
               this._status = status
               if (headers) Object.assign(this._headers, headers)
             },
-            setHeader(name, value) {
+            setHeader(name: any, value: any) {
               this._headers[name] = value
             },
-            getHeader(name) {
+            getHeader(name: any) {
               return this._headers[name]
             },
-            end(data) {
+            end(data: any) {
               if (data) this._body.push(data)
               const finalBody = Buffer.concat(
                 this._body.map((chunk) =>
@@ -944,25 +1024,26 @@ class NodelinkServer extends EventEmitter {
               })
               resolve(response)
             },
-            write(data) {
+            write(data: any) {
               if (data) this._body.push(data)
             }
           }
 
-          requestHandler(self, reqShim, resShim)
+          RequestHandler(self, reqShim, resShim)
         })
       },
 
       websocket: {
         sendPings: true,
-
+        data: {} as BunSocketData,
         open(ws) {
+          if (!ws.data) return
           const wrapper = new BunSocketWrapper(ws)
           ws.data.wrapper = wrapper
 
           const { clientInfo, sessionId, reqHeaders } = ws.data
 
-          const reqShim = {
+          const reqShim: ReqShim = {
             headers: reqHeaders,
             url: ws.data.url,
             socket: { remoteAddress: ws.data.remoteAddress }
@@ -971,8 +1052,7 @@ class NodelinkServer extends EventEmitter {
           logger(
             'info',
             'Server',
-            `\x1b[36m${clientInfo.name}\x1b[0m${
-              clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''
+            `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''
             } connected from [External] (${ws.data.remoteAddress}) | \x1b[33mURL:\x1b[0m ${ws.data.url}`
           )
 
@@ -992,7 +1072,7 @@ class NodelinkServer extends EventEmitter {
               if (!self.options.voiceReceive?.enabled) {
                 try {
                   wrapper.close(1008, 'Voice receive disabled')
-                } catch {}
+                } catch { }
                 return
               }
               eventName = '/v4/websocket/voice'
@@ -1001,22 +1081,24 @@ class NodelinkServer extends EventEmitter {
               eventName = '/v4/websocket/youtube/live'
               liveId = liveMatch[1]
             }
-          } catch {}
+          } catch { }
 
-          self.socket.emit(
-            eventName,
-            wrapper,
-            reqShim,
-            clientInfo,
-            sessionId,
-            guildId || liveId
-          )
+          if (self.socket) {
+            self.socket.emit(
+              eventName,
+              wrapper,
+              reqShim,
+              clientInfo,
+              sessionId,
+              guildId || liveId
+            )
+          }
         },
-        message(ws, message) {
-          ws.data.wrapper?._handleMessage(message)
+        message(ws: ServerWebSocket<BunSocketData>, message: any) {
+          ws.data?.wrapper?._handleMessage(message)
         },
-        close(ws, code, reason) {
-          ws.data.wrapper?._handleClose(code, reason)
+        close(ws: ServerWebSocket<BunSocketData>, code: any, reason: any) {
+          ws.data?.wrapper?._handleClose(code, reason)
         }
       }
     })
@@ -1034,21 +1116,21 @@ class NodelinkServer extends EventEmitter {
       return
     }
 
-    this.server = http.createServer((req, res) =>
-      requestHandler(this, req, res)
-    )
+    this.server = http.createServer((req: any, res: any) =>
+      RequestHandler(this, req, res)
+    );
 
-    this.server.keepAliveTimeout = 65000
-    this.server.headersTimeout = 66000
+    (this.server as http.Server).keepAliveTimeout = 65000;
+    (this.server as http.Server).headersTimeout = 66000;
 
-    this.server.on('upgrade', (request, socket, head) => {
+    (this.server as http.Server).on('upgrade', (request: any, socket: any, head: any) => {
       const { remoteAddress, remotePort } = request.socket
       const isInternal =
         /^(::1|localhost|127\.0\.0\.1)/.test(remoteAddress) ||
         /^::ffff:127\.0\.0\.1/.test(remoteAddress)
       const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort})`
 
-      const rejectUpgrade = (status, statusText, body) => {
+      const rejectUpgrade = (status: any, statusText: any, body: any) => {
         socket.write(
           `HTTP/1.1 ${status} ${statusText}\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`
         )
@@ -1056,7 +1138,7 @@ class NodelinkServer extends EventEmitter {
       }
 
       const originalHeaders = request.headers
-      const headers = {}
+      const headers: any = {}
       for (const key in originalHeaders) {
         headers[key.toLowerCase()] = originalHeaders[key]
       }
@@ -1075,7 +1157,10 @@ class NodelinkServer extends EventEmitter {
         )
         return rejectUpgrade(401, 'Unauthorized', 'Invalid password provided.')
       }
-      const clientInfo = parseClient(headers['client-name'])
+      const clientInfo = parseClient(headers['client-name']) as {
+        name: string;
+        version: string | undefined;
+      }
       if (!clientInfo) {
         logger(
           'warn',
@@ -1142,8 +1227,7 @@ class NodelinkServer extends EventEmitter {
         logger(
           'info',
           'Server',
-          `\x1b[36m${clientInfo.name}\x1b[0m${
-            clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''
+          `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''
           } connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
         )
 
@@ -1158,9 +1242,9 @@ class NodelinkServer extends EventEmitter {
           routeId = liveMatch[1]
         }
 
-        if (isBun && !this._usingBunServer) {
-          this.socket.handleUpgrade(request, socket, head, (ws) => {
-            this.socket.emit(
+        if (isBun && !this._usingBunServer && this.socket) {
+          (this.socket as WebSocketServer).handleUpgrade(request, socket, head, (ws: any) => {
+            this.socket?.emit(
               eventName,
               ws,
               request,
@@ -1170,8 +1254,8 @@ class NodelinkServer extends EventEmitter {
             )
           })
         } else {
-          this.socket.handleUpgrade(request, socket, head, {}, (ws) =>
-            this.socket.emit(
+          (this.socket as WebSocketServer | undefined)?.handleUpgrade(request, socket, head, {}, (ws: any) =>
+            this.socket?.emit(
               eventName,
               ws,
               request,
@@ -1195,13 +1279,13 @@ class NodelinkServer extends EventEmitter {
       }
     })
 
-    this.socket.on(
+    this.socket?.on(
       '/v4/websocket/voice',
-      (socket, request, _clientInfo, _sessionId, guildId) => {
+      (socket: any, request: any, _clientInfo: any, _sessionId: string, guildId: string) => {
         if (!this.options.voiceReceive?.enabled) {
           try {
             socket.close(1008, 'Voice receive disabled')
-          } catch {}
+          } catch { }
           return
         }
 
@@ -1215,9 +1299,9 @@ class NodelinkServer extends EventEmitter {
       }
     )
 
-    this.socket.on(
+    this.socket?.on(
       '/v4/websocket/youtube/live',
-      (socket, request, _clientInfo, _sessionId, id) => {
+      (socket: any, request: any, _clientInfo: any, _sessionId: any, id: any) => {
         let videoId = id
 
         if (/^\d{17,20}$/.test(id)) {
@@ -1225,18 +1309,18 @@ class NodelinkServer extends EventEmitter {
           if (player?.track?.info?.sourceName?.includes('youtube')) {
             videoId = player.track.info.identifier
           }
-        } 
+        }
         else if (id.length > 50) {
           try {
             const decoded = decodeTrack(id)
             if (decoded?.info?.sourceName?.includes('youtube')) {
               videoId = decoded.info.identifier
             }
-          } catch (_e) {}
+          } catch (_e: any) { }
         }
 
         if (!this.sourceWorkerManager) {
-          const yt = this.sources.getSource('youtube')
+          const yt = this.sources?.getSource('youtube')
           if (!yt) {
             socket.close(1008, 'YouTube source not enabled')
             return
@@ -1249,19 +1333,19 @@ class NodelinkServer extends EventEmitter {
 
         const resShim = {
           headersSent: false,
-          send: (data) => {
+          send: (data: any) => {
             const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
             socket.sendFrame(payload, { len: payload.length, fin: true, opcode: Buffer.isBuffer(data) ? 0x02 : 0x01 })
           },
-          writeHead: (status) => {
+          writeHead: (status: any) => {
             if (status !== 200) socket.close(1011, 'Worker failed')
           },
-          write: (data) => {
+          write: (data: any) => {
             const payload = Buffer.isBuffer(data) ? data : Buffer.from(String(data))
             socket.sendFrame(payload, { len: payload.length, fin: true, opcode: Buffer.isBuffer(data) ? 0x02 : 0x01 })
           },
           end: () => socket.close(1000, 'Finished'),
-          on: (event, cb) => socket.on(event, cb)
+          on: (event: any, cb: any) => socket.on(event, cb)
         }
 
         this.sourceWorkerManager.delegate(
@@ -1276,7 +1360,7 @@ class NodelinkServer extends EventEmitter {
   }
 
   _listen() {
-    if (!this.server || typeof this.server.listen !== 'function') return
+    if (!this.server || typeof (this.server as any).listen !== 'function') return
 
     const port = this.options.server.port
     const host = this.options.server.host || '0.0.0.0'
@@ -1285,9 +1369,9 @@ class NodelinkServer extends EventEmitter {
       'info',
       'Server',
       `Attempting to listen on host: ${host}, port: ${port}`
-    )
+    );
 
-    this.server.on('error', (err) => {
+    (this.server as http.Server).on('error', (err: any) => {
       if (err.code === 'EADDRINUSE') {
         logger('error', 'Server', `Port ${port} is already in use.`)
       } else if (err.code === 'EADDRNOTAVAIL') {
@@ -1305,9 +1389,9 @@ class NodelinkServer extends EventEmitter {
         logger('error', 'Server', `Failed to start server: ${err.message}`)
       }
       process.exit(1)
-    })
+    });
 
-    this.server.listen(port, host, () => {
+    (this.server as http.Server).listen(port, host, () => {
       logger(
         'started',
         'Server',
@@ -1381,7 +1465,8 @@ class NodelinkServer extends EventEmitter {
       this.statsManager.setVoiceConnections(voiceConnections)
 
       if (clusterEnabled && cluster.isWorker) {
-        process.send({
+        // fishy ports to typescript 🙃
+        process.send?.({
           type: 'workerStats',
           stats: {
             players: localPlayers,
@@ -1397,7 +1482,7 @@ class NodelinkServer extends EventEmitter {
       const workerMetrics = this.workerManager
         ? this.workerManager.getWorkerMetrics()
         : null
-      this.statsManager.updateStatsMetrics(stats, workerMetrics)
+      this.statsManager.updateStatsMetrics(stats, workerMetrics as any)
 
       if (now - lastStatsSendTime >= statsSendInterval) {
         lastStatsSendTime = now
@@ -1427,10 +1512,10 @@ class NodelinkServer extends EventEmitter {
     if (this._usingBunServer && this.server) {
       try {
         logger('info', 'WebSocket', 'Stopping Bun server...')
-        await this.server.stop(true)
-        this.server.unref()
+        await (this.server as any).stop(true);
+        (this.server as any).unref();
         logger('info', 'WebSocket', 'Bun server stopped successfully')
-      } catch (e) {
+      } catch (e: any) {
         logger(
           'error',
           'WebSocket',
@@ -1449,10 +1534,10 @@ class NodelinkServer extends EventEmitter {
             try {
               session.socket.close(1000, 'Server shutdown')
               closedCount++
-            } catch (_e) {
+            } catch (_e: any) {
               try {
                 session.socket.destroy()
-              } catch (_destroyErr) {
+              } catch (_destroyErr: any) {
                 logger(
                   'debug',
                   'WebSocket',
@@ -1471,7 +1556,7 @@ class NodelinkServer extends EventEmitter {
           'WebSocket',
           `Closed ${closedCount} WebSocket connection(s) successfully`
         )
-      } catch (error) {
+      } catch (error: any) {
         logger(
           'error',
           'WebSocket',
@@ -1481,7 +1566,7 @@ class NodelinkServer extends EventEmitter {
     }
   }
 
-  handleIPCMessage(msg) {
+  handleIPCMessage(msg: IPCMessage) {
     if (msg.type === 'playerEvent') {
       const { sessionId, data } = msg.payload
       const session = this.sessions.get(sessionId)
@@ -1489,7 +1574,7 @@ class NodelinkServer extends EventEmitter {
     } else if (msg.type === 'workerStats') {
       if (this.workerManager) {
         const worker = this.workerManager.workers.find(
-          (w) => w.process.pid === msg.pid
+          (w: any) => w.process.pid === msg.pid
         )
         if (worker) {
           this.workerManager.workerLoad.set(worker.id, msg.stats.players)
@@ -1542,7 +1627,7 @@ class NodelinkServer extends EventEmitter {
     }
   }
 
-  async start(startOptions = {}) {
+  async start(startOptions: any = {}) {
     this._validateConfig()
 
     await this.credentialManager.load()
@@ -1565,9 +1650,9 @@ class NodelinkServer extends EventEmitter {
     }
 
     if (this.sources && (!startOptions.isClusterPrimary || !specEnabled)) {
-      await this.sources.loadFolder()
-      await this.lyrics.loadFolder()
-      await this.meanings.loadFolder()
+      await this.sources?.loadFolder()
+      await this.lyrics?.loadFolder()
+      await this.meanings?.loadFolder()
     }
 
     this._setupSocketEvents()
@@ -1579,23 +1664,25 @@ class NodelinkServer extends EventEmitter {
         'Server',
         'Running as cluster worker — waiting for sockets from master.'
       )
-      process.on('message', (msg, handle) => {
-        if (!msg || msg.type !== 'sticky-session') return
+      process.on('message', (msg: any, handle) => {
+        if (!msg || (msg.type !== 'sticky-session')) return
         if (!handle) return
         try {
           try {
+            // @ts-ignore
             handle.pause?.()
-          } catch (_e) {}
-          this.server.emit('connection', handle)
-        } catch (err) {
+          } catch (_e) { }
+          (this.server as http.Server).emit('connection', handle);
+        } catch (err: any) {
           logger(
             'error',
             'Server',
             `Failed to inject socket from master: ${err?.message ?? err}`
           )
           try {
+            // @ts-ignore
             handle.destroy?.()
-          } catch (_e) {}
+          } catch (_e) { }
         }
       })
     } else {
@@ -1634,7 +1721,7 @@ class NodelinkServer extends EventEmitter {
       const workerMetrics = this.workerManager
         ? this.workerManager.getWorkerMetrics()
         : null
-      this.statsManager.updateStatsMetrics(stats, workerMetrics)
+      this.statsManager.updateStatsMetrics(stats, workerMetrics as any)
 
       const sessionCount = this.sessions.activeSessions?.size || 0
       this.statsManager.setWebsocketConnections(sessionCount)
@@ -1651,7 +1738,7 @@ class NodelinkServer extends EventEmitter {
     }, metricsInterval)
   }
 
-  registerSource(name, source) {
+  registerSource(name: any, source: any) {
     if (!this.sources) {
       logger(
         'warn',
@@ -1664,45 +1751,45 @@ class NodelinkServer extends EventEmitter {
     logger('info', 'Server', `Registered custom source: ${name}`)
   }
 
-  registerFilter(name, filter) {
+  registerFilter(name: any, filter: any) {
     this.extensions.filters.set(name, filter)
     logger('info', 'Server', `Registered custom filter: ${name}`)
   }
 
-  registerRoute(method, path, handler) {
+  registerRoute(method: any, path: any, handler: any) {
     this.extensions.routes.push({ method, path, handler })
     logger('info', 'Server', `Registered custom route: ${method} ${path}`)
   }
 
-  registerMiddleware(fn) {
+  registerMiddleware(fn: any) {
     this.extensions.middlewares.push(fn)
     logger('info', 'Server', 'Registered custom REST interceptor (middleware)')
   }
 
-  registerTrackModifier(fn) {
+  registerTrackModifier(fn: any) {
     this.extensions.trackModifiers.push(fn)
     logger('info', 'Server', 'Registered custom track info modifier')
   }
 
-  registerWebSocketInterceptor(fn) {
+  registerWebSocketInterceptor(fn: any) {
     this.extensions.wsInterceptors.push(fn)
     logger('info', 'Server', 'Registered custom WebSocket interceptor')
   }
 
-  registerAudioInterceptor(interceptor) {
+  registerAudioInterceptor(interceptor: any) {
     if (!this.extensions.audioInterceptors)
       this.extensions.audioInterceptors = []
     this.extensions.audioInterceptors.push(interceptor)
     logger('info', 'Server', 'Registered custom audio interceptor')
   }
 
-  registerPlayerInterceptor(interceptor) {
+  registerPlayerInterceptor(interceptor: any) {
     this.extensions.playerInterceptors.push(interceptor)
     logger('info', 'Server', 'Registered custom player interceptor')
   }
 }
 
-import WorkerManager from './managers/workerManager.js'
+
 
 if (clusterEnabled && cluster.isPrimary) {
   if (config.sources?.youtube?.getOAuthToken) {
@@ -1712,7 +1799,7 @@ if (clusterEnabled && cluster.isPrimary) {
       process.exit(1)
     })).default
 
-    const mockNodelink = { options: config }
+    const mockNodelink: any = { options: config }
     mockNodelink.credentialManager = new CredentialManager(mockNodelink)
     const validator = new OAuth(mockNodelink)
     await validator.validateCurrentTokens()
@@ -1720,7 +1807,7 @@ if (clusterEnabled && cluster.isPrimary) {
     try {
       await OAuth.acquireRefreshToken()
       process.exit(0)
-    } catch (error) {
+    } catch (error: any) {
       logger(
         'error',
         'OAuth',
@@ -1772,8 +1859,8 @@ if (clusterEnabled && cluster.isPrimary) {
 
       await nserver._cleanupWebSocketServer()
 
-      if (nserver.server?.listening) {
-        await new Promise((resolve) => nserver.server.close(resolve))
+      if ((nserver.server as http.Server)?.listening) {
+        await new Promise((resolve) => (nserver.server as http.Server).close(resolve))
         logger('info', 'Server', 'HTTP server closed.')
       }
 
@@ -1827,8 +1914,8 @@ if (clusterEnabled && cluster.isPrimary) {
 
       await nserver._cleanupWebSocketServer()
 
-      if (nserver.server?.listening) {
-        await new Promise((resolve) => nserver.server.close(resolve))
+      if ((nserver.server as http.Server)?.listening) {
+        await new Promise((resolve) => (nserver.server as http.Server).close(resolve))
         logger('info', 'Server', 'HTTP server closed.')
       }
 
