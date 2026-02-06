@@ -1,4 +1,4 @@
-import { SAMPLE_RATE } from '../../constants.js'
+import { SAMPLE_RATE } from '../../constants.ts'
 
 const BAND_FREQUENCIES = [
   25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000,

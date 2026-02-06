@@ -29,7 +29,7 @@ import {
 } from './utils.js'
 import 'dotenv/config'
 import type { ServerWebSocket } from 'bun'
-import { GatewayEvents } from './constants.js'
+import { GatewayEvents } from './constants'
 import DosProtectionManager from './managers/dosProtectionManager.js'
 import type LyricsManager from './managers/lyricsManager.js'
 import type MeaningManager from './managers/meaningManager.js'

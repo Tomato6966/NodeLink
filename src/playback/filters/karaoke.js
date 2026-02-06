@@ -1,4 +1,4 @@
-import { SAMPLE_RATE } from '../../constants.js'
+import { SAMPLE_RATE } from '../../constants.ts'
 import { clamp16Bit } from './dsp/clamp16Bit.js'
 
 const MAX_OUTPUT_GAIN = 0.98

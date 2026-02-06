@@ -1,4 +1,4 @@
-import { SAMPLE_RATE } from '../../../constants.js'
+import { SAMPLE_RATE } from '../../../constants.ts'
 import { Waveforms } from './waves.js'
 
 export default class LFO {

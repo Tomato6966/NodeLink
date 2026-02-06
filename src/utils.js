@@ -18,7 +18,7 @@ import {
   DISCORD_ID_REGEX,
   REDIRECT_STATUS_CODES,
   SEMVER_PATTERN
-} from './constants.js'
+} from './constants.ts'
 
 let ProxyAgent
 try {

@@ -1,6 +1,6 @@
 import { SeekError } from '@ecliptia/seekable-stream'
 import discordVoice from '@performanc/voice'
-import { EndReasons, GatewayEvents } from '../constants.js'
+import { EndReasons, GatewayEvents } from '../constants.ts'
 import { logger } from '../utils.js'
 
 let createAudioResource

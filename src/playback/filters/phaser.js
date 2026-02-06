@@ -1,4 +1,4 @@
-import { SAMPLE_RATE } from '../../constants.js'
+import { SAMPLE_RATE } from '../../constants.ts'
 import Allpass from './dsp/allpass.js'
 import { clamp16Bit } from './dsp/clamp16Bit.js'
 import LFO from './dsp/lfo.js'

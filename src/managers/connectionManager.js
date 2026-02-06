@@ -1,4 +1,4 @@
-import { GatewayEvents } from '../constants.js'
+import { GatewayEvents } from '../constants.ts'
 import { http1makeRequest, logger } from '../utils.js'
 
 const TEST_URLS = [
