@@ -1,0 +1,362 @@
+import type { VoiceAudioStream, VoiceConnection } from '@performanc/voice'
+import type { TrackData } from './index.types.ts'
+import type { TrackStreamResult, TrackUrlResult } from './source.types.ts'
+
+/**
+ * Runtime filter settings applied to an audio stream.
+ */
+export interface FiltersState {
+  filters?: Record<string, unknown> & {
+    timescale?: { speed?: number; rate?: number }
+  }
+}
+
+/**
+ * Single fade segment configuration.
+ */
+export interface FadingSection {
+  duration: number
+  curve?: string
+}
+
+/**
+ * Composite fading configuration for different playback actions.
+ */
+export interface FadingConfig {
+  enabled?: boolean
+  trackStart?: FadingSection
+  trackEnd?: FadingSection
+  trackStop?: FadingSection
+  seek?: FadingSection
+}
+
+/**
+ * Voice connection state used to resume or update sessions.
+ */
+export interface PlayerVoiceState {
+  sessionId: string | null
+  token: string | null
+  endpoint: string | null
+  channelId: string | null
+}
+
+/**
+ * Snapshot of player runtime metrics sent to clients.
+ */
+export interface PlayerEventState {
+  time: number
+  position: number
+  connected: boolean
+  ping: number
+}
+
+/**
+ * Timestamped lyric line with optional per-word metadata.
+ */
+export interface LyricsLine {
+  timestamp: number
+  duration: number
+  line: string
+  words: Array<Record<string, unknown>>
+  plugin: Record<string, unknown>
+}
+
+/**
+ * Full lyrics payload emitted to clients.
+ */
+export interface LyricsPayload {
+  sourceName: string
+  provider: string
+  text: string
+  lines: LyricsLine[]
+  plugin: Record<string, unknown>
+}
+
+/**
+ * Stream format indicator. Can be a simple string or a detailed object.
+ */
+export type TrackFormat = string | { itag?: number; [key: string]: unknown }
+
+type BaseTrackInfo = NonNullable<TrackData['info']> & {
+  artworkUrl: string | null
+  isrc: string | null
+  uri: string
+}
+
+/**
+ * Track metadata enriched with optional artwork and identifiers.
+ */
+export type TrackInfoExtended = BaseTrackInfo & {
+  audioTrackId?: string
+}
+
+/**
+ * Track data used internally by the player.
+ */
+export interface PlayerTrack {
+  encoded?: string
+  info: TrackInfoExtended
+  endTime?: number
+  userData?: unknown
+  audioTrackId?: string
+  pluginInfo?: Record<string, unknown>
+}
+
+export type StreamInfo =
+  | (TrackUrlResult & {
+      trackInfo?: TrackInfoExtended
+      format?: TrackFormat
+      protocol?: string
+    })
+  | null
+
+/**
+ * Audio resource abstraction returned by stream processor.
+ */
+export interface AudioResource {
+  setVolume(volume: number): void
+  setFilters(filters: FiltersState): void
+  setFadeVolume?(volume: number): void
+  fadeTo?(volume: number, durationMs: number, curve?: string): void
+  destroy(): void
+  stream?: VoiceAudioStream
+}
+
+/**
+ * Mixer interface used to blend PCM layers.
+ */
+export interface AudioMixer {
+  autoCleanup?: boolean
+  mixLayers: Map<
+    string,
+    {
+      id: string
+      track: PlayerTrack
+      volume: number
+      position: number
+      startTime: number
+    }
+  >
+  addLayer: (
+    stream: VoiceAudioStream,
+    track: PlayerTrack,
+    volume?: number | null
+  ) => string
+  removeLayer: (id: string, reason?: string) => boolean
+  updateLayerVolume: (id: string, volume: number) => boolean
+  getLayers: () => Array<{
+    id: string
+    track: PlayerTrack
+    volume: number
+    position: number
+    startTime: number
+  }>
+  clearLayers: (reason?: string) => number
+  on: (
+    event: 'mixStarted' | 'mixEnded' | 'mixError',
+    listener: (data: {
+      id: string
+      track?: PlayerTrack
+      volume?: number
+      reason?: string
+      error?: Error
+    }) => void
+  ) => void
+}
+
+/**
+ * Timer handles used for fade scheduling.
+ */
+export interface FadeTimers {
+  trackEnd: NodeJS.Timeout | null
+  pause: NodeJS.Timeout | null
+  stop: NodeJS.Timeout | null
+}
+
+/**
+ * NodeLink runtime options relevant to playback.
+ */
+export interface NodeLinkOptions {
+  defaultVolume?: number
+  eventTimeoutMs?: number
+  trackStuckThresholdMs: number
+  playerUpdateInterval: number
+  enableHoloTracks?: boolean
+  fetchChannelInfo?: boolean
+  resolveExternalLinks?: boolean
+  audio?: {
+    encryption?: string | null
+    fading?: FadingConfig
+    loudnessNormalizer?: boolean
+    resamplingQuality?: string
+  }
+  mix?: {
+    enabled?: boolean
+    defaultVolume?: number
+    maxLayersMix?: number
+    autoCleanup?: boolean
+  }
+}
+
+/**
+ * Minimal source manager contract used by the player.
+ */
+export interface SourceManagerLike {
+  getTrackUrl: (
+    trackInfo: TrackInfoExtended,
+    arg1?: unknown,
+    isRecovering?: boolean
+  ) => Promise<
+    TrackUrlResult & {
+      protocol?: string
+      format?: TrackFormat
+      trackInfo?: TrackInfoExtended
+      additionalData?: Record<string, unknown>
+    }
+  >
+  getTrackStream: (
+    trackInfo: TrackInfoExtended,
+    url: string,
+    protocol?: string,
+    additionalData?: Record<string, unknown>
+  ) => Promise<
+    TrackStreamResult & { type?: string; exception?: { message: string } }
+  >
+  getSource: (name: string) => {
+    loadStream?: (...args: unknown[]) => unknown
+    resolveHoloTrack?: (
+      track: PlayerTrack,
+      options: { fetchChannelInfo?: boolean; resolveExternalLinks?: boolean }
+    ) => Promise<PlayerTrack | null>
+  } | null
+}
+
+/**
+ * Lyrics provider interface.
+ */
+export interface LyricsManagerLike {
+  loadLyrics: (
+    track: { info: TrackInfoExtended },
+    token?: unknown,
+    skip?: boolean
+  ) => Promise<{
+    loadType: 'lyrics'
+    data: {
+      provider: string
+      lines: Array<{
+        time: number
+        duration?: number
+        text: string
+        words?: Array<Record<string, unknown>>
+      }>
+    }
+  } | null>
+}
+
+/**
+ * Basic statistics collector used for playback events.
+ */
+export interface StatsManagerLike {
+  incrementPlaybackEvent: (event: string) => void
+}
+
+/**
+ * Logging function signature.
+ */
+export type LoggerFn = (level: string, ...args: unknown[]) => void
+
+/**
+ * NodeLink runtime context required by the player.
+ */
+export interface NodeLink {
+  options: Partial<NodeLinkOptions> & {
+    trackStuckThresholdMs: number
+    playerUpdateInterval: number
+  }
+  logger: LoggerFn
+  statsManager: StatsManagerLike
+  voiceRelay?: {
+    attach?: (connection: VoiceConnection, guildId: string) => void
+  }
+  sources: SourceManagerLike
+  lyrics: LyricsManagerLike
+  statistics?: { players?: number }
+}
+
+/**
+ * Session context for the websocket client controlling the player.
+ */
+export interface Session {
+  id: string
+  userId: string
+  socket: { send: (data: string) => void }
+  isPaused: boolean
+  eventQueue: string[]
+}
+
+/**
+ * Player constructor options.
+ */
+export interface PlayerOptions {
+  nodelink: NodeLink
+  session: Session
+  guildId: string
+}
+
+/**
+ * Payload accepted by the play operation.
+ */
+export interface PlayPayload {
+  encoded?: string
+  info: TrackInfoExtended
+  userData?: unknown
+  audioTrackId?: string
+  noReplace?: boolean
+  startTime?: number
+  endTime?: number
+}
+
+/**
+ * JSON-safe representation of a player used in gateway events.
+ */
+export interface PlayerStateJSON {
+  guildId: string
+  track: PlayerTrack | null
+  volume: number
+  fading?: FadingConfig | undefined
+  loudnessNormalizer: boolean
+  paused: boolean
+  filters: FiltersState
+  state: PlayerEventState
+  voice: PlayerVoiceState
+}
+
+/**
+ * Factory signature for creating audio resources.
+ */
+export type CreateAudioResource = (
+  stream: TrackStreamResult['stream'],
+  type: unknown,
+  nodelink: NodeLink,
+  initialFilters: FiltersState,
+  volume: number,
+  audioMixer: AudioMixer | null,
+  returnPCM?: boolean,
+  loudnessNormalizer?: boolean
+) => AudioResource
+
+/**
+ * Factory signature for creating seekable audio resources.
+ */
+export type CreateSeekeableAudioResource = (
+  url: string,
+  seekTime: number,
+  endTime: number | undefined,
+  nodelink: NodeLink,
+  initialFilters: FiltersState,
+  player: { streamInfo: StreamInfo },
+  volume: number,
+  audioMixer: AudioMixer | null
+) => Promise<
+  AudioResource | { exception: { message: string; severity?: string } }
+>

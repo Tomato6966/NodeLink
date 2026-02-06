@@ -79,7 +79,7 @@ export default class PlayerManager {
         throw e
       }
     }
-    const { Player } = await import('../playback/player.js')
+    const { Player } = await import('../playback/player')
     logger(
       'debug',
       'PlayerManager',
