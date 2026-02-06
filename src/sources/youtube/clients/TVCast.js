@@ -3,18 +3,19 @@ import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.js'
 
 export default class TV extends BaseClient {
   constructor(nodelink, oauth) {
-    super(nodelink, 'TVHTML5', oauth)
+    super(nodelink, 'TVHTML5_CAST', oauth)
   }
 
   getClient(context) {
     return {
       client: {
-        clientName: 'TVHTML5',
-        clientVersion: '7.20260113.16.00',
+        clientName: 'TVHTML5_CAST',
+        clientVersion: '7.20190924',
         userAgent:
-          'Mozilla/5.0 (Fuchsia) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 CrKey/1.56.500000',
+          'Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 CrKey/1.54.248666',
         hl: context.client.hl,
-        gl: context.client.gl
+        gl: context.client.gl,
+        visitorData: context.client.visitorData
       },
       user: { lockedSafetyMode: false },
       request: { useSsl: true }
@@ -26,24 +27,7 @@ export default class TV extends BaseClient {
   }
 
   async getAuthHeaders() {
-    if (this.oauth) {
-      const accessToken = await this.oauth.getAccessToken()
-      if (accessToken) {
-        logger(
-          'debug',
-          'YouTube-TV',
-          'Successfully acquired access token for authentication.'
-        )
-        return {
-          Authorization: `Bearer ${accessToken}`
-        }
-      }
-    }
-    logger(
-      'debug',
-      'YouTube-TV',
-      'No access token available. Proceeding without authentication.'
-    )
+    // this client does not work with oauth, does not require it to function, because the audio is beign casted (prob)
     return {}
   }
 
@@ -60,7 +44,7 @@ export default class TV extends BaseClient {
         if (!videoIdMatch || !videoIdMatch[1]) {
           logger(
             'error',
-            'YouTube-TV',
+            'YouTube-TVCast',
             `Could not parse video ID from URL: ${url}`
           )
           return {
@@ -84,7 +68,7 @@ export default class TV extends BaseClient {
 
         if (statusCode !== 200) {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
-          logger('error', 'YouTube-TV', message)
+          logger('error', 'YouTube-TVCast', message)
           return {
             exception: { message, severity: 'common', cause: 'Upstream' }
           }
@@ -102,7 +86,7 @@ export default class TV extends BaseClient {
         if (!playlistIdMatch || !playlistIdMatch[1]) {
           logger(
             'error',
-            'YouTube-TV',
+            'YouTube-TVCast',
             `Could not parse playlist ID from URL: ${url}`
           )
           return {
@@ -171,7 +155,7 @@ export default class TV extends BaseClient {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',
-      'YouTube-TV',
+      'YouTube-TVCast',
       `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`
     )
 
@@ -185,7 +169,7 @@ export default class TV extends BaseClient {
 
     if (statusCode !== 200) {
       const message = `Failed to get player data for stream. Status: ${statusCode}`
-      logger('error', 'YouTube-TV', message)
+      logger('error', 'YouTube-TVCast', message)
       return { exception: { message, severity: 'common', cause: 'Upstream' } }
     }
 

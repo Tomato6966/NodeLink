@@ -7,6 +7,7 @@ import AndroidVR from './clients/AndroidVR.js'
 import IOS from './clients/IOS.js'
 import Music from './clients/Music.js'
 import TV from './clients/TV.js'
+import TVCast from './clients/TVCast.js'
 import Web from './clients/Web.js'
 import WebEmbedded from './clients/WebEmbedded.js'
 import WebRemix from './clients/Web_Remix.js'
@@ -66,6 +67,7 @@ export default class YouTubeSource {
       Music,
       WebRemix,
       TV,
+      TVCast,
       Web,
       WebEmbedded
     }
@@ -337,10 +339,17 @@ export default class YouTubeSource {
 
       if (
         (!automixRes || automixRes.loadType !== 'playlist') &&
-        (this.clients.TV || this.clients.WebRemix)
+        (this.clients.TV || this.clients.TVCast || this.clients.WebRemix)
       ) {
         try {
-          automixRes = await this.clients.TV.resolve(
+          const tvClient = this.clients.TV || this.clients.TVCast
+          const clientName = this.clients.TV ? 'TV' : 'TVCast'
+          logger(
+            'debug',
+            'YouTube',
+            `Attempting recommendations with ${clientName} client`
+          )
+          automixRes = await tvClient.resolve(
             `https://www.youtube.com/playlist?list=${automixId}`,
             'youtube',
             this.ytContext,

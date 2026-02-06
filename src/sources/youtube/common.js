@@ -1600,6 +1600,13 @@ export class BaseClient {
         requestBody.playbackContext.contentPlaybackContext.encryptedHostFlags =
           encryptedHostFlags
       }
+      // this speeds it up a bit.
+      if (context.client.clientName === 'WEB_EMBEDDED_PLAYER') {
+        requestBody.serializedThirdPartyEmbedConfig = {
+          hideInfoBar: true,
+          disableRelatedVideos: true
+        }
+      }
     }
 
     if (this.requirePlayerScript() && cipherManager) {
