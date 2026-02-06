@@ -1,0 +1,523 @@
+/**
+ * Type definitions for source worker
+ * @module typings/source.types
+ */
+
+import type { Socket } from 'node:net'
+import type { Readable } from 'node:stream'
+import type { Worker as NodeWorker } from 'node:worker_threads'
+
+/**
+ * Frame type identifier for socket communication protocol
+ * @public
+ */
+export enum FrameType {
+  /** Data chunk frame (0) - contains payload data */
+  DATA = 0,
+  /** End frame (1) - signals completion of transmission */
+  END = 1,
+  /** Error frame (2) - contains error message */
+  ERROR = 2,
+  /** Chat action frame (3) - contains live chat actions */
+  CHAT_ACTION = 3
+}
+
+/**
+ * Configuration for specialized source worker cluster
+ * @public
+ */
+export interface SourceWorkerConfig {
+  /** Number of micro-workers to spawn per source worker */
+  microWorkers?: number
+  /** Maximum tasks per micro-worker before queuing */
+  tasksPerWorker?: number
+  /** Whether to suppress debug/info logs from micro-workers */
+  silentLogs?: boolean
+}
+
+/**
+ * Extended Worker with load tracking properties
+ * @public
+ */
+export interface MicroWorker extends NodeWorker {
+  /** Whether the worker is ready to receive tasks */
+  ready: boolean
+  /** Current number of active tasks on this worker */
+  load: number
+}
+
+/**
+ * Worker thread initialization data
+ * @public
+ */
+export interface WorkerData {
+  /** NodeLink configuration object */
+  config: Record<string, unknown>
+  /** Whether to silence debug/info logs */
+  silentLogs: boolean
+  /** Thread identifier (1-indexed) */
+  threadId: number
+}
+
+/**
+ * Base message structure for worker communication
+ * @public
+ */
+export interface WorkerMessage {
+  /** Message type identifier */
+  type: string
+}
+
+/**
+ * Message sent when worker becomes ready
+ * @public
+ */
+export interface ReadyMessage extends WorkerMessage {
+  type: 'ready'
+  /** Process ID of the worker (optional, main thread only) */
+  pid?: number
+}
+
+/**
+ * Message containing task result
+ * @public
+ */
+export interface ResultMessage extends WorkerMessage {
+  type: 'result'
+  /** Socket path for response */
+  socketPath: string
+  /** Task identifier */
+  id: string
+  /** JSON-stringified result data (mutually exclusive with error) */
+  result?: string
+  /** Error message (mutually exclusive with result) */
+  error?: string
+}
+
+/**
+ * Message containing stream data chunk
+ * @public
+ */
+export interface StreamMessage extends WorkerMessage {
+  type: 'stream'
+  /** Socket path for streaming */
+  socketPath: string
+  /** Stream identifier */
+  id: string
+  /** Data chunk (Buffer or string) */
+  chunk: Buffer | string
+}
+
+/**
+ * Message containing live chat actions
+ * @public
+ */
+export interface ChatActionMessage extends WorkerMessage {
+  type: 'chatAction'
+  /** Socket path for chat communication */
+  socketPath: string
+  /** Chat session identifier */
+  id: string
+  /** Live chat action data */
+  data: {
+    /** Operation type */
+    op: 'actions'
+    /** Array of chat actions/messages */
+    actions: Array<Record<string, unknown>>
+  }
+}
+
+/**
+ * Message signaling stream end
+ * @public
+ */
+export interface EndMessage extends WorkerMessage {
+  type: 'end'
+  /** Socket path */
+  socketPath: string
+  /** Stream identifier */
+  id: string
+}
+
+/**
+ * Message containing stream error
+ * @public
+ */
+export interface ErrorMessage extends WorkerMessage {
+  type: 'error'
+  /** Socket path */
+  socketPath: string
+  /** Stream identifier */
+  id: string
+  /** Error message string */
+  error: string
+}
+
+/**
+ * Union type of all possible worker messages
+ * @public
+ */
+export type WorkerMessageType =
+  | ReadyMessage
+  | ResultMessage
+  | StreamMessage
+  | ChatActionMessage
+  | EndMessage
+  | ErrorMessage
+
+/**
+ * Task data structure sent to micro-workers
+ * @public
+ */
+export interface TaskData {
+  /** Task identifier */
+  id: string
+  /** Task type */
+  task: TaskType
+  /** Task payload (task-specific data) */
+  payload: TaskPayload
+  /** Unix socket path for response */
+  socketPath: string
+}
+
+/**
+ * Supported task types for source workers
+ * @public
+ */
+export type TaskType =
+  | 'resolve'
+  | 'search'
+  | 'unifiedSearch'
+  | 'loadLyrics'
+  | 'loadMeaning'
+  | 'loadChapters'
+  | 'loadStream'
+  | 'loadLiveChat'
+  | 'cancelLiveChat'
+
+/**
+ * Base task payload structure
+ * @public
+ */
+export interface BaseTaskPayload {
+  /** Track information (for track-related tasks) */
+  decodedTrackInfo?: TrackInfo
+}
+
+/**
+ * Payload for resolve task
+ * @public
+ */
+export interface ResolvePayload extends BaseTaskPayload {
+  /** URL to resolve */
+  url: string
+}
+
+/**
+ * Payload for search task
+ * @public
+ */
+export interface SearchPayload extends BaseTaskPayload {
+  /** Source name to search */
+  source: string
+  /** Search query string */
+  query: string
+}
+
+/**
+ * Payload for unified search task
+ * @public
+ */
+export interface UnifiedSearchPayload extends BaseTaskPayload {
+  /** Search query string */
+  query: string
+}
+
+/**
+ * Payload for lyrics/meaning tasks
+ * @public
+ */
+export interface LyricsPayload extends BaseTaskPayload {
+  /** Decoded track information */
+  decodedTrackInfo: TrackInfo
+  /** Target language code (ISO 639-1) */
+  language?: string
+}
+
+/**
+ * Payload for load stream task
+ * @public
+ */
+export interface LoadStreamPayload extends BaseTaskPayload {
+  /** Decoded track information */
+  decodedTrackInfo: TrackInfo
+  /** Starting position in milliseconds */
+  position?: number
+  /** Volume level (0-1000, default 100) */
+  volume?: number
+  /** Audio filter configuration */
+  filters?: Record<string, unknown>
+}
+
+/**
+ * Payload for live chat task
+ * @public
+ */
+export interface LiveChatPayload extends BaseTaskPayload {
+  /** YouTube video ID */
+  videoId: string
+}
+
+/**
+ * Payload for cancel live chat task
+ * @public
+ */
+export interface CancelChatPayload extends BaseTaskPayload {
+  /** Chat session ID to cancel */
+  id: string
+}
+
+/**
+ * Union type of all task payloads
+ * @public
+ */
+export type TaskPayload =
+  | ResolvePayload
+  | SearchPayload
+  | UnifiedSearchPayload
+  | LyricsPayload
+  | LoadStreamPayload
+  | LiveChatPayload
+  | CancelChatPayload
+  | BaseTaskPayload
+
+/**
+ * Track information structure
+ * @public
+ */
+export interface TrackInfo {
+  /** Track identifier (Base64 encoded) */
+  identifier: string
+  /** Whether the track is seekable */
+  isSeekable: boolean
+  /** Track author/artist name */
+  author: string
+  /** Track duration in milliseconds */
+  length: number
+  /** Whether this is a live stream */
+  isStream: boolean
+  /** Track position in queue */
+  position: number
+  /** Track title */
+  title: string
+  /** Track source URI */
+  uri: string
+  /** Artwork/thumbnail URL */
+  artworkUrl?: string
+  /** International Standard Recording Code */
+  isrc?: string
+  /** Source name (e.g., 'youtube', 'spotify') */
+  sourceName: string
+}
+
+/**
+ * Result of track URL resolution
+ * @public
+ */
+export interface TrackUrlResult {
+  /** Resolved URL */
+  url: string
+  /** Protocol type */
+  protocol: string
+  /** Audio format */
+  format?: string
+  /** Updated track information (if changed) */
+  newTrack?: {
+    /** Updated track info */
+    info: TrackInfo
+  }
+  /** Additional metadata for streaming */
+  additionalData?: Record<string, unknown>
+  /** Exception if resolution failed */
+  exception?: {
+    /** Error message */
+    message: string
+    /** Error severity level */
+    severity: string
+  }
+}
+
+/**
+ * Result of track stream fetch
+ * @public
+ */
+export interface TrackStreamResult {
+  /** Readable stream of audio data */
+  stream: Readable
+  /** MIME type or container format */
+  type?: string
+  /** Exception if fetch failed */
+  exception?: {
+    /** Error message */
+    message: string
+    /** Error severity level */
+    severity: string
+  }
+}
+
+/**
+ * Live chat poll result
+ * @public
+ */
+export interface LiveChatPollResult {
+  /** Array of chat actions/messages */
+  actions: Array<Record<string, unknown>>
+  /** Milliseconds to wait before next poll */
+  timeoutMs: number
+}
+
+/**
+ * Minimal NodeLink context for workers
+ * @public
+ */
+export interface WorkerNodeLink {
+  /** Configuration options */
+  options: Record<string, unknown>
+  /** Logger function */
+  logger: (level: string, category: string, message: string) => void
+  /** Source manager instance */
+  sources?: SourceManager
+  /** Lyrics manager instance */
+  lyrics?: LyricsManager
+  /** Meanings manager instance */
+  meanings?: MeaningManager
+  /** Credential manager instance */
+  credentialManager?: CredentialManager
+  /** Track cache manager instance */
+  trackCacheManager?: TrackCacheManager
+  /** Route planner manager instance */
+  routePlanner?: RoutePlannerManager
+  /** Stats manager instance */
+  statsManager?: StatsManager
+}
+
+/**
+ * Source manager interface (minimal)
+ * @public
+ */
+export interface SourceManager {
+  /** Resolve URL to track(s) */
+  resolve: (url: string) => Promise<unknown>
+  /** Search for tracks */
+  search: (source: string, query: string) => Promise<unknown>
+  /** Unified search across sources */
+  unifiedSearch: (query: string) => Promise<unknown>
+  /** Get track URL */
+  getTrackUrl: (trackInfo: TrackInfo) => Promise<TrackUrlResult>
+  /** Get track stream */
+  getTrackStream: (
+    trackInfo: TrackInfo,
+    url: string,
+    protocol: string,
+    additionalData: Record<string, unknown>
+  ) => Promise<TrackStreamResult>
+  /** Get track chapters */
+  getChapters: (track: { info: TrackInfo }) => Promise<unknown>
+  /** Get source by name */
+  getSource: (name: string) => YouTubeSource | null
+  /** Load sources from folder */
+  loadFolder: () => Promise<void>
+}
+
+/**
+ * YouTube source interface (minimal)
+ * @public
+ */
+export interface YouTubeSource {
+  /** Live chat interface */
+  liveChat: {
+    /** Get live chat instance */
+    getLiveChat: (videoId: string) => Promise<LiveChat | null>
+  }
+}
+
+/**
+ * Live chat interface
+ * @public
+ */
+export interface LiveChat {
+  /** Poll for new chat messages */
+  poll: () => Promise<LiveChatPollResult | null>
+}
+
+/**
+ * Lyrics manager interface (minimal)
+ * @public
+ */
+export interface LyricsManager {
+  /** Load lyrics for track */
+  loadLyrics: (
+    track: { info: TrackInfo },
+    language?: string
+  ) => Promise<unknown>
+  /** Load lyrics sources */
+  loadFolder: () => Promise<void>
+}
+
+/**
+ * Meanings manager interface (minimal)
+ * @public
+ */
+export interface MeaningManager {
+  /** Load song meaning/interpretation */
+  loadMeaning: (
+    track: { info: TrackInfo },
+    language?: string
+  ) => Promise<unknown>
+  /** Load meaning sources */
+  loadFolder: () => Promise<void>
+}
+
+/**
+ * Credential manager interface (minimal)
+ * @public
+ */
+export interface CredentialManager {
+  /** Load credentials from disk */
+  load: () => Promise<void>
+}
+
+/**
+ * Track cache manager interface (minimal)
+ * @public
+ */
+export interface TrackCacheManager {
+  /** Load cache from disk */
+  load: () => Promise<void>
+}
+
+/**
+ * Stats manager interface (minimal)
+ * @public
+ */
+export interface StatsManager {
+  /** Initialize stats manager */
+  initialize?: () => Promise<void>
+  /** Manager instance properties */
+  [key: string]: unknown
+}
+
+/**
+ * Route planner manager interface (minimal)
+ * @public
+ */
+export interface RoutePlannerManager {
+  /** Manager instance properties */
+  [key: string]: unknown
+}
+
+/**
+ * Socket map entry
+ * @internal
+ */
+export type SocketMap = Map<string, Socket>
