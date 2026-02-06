@@ -35,6 +35,7 @@ const updatePlayerSchema = v.compile({
   endTime: { type: 'number', min: 0, nullable: true, optional: true },
   volume: { type: 'number', min: 0, max: 1000, optional: true },
   paused: { type: 'boolean', optional: true },
+  loudnessNormalizer: { type: 'boolean', optional: true },
   filters: filtersSchema,
   fading: { type: 'any', optional: true },
   voice: { ...voiceStateSchema, optional: true },
@@ -533,6 +534,18 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           )
           const sanitizedFading = sanitizeFadingConfig(payload.fading)
           await session.players.setFading(guildId, sanitizedFading)
+        }
+
+        if (payload.loudnessNormalizer !== undefined) {
+          logger(
+            'debug',
+            'PlayerUpdate',
+            `Setting loudnessNormalizer to ${payload.loudnessNormalizer} for guild ${guildId}`
+          )
+          await session.players.setLoudnessNormalizer(
+            guildId,
+            payload.loudnessNormalizer
+          )
         }
 
         const playerJson = await session.players.toJSON(guildId)

@@ -433,6 +433,27 @@ class NodelinkServer extends EventEmitter {
     )
 
     validateProperty(
+      this.options.audio.loudnessNormalizer,
+      'audio.loudnessNormalizer',
+      'boolean',
+      (v) => typeof v === 'boolean'
+    )
+
+    validateProperty(
+      this.options.audio.lookaheadMs,
+      'audio.lookaheadMs',
+      'number >= 0',
+      (v) => typeof v === 'number' && v >= 0
+    )
+
+    validateProperty(
+      this.options.audio.gateThresholdLUFS,
+      'audio.gateThresholdLUFS',
+      'number <= 0',
+      (v) => typeof v === 'number' && v <= 0
+    )
+
+    validateProperty(
       this.options.routePlanner?.strategy,
       'routePlanner.strategy',
       "one of ['RotateOnBan', 'RoundRobin', 'LoadBalance']",

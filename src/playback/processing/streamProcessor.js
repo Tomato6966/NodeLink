@@ -1621,7 +1621,8 @@ class StreamAudioResource extends BaseAudioResource {
     initialFilters = {},
     volume = 1.0,
     audioMixer = null,
-    returnPCM = false
+    returnPCM = false,
+    enableAGC = true
   ) {
     super()
 
@@ -1641,14 +1642,15 @@ class StreamAudioResource extends BaseAudioResource {
     )
 
     if (returnPCM) {
-      this._createPCMOutputPipeline(pcmStream, volume)
+      this._createPCMOutputPipeline(pcmStream, volume, enableAGC)
     } else {
       this._createOutputPipeline(
         pcmStream,
         nodelink,
         initialFilters,
         volume,
-        audioMixer
+        audioMixer,
+        enableAGC
       )
     }
 
@@ -1790,10 +1792,17 @@ class StreamAudioResource extends BaseAudioResource {
     nodelink,
     initialFilters,
     volume,
-    audioMixer = null
+    audioMixer = null,
+    enableAGC = true
   ) {
     const filters = new FiltersManager(nodelink, initialFilters)
-    const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
+    const volumeTransformer = new VolumeTransformer({ 
+      type: 's16le', 
+      volume,
+      enableAGC,
+      lookaheadMs: nodelink.options.audio.lookaheadMs,
+      gateThresholdLUFS: nodelink.options.audio.gateThresholdLUFS
+    })
     const fadeTransformer = new FadeTransformer({
       type: 's16le',
       volume: 1.0,
@@ -1847,9 +1856,15 @@ class StreamAudioResource extends BaseAudioResource {
     this.stream = opusEncoder
   }
 
-  _createPCMOutputPipeline(pcmStream, volume) {
-    if (volume !== 1.0) {
-      const volumeTransformer = new VolumeTransformer({ type: 's16le', volume })
+  _createPCMOutputPipeline(pcmStream, volume, enableAGC = true) {
+    if (volume !== 1.0 || enableAGC) {
+      const volumeTransformer = new VolumeTransformer({ 
+        type: 's16le', 
+        volume,
+        enableAGC,
+        lookaheadMs: this.nodelink?.options?.audio?.lookaheadMs,
+        gateThresholdLUFS: this.nodelink?.options?.audio?.gateThresholdLUFS
+      })
       this.pipes.push(volumeTransformer)
 
       pipeline(pcmStream, volumeTransformer, (err) => {
@@ -1912,7 +1927,8 @@ export const createAudioResource = (
   initialFilters = {},
   volume = 1.0,
   audioMixer = null,
-  returnPCM = false
+  returnPCM = false,
+  enableAGC = true
 ) =>
   new StreamAudioResource(
     stream,
@@ -1921,7 +1937,8 @@ export const createAudioResource = (
     initialFilters,
     volume,
     audioMixer,
-    returnPCM
+    returnPCM,
+    enableAGC
   )
 
 export const createSeekeableAudioResource = async (
@@ -1957,7 +1974,9 @@ export const createSeekeableAudioResource = async (
       nodelink,
       initialFilters,
       volume,
-      audioMixer
+      audioMixer,
+      false,
+      player.loudnessNormalizer
     )
   } catch (err) {
     const cause = err instanceof SeekError ? err.code : 'UNKNOWN'

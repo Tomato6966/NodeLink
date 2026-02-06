@@ -50,6 +50,7 @@ export class Player {
     this.audioMixer = null
     this._initAudioMixer()
     this.fading = this.nodelink.options?.audio?.fading
+    this.loudnessNormalizer = this.nodelink.options?.audio?.loudnessNormalizer ?? false
     this._fadeTimers = { trackEnd: null, pause: null, stop: null }
     this._isResuming = false
     this._pendingTrackStartFade = false
@@ -560,7 +561,9 @@ export class Player {
       this.nodelink,
       this.filters,
       this.volumePercent / 100,
-      this.audioMixer
+      this.audioMixer,
+      false,
+      this.loudnessNormalizer
     )
     return { stream: resource }
   }
@@ -1390,6 +1393,14 @@ export class Player {
     return true
   }
 
+  setLoudnessNormalizer(enabled) {
+    this.loudnessNormalizer = !!enabled
+    if (this.connection?.audioStream) {
+      this.connection.audioStream.setLoudnessNormalizer?.(this.loudnessNormalizer)
+    }
+    return true
+  }
+
   setFilters(filters) {
     if (this.destroying || !this.track) return false
     logger(
@@ -1801,6 +1812,7 @@ export class Player {
       track: this.track,
       volume: this.volumePercent,
       fading: this.fading,
+      loudnessNormalizer: this.loudnessNormalizer,
       paused: this.isPaused,
       filters: this.filters,
       state: {

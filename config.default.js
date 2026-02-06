@@ -432,6 +432,9 @@ export default {
     quality: 'high', // high, medium, low, lowest
     encryption: 'aead_aes256_gcm_rtpsize',
     resamplingQuality: 'best', // best, medium, fastest, zero order holder, linear
+    loudnessNormalizer: false, // Enable/disable AGC globally
+    lookaheadMs: 5, // Limiter lookahead buffer in milliseconds
+    gateThresholdLUFS: -60, // Silence threshold for AGC gate
     fading: {
       enabled: false,
       // curve meanings:
