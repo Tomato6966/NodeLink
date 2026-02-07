@@ -6,6 +6,7 @@
 import type { Socket } from 'node:net'
 import type { Readable } from 'node:stream'
 import type { Worker as NodeWorker } from 'node:worker_threads'
+import type { TrackInfoExtended } from './player.types.ts'
 
 /**
  * Frame type identifier for socket communication protocol
@@ -457,7 +458,7 @@ export interface LiveChat {
 export interface LyricsManager {
   /** Load lyrics for track */
   loadLyrics: (
-    track: { info: TrackInfo },
+    track: { info: TrackInfo | TrackInfoExtended },
     language?: string
   ) => Promise<unknown>
   /** Load lyrics sources */
@@ -471,7 +472,7 @@ export interface LyricsManager {
 export interface MeaningManager {
   /** Load song meaning/interpretation */
   loadMeaning: (
-    track: { info: TrackInfo },
+    track: { info: TrackInfo | TrackInfoExtended },
     language?: string
   ) => Promise<unknown>
   /** Load meaning sources */
@@ -512,8 +513,10 @@ export interface StatsManager {
  * @public
  */
 export interface RoutePlannerManager {
-  /** Manager instance properties */
-  [key: string]: unknown
+  /** Initialize route planner */
+  initialize?: () => Promise<void>
+  /** Dispose route planner */
+  dispose?: () => Promise<void>
 }
 
 /**

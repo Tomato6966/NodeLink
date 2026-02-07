@@ -39,7 +39,7 @@ import RateLimitManager from './managers/rateLimitManager.js'
 import type SourcesManager from './managers/sourceManager.js'
 import SourceWorkerManager from './managers/sourceWorkerManager.js'
 import WorkerManager from './managers/workerManager.js'
-import type { NodelinkConfig } from './typings/config.types.js'
+import type { NodelinkConfig } from './typings/config.types'
 import type {
   AudioInterceptorExtension,
   BunSocketData,
@@ -66,8 +66,8 @@ import type {
   VoiceRelay,
   WebSocketInterceptorExtension,
   Worker
-} from './typings/index.types.js'
-import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types.js'
+} from './typings/index.types'
+import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types'
 import { parseVoiceFrameHeader } from './voice/voiceFrames.js'
 import { createVoiceRelay } from './voice/voiceRelay.js'
 
@@ -244,7 +244,8 @@ class BunSocketWrapper extends EventEmitter implements IBunSocketWrapper {
 let registry: NodelinkRegistry | null = null
 if ((process as NodeJS.Process & { embedder?: string }).embedder === 'nodejs') {
   try {
-    // @ts-expect-error - registry.js is generated during build
+    // biome-ignore lint/suspicious/noTsIgnore: registry.js is generated only in SEA builds
+    // @ts-ignore - registry.js is generated only in SEA builds
     registry = await import('./registry.js')
   } catch (_e) {}
 }
@@ -2275,7 +2276,7 @@ if (clusterEnabled && cluster.isPrimary) {
     process.exit(1)
   })
 } else if (clusterEnabled && cluster.isWorker) {
-  await import('./workers/main.js')
+  await import('./workers/main')
 } else {
   const serverInstancePromise = (async () => {
     const nserver = new NodelinkServer(
