@@ -14,7 +14,7 @@ import SourceManager from '../managers/sourceManager.js'
 import StatsManager from '../managers/statsManager.js'
 import TrackCacheManager from '../managers/trackCacheManager.js'
 import { Player } from '../playback/player'
-import { createPCMStream } from '../playback/processing/streamProcessor.js'
+import { createPCMStream } from '../playback/processing/streamProcessor.ts'
 import { bufferPool } from '../playback/structs/BufferPool.js'
 import type { TrackInfoExtended } from '../typings/player.types.ts'
 import type {
@@ -306,7 +306,7 @@ function sendCommandError(requestId: string, error: unknown): boolean {
 }
 
 const nodelink: WorkerNodeLink = {
-  options: config,
+  options: config as WorkerNodeLink['options'],
   logger,
   voiceRelay: undefined,
   statsManager: null as unknown as StatsManager,
@@ -689,7 +689,7 @@ async function startLoadStream(
 
   const pcmStream = createPCMStream(
     fetched.stream,
-    fetched.type || urlResult.format,
+    fetched.type || (urlResult.format as string) || 'unknown',
     nodelink,
     (payload?.volume ?? 100) / 100,
     payload?.filters || {}

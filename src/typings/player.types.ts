@@ -119,7 +119,7 @@ export interface AudioResource {
   setFadeVolume?(volume: number): void
   fadeTo?(volume: number, durationMs: number, curve?: string): void
   destroy(): void
-  stream?: VoiceAudioStream
+  stream?: VoiceAudioStream | null
 }
 
 /**
@@ -189,6 +189,8 @@ export interface NodeLinkOptions {
     fading?: FadingConfig
     loudnessNormalizer?: boolean
     resamplingQuality?: string
+    lookaheadMs?: number
+    gateThresholdLUFS?: number
   }
   mix?: {
     enabled?: boolean
@@ -281,6 +283,7 @@ export interface NodeLink {
   sources: SourceManagerLike
   lyrics: LyricsManagerLike
   statistics?: { players?: number }
+  extensions?: { audioInterceptors?: unknown[] } & Record<string, unknown>
 }
 
 /**

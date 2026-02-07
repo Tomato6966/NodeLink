@@ -1,6 +1,6 @@
 import { pipeline } from 'node:stream'
 import Validator from 'fastest-validator'
-import { createPCMStream } from '../playback/processing/streamProcessor.js'
+import { createPCMStream } from '../playback/processing/streamProcessor.ts'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.js'
 
 const v = new Validator({ haltOnFirstError: true })

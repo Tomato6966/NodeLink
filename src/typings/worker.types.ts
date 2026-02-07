@@ -68,7 +68,7 @@ export type AudioInterceptor = (stream: Readable) => unknown
 /**
  * Registered worker extensions.
  */
-export interface WorkerExtensions {
+export interface WorkerExtensions extends Record<string, unknown> {
   workerInterceptors: WorkerInterceptor[]
   audioInterceptors: AudioInterceptor[]
   filters?: Map<string, unknown>
@@ -78,7 +78,7 @@ export interface WorkerExtensions {
  * Runtime context shared across worker components.
  */
 export interface WorkerNodeLink extends NodeLink {
-  options: NodeLinkConfig
+  options: NodeLinkConfig & NodeLink['options']
   logger: WorkerLogger
   voiceRelay?: NodeLink['voiceRelay']
   statsManager: WorkerStatsManager

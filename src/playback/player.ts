@@ -41,7 +41,7 @@ let createSeekeableAudioResource: CreateSeekeableAudioResource | null = null
 async function getStreamProcessor(): Promise<void> {
   if (createAudioResource && createSeekeableAudioResource) return
 
-  const processor = await import('./processing/streamProcessor.js')
+  const processor = await import('./processing/streamProcessor.ts')
   createAudioResource = processor.createAudioResource as CreateAudioResource
   createSeekeableAudioResource =
     processor.createSeekeableAudioResource as CreateSeekeableAudioResource
@@ -1906,7 +1906,7 @@ export class Player {
     const mixVolume = volume ?? mixConfig.defaultVolume ?? 0.8
 
     const { createAudioResource: createResource } = await import(
-      './processing/streamProcessor.js'
+      './processing/streamProcessor.ts'
     )
 
     const urlData = await this.nodelink.sources.getTrackUrl(trackPayload.info)
@@ -1927,7 +1927,7 @@ export class Player {
 
     const pcmResource = createResource(
       fetched.stream,
-      fetched.type || urlData.format,
+      fetched.type || (urlData.format as string) || 'unknown',
       this.nodelink,
       {},
       mixVolume,

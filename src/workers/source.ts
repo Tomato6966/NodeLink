@@ -23,6 +23,7 @@ import type {
   WorkerMessageType,
   WorkerNodeLink
 } from '../typings/source.types'
+import type { NodeLink } from '../typings/player.types'
 import * as utils from '../utils.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -378,7 +379,7 @@ if (isMainThread) {
     { default: RoutePlannerManager },
     { default: StatsManager }
   ] = await Promise.all([
-    import('../playback/processing/streamProcessor.js'),
+    import('../playback/processing/streamProcessor.ts'),
     import('../managers/sourceManager.js'),
     import('../managers/lyricsManager.js'),
     import('../managers/meaningManager.js'),
@@ -613,8 +614,8 @@ if (isMainThread) {
 
       pcmStream = createPCMStream(
         fetched.stream,
-        fetched.type || urlResult.format,
-        nodelink,
+        fetched.type || (urlResult.format as string) || 'unknown',
+        nodelink as unknown as NodeLink,
         (payload?.volume ?? 100) / 100,
         payload?.filters || {}
       )
