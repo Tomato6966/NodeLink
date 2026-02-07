@@ -289,7 +289,10 @@ function modifyPayload(nodelink, data) {
 }
 
 function sendResponse(req, res, data, status, trace = false) {
-  const headers = {}
+  const headers = {
+    'Nodelink-Api-Version': '4',
+    'IamNodelink': 'true'
+  }
 
   if (!data) {
     res.writeHead(status, headers)

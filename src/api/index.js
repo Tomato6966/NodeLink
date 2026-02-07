@@ -82,6 +82,14 @@ async function loadRoutes() {
 const routesPromise = loadRoutes()
 
 async function requestHandler(nodelink, req, res) {
+  const originalWriteHead = res.writeHead
+  res.writeHead = (status, headers) => {
+    res.setHeader('Nodelink-Api-Version', '4')
+    res.setHeader('IamNodelink', 'true')
+
+    return originalWriteHead.call(res, status, headers)
+  }
+
   const startTime = Date.now()
   const parsedUrl = new URL(req.url, `http://${req.headers.host}`)
 

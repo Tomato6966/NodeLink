@@ -1087,7 +1087,11 @@ class NodelinkServer extends EventEmitter {
             )
             return new Response('Invalid password provided.', {
               status: 401,
-              statusText: 'Unauthorized'
+              statusText: 'Unauthorized',
+              headers: {
+                'Nodelink-Api-Version': '4',
+                'IamNodelink': 'true'
+              }
             })
           }
 
@@ -1099,7 +1103,11 @@ class NodelinkServer extends EventEmitter {
             )
             return new Response('Invalid or missing Client-Name header.', {
               status: 400,
-              statusText: 'Bad Request'
+              statusText: 'Bad Request',
+              headers: {
+                'Nodelink-Api-Version': '4',
+                'IamNodelink': 'true'
+              }
             })
           }
 
@@ -1107,7 +1115,11 @@ class NodelinkServer extends EventEmitter {
             logger('warn', 'Server', `Invalid user ID from ${clientAddress}`)
             return new Response('Invalid or missing User-Id header.', {
               status: 400,
-              statusText: 'Bad Request'
+              statusText: 'Bad Request',
+              headers: {
+                'Nodelink-Api-Version': '4',
+                'IamNodelink': 'true'
+              }
             })
           }
 
@@ -1120,7 +1132,11 @@ class NodelinkServer extends EventEmitter {
             )
             return new Response('Invalid or missing Client-Name header.', {
               status: 400,
-              statusText: 'Bad Request'
+              statusText: 'Bad Request',
+              headers: {
+                'Nodelink-Api-Version': '4',
+                'IamNodelink': 'true'
+              }
             })
           }
 
@@ -1135,7 +1151,13 @@ class NodelinkServer extends EventEmitter {
           })
 
           if (success) return undefined
-          return new Response('WebSocket upgrade failed', { status: 400 })
+          return new Response('WebSocket upgrade failed', {
+            status: 400,
+            headers: {
+              'Nodelink-Api-Version': '4',
+              'IamNodelink': 'true'
+            }
+          })
         }
 
         return new Promise((resolve) => {
@@ -1332,7 +1354,7 @@ class NodelinkServer extends EventEmitter {
           body: string
         ) => {
           socket.write(
-            `HTTP/1.1 ${status} ${statusText}\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`
+            `HTTP/1.1 ${status} ${statusText}\r\nNodelink-Api-Version: 4\r\nIamNodelink: true\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`
           )
           socket.destroy()
         }
