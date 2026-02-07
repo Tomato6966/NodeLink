@@ -255,9 +255,7 @@ export interface FAAD2DecoderLike {
   /** Promise that resolves when the WASM module is ready. */
   ready: Promise<void>
   /** Configures the decoder for a specific frame type. */
-  configure(frame: Buffer, isADTS: boolean): Promise<void>
-  /** Parses AAC configuration from a header frame. */
-  readConfig(frame: Buffer): void
+  configure(frame: Buffer, autoDetect?: boolean): Promise<void>
   /** Decodes a single AAC frame. */
   decode(frame: Buffer): AACDecodeResult | null
   /** Releases native resources (FAAD2 node binding version). */

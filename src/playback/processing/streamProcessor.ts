@@ -1065,7 +1065,7 @@ class AACDecoderStream extends Transform {
         const adtsFrame = frameInfo.frame
 
         if (!this.isConfigured) {
-          this.decoder.readConfig(adtsFrame)
+          await this.decoder.configure(adtsFrame)
           this.isConfigured = true
         }
 
