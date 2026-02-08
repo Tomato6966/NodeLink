@@ -47,7 +47,7 @@ import type {
   SymphoniaDecoderLike
 } from '../../typings/streamProcessor.types.ts'
 import { logger } from '../../utils.js'
-import FlvDemuxer from '../demuxers/Flv.js'
+import FlvDemuxer from '../demuxers/Flv.ts'
 import WebmOpusDemuxer from '../demuxers/WebmOpus.ts'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.ts'
 import { RingBuffer } from '../structs/RingBuffer.js'

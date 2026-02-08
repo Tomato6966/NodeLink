@@ -38,6 +38,26 @@ export interface WebmTagReadResult {
 }
 
 /**
+ * Metadata for a parsed FLV tag header.
+ * @example
+ * ```ts
+ * const tag: FlvTagInfo = { type: 8, size: 1024 }
+ * ```
+ * @public
+ */
+export interface FlvTagInfo {
+  /**
+   * FLV tag type (8 = audio, 9 = video, 18 = script data).
+   */
+  type: number
+
+  /**
+   * Tag payload size in bytes (excluding header and previous tag size).
+   */
+  size: number
+}
+
+/**
  * Surface for WebM demuxer streams that emit Opus packets.
  * @public
  */
