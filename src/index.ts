@@ -4,7 +4,7 @@ import http from 'node:http'
 import WebSocketServer from '@performanc/pwsl-server'
 
 import RequestHandler from './api/index.ts'
-import ConnectionManager from './managers/connectionManager.js'
+import ConnectionManager from './managers/connectionManager.ts'
 import CredentialManager from './managers/credentialManager.js'
 import RoutePlannerManager from './managers/routePlannerManager.js'
 import SessionManager from './managers/sessionManager.js'

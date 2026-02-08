@@ -4,7 +4,7 @@ import { monitorEventLoopDelay } from 'node:perf_hooks'
 import v8 from 'node:v8'
 
 import { GatewayEvents } from '../constants.ts'
-import ConnectionManager from '../managers/connectionManager.js'
+import ConnectionManager from '../managers/connectionManager.ts'
 import CredentialManager from '../managers/credentialManager.js'
 import LyricsManager from '../managers/lyricsManager.js'
 import MeaningManager from '../managers/meaningManager.js'
