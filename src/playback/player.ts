@@ -1162,9 +1162,13 @@ export class Player {
         )
       }
 
+      const startPosition = this._realPosition()
       const result = await seekPromise
       if (result) {
-        this.emitEvent(GatewayEvents.SEEK, { position: this.position })
+        this.emitEvent(GatewayEvents.SEEK, {
+          position: this.position,
+          duration: this.position - startPosition
+        })
         this._lyricsBasePosition = this.position
         this._lyricsBasePackets =
           this.connection?.statistics?.packetsExpected ?? 0
