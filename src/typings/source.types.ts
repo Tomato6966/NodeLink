@@ -6,7 +6,12 @@
 import type { Socket } from 'node:net'
 import type { Readable } from 'node:stream'
 import type { Worker as NodeWorker } from 'node:worker_threads'
+import type {
+  CredentialEntry,
+  CredentialManagerStats
+} from './credential.types.ts'
 import type { TrackInfoExtended } from './player.types.ts'
+import type { TrackCacheEntry } from './trackCache.types.ts'
 
 /**
  * Frame type identifier for socket communication protocol
@@ -486,6 +491,22 @@ export interface MeaningManager {
 export interface CredentialManager {
   /** Load credentials from disk */
   load: () => Promise<void>
+  /** Lookup a stored credential value */
+  get: <T = unknown>(key: string) => T | null
+  /** Return the full credential entry with metadata */
+  getEntry?: <T = unknown>(key: string) => CredentialEntry<T> | null
+  /** Store or update a credential value */
+  set: <T = unknown>(key: string, value: T, ttlMs?: number) => void
+  /** Remove a credential entry */
+  delete?: (key: string) => boolean
+  /** Check whether a credential entry exists */
+  has?: (key: string) => boolean
+  /** Clear all stored credentials */
+  clear?: () => void
+  /** Persist credentials to disk immediately */
+  forceSave?: () => Promise<void>
+  /** Get runtime statistics about stored credentials */
+  getStats?: () => CredentialManagerStats
 }
 
 /**
@@ -495,6 +516,22 @@ export interface CredentialManager {
 export interface TrackCacheManager {
   /** Load cache from disk */
   load: () => Promise<void>
+  /** Lookup a cached entry */
+  get: <T = unknown>(source: string, identifier: string) => T | null
+  /** Store a cached entry */
+  set: (
+    source: string,
+    identifier: string,
+    value: unknown,
+    ttlMs?: number
+  ) => void
+  /** Get the raw cached entry with metadata */
+  getEntry?: (
+    source: string,
+    identifier: string
+  ) => TrackCacheEntry<unknown> | null
+  /** Persist the cache to disk immediately */
+  forceSave?: () => Promise<void>
 }
 
 /**

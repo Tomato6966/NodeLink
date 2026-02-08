@@ -5,11 +5,11 @@ import WebSocketServer from '@performanc/pwsl-server'
 
 import RequestHandler from './api/index.ts'
 import ConnectionManager from './managers/connectionManager.ts'
-import CredentialManager from './managers/credentialManager.js'
+import CredentialManager from './managers/credentialManager.ts'
 import RoutePlannerManager from './managers/routePlannerManager.js'
 import SessionManager from './managers/sessionManager.js'
 import StatsManager from './managers/statsManager.js'
-import TrackCacheManager from './managers/trackCacheManager.js'
+import TrackCacheManager from './managers/trackCacheManager.ts'
 import {
   applyEnvOverrides,
   checkForUpdates,

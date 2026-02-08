@@ -383,8 +383,8 @@ if (isMainThread) {
     import('../managers/sourceManager.js'),
     import('../managers/lyricsManager.js'),
     import('../managers/meaningManager.js'),
-    import('../managers/credentialManager.js'),
-    import('../managers/trackCacheManager.js'),
+    import('../managers/credentialManager.ts'),
+    import('../managers/trackCacheManager.ts'),
     import('../managers/routePlannerManager.js'),
     import('../managers/statsManager.js')
   ])
