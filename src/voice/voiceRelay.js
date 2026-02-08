@@ -1,5 +1,5 @@
 import discordVoice from '@performanc/voice'
-import { Decoder as OpusDecoder } from '../playback/opus/Opus.js'
+import { Decoder as OpusDecoder } from '../playback/opus/Opus.ts'
 import {
   buildVoiceFrame,
   resolveVoiceFormat,

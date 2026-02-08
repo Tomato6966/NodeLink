@@ -49,7 +49,7 @@ import type {
 import { logger } from '../../utils.js'
 import FlvDemuxer from '../demuxers/Flv.js'
 import WebmOpusDemuxer from '../demuxers/WebmOpus.ts'
-import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.js'
+import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.ts'
 import { RingBuffer } from '../structs/RingBuffer.js'
 import { FadeTransformer } from './FadeTransformer.js'
 import { FlowController } from './FlowController.js'
