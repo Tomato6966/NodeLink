@@ -64,8 +64,8 @@ export default class Timescale {
   update(filters) {
     const settings = filters.timescale || {}
 
-    const speed = 2.0//Number.isFinite(settings.speed) ? settings.speed : 1.0
-    const pitch = 1.0//Number.isFinite(settings.pitch) ? settings.pitch : 1.0
+    const speed = Number.isFinite(settings.speed) ? settings.speed : 1.0
+    const pitch = Number.isFinite(settings.pitch) ? settings.pitch : 1.0
     const rate = Number.isFinite(settings.rate) ? settings.rate : 1.0
 
     const bypass = speed === 1.0 && pitch === 1.0 && rate === 1.0
