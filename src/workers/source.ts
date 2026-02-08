@@ -9,6 +9,7 @@ import {
   workerData as rawWorkerData,
   Worker
 } from 'node:worker_threads'
+import type { NodeLink } from '../typings/player.types.ts'
 import type {
   FrameType,
   LiveChatPayload,
@@ -22,8 +23,7 @@ import type {
   WorkerData,
   WorkerMessageType,
   WorkerNodeLink
-} from '../typings/source.types'
-import type { NodeLink } from '../typings/player.types'
+} from '../typings/source.types.ts'
 import * as utils from '../utils.js'
 
 const __filename = fileURLToPath(import.meta.url)

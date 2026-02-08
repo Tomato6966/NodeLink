@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events'
 import http from 'node:http'
 import WebSocketServer from '@performanc/pwsl-server'
 
-import RequestHandler from './api/index'
+import RequestHandler from './api/index.ts'
 import ConnectionManager from './managers/connectionManager.js'
 import CredentialManager from './managers/credentialManager.js'
 import RoutePlannerManager from './managers/routePlannerManager.js'
@@ -27,7 +27,7 @@ import {
 } from './utils.js'
 import 'dotenv/config'
 import type { ServerWebSocket } from 'bun'
-import { GatewayEvents } from './constants'
+import { GatewayEvents } from './constants.ts'
 import DosProtectionManager from './managers/dosProtectionManager.js'
 import type LyricsManager from './managers/lyricsManager.js'
 import type MeaningManager from './managers/meaningManager.js'
@@ -37,7 +37,7 @@ import RateLimitManager from './managers/rateLimitManager.js'
 import type SourcesManager from './managers/sourceManager.js'
 import SourceWorkerManager from './managers/sourceWorkerManager.js'
 import WorkerManager from './managers/workerManager.js'
-import type { NodelinkConfig } from './typings/config.types'
+import type { NodelinkConfig } from './typings/config.types.ts'
 import type {
   AudioInterceptorExtension,
   BunSocketData,
@@ -63,8 +63,8 @@ import type {
   VoiceRelay,
   WebSocketInterceptorExtension,
   Worker
-} from './typings/index.types'
-import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types'
+} from './typings/index.types.ts'
+import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types.ts'
 import { parseVoiceFrameHeader } from './voice/voiceFrames.js'
 import { createVoiceRelay } from './voice/voiceRelay.js'
 
@@ -2275,7 +2275,7 @@ if (clusterEnabled && cluster.isPrimary) {
     process.exit(1)
   })
 } else if (clusterEnabled && cluster.isWorker) {
-  await import('./workers/main')
+  await import('./workers/main.ts')
 } else {
   const serverInstancePromise = (async () => {
     const nserver = new NodelinkServer(
