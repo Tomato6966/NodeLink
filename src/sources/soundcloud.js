@@ -538,7 +538,9 @@ export default class SoundCloudSource {
       })
 
       const results = await Promise.all(promises)
-      results.forEach((batch) => complete.push(...batch))
+      results.forEach((batch) => {
+        complete.push(...batch)
+      })
     }
 
     const tracks = complete
@@ -605,7 +607,7 @@ export default class SoundCloudSource {
       const cached = this.nodelink.trackCacheManager.get('soundcloud', info.identifier)
       if (cached) {
         const expiresMatch = cached.url.match(/expires=(\d+)/)
-        const expires = expiresMatch ? parseInt(expiresMatch[1]) * 1000 : 0
+        const expires = expiresMatch ? parseInt(expiresMatch[1], 10) * 1000 : 0
 
         if (expires > Date.now() + 5000) {
           logger('debug', 'Sources', `Using cached SoundCloud URL for ${info.identifier}`)
@@ -743,7 +745,7 @@ export default class SoundCloudSource {
     if (!finalUrl) {
       return this._buildException('Failed to resolve stream URL')
     }
-    
+
     if (finalUrl.includes('cf-preview-media.sndcdn.com') || finalUrl.includes('/preview/')) {
   return this._buildException('Track only has preview URL')
     }
@@ -829,6 +831,20 @@ export default class SoundCloudSource {
       })
 
       res.stream.on('error', (err) => {
+        if (err.message === 'aborted') {
+          // Aborted is a non-fatal error, plus when it gets "emitted" to the stream, the playback will continue as normal,
+          // even if the stream is aborted, all the data is already transferred or buffered, so it's safe to ignore ig.
+
+          logger('debug', 'Sources', 'SoundCloud progressive stream aborted (most of the time this is harmless)')
+
+          if (!stream.writableEnded) {
+            stream.emit('finishBuffering')
+            stream.end()
+          }
+
+          return
+        }
+
         logger('error', 'Sources', `Progressive stream error: ${err.message}`)
         if (!stream.destroyed) stream.destroy(err)
       })
