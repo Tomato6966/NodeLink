@@ -53,7 +53,7 @@ import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.ts'
 import { RingBuffer } from '../structs/RingBuffer.js'
 import { FadeTransformer } from './FadeTransformer.js'
 import { FlowController } from './FlowController.js'
-import { FiltersManager } from './filtersManager.js'
+import { FiltersManager } from './filtersManager.ts'
 import { VolumeTransformer } from './VolumeTransformer.js'
 
 const AUDIO_CONFIG: AudioConfig = Object.freeze({

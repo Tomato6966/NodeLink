@@ -1699,7 +1699,7 @@ export class Player {
   /**
    * Applies audio filters to the active stream.
    *
-   * @param filters - Filter payload to merge with current filters.
+   * @param filters - Filter payload that replaces the active filter set.
    * @returns True when filters applied; false if player inactive.
    */
   public setFilters(filters: FiltersState): boolean {
@@ -1711,30 +1711,44 @@ export class Player {
       filters
     )
 
-    if (filters.filters && Object.keys(filters.filters).length === 0) {
+    const payload =
+      (filters.filters as Record<string, unknown> | undefined) ??
+      (filters as Record<string, unknown> | undefined)
+
+    if (!payload || Object.keys(payload).length === 0) {
       this.filters = {}
     } else {
-      const newFilterSettings = JSON.parse(
-        JSON.stringify(this.filters.filters || {})
-      ) as Record<string, unknown>
+      const newFilterSettings: Record<string, unknown> = {}
 
-      for (const key in filters.filters || {}) {
-        const value = (filters.filters as Record<string, unknown>)[key]
+      for (const key in payload) {
+        const value = payload[key]
         if (value === null || value === undefined) {
-          delete newFilterSettings[key]
-        } else {
-          if (key === 'equalizer' && Array.isArray(value)) {
-            newFilterSettings[key] = value
-          } else {
-            newFilterSettings[key] = {
-              ...(newFilterSettings[key] as
-                | Record<string, unknown>
-                | undefined),
-              ...(value as Record<string, unknown>)
-            }
+          continue
+        }
+        if (key === 'equalizer' && Array.isArray(value)) {
+          newFilterSettings[key] = value
+          continue
+        }
+
+        const existing = (
+          this.filters.filters as Record<string, unknown> | undefined
+        )?.[key]
+        if (
+          existing &&
+          typeof existing === 'object' &&
+          !Array.isArray(existing) &&
+          typeof value === 'object' &&
+          !Array.isArray(value)
+        ) {
+          newFilterSettings[key] = {
+            ...(existing as Record<string, unknown>),
+            ...(value as Record<string, unknown>)
           }
+        } else {
+          newFilterSettings[key] = value
         }
       }
+
       this.filters = { ...this.filters, filters: newFilterSettings }
     }
 

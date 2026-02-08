@@ -1,5 +1,15 @@
-import { Transform } from 'node:stream'
-import { logger } from '../../utils.js'
+import {
+  Transform,
+  type TransformCallback,
+  type TransformOptions
+} from 'node:stream'
+import type {
+  FilterClass,
+  FilterInstance,
+  FilterSettings,
+  FiltersManagerContext
+} from '../../typings/filters.types.ts'
+import type { FiltersState } from '../../typings/player.types.ts'
 
 import ChannelMix from '../filters/channelMix.js'
 import Chorus from '../filters/chorus.js'
@@ -19,7 +29,7 @@ import Timescale from '../filters/timescale.js'
 import Tremolo from '../filters/tremolo.js'
 import Vibrato from '../filters/vibrato.js'
 
-const FILTER_CLASSES = {
+const FILTER_CLASSES: Record<string, FilterClass> = {
   tremolo: Tremolo,
   vibrato: Vibrato,
   lowpass: Lowpass,
@@ -39,8 +49,31 @@ const FILTER_CLASSES = {
   flanger: Flanger
 }
 
+/**
+ * Manages the active filter chain and applies it to PCM buffers.
+ * @example
+ * ```ts
+ * const manager = new FiltersManager(nodelink, { filters: { timescale: { speed: 1.1 } } })
+ * stream.pipe(manager).on('data', (chunk) => console.log(chunk.length))
+ * ```
+ * @public
+ */
 export class FiltersManager extends Transform {
-  constructor(nodelink, options = {}) {
+  private readonly nodelink: FiltersManagerContext
+  private activeFilters: FilterInstance[]
+  private filterInstances: Record<string, FilterInstance>
+
+  /**
+   * Creates a new filter manager.
+   * @param nodelink - NodeLink context for extensions.
+   * @param initialFilters - Initial filter payload.
+   * @param options - Transform options for the stream pipeline.
+   */
+  constructor(
+    nodelink: FiltersManagerContext,
+    initialFilters: FiltersState = {},
+    options: TransformOptions = {}
+  ) {
     super(options)
     this.nodelink = nodelink
     this.activeFilters = []
@@ -52,15 +85,19 @@ export class FiltersManager extends Transform {
       }
     }
 
-    this.update(options)
+    this.update(initialFilters)
   }
 
-  update(filters) {
+  /**
+   * Updates the active filter chain using a new filter payload.
+   * @param filters - Filter settings (supports `{ filters: {...} }` or direct map).
+   */
+  update(filters: FiltersState | FilterSettings): void {
     this.activeFilters = []
-    const settings = filters.filters || filters
+    const settings = this._normalizeFilters(filters)
 
     for (const name in settings) {
-      const config = settings[name]
+      const config = (settings as Record<string, unknown>)[name]
       if (!config) continue
 
       if (FILTER_CLASSES[name] && !this.filterInstances[name]) {
@@ -76,10 +113,14 @@ export class FiltersManager extends Transform {
       }
     }
 
-    this.activeFilters.sort((a, b) => (a.priority || 99) - (b.priority || 99))
+    this.activeFilters.sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99))
   }
 
-  process(chunk) {
+  /**
+   * Processes a PCM buffer through the active filter chain.
+   * @param chunk - PCM audio chunk.
+   */
+  process(chunk: Buffer): Buffer {
     if (this.activeFilters.length === 0) return chunk
 
     let processed = chunk
@@ -89,7 +130,10 @@ export class FiltersManager extends Transform {
     return processed
   }
 
-  flush() {
+  /**
+   * Flushes any buffered filter data.
+   */
+  flush(): Buffer {
     let remaining = Buffer.alloc(0)
     for (const filter of this.activeFilters) {
       if (typeof filter.flush === 'function') {
@@ -102,14 +146,32 @@ export class FiltersManager extends Transform {
     return remaining
   }
 
-  _transform(chunk, _encoding, callback) {
+  override _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: TransformCallback
+  ): void {
     this.push(this.process(chunk))
     callback()
   }
 
-  _flush(callback) {
+  override _flush(callback: TransformCallback): void {
     const remaining = this.flush()
     if (remaining.length > 0) this.push(remaining)
     callback()
+  }
+
+  /**
+   * Normalizes incoming filter payloads to a simple settings map.
+   * @param filters - Filter payload in any supported shape.
+   */
+  private _normalizeFilters(
+    filters: FiltersState | FilterSettings
+  ): FilterSettings {
+    if (!filters || typeof filters !== 'object') return {}
+    if ('filters' in filters) {
+      return (filters as FiltersState).filters ?? {}
+    }
+    return filters as FilterSettings
   }
 }
