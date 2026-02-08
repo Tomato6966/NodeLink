@@ -168,7 +168,7 @@ export default {
       enabled: true
     },
     soundcloud: {
-      enabled: true,
+      enabled: true
       // clientId: ""
     },
     local: {
@@ -212,7 +212,7 @@ export default {
     },
     vimeo: {
       // Note: not 100% of the songs are currently working (but most should.), because i need to code a different extractor for every year (2010, 2011, etc. not all are done)
-      enabled: true,
+      enabled: true
     },
     telegram: {
       enabled: true
@@ -239,6 +239,13 @@ export default {
       speed: 1.0,
       enforceConfig: false
     },
+    lazypytts: {
+      enabled: true,
+      service: 'Cerence',
+      voice: 'Luciana',
+      maxTextLength: 3000,
+      enforceConfig: false
+    },
     jiosaavn: {
       enabled: true,
       playlistLoadLimit: 50,
@@ -262,7 +269,7 @@ export default {
         password: '' // Optional password
       }
     },
-    "google-tts": {
+    'google-tts': {
       enabled: true,
       language: 'en-US'
     },
@@ -272,7 +279,7 @@ export default {
     // https://github.com/OHF-Voice/piper1-gpl/tree/main?tab=readme-ov-file
     pipertts: {
       enabled: false, // Disabled by default. Enable it to use Piper TTS.
-      url: 'http://localhost:5000', // URL of your Piper TTS server
+      url: 'http://localhost:5000' // URL of your Piper TTS server
       // Optional settings (defaults from Piper):
       // voice: 'en_US-lessac-medium',
       // speaker: 0,
@@ -289,11 +296,27 @@ export default {
       gl: 'US',
       clients: {
         search: ['Android'], // Clients used for searching tracks
-        playback: ['AndroidVR', 'TV', 'TVCast', 'WebEmbedded', 'WebParentTools', 'Web', 'IOS'], // Clients used for playback/streaming
-        resolve: ['AndroidVR', 'TV', 'TVCast', 'WebEmbedded', 'WebParentTools', 'IOS', 'Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
+        playback: [
+          'AndroidVR',
+          'TV',
+          'TVCast',
+          'WebEmbedded',
+          'WebParentTools',
+          'Web',
+          'IOS'
+        ], // Clients used for playback/streaming
+        resolve: [
+          'AndroidVR',
+          'TV',
+          'TVCast',
+          'WebEmbedded',
+          'WebParentTools',
+          'IOS',
+          'Web'
+        ], // Clients used for resolving detailed track information (channel, external links, etc.)
         settings: {
           TV: {
-            refreshToken: [""] // You can use a string "token" or an array ["token1", "token2"] for rotation/fallback
+            refreshToken: [''] // You can use a string "token" or an array ["token1", "token2"] for rotation/fallback
           }
         }
       },
