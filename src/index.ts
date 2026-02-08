@@ -1,11 +1,9 @@
 import cluster from 'node:cluster'
 import { EventEmitter } from 'node:events'
 import http from 'node:http'
-import path from 'node:path'
-import { pathToFileURL } from 'node:url'
 import WebSocketServer from '@performanc/pwsl-server'
 
-import RequestHandler from './api/index.js'
+import RequestHandler from './api/index'
 import ConnectionManager from './managers/connectionManager.js'
 import CredentialManager from './managers/credentialManager.js'
 import RoutePlannerManager from './managers/routePlannerManager.js'
@@ -50,7 +48,6 @@ import type {
   NodelinkServer as INodelinkServer,
   MiddlewareExtension,
   NodelinkExtensions,
-  NodelinkRegistry,
   NodelinkServerType,
   NodelinkSocketType,
   NodelinkStatistics,
@@ -73,23 +70,14 @@ import { createVoiceRelay } from './voice/voiceRelay.js'
 
 let config: NodelinkConfig
 
-const isSEA =
-  (process as NodeJS.Process & { embedder?: string }).embedder === 'nodejs'
-const executableDir = path.dirname(process.execPath)
-
 try {
-  const configPath = isSEA
-    ? pathToFileURL(path.join(executableDir, 'config.js')).href
-    : '../config.js'
-  config = (await import(configPath)).default
+  config = (await import('../config.js')).default as unknown as NodelinkConfig
 } catch (e) {
   const error = e as ConfigLoadError
   if (error.code === 'ERR_MODULE_NOT_FOUND' || error.code === 'ENOENT') {
     try {
-      const defaultConfigPath = isSEA
-        ? pathToFileURL(path.join(executableDir, 'config.default.js')).href
-        : '../config.default.js'
-      config = (await import(defaultConfigPath)).default
+      config = (await import('../config.default.js'))
+        .default as unknown as NodelinkConfig
       console.log(
         '[WARN] Config: config.js not found, using config.default.js. It is recommended to create a config.js file for your own configuration.'
       )
@@ -241,15 +229,6 @@ class BunSocketWrapper extends EventEmitter implements IBunSocketWrapper {
   }
 }
 
-let registry: NodelinkRegistry | null = null
-if ((process as NodeJS.Process & { embedder?: string }).embedder === 'nodejs') {
-  try {
-    // biome-ignore lint/suspicious/noTsIgnore: registry.js is generated only in SEA builds
-    // @ts-ignore - registry.js is generated only in SEA builds
-    registry = await import('./registry.js')
-  } catch (_e) {}
-}
-
 /**
  * Main NodeLink server class
  * Handles WebSocket connections, audio sources, and player management
@@ -275,7 +254,6 @@ class NodelinkServer extends EventEmitter {
   pluginManager: PluginManager
   sourceWorkerManager: SourceWorkerManager | null
   workerManager: WorkerManager | null
-  registry: NodelinkRegistry | null
   version: string
   gitInfo: GitInfo
   statistics: NodelinkStatistics
@@ -333,7 +311,6 @@ class NodelinkServer extends EventEmitter {
         ? new SourceWorkerManager(this)
         : null
     this.workerManager = null
-    this.registry = registry
     this.version = String(getVersion())
     this.gitInfo = getGitInfo()
     this.statistics = {
@@ -1090,7 +1067,7 @@ class NodelinkServer extends EventEmitter {
               statusText: 'Unauthorized',
               headers: {
                 'Nodelink-Api-Version': '4',
-                'IamNodelink': 'true'
+                IamNodelink: 'true'
               }
             })
           }
@@ -1106,7 +1083,7 @@ class NodelinkServer extends EventEmitter {
               statusText: 'Bad Request',
               headers: {
                 'Nodelink-Api-Version': '4',
-                'IamNodelink': 'true'
+                IamNodelink: 'true'
               }
             })
           }
@@ -1118,7 +1095,7 @@ class NodelinkServer extends EventEmitter {
               statusText: 'Bad Request',
               headers: {
                 'Nodelink-Api-Version': '4',
-                'IamNodelink': 'true'
+                IamNodelink: 'true'
               }
             })
           }
@@ -1135,7 +1112,7 @@ class NodelinkServer extends EventEmitter {
               statusText: 'Bad Request',
               headers: {
                 'Nodelink-Api-Version': '4',
-                'IamNodelink': 'true'
+                IamNodelink: 'true'
               }
             })
           }
@@ -1155,7 +1132,7 @@ class NodelinkServer extends EventEmitter {
             status: 400,
             headers: {
               'Nodelink-Api-Version': '4',
-              'IamNodelink': 'true'
+              IamNodelink: 'true'
             }
           })
         }

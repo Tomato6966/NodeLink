@@ -1,14 +1,8 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { logger } from '../utils.js'
 import { alignLyrics } from '../modules/lyricsAligner.js'
-
-let lyricRegistry
-try {
-  const mod = await import('../registry.js')
-  lyricRegistry = mod.lyricRegistry
-} catch {}
+import { logger } from '../utils.js'
 
 export default class LyricsManager {
   constructor(nodelink) {
@@ -22,29 +16,6 @@ export default class LyricsManager {
     const lyricsDir = path.join(__dirname, '../lyrics')
 
     this.lyricsSources.clear()
-
-    if (lyricRegistry && Object.keys(lyricRegistry).length > 0) {
-      await Promise.all(
-        Object.entries(lyricRegistry).map(async ([name, mod]) => {
-          if (!this.nodelink.options.lyrics?.[name]?.enabled) return
-
-          const Mod = mod.default || mod
-          const instance = new Mod(this.nodelink)
-
-          if (await instance.setup()) {
-            this.lyricsSources.set(name, instance)
-            logger('info', 'Lyrics', `Loaded lyrics source: ${name}`)
-          } else {
-            logger(
-              'error',
-              'Lyrics',
-              `Failed setup for lyrics source: ${name}; source not available.`
-            )
-          }
-        })
-      )
-      return
-    }
 
     try {
       await fs.access(lyricsDir)

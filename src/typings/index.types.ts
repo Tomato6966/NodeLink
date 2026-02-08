@@ -2,6 +2,7 @@ import type { EventEmitter } from 'node:events'
 import type * as http from 'node:http'
 import type WebSocketServer from '@performanc/pwsl-server'
 import type { ServerWebSocket } from 'bun'
+import type { ApiMiddlewareExtension, ApiRouteExtension } from './api.types.js'
 import type { NodelinkConfig } from './config.types.js'
 import type { ClientInfo } from './shared.types.js'
 
@@ -126,18 +127,6 @@ export type NodelinkServerType =
  * @public
  */
 export type NodelinkSocketType = EventEmitter | WebSocketServer | null
-
-/**
- * Registry information for Single Executable Application (SEA) builds
- * @public
- */
-export interface NodelinkRegistry {
-  [key: string]:
-    | string
-    | number
-    | boolean
-    | Record<string, string | number | boolean>
-}
 
 /**
  * Git repository information
@@ -423,41 +412,14 @@ export interface HttpResponse {
  * Custom HTTP route extension
  * @public
  */
-export interface RouteExtension {
-  /**
-   * HTTP method (GET, POST, etc.)
-   */
-  method: string
-
-  /**
-   * Route path pattern
-   */
-  path: string
-
-  /**
-   * Request handler function
-   * @param req - HTTP request object
-   * @param res - HTTP response object
-   */
-  handler: (req: HttpRequest, res: HttpResponse) => void | Promise<void>
-}
+export interface RouteExtension extends ApiRouteExtension {}
 
 /**
- * HTTP middleware extension
+ * HTTP middleware extension executed before route resolution.
+ * @remarks Returning true stops further processing.
  * @public
  */
-/**
- * Middleware handler function
- * @param req - HTTP request object
- * @param res - HTTP response object
- * @param next - Function to call next middleware
- * @public
- */
-export type MiddlewareExtension = (
-  req: HttpRequest,
-  res: HttpResponse,
-  next: () => void
-) => void | Promise<void>
+export type MiddlewareExtension = ApiMiddlewareExtension
 
 /**
  * Track data modifier function

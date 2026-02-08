@@ -90,7 +90,6 @@ export interface WorkerNodeLink extends NodeLink {
   routePlanner: RoutePlannerManagerLike
   connectionManager: ConnectionManagerLike
   pluginManager: PluginManagerLike
-  registry: unknown
   extensions: WorkerExtensions
   registerWorkerInterceptor: (fn: WorkerInterceptor) => void
   registerSource: (name: string, source: unknown) => void

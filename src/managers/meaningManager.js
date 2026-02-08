@@ -3,12 +3,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { logger } from '../utils.js'
 
-let meaningRegistry
-try {
-  const mod = await import('../registry.js')
-  meaningRegistry = mod.meaningRegistry
-} catch {}
-
 export default class MeaningManager {
   constructor(nodelink) {
     this.nodelink = nodelink
@@ -21,29 +15,6 @@ export default class MeaningManager {
     const meaningsDir = path.join(__dirname, '../meanings')
 
     this.meaningSources.clear()
-
-    if (meaningRegistry && Object.keys(meaningRegistry).length > 0) {
-      await Promise.all(
-        Object.entries(meaningRegistry).map(async ([name, mod]) => {
-          if (!this.nodelink.options.meanings?.[name]?.enabled) return
-
-          const Mod = mod.default || mod
-          const instance = new Mod(this.nodelink)
-
-          if (await instance.setup()) {
-            this.meaningSources.set(name, instance)
-            logger('info', 'Meaning', `Loaded meaning source: ${name}`)
-          } else {
-            logger(
-              'error',
-              'Meaning',
-              `Failed setup for meaning source: ${name}; source not available.`
-            )
-          }
-        })
-      )
-      return
-    }
 
     try {
       await fs.access(meaningsDir)

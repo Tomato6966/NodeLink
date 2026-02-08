@@ -3,12 +3,6 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { logger } from '../utils.js'
 
-let sourceRegistry
-try {
-  const mod = await import('../registry.js')
-  sourceRegistry = mod.sourceRegistry
-} catch {}
-
 export default class SourcesManager {
   constructor(nodelink) {
     this.nodelink = nodelink
@@ -78,32 +72,24 @@ export default class SourcesManager {
       }
     }
 
-    if (sourceRegistry && Object.keys(sourceRegistry).length > 0) {
-      await Promise.all(
-        Object.entries(sourceRegistry).map(([name, mod]) =>
-          processSource(name, mod)
-        )
+    try {
+      await fs.access(sourcesDir)
+      const files = await fs.readdir(sourcesDir, { recursive: true })
+      const jsFiles = files.filter(
+        (f) => f.endsWith('.js') && !f.includes('clients/')
       )
-    } else {
-      try {
-        await fs.access(sourcesDir)
-        const files = await fs.readdir(sourcesDir, { recursive: true })
-        const jsFiles = files.filter(
-          (f) => f.endsWith('.js') && !f.includes('clients/')
-        )
 
-        await Promise.all(
-          jsFiles.map(async (file) => {
-            const name = path.basename(file, '.js').toLowerCase()
-            const filePath = path.join(sourcesDir, file)
-            const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
-            const mod = await import(fileUrl)
-            await processSource(name, mod)
-          })
-        )
-      } catch (e) {
-        logger('error', 'Sources', `Error loading sources: ${e.message}`)
-      }
+      await Promise.all(
+        jsFiles.map(async (file) => {
+          const name = path.basename(file, '.js').toLowerCase()
+          const filePath = path.join(sourcesDir, file)
+          const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
+          const mod = await import(fileUrl)
+          await processSource(name, mod)
+        })
+      )
+    } catch (e) {
+      logger('error', 'Sources', `Error loading sources: ${e.message}`)
     }
 
     this.patternMap.sort((a, b) => b.priority - a.priority)

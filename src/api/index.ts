@@ -2,6 +2,17 @@ import fs from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PATH_VERSION } from '../constants.ts'
+import type {
+  ApiHeaders,
+  ApiHttpMethod,
+  ApiNodelinkServer,
+  ApiRequest,
+  ApiResponse,
+  ApiRouteCollection,
+  ApiRouteDefinition,
+  ApiRouteModule,
+  ApiRouteModuleEntry
+} from '../typings/api.types.ts'
 import {
   logger,
   sendErrorResponse,
@@ -9,44 +20,68 @@ import {
   verifyMethod
 } from '../utils.js'
 
-let apiRegistry
-try {
-  const mod = await import('../registry.js')
-  apiRegistry = mod.apiRegistry
-} catch {}
-
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-async function loadRoutes() {
-  const staticRoutes = new Map()
-  const dynamicRoutes = []
-  let routeModules = []
+const defaultMethods: ApiHttpMethod[] = ['GET']
 
-  if (apiRegistry) {
-    routeModules = Object.entries(apiRegistry).map(([file, mod]) => ({
-      file,
-      module: mod.default || mod
-    }))
+const getHeaderValue = (
+  value: string | string[] | undefined
+): string | undefined => (Array.isArray(value) ? value[0] : value)
+
+type RouteModuleImport = ApiRouteModule | { default?: ApiRouteModule }
+
+const resolveRouteModule = (module: RouteModuleImport): ApiRouteModule => {
+  if ('default' in module && module.default) {
+    return module.default
   }
+  return module as ApiRouteModule
+}
 
-  if (routeModules.length === 0) {
-    try {
-      const routeFiles = await fs.readdir(__dirname)
-      for (const file of routeFiles) {
-        if (file !== 'index.js' && file.endsWith('.js')) {
-          const filePath = join(__dirname, file)
-          const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
-          const routeModule = await import(fileUrl)
-          routeModules.push({ file, module: routeModule.default })
-        }
+const parseContentLength = (value: string | string[] | undefined): number => {
+  if (Array.isArray(value)) {
+    return Number.parseInt(value[0] ?? '', 10)
+  }
+  if (typeof value === 'string') {
+    return Number.parseInt(value, 10)
+  }
+  return Number.NaN
+}
+
+/**
+ * Loads and normalizes API route modules from the filesystem.
+ * @remarks Static routes are stored by pathname, while dynamic routes use RegExp
+ * matching to support parameterized paths like `/sessions/:id`.
+ * @example
+ * ```ts
+ * const { staticRoutes } = await loadRoutes()
+ * const route = staticRoutes.get('/v4/version')
+ * ```
+ * @internal
+ */
+async function loadRoutes(): Promise<ApiRouteCollection> {
+  const staticRoutes = new Map<string, ApiRouteDefinition>()
+  const dynamicRoutes: ApiRouteCollection['dynamicRoutes'] = []
+  const routeModules: ApiRouteModuleEntry[] = []
+
+  try {
+    const routeFiles = await fs.readdir(__dirname)
+    for (const file of routeFiles) {
+      if (file !== 'index.js' && file.endsWith('.js')) {
+        const filePath = join(__dirname, file)
+        const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
+        const routeModule = (await import(fileUrl.href)) as RouteModuleImport
+        routeModules.push({
+          file,
+          module: resolveRouteModule(routeModule)
+        })
       }
-    } catch {}
-  }
+    }
+  } catch {}
 
   for (const { file, module } of routeModules) {
     const routeName = file.replace('.js', '').toLowerCase()
-    let pathname
+    let pathname: string | RegExp
 
     if (routeName === 'version') {
       pathname = '/version'
@@ -62,9 +97,9 @@ async function loadRoutes() {
       pathname = `/${PATH_VERSION}/${routeName}`
     }
 
-    const routeData = {
+    const routeData: ApiRouteDefinition = {
       handler: module.handler,
-      methods: module.methods || ['GET']
+      methods: module.methods ?? defaultMethods
     }
 
     if (pathname instanceof RegExp) {
@@ -81,7 +116,25 @@ async function loadRoutes() {
 
 const routesPromise = loadRoutes()
 
-async function requestHandler(nodelink, req, res) {
+/**
+ * Main HTTP request handler for the NodeLink REST API.
+ * @param nodelink - NodeLink server instance.
+ * @param req - Incoming request (Node.js or Bun shim).
+ * @param res - Response object (Node.js or Bun shim).
+ * @example
+ * ```ts
+ * import http from 'node:http'
+ * import RequestHandler from './api/index.js'
+ *
+ * http.createServer((req, res) => RequestHandler(nodelink, req, res))
+ * ```
+ * @public
+ */
+async function requestHandler(
+  nodelink: ApiNodelinkServer,
+  req: ApiRequest,
+  res: ApiResponse
+): Promise<void> {
   const originalWriteHead = res.writeHead
   res.writeHead = (status, headers) => {
     res.setHeader('Nodelink-Api-Version', '4')
@@ -91,7 +144,13 @@ async function requestHandler(nodelink, req, res) {
   }
 
   const startTime = Date.now()
-  const parsedUrl = new URL(req.url, `http://${req.headers.host}`)
+  const requestUrl = req.url ?? '/'
+  const headerAccess = req.headers as ApiHeaders & {
+    host?: string | string[]
+    authorization?: string | string[]
+  }
+  const hostHeader = getHeaderValue(headerAccess.host)
+  const parsedUrl = new URL(requestUrl, `http://${hostHeader ?? 'localhost'}`)
 
   const middlewares = nodelink.extensions?.middlewares
   if (middlewares && Array.isArray(middlewares)) {
@@ -103,12 +162,13 @@ async function requestHandler(nodelink, req, res) {
 
   nodelink.statsManager.incrementApiRequest(parsedUrl.pathname)
   const trace = parsedUrl.searchParams.get('trace') === 'true'
-  const remoteAddress = req.socket.remoteAddress
+  const remoteAddress = req.socket?.remoteAddress ?? 'unknown'
+  const remotePort = req.socket?.remotePort
   const isInternal = ['127.0.0.1', '::1', 'localhost'].includes(remoteAddress)
-  const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${req.socket.remotePort})`
+  const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort ?? 'unknown'})`
 
-  const originalEnd = res.end
-  res.end = (...args) => {
+  const originalEnd = res.end.bind(res)
+  res.end = (...args: Parameters<ApiResponse['end']>) => {
     const duration = Date.now() - startTime
     nodelink.statsManager.recordHttpRequestDuration(
       parsedUrl.pathname,
@@ -116,7 +176,7 @@ async function requestHandler(nodelink, req, res) {
       res.statusCode,
       duration
     )
-    originalEnd.apply(res, args)
+    originalEnd(...args)
   }
 
   const isMetricsEndpoint = parsedUrl.pathname === `/${PATH_VERSION}/metrics`
@@ -135,7 +195,7 @@ async function requestHandler(nodelink, req, res) {
 
     const authConfig = metricsConfig.authorization || {}
     let authType = authConfig.type
-    if (!['Bearer', 'Basic'].includes(authType)) {
+    if (authType !== 'Bearer' && authType !== 'Basic') {
       logger(
         'warn',
         `Config: metrics authorization.type SHOULD BE one of 'Bearer', 'Basic'.... Defaulting to 'Bearer'!`
@@ -143,31 +203,36 @@ async function requestHandler(nodelink, req, res) {
       authType = 'Bearer'
     }
 
-    const metricsUsername = authConfig.username || 'admin' 
+    const metricsUsername = authConfig.username || 'admin'
     const metricsPassword =
       authConfig.password || nodelink.options.server.password
 
-    const authHeader = req.headers?.authorization
+    const authHeader = getHeaderValue(headerAccess.authorization)
     const isValidAuth =
       authHeader === metricsPassword ||
       (authType === 'Bearer' && authHeader === `Bearer ${metricsPassword}`) ||
-      (authType === 'Basic' && (() => {
-        try {
-          // 1. Decode the "user:pass" string
-          const decoded = Buffer.from(authHeader.slice(6), 'base64').toString('utf8')
-          
-          // 2. Split by the first colon (passwords can contain colons!)
-          const colonIndex = decoded.indexOf(':')
-          if (colonIndex === -1) return false // Invalid format
-          
-          const user = decoded.slice(0, colonIndex)
-          const pass = decoded.slice(colonIndex + 1)
-          
-          return user === metricsUsername && pass === metricsPassword  //verify both
-        } catch {
-          return false
-        }
-      })())
+      (authType === 'Basic' &&
+        typeof authHeader === 'string' &&
+        authHeader.startsWith('Basic ') &&
+        (() => {
+          try {
+            // 1. Decode the "user:pass" string
+            const decoded = Buffer.from(authHeader.slice(6), 'base64').toString(
+              'utf8'
+            )
+
+            // 2. Split by the first colon (passwords can contain colons!)
+            const colonIndex = decoded.indexOf(':')
+            if (colonIndex === -1) return false // Invalid format
+
+            const user = decoded.slice(0, colonIndex)
+            const pass = decoded.slice(colonIndex + 1)
+
+            return user === metricsUsername && pass === metricsPassword // verify both
+          } catch {
+            return false
+          }
+        })())
 
     if (!isValidAuth) {
       logger(
@@ -208,7 +273,11 @@ async function requestHandler(nodelink, req, res) {
   }
 
   const rateLimitCheck = nodelink.rateLimitManager.check(req, parsedUrl)
-  if (rateLimitCheck.limit !== undefined) {
+  if (
+    rateLimitCheck.limit !== undefined &&
+    rateLimitCheck.remaining !== undefined &&
+    rateLimitCheck.reset !== undefined
+  ) {
     res.setHeader('X-RateLimit-Limit', rateLimitCheck.limit)
     res.setHeader('X-RateLimit-Remaining', rateLimitCheck.remaining)
     res.setHeader('X-RateLimit-Reset', Math.ceil(rateLimitCheck.reset / 1000))
@@ -225,7 +294,8 @@ async function requestHandler(nodelink, req, res) {
       remoteAddress
     )
 
-    const retryAfter = Math.ceil((rateLimitCheck.reset - Date.now()) / 1000)
+    const resetTime = rateLimitCheck.reset ?? Date.now()
+    const retryAfter = Math.ceil((resetTime - Date.now()) / 1000)
     res.setHeader('Retry-After', retryAfter)
 
     sendErrorResponse(
@@ -241,7 +311,7 @@ async function requestHandler(nodelink, req, res) {
   }
 
   if (!isMetricsEndpoint) {
-    const authHeader = req.headers?.authorization
+    const authHeader = getHeaderValue(headerAccess.authorization)
     if (
       !authHeader ||
       (authHeader !== nodelink.options.server.password &&
@@ -262,9 +332,10 @@ async function requestHandler(nodelink, req, res) {
   const MAX_BODY_SIZE = nodelink.options.server?.maxBodySize || 10 * 1024 * 1024
 
   let body = ''
+  let parsedBody: unknown = body
   if (req.method !== 'GET') {
-    const contentLength = parseInt(req.headers['content-length'])
-    if (!isNaN(contentLength) && contentLength > MAX_BODY_SIZE) {
+    const contentLength = parseContentLength(headerAccess['content-length'])
+    if (!Number.isNaN(contentLength) && contentLength > MAX_BODY_SIZE) {
       logger(
         'warn',
         'Server',
@@ -279,14 +350,19 @@ async function requestHandler(nodelink, req, res) {
         parsedUrl.pathname,
         trace
       )
-      req.destroy()
+      req.destroy?.()
       return
     }
 
-    await new Promise((resolve) => {
+    await new Promise<void>((resolve) => {
+      if (typeof req.on !== 'function') {
+        resolve()
+        return
+      }
+
       let receivedSize = 0
 
-      const onData = (chunk) => {
+      const onData = (chunk: Buffer) => {
         receivedSize += chunk.length
         if (receivedSize > MAX_BODY_SIZE) {
           logger(
@@ -294,8 +370,8 @@ async function requestHandler(nodelink, req, res) {
             'Server',
             `Request rejected: Body size exceeded limit of ${MAX_BODY_SIZE}`
           )
-          req.removeListener('data', onData)
-          req.removeListener('end', onEnd)
+          req.removeListener?.('data', onData)
+          req.removeListener?.('end', onEnd)
           sendErrorResponse(
             req,
             res,
@@ -305,7 +381,7 @@ async function requestHandler(nodelink, req, res) {
             parsedUrl.pathname,
             trace
           )
-          req.destroy()
+          req.destroy?.()
           resolve()
         }
         body += chunk.toString()
@@ -313,24 +389,28 @@ async function requestHandler(nodelink, req, res) {
 
       const onEnd = () => {
         try {
-          if (
-            req.headers['content-type']?.includes('application/json') &&
-            body
-          ) {
-            body = JSON.parse(body)
+          const contentType = getHeaderValue(headerAccess['content-type'])
+          if (contentType?.includes('application/json') && body) {
+            parsedBody = JSON.parse(body)
           }
         } catch (error) {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error)
           logger(
             'error',
             'Server',
-            `Failed to parse JSON body: ${error.message}. Path: ${parsedUrl.pathname}, Content-Type: ${req.headers['content-type'] || 'N/A'}, Raw Body: '${body}', Headers: ${JSON.stringify(req.headers)}`
+            `Failed to parse JSON body: ${errorMessage}. Path: ${
+              parsedUrl.pathname
+            }, Content-Type: ${
+              getHeaderValue(headerAccess['content-type']) || 'N/A'
+            }, Raw Body: '${body}', Headers: ${JSON.stringify(req.headers)}`
           )
           sendErrorResponse(
             req,
             res,
             400,
             'Invalid JSON',
-            error.message || 'Failed to parse JSON body',
+            errorMessage || 'Failed to parse JSON body',
             parsedUrl.pathname,
             trace
           )
@@ -343,15 +423,19 @@ async function requestHandler(nodelink, req, res) {
       req.on('end', onEnd)
     })
   }
-  req.body = body
+  req.body = parsedBody
 
-  req.headers.authorization = '[REDACTED]'
-  req.headers.host = '[REDACTED]'
+  headerAccess.authorization = '[REDACTED]'
+  headerAccess.host = '[REDACTED]'
   if (!isMetricsEndpoint) {
     logger(
       'info',
       'Request',
-      `${req.method} | ${clientAddress} [${req.headers['user-agent']}] - ${parsedUrl.pathname} ${JSON.stringify(req.headers)}${req.body ? `\nBody: ${JSON.stringify(req.body)}` : ''}`
+      `${req.method} | ${clientAddress} [${getHeaderValue(
+        headerAccess['user-agent']
+      )}] - ${parsedUrl.pathname} ${JSON.stringify(req.headers)}${
+        req.body ? `\nBody: ${JSON.stringify(req.body)}` : ''
+      }`
     )
   }
 
@@ -384,7 +468,7 @@ async function requestHandler(nodelink, req, res) {
           parsedUrl,
           req,
           res,
-          customRoute.method ? [customRoute.method] : ['GET'],
+          customRoute.method ? [customRoute.method] : defaultMethods,
           clientAddress,
           trace
         )

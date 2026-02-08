@@ -318,7 +318,6 @@ const nodelink: WorkerNodeLink = {
   routePlanner: null as unknown as RoutePlannerManagerLike,
   connectionManager: null as unknown as ConnectionManager,
   pluginManager: null as unknown as PluginManager,
-  registry: null,
   extensions: {
     workerInterceptors: [],
     audioInterceptors: []
@@ -375,16 +374,6 @@ nodelink.routePlanner = new RoutePlannerManager(
 ) as RoutePlannerManagerLike
 nodelink.connectionManager = new ConnectionManager(nodelink)
 nodelink.pluginManager = new PluginManager(nodelink)
-nodelink.registry = null
-if (process.embedder === 'nodejs') {
-  try {
-    // biome-ignore lint/suspicious/noTsIgnore: registry.js is generated only in SEA builds
-    // @ts-ignore - registry.js is generated only in SEA builds
-    nodelink.registry = await import('../registry.js')
-  } catch (e: unknown) {
-    logger('error', 'Worker', `Failed to load registry: ${getErrorMessage(e)}`)
-  }
-}
 
 function setEfficiencyMode(enabled: boolean): void {
   try {
