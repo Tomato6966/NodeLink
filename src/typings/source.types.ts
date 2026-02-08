@@ -11,6 +11,11 @@ import type {
   CredentialManagerStats
 } from './credential.types.ts'
 import type { TrackInfoExtended } from './player.types.ts'
+import type {
+  StatsMetricsPayload,
+  StatsSnapshot,
+  WorkerMetricsPayload
+} from './stats.types.ts'
 import type { TrackCacheEntry } from './trackCache.types.ts'
 
 /**
@@ -541,6 +546,82 @@ export interface TrackCacheManager {
 export interface StatsManager {
   /** Initialize stats manager */
   initialize?: () => Promise<void>
+  /** Returns a snapshot of in-memory counters */
+  getSnapshot?: () => StatsSnapshot
+  /** Increments API request counters */
+  incrementApiRequest?: (endpoint: string) => void
+  /** Increments API error counters */
+  incrementApiError?: (endpoint: string) => void
+  /** Increments source success counters */
+  incrementSourceSuccess?: (source: string) => void
+  /** Increments source failure counters */
+  incrementSourceFailure?: (source: string) => void
+  /** Increments playback event counters */
+  incrementPlaybackEvent?: (eventType: string) => void
+  /** Updates stats gauges from aggregated payloads */
+  updateStatsMetrics?: (
+    statsData: StatsMetricsPayload,
+    workerMetrics?: WorkerMetricsPayload | null
+  ) => void
+  /** Updates active voice connection count */
+  setVoiceConnections?: (count: number) => void
+  /** Updates active websocket connection count */
+  setWebsocketConnections?: (count: number) => void
+  /** Increments websocket message counters */
+  incrementWebsocketMessage?: (direction: string, opType: string) => void
+  /** Increments session resume counters */
+  incrementSessionResume?: (clientName: string, success: boolean) => void
+  /** Updates route planner IP counters */
+  setRoutePlannerIps?: (available: number, banned: number) => void
+  /** Records HTTP request durations */
+  recordHttpRequestDuration?: (
+    endpoint: string,
+    method: string | undefined,
+    statusCode: number | undefined,
+    durationMs: number
+  ) => void
+  /** Increments rate limit hit counters */
+  incrementRateLimitHit?: (endpoint: string, ip?: string) => void
+  /** Increments DoS protection block counters */
+  incrementDosProtectionBlock?: (
+    ip: string | undefined,
+    reason?: string
+  ) => void
+  /** Increments worker restart counters */
+  incrementWorkerRestart?: (workerId: number | string) => void
+  /** Increments worker failure counters */
+  incrementWorkerFailure?: (
+    workerId: number | string,
+    exitCode?: number | string
+  ) => void
+  /** Records command execution times */
+  recordCommandExecutionTime?: (
+    commandType: string,
+    workerId: number | string,
+    durationMs: number
+  ) => void
+  /** Increments command timeout counters */
+  incrementCommandTimeout?: (commandType: string) => void
+  /** Increments command retry counters */
+  incrementCommandRetry?: (commandType: string) => void
+  /** Increments player restoration counters */
+  incrementPlayerRestoration?: (workerId: number | string) => void
+  /** Increments player destruction counters */
+  incrementPlayerDestruction?: (sessionId: string, reason?: string) => void
+  /** Increments track load counters */
+  incrementTrackLoad?: (source: string, status: string) => void
+  /** Records track load duration */
+  recordTrackLoadDuration?: (source: string, durationMs: number) => void
+  /** Increments stream error counters */
+  incrementStreamError?: (errorType: string, source: string) => void
+  /** Increments player stuck counters */
+  incrementPlayerStuck?: (guildId: string, reason: string) => void
+  /** Increments voice connection error counters */
+  incrementVoiceConnectionError?: (errorType: string) => void
+  /** Increments lyrics request counters */
+  incrementLyricsRequest?: (provider: string, status: string) => void
+  /** Increments filter usage counters */
+  incrementFilterUsage?: (filterType: string) => void
   /** Manager instance properties */
   [key: string]: unknown
 }

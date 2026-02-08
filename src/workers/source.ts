@@ -386,7 +386,7 @@ if (isMainThread) {
     import('../managers/credentialManager.ts'),
     import('../managers/trackCacheManager.ts'),
     import('../managers/routePlannerManager.js'),
-    import('../managers/statsManager.js')
+    import('../managers/statsManager.ts')
   ])
 
   nodelink.statsManager = new StatsManager(
