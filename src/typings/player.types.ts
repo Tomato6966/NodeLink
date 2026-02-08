@@ -7,7 +7,7 @@ import type { TrackStreamResult, TrackUrlResult } from './source.types.ts'
  */
 export interface FiltersState {
   filters?: Record<string, unknown> & {
-    timescale?: { speed?: number; rate?: number }
+    timescale?: { speed?: number; pitch?: number; rate?: number }
   }
 }
 
