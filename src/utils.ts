@@ -1,3 +1,4 @@
+// biome-ignore assist/source/organizeImports: <no need to organize imports>
 import { execSync } from 'node:child_process'
 import * as crypto from 'node:crypto'
 import * as fs from 'node:fs'
@@ -23,7 +24,7 @@ import {
 
 import type { ApiHttpMethod, ApiRequest, ApiResponse, ApiSendResponse } from './typings/api.types.js'
 import type { ClientInfo } from './typings/shared.types.js'
-import type { GitInfo, NodelinkServer, NodelinkServerType } from './typings/index.types.js'
+import type { GitInfo, NodelinkServer } from './typings/index.types.js'
 
 /**
  * Log level type
@@ -49,17 +50,21 @@ interface LoggingConfig {
 let ProxyAgent: typeof import('proxy-agent').ProxyAgent | undefined
 try {
     const mod = await import('proxy-agent')
+    // biome-ignore lint/suspicious/noExplicitAny: Dynamic import of optional dependency
     ProxyAgent = (mod as any).ProxyAgent || (mod as any).default
 } catch { }
 
 let loggingConfig: LoggingConfig = {}
-const logLevels: Record<string, number> = {
+const logLevels = {
     debug: 0,
     info: 1,
     warn: 2,
     error: 3
 } as const
-let currentLogLevel: number = logLevels['info']!
+
+type LogLevelKey = keyof typeof logLevels
+
+let currentLogLevel: number = logLevels.info ?? 1
 let logStream: fs.WriteStream | null = null
 let gitInfoCache: GitInfo | null = null
 let currentLogFile: string | null = null
@@ -191,7 +196,8 @@ function initFileLogger(): void {
  */
 export function initLogger(config: { logging?: LoggingConfig }): void {
     loggingConfig = config.logging || {}
-    currentLogLevel = logLevels[loggingConfig.level || 'info'] || logLevels['info']!
+    const level = loggingConfig.level || 'info'
+    currentLogLevel = logLevels[level as LogLevelKey] ?? logLevels.info ?? 1
     initFileLogger()
 }
 
@@ -204,7 +210,7 @@ export function logger(level: LogLevel, ...args: any[]): void {
         level === 'sources' || level === 'started' || level === 'network'
             ? 'info'
             : level
-    const levelIndex = logLevels[effectiveLevel]
+    const levelIndex = logLevels[effectiveLevel as LogLevelKey]
 
     if (levelIndex === undefined || levelIndex < currentLogLevel) return
 
@@ -333,6 +339,7 @@ export function parseSemver(version: string): SemverObject | null {
  */
 export function getVersion(type: 'string'): string
 export function getVersion(type: 'object'): SemverObject | null
+export function getVersion(): string
 export function getVersion(type: 'string' | 'object' = 'string'): string | SemverObject | null {
     if (type === 'object') {
         return parseSemver(packageJson.version)
@@ -634,7 +641,7 @@ export function decodeTrack(encoded: string): any {
         let i = pRef.value
 
         while (i < end) {
-            const c = buf[i]! & 0xff
+            const c = (buf[i] ?? 0) & 0xff
 
             if (c < 0x80) {
                 i += 1
@@ -644,7 +651,7 @@ export function decodeTrack(encoded: string): any {
 
             if ((c & 0xe0) === 0xc0) {
                 if (i + 1 >= end) throw new Error('Malformed utf')
-                const c2 = buf[i + 1]! & 0xff
+                const c2 = (buf[i + 1] ?? 0) & 0xff
                 if ((c2 & 0xc0) !== 0x80) throw new Error('Malformed utf')
                 const ch = ((c & 0x1f) << 6) | (c2 & 0x3f)
                 i += 2
@@ -654,8 +661,8 @@ export function decodeTrack(encoded: string): any {
 
             if ((c & 0xf0) === 0xe0) {
                 if (i + 2 >= end) throw new Error('Malformed utf')
-                const c2 = buf[i + 1]! & 0xff
-                const c3 = buf[i + 2]! & 0xff
+                const c2 = (buf[i + 1] ?? 0) & 0xff
+                const c3 = (buf[i + 2] ?? 0) & 0xff
                 if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80)
                     throw new Error('Malformed utf')
                 const ch = ((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f)
@@ -674,7 +681,7 @@ export function decodeTrack(encoded: string): any {
     const readNullableTextFrom = (buf: Buffer, pRef: { value: number }): string | null => {
         if (pRef.value + 1 > buf.length)
             throw new Error('Unexpected end of buffer (need 1 byte)')
-        const present = buf[pRef.value++]! !== 0
+        const present = (buf[pRef.value++] ?? 0) !== 0
         return present ? readModifiedUTF8From(buf, pRef) : null
     }
 
@@ -696,7 +703,7 @@ export function decodeTrack(encoded: string): any {
             let i = p
 
             while (i < end) {
-                const c = detailsBuf[i]! & 0xff
+                const c = (detailsBuf[i] ?? 0) & 0xff
 
                 if (c < 0x80) {
                     i += 1
@@ -706,7 +713,7 @@ export function decodeTrack(encoded: string): any {
 
                 if ((c & 0xe0) === 0xc0) {
                     if (i + 1 >= end) throw new Error('Malformed utf')
-                    const c2 = detailsBuf[i + 1]! & 0xff
+                    const c2 = (detailsBuf[i + 1] ?? 0) & 0xff
                     if ((c2 & 0xc0) !== 0x80) throw new Error('Malformed utf')
                     const ch = ((c & 0x1f) << 6) | (c2 & 0x3f)
                     i += 2
@@ -716,8 +723,8 @@ export function decodeTrack(encoded: string): any {
 
                 if ((c & 0xf0) === 0xe0) {
                     if (i + 2 >= end) throw new Error('Malformed utf')
-                    const c2 = detailsBuf[i + 1]! & 0xff
-                    const c3 = detailsBuf[i + 2]! & 0xff
+                    const c2 = (detailsBuf[i + 1] ?? 0) & 0xff
+                    const c3 = (detailsBuf[i + 2] ?? 0) & 0xff
                     if ((c2 & 0xc0) !== 0x80 || (c3 & 0xc0) !== 0x80)
                         throw new Error('Malformed utf')
                     const ch = ((c & 0x0f) << 12) | ((c2 & 0x3f) << 6) | (c3 & 0x3f)
@@ -735,7 +742,7 @@ export function decodeTrack(encoded: string): any {
 
         const readNullable2 = (): string | null => {
             ensure2(1)
-            const present = detailsBuf[p++]! !== 0
+            const present = (detailsBuf[p++] ?? 0) !== 0
             return present ? readUTF2() : null
         }
 
@@ -749,7 +756,7 @@ export function decodeTrack(encoded: string): any {
         let p = 0
         try {
             if (buf.length < 1) return { ok: false }
-            const present = buf[p++]! !== 0
+            const present = (buf[p++] ?? 0) !== 0
             if (!present) return { ok: false }
             const pRef = { value: p }
             const s = readModifiedUTF8From(buf, pRef)
@@ -796,7 +803,7 @@ export function decodeTrack(encoded: string): any {
 
         if (pRef.value + 1 > messageBuf.length)
             throw new Error('Unexpected end of message (need 1 byte)')
-        const version = messageBuf[pRef.value++]! & 0xff
+        const version = (messageBuf[pRef.value++] ?? 0) & 0xff
 
         const title = readModifiedUTF8From(messageBuf, pRef)
         const author = readModifiedUTF8From(messageBuf, pRef)
@@ -810,7 +817,7 @@ export function decodeTrack(encoded: string): any {
 
         if (pRef.value + 1 > messageBuf.length)
             throw new Error('Unexpected end of message (need 1 byte)')
-        const isStream = messageBuf[pRef.value++]! !== 0
+        const isStream = (messageBuf[pRef.value++] ?? 0) !== 0
 
         const uri = version >= 2 ? readNullableTextFrom(messageBuf, pRef) : null
         const artworkUrl =
@@ -980,7 +987,7 @@ export function parseClient(agent: string | undefined | null): ClientInfo | null
 
     const info: ClientInfo = { name }
     if (version) info.version = version
-    if (metaPart && metaPart.startsWith('(') && metaPart.endsWith(')')) {
+    if (metaPart?.startsWith('(') && metaPart.endsWith(')')) {
         const meta = metaPart.slice(1, -1)
         if (meta.startsWith('http')) {
             info.url = meta
@@ -1134,10 +1141,10 @@ async function _internalHttp1Request(urlString: string, options: HttpRequestOpti
         const req = lib.request(reqOptions, (res) => {
             const { statusCode, headers: respHeaders } = res
 
-            if ((REDIRECT_STATUS_CODES as ReadonlyArray<number>).includes(statusCode!) && respHeaders.location) {
+            if ((REDIRECT_STATUS_CODES as ReadonlyArray<number>).includes(statusCode ?? 0) && respHeaders.location) {
                 res.resume()
                 const nextUrl = new URL(respHeaders.location, currentUrl).href
-                const isGetRedirect = [301, 302, 303].includes(statusCode!)
+                const isGetRedirect = [301, 302, 303].includes(statusCode ?? 0)
                 let nextMethod = method
                 let nextBody = body
                 if (method === 'HEAD') {
@@ -1190,7 +1197,7 @@ async function _internalHttp1Request(urlString: string, options: HttpRequestOpti
             }
 
             if (streamOnly) {
-                resolve({ statusCode: statusCode!, headers: respHeaders, stream: finalStream })
+                resolve({ statusCode: statusCode ?? 500, headers: respHeaders, stream: finalStream })
                 return
             }
 
@@ -1201,7 +1208,7 @@ async function _internalHttp1Request(urlString: string, options: HttpRequestOpti
                     const responseBuffer = Buffer.concat(chunks)
 
                     if (options.responseType === 'buffer') {
-                        resolve({ statusCode: statusCode!, headers: respHeaders, body: responseBuffer })
+                        resolve({ statusCode: statusCode ?? 500, headers: respHeaders, body: responseBuffer })
                         return
                     }
 
@@ -1210,7 +1217,7 @@ async function _internalHttp1Request(urlString: string, options: HttpRequestOpti
                         .toLowerCase()
                         .startsWith('application/json')
                     const responseBody = isJson && text ? JSON.parse(text) : text
-                    resolve({ statusCode: statusCode!, headers: respHeaders, body: responseBody })
+                    resolve({ statusCode: statusCode ?? 500, headers: respHeaders, body: responseBody })
                 } catch (err: any) {
                     reject(
                         new Error(
@@ -1447,14 +1454,14 @@ export async function makeRequest(urlString: string, options: HttpRequestOptions
 
                 if (method === 'HEAD') {
                     closeSessionGracefully()
-                    return resolve({ statusCode: statusCode!, headers })
+                    return resolve({ statusCode: statusCode ?? 500, headers })
                 }
 
                 if (streamOnly) {
                     responseStream.on('end', closeSessionGracefully)
                     responseStream.on('error', closeSessionGracefully)
                     responseStream.on('close', closeSessionGracefully)
-                    return resolve({ statusCode: statusCode!, headers, stream: responseStream })
+                    return resolve({ statusCode: statusCode ?? 500, headers, stream: responseStream })
                 }
 
                 try {
@@ -1484,12 +1491,12 @@ export async function makeRequest(urlString: string, options: HttpRequestOptions
                     }
 
                     resolve({
-                        statusCode: statusCode!,
+                        statusCode: statusCode ?? 500,
                         headers,
                         body: responseBody
                     })
                 } catch (err: any) {
-                    resolve({ statusCode: statusCode!, headers, error: err.message })
+                    resolve({ statusCode: statusCode ?? 500, headers, error: err.message })
                 } finally {
                     if (!streamOnly) closeSessionGracefully()
                 }
@@ -1545,7 +1552,7 @@ export async function http1makeRequest(urlString: string, options: HttpRequestOp
             let agent = options.agent
 
             if (!agent) {
-                if (proxy && proxy.url) {
+                if (proxy?.url) {
                     if (ProxyAgent) {
                         const proxyUrl = new URL(proxy.url)
                         if (proxy.username && proxy.password) {
@@ -1602,7 +1609,6 @@ export async function http1makeRequest(urlString: string, options: HttpRequestOp
  * @public
  */
 export async function loadHLS(url: string, stream: any, _onceEnded = false, shouldEnd = true): Promise<boolean> {
-    // biome-ignore lint: no-promise-executor-return
     return new Promise(async (resolve) => {
         try {
             const writeAndWait = async (chunk: Buffer) => {
@@ -1665,8 +1671,8 @@ export async function loadHLS(url: string, stream: any, _onceEnded = false, shou
             const mapTag = lines.find((l) => l.startsWith('#EXT-X-MAP:'))
             if (mapTag) {
                 const mapUriMatch = mapTag.match(/URI="([^"]+)"/)
-                if (mapUriMatch) {
-                    const initUrl = new URL(mapUriMatch[1]!, base).toString()
+                if (mapUriMatch?.[1]) {
+                    const initUrl = new URL(mapUriMatch[1], base).toString()
                     const initRes = await http1makeRequest(initUrl, {
                         method: 'GET',
                         responseType: 'buffer'
@@ -1689,20 +1695,20 @@ export async function loadHLS(url: string, stream: any, _onceEnded = false, shou
             let sawEnd = false
 
             for (let i = 0; i < lines.length; i++) {
-                if (lines[i]!.startsWith('#EXTINF')) {
+                if (lines[i]?.startsWith('#EXTINF')) {
                     const uri = lines[i + 1]
                     if (uri && !uri.startsWith('#')) {
                         segs.push(new URL(uri, base).toString())
                     }
                 }
-                if (lines[i]!.startsWith('#EXT-X-ENDLIST')) sawEnd = true
+                if (lines[i]?.startsWith('#EXT-X-ENDLIST')) sawEnd = true
             }
 
             for (let i = 0; i < segs.length; i++) {
                 if (stream.destroyed) break
 
                 try {
-                    const s = await http1makeRequest(segs[i]!, {
+                    const s = await http1makeRequest(segs[i] ?? '', {
                         method: 'GET',
                         streamOnly: true
                     })
@@ -1809,9 +1815,9 @@ export async function loadHLSPlaylist(url: string, stream: any): Promise<any> {
         if (audioTags.length) {
             const defaultTag = audioTags.find((l) => /DEFAULT=YES/.test(l))
             const pickTag = defaultTag || audioTags[audioTags.length - 1]
-            const uriMatch = pickTag!.match(/URI="([^"]+)"/)
-            if (uriMatch && uriMatch[1]) {
-                const audioUrl = new URL(uriMatch[1]!, url).toString()
+            const uriMatch = pickTag?.match(/URI="([^"]+)"/)
+            if (uriMatch?.[1]) {
+                const audioUrl = new URL(uriMatch[1], url).toString()
                 return loadHLS(audioUrl, stream, false, true)
             }
         }

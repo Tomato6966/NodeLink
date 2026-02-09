@@ -71,7 +71,6 @@ import { createVoiceRelay } from './voice/voiceRelay.js'
 let config: NodelinkConfig
 
 try {
-  // @ts-ignore - config.js is expected to not be found for fresh copies.
   config = (await import('../config.js')).default as unknown as NodelinkConfig
 } catch (e) {
   const error = e as ConfigLoadError
@@ -110,7 +109,8 @@ if (process.env['CLUSTER_WORKERS'])
 else if (typeof config.cluster?.workers === 'number')
   _configuredWorkers = config.cluster.workers
 
-initLogger(config)
+// biome-ignore lint/suspicious/noExplicitAny: Config type alignment
+initLogger(config as any)
 
 const isBun = typeof Bun !== 'undefined'
 
@@ -1369,7 +1369,10 @@ class NodelinkServer extends EventEmitter {
             'Invalid password provided.'
           )
         }
-        const clientInfo = parseClient(headers['client-name']) as {
+        const clientNameHeader = headers['client-name']
+        const clientInfo = parseClient(
+          Array.isArray(clientNameHeader) ? clientNameHeader[0] : clientNameHeader
+        ) as {
           name: string
           version: string | undefined
         }
@@ -1421,7 +1424,9 @@ class NodelinkServer extends EventEmitter {
               'User-Id header is missing.'
             )
           }
-          if (!verifyDiscordID(headers['user-id'])) {
+          const userIdHeader = headers['user-id']
+          const userId = Array.isArray(userIdHeader) ? userIdHeader[0] : userIdHeader
+          if (!userId || !verifyDiscordID(userId)) {
             logger(
               'warn',
               'Server',
