@@ -8,7 +8,7 @@ import type {
   WebmTrackInfo
 } from '../../typings/demuxer.types.ts'
 import { logger } from '../../utils.js'
-import { RingBuffer } from '../structs/RingBuffer.js'
+import { RingBuffer } from '../structs/RingBuffer.ts'
 
 const TOO_SHORT: unique symbol = Symbol('TOO_SHORT')
 const INVALID_VINT: unique symbol = Symbol('INVALID_VINT')
@@ -38,17 +38,17 @@ type VintLengthResult = number | typeof TOO_SHORT | typeof INVALID_VINT
 type VintResult = bigint | typeof TOO_SHORT
 type EbmlIdResult =
   | {
-      id: Buffer
-      offset: number
-    }
+    id: Buffer
+    offset: number
+  }
   | typeof TOO_SHORT
   | typeof INVALID_VINT
 type TagSizeResult =
   | {
-      offset: number
-      dataLen: bigint
-      vintLen: number
-    }
+    offset: number
+    dataLen: bigint
+    vintLen: number
+  }
   | typeof TOO_SHORT
   | typeof INVALID_VINT
 type TagReadResult = WebmTagReadResult | typeof TOO_SHORT
@@ -324,7 +324,7 @@ abstract class WebmBaseDemuxer extends Transform {
       try {
         this._checkHead(data)
         this.emit('head', data)
-      } catch (_e) {}
+      } catch (_e) { }
     } else if (tag === 'a3') {
       const firstByte = data[0]
       if (

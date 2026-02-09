@@ -4,6 +4,10 @@ const MAX_POOL_SIZE_BYTES = 50 * 1024 * 1024
 const CLEANUP_INTERVAL = 60000
 
 class BufferPool {
+  private pools: Map<number, Buffer[]>
+  private totalBytes: number
+  private cleanupInterval: NodeJS.Timeout
+
   constructor() {
     this.pools = new Map()
     this.totalBytes = 0
@@ -12,7 +16,7 @@ class BufferPool {
     this.cleanupInterval.unref()
   }
 
-  _getAlignedSize(size) {
+  private _getAlignedSize(size: number): number {
     if (size <= 1024) return 1024
     let n = size - 1
     n |= n >> 1
@@ -23,18 +27,18 @@ class BufferPool {
     return n + 1
   }
 
-  acquire(size) {
+  public acquire(size: number): Buffer {
     const alignedSize = this._getAlignedSize(size)
     const pool = this.pools.get(alignedSize)
     if (pool && pool.length > 0) {
-      const buffer = pool.pop()
+      const buffer = pool.pop()!
       this.totalBytes -= alignedSize
       return buffer
     }
     return Buffer.allocUnsafe(alignedSize)
   }
 
-  release(buffer) {
+  public release(buffer: Buffer): void {
     if (!Buffer.isBuffer(buffer)) return
 
     const size = buffer.length
@@ -45,20 +49,22 @@ class BufferPool {
       return
     }
 
-    if (!this.pools.has(size)) {
-      this.pools.set(size, [])
+    let pool = this.pools.get(size)
+    if (!pool) {
+      pool = []
+      this.pools.set(size, pool)
     }
 
-    this.pools.get(size).push(buffer)
+    pool.push(buffer)
     this.totalBytes += size
   }
 
-  clear() {
+  public clear(): void {
     this.pools.clear()
     this.totalBytes = 0
   }
 
-  _cleanup() {
+  private _cleanup(): void {
     if (this.totalBytes > MAX_POOL_SIZE_BYTES) {
       this.pools.clear()
       this.totalBytes = 0
@@ -68,3 +74,4 @@ class BufferPool {
 }
 
 export const bufferPool = new BufferPool()
+

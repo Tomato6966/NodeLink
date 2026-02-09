@@ -50,7 +50,7 @@ import { logger } from '../../utils.js'
 import FlvDemuxer from '../demuxers/Flv.ts'
 import WebmOpusDemuxer from '../demuxers/WebmOpus.ts'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.ts'
-import { RingBuffer } from '../structs/RingBuffer.js'
+import { RingBuffer } from '../structs/RingBuffer.ts'
 import { FadeTransformer } from './FadeTransformer.js'
 import { FlowController } from './FlowController.js'
 import { FiltersManager } from './filtersManager.ts'
@@ -146,8 +146,8 @@ const _createAdtsHeader = (
     0xff,
     0xf1,
     ((profileIndex & 0x03) << 6) |
-      ((samplingIndex & 0x0f) << 2) |
-      ((channelCount & 0x04) >> 2),
+    ((samplingIndex & 0x0f) << 2) |
+    ((channelCount & 0x04) >> 2),
     ((channelCount & 0x03) << 6) | ((frameLength & 0x1800) >> 11),
     (frameLength & 0x7f8) >> 3,
     ((frameLength & 0x7) << 5) | 0x1f,
@@ -659,7 +659,7 @@ class SymphoniaDecoderStream extends Transform {
         this.push(result.samples)
         count++
       }
-    } catch {}
+    } catch { }
 
     this._cleanup()
     callback()
@@ -689,17 +689,17 @@ class SymphoniaDecoderStream extends Transform {
     if (this.decoder) {
       try {
         this.decoder.flush()
-      } catch {}
+      } catch { }
       try {
         this.decoder.free()
-      } catch {}
+      } catch { }
       this.decoder = null
     }
 
     if (this.resampler) {
       try {
         this.resampler.destroy()
-      } catch {}
+      } catch { }
       this.resampler = null
     }
   }
@@ -1152,7 +1152,7 @@ class AACDecoderStream extends Transform {
             this.push(Buffer.from(pcmInt16.buffer))
           }
         }
-      } catch (_err) {}
+      } catch (_err) { }
     }
 
     if (this.resampler) this.resampler.destroy?.()
@@ -1310,12 +1310,12 @@ class MP4ToAACStream extends Transform {
         chunk instanceof ArrayBuffer
           ? chunk
           : (chunk.buffer.slice(
-              chunk.byteOffset,
-              chunk.byteOffset + chunk.byteLength
-            ) as ArrayBuffer & { fileStart?: number })
+            chunk.byteOffset,
+            chunk.byteOffset + chunk.byteLength
+          ) as ArrayBuffer & { fileStart?: number })
 
-      ;(arrayBuffer as ArrayBuffer & { fileStart?: number }).fileStart =
-        this.offset
+        ; (arrayBuffer as ArrayBuffer & { fileStart?: number }).fileStart =
+          this.offset
       this.offset += arrayBuffer.byteLength
 
       this.mp4boxFile.appendBuffer(arrayBuffer)
@@ -1329,7 +1329,7 @@ class MP4ToAACStream extends Transform {
     if (!this._aborted && this.mp4boxFile) {
       try {
         this.mp4boxFile.flush()
-      } catch {}
+      } catch { }
     }
     this._cleanupMp4Box()
     callback()
@@ -1348,7 +1348,7 @@ class MP4ToAACStream extends Transform {
     if (this.mp4boxFile) {
       try {
         this.mp4boxFile.stop()
-      } catch {}
+      } catch { }
       this.mp4boxFile.onReady = null
       this.mp4boxFile.onSamples = null
       this.mp4boxFile.onError = null
@@ -1771,7 +1771,7 @@ class FMP4ToAACStream extends Transform {
     if (this.bufferMode) {
       try {
         this._processBuffer()
-      } catch (_err) {}
+      } catch (_err) { }
     }
     callback()
   }
@@ -2194,8 +2194,8 @@ class StreamAudioResource extends BaseAudioResource {
 
     return new Error(
       `Unsupported audio format: '${type}'.\n` +
-        'Supported formats:\n' +
-        supportedFormats.map((f) => `  • ${f}`).join('\n')
+      'Supported formats:\n' +
+      supportedFormats.map((f) => `  • ${f}`).join('\n')
     )
   }
 }
@@ -2346,7 +2346,7 @@ export const createPCMStream = (
 
   for (const s of streams) {
     if (s !== stream) {
-      ;(s as Transform).on('error', (err: Error & { code?: string }) =>
+      ; (s as Transform).on('error', (err: Error & { code?: string }) =>
         logger(
           'error',
           'PCMStream',
