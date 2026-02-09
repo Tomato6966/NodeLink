@@ -1001,11 +1001,20 @@ async function _internalHttp1Request(urlString, options = {}) {
           nextMethod = 'GET'
           nextBody = undefined
         }
+        const nextHeaders = { ...customHeaders }
+        const setCookie = respHeaders['set-cookie']
+        if (setCookie) {
+          const cookies = Array.isArray(setCookie) ? setCookie : [setCookie]
+          const existingCookie = nextHeaders.cookie || nextHeaders.Cookie || ''
+          const newCookies = cookies.map((c) => c.split(';')[0]).join('; ')
+          nextHeaders.cookie = existingCookie ? `${existingCookie}; ${newCookies}` : newCookies
+        }
         const nextOptions = {
           ...options,
           _redirectsFollowed: _redirectsFollowed + 1,
           method: nextMethod,
-          body: nextBody
+          body: nextBody,
+          headers: nextHeaders
         }
         resolve(http1makeRequest(nextUrl, nextOptions))
         return
