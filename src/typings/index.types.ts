@@ -348,10 +348,10 @@ export interface FilterExtension {
    * Additional filter-specific properties
    */
   [key: string]:
-    | string
-    | number
-    | boolean
-    | ((data: Buffer, options?: FilterOptions) => Buffer | Promise<Buffer>)
+  | string
+  | number
+  | boolean
+  | ((data: Buffer, options?: FilterOptions) => Buffer | Promise<Buffer>)
 }
 
 /**
@@ -412,7 +412,7 @@ export interface HttpResponse {
  * Custom HTTP route extension
  * @public
  */
-export interface RouteExtension extends ApiRouteExtension {}
+export interface RouteExtension extends ApiRouteExtension { }
 
 /**
  * HTTP middleware extension executed before route resolution.
@@ -436,21 +436,21 @@ export type ParsedWebSocketData =
   | string
   | Buffer
   | {
-      op: string
-      guildId?: string
-      track?: string | TrackData
-      position?: number
-      paused?: boolean
-      volume?: number
-      filters?: Record<string, number | boolean>
-      [key: string]:
-        | string
-        | number
-        | boolean
-        | TrackData
-        | Record<string, number | boolean>
-        | undefined
-    }
+    op: string
+    guildId?: string
+    track?: string | TrackData
+    position?: number
+    paused?: boolean
+    volume?: number
+    filters?: Record<string, number | boolean>
+    [key: string]:
+    | string
+    | number
+    | boolean
+    | TrackData
+    | Record<string, number | boolean>
+    | undefined
+  }
 
 /**
  * WebSocket interceptor context
@@ -650,12 +650,12 @@ export interface TrackData {
    * Additional track-specific properties
    */
   [key: string]:
-    | string
-    | number
-    | boolean
-    | Record<string, string | number | boolean | null>
-    | null
-    | undefined
+  | string
+  | number
+  | boolean
+  | Record<string, string | number | boolean | null>
+  | null
+  | undefined
 }
 
 /**
@@ -744,6 +744,27 @@ export interface VoiceConnection {
    * Whether the connection is active
    */
   connected: boolean
+
+  /**
+   * Voice connection statistics
+   * @public
+   */
+  statistics: {
+    /**
+     * Total number of packets sent
+     */
+    packetsSent: number
+
+    /**
+     * Total number of packets lost/nulled
+     */
+    packetsLost: number
+
+    /**
+     * Total number of packets expected to be sent
+     */
+    packetsExpected: number
+  }
 
   /**
    * Sends audio data
@@ -1136,6 +1157,31 @@ export interface WorkerMetrics {
   players: number
 
   /**
+   * Number of players currently playing audio
+   */
+  playingPlayers: number
+
+  /**
+   * Frame statistics for the worker
+   */
+  frameStats?: {
+    /**
+     * Number of packets sent
+     */
+    sent: number
+
+    /**
+     * Number of packets nulled
+     */
+    nulled: number
+
+    /**
+     * Number of packets expected
+     */
+    expected: number
+  }
+
+  /**
    * Memory usage
    */
   memory?: {
@@ -1201,6 +1247,11 @@ export interface NodelinkServer {
     workers: Worker[]
 
     /**
+     * Map of worker statistics
+     */
+    workerStats: Map<number, WorkerMetrics>
+
+    /**
      * Worker load map
      */
     workerLoad: Map<number, number>
@@ -1220,6 +1271,11 @@ export interface NodelinkServer {
      */
     getWorkerMetrics: () => WorkerMetrics[]
   } | null
+
+  /**
+   * Global server statistics
+   */
+  statistics: NodelinkStatistics
 
   /**
    * Voice sockets map

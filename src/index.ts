@@ -71,6 +71,7 @@ import { createVoiceRelay } from './voice/voiceRelay.js'
 let config: NodelinkConfig
 
 try {
+  // @ts-ignore - config.js is expected to not be found for fresh copies.
   config = (await import('../config.js')).default as unknown as NodelinkConfig
 } catch (e) {
   const error = e as ConfigLoadError
