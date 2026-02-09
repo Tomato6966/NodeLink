@@ -25,8 +25,11 @@ let ACTIVE_LIB: OpusLibrary | null = null
 const _getLib = (): OpusLibrary => {
   if (ACTIVE_LIB) return ACTIVE_LIB
   const libs: Array<{ name: string; pick: (mod: Record<string, unknown>) => unknown }> = [
+    // biome-ignore lint: TypeScript requires bracket access for index signatures
     { name: '@toddynnn/voice-opus', pick: (m) => m['OpusEncoder'] },
+    // biome-ignore lint: TypeScript requires bracket access for index signatures
     { name: 'toddy-mediaplex', pick: (m) => m['OpusEncoder'] },
+    // biome-ignore lint: TypeScript requires bracket access for index signatures
     { name: '@discordjs/opus', pick: (m) => m['OpusEncoder'] },
     { name: 'opusscript', pick: (m) => m }
   ]
@@ -40,6 +43,7 @@ const _getLib = (): OpusLibrary => {
         return ACTIVE_LIB
       }
     } catch (e: unknown) {
+      // biome-ignore lint: TypeScript requires bracket access for index signatures
       if (e instanceof Error && (e as unknown as Record<string, unknown>)['code'] !== 'MODULE_NOT_FOUND') throw e
     }
   }
@@ -56,6 +60,7 @@ const _createInstance = (
 
   let type: number | string = app
   if (name === 'opusscript' && typeof app === 'string') {
+    // biome-ignore lint: TypeScript requires bracket access for index signatures
     type = Encoder.Application[app.toUpperCase()] ?? Encoder.Application['VOIP'] ?? 2048 // 2048 is VOIP for opusscript
   }
 
