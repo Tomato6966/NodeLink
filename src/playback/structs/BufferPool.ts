@@ -30,10 +30,12 @@ class BufferPool {
   public acquire(size: number): Buffer {
     const alignedSize = this._getAlignedSize(size)
     const pool = this.pools.get(alignedSize)
-    if (pool && pool.length > 0) {
-      const buffer = pool.pop()!
-      this.totalBytes -= alignedSize
-      return buffer
+    if (pool?.length) {
+      const buffer = pool.pop()
+      if (buffer) {
+        this.totalBytes -= alignedSize
+        return buffer
+      }
     }
     return Buffer.allocUnsafe(alignedSize)
   }
