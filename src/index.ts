@@ -37,7 +37,7 @@ import RateLimitManager from './managers/rateLimitManager.ts'
 import type SourcesManager from './managers/sourceManager.js'
 import SourceWorkerManager from './managers/sourceWorkerManager.js'
 import WorkerManager from './managers/workerManager.js'
-import type { NodelinkConfig } from './typings/config.types.ts'
+import type { NodelinkConfig } from './typings/config/config.types.ts'
 import type {
   AudioInterceptorExtension,
   BunSocketData,

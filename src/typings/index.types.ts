@@ -2,8 +2,8 @@ import type { EventEmitter } from 'node:events'
 import type * as http from 'node:http'
 import type WebSocketServer from '@performanc/pwsl-server'
 import type { ServerWebSocket } from 'bun'
-import type { ApiMiddlewareExtension, ApiRouteExtension } from './api.types.js'
-import type { NodelinkConfig } from './config.types.js'
+import type { ApiMiddlewareExtension, ApiRouteExtension } from './api/api.types.ts'
+import type { NodelinkConfig } from './config/config.types.ts'
 import type { ClientInfo } from './shared.types.js'
 
 /**

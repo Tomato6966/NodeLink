@@ -23,7 +23,7 @@ import type {
   WorkerData,
   WorkerMessageType,
   WorkerNodeLink
-} from '../typings/source.types.ts'
+} from '../typings/sources/source.types.ts'
 import * as utils from '../utils.js'
 
 const __filename = fileURLToPath(import.meta.url)

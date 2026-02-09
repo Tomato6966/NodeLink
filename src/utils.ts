@@ -22,7 +22,7 @@ import {
     SEMVER_PATTERN
 } from './constants.ts'
 
-import type { ApiHttpMethod, ApiRequest, ApiResponse, ApiSendResponse } from './typings/api.types.js'
+import type { ApiHttpMethod, ApiRequest, ApiResponse, ApiSendResponse } from './typings/api/api.types.ts'
 import type { ClientInfo } from './typings/shared.types.js'
 import type { GitInfo, NodelinkServer } from './typings/index.types.js'
 

@@ -22,7 +22,7 @@ import type {
   TrackInfo,
   TrackStreamResult,
   TrackUrlResult
-} from '../typings/source.types.ts'
+} from '../typings/sources/source.types.ts'
 import type {
   ActiveStreamEntry,
   CreatePlayerPayload,
@@ -35,7 +35,7 @@ import type {
   WorkerCommandPayload,
   WorkerNodeLink,
   WorkerPlayer
-} from '../typings/worker.types.ts'
+} from '../typings/workers/worker.types.ts'
 import { cleanupHttpAgents, initLogger, logger } from '../utils.js'
 import { createVoiceRelay } from '../voice/voiceRelay.js'
 

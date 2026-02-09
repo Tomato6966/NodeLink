@@ -13,7 +13,7 @@ import type {
   ConnectivityTestResult,
   NetworkInfo,
   PingResult
-} from '../typings/connection.types.ts'
+} from '../typings/voice/connection.types.ts'
 import { http1makeRequest, logger } from '../utils.js'
 
 const execAsync = promisify(exec)

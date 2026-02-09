@@ -19,7 +19,7 @@ import type {
   FiltersState,
   NodeLink,
   StreamInfo
-} from '../../typings/player.types.ts'
+} from '../../typings/playback/player.types.ts'
 import type {
   AACConfig,
   AACDecoderStreamOptions,
@@ -45,7 +45,7 @@ import type {
   RingBufferLike,
   SeekableStreamMeta,
   SymphoniaDecoderLike
-} from '../../typings/streamProcessor.types.ts'
+} from '../../typings/playback/streamProcessor.types.ts'
 import { logger } from '../../utils.js'
 import FlvDemuxer from '../demuxers/Flv.ts'
 import WebmOpusDemuxer from '../demuxers/WebmOpus.ts'

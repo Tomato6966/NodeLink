@@ -18,12 +18,12 @@ import type {
   TrackInfo,
   TrackStreamResult,
   TrackUrlResult
-} from './source.types.ts'
+} from '../sources/source.types.ts'
 
 /**
  * NodeLink configuration shape.
  */
-export type NodeLinkConfig = typeof import('../../config.default.js').default
+export type NodeLinkConfig = typeof import('../../../config.default.js').default
 
 /**
  * Logger signature used by worker components.

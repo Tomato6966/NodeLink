@@ -12,7 +12,7 @@ import type {
   ApiRouteDefinition,
   ApiRouteModule,
   ApiRouteModuleEntry
-} from '../typings/api.types.ts'
+} from '../typings/api/api.types.ts'
 import {
   logger,
   sendErrorResponse,

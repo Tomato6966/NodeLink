@@ -8,7 +8,7 @@ import type {
   OpusEncoderInstance,
   OpusInstanceResult,
   OpusLibrary
-} from '../../typings/opus.types.ts'
+} from '../../typings/playback/opus.types.ts'
 
 const require = createRequire(import.meta.url)
 

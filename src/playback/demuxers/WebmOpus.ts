@@ -6,7 +6,7 @@ import {
 import type {
   WebmTagReadResult,
   WebmTrackInfo
-} from '../../typings/demuxer.types.ts'
+} from '../../typings/playback/demuxer.types.ts'
 import { logger } from '../../utils.js'
 import { RingBuffer } from '../structs/RingBuffer.js'
 

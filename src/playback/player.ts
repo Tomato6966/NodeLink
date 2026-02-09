@@ -28,7 +28,7 @@ import type {
   TrackFormat,
   TrackInfoExtended
 } from '../typings/player.types.ts'
-import type { TrackUrlResult } from '../typings/source.types.ts'
+import type { TrackUrlResult } from '../typings/sources/source.types.ts'
 import { logger } from '../utils.js'
 
 export type GatewayEventName =
