@@ -721,7 +721,7 @@ class MPEGTSDemuxer extends Transform {
 
     this.ringBuffer = new RingBuffer(
       BUFFER_THRESHOLDS.maxCompressed
-    ) as RingBufferLike
+    ) as unknown as RingBufferLike
     this.patPmtId = null
     this.audioPid = null
     this.audioPidFound = false
@@ -893,7 +893,7 @@ class AACDecoderStream extends Transform {
     this.isDecoderReady = false
     this.isConfigured = false
     this.pendingChunks = []
-    this.ringBuffer = new RingBuffer(AAC_BUFFER_SIZE) as RingBufferLike
+    this.ringBuffer = new RingBuffer(AAC_BUFFER_SIZE) as unknown as RingBufferLike
     this.resamplingQuality = options.resamplingQuality || 'fastest'
     this.resamplerCreationPromise = null
 
