@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import { RingBuffer } from '../structs/RingBuffer.js'
+import { RingBuffer } from '../structs/RingBuffer.ts'
 
 const LAYER_BUFFER_SIZE = 1024 * 1024 // 1MB per layer (~5 seconds of PCM)
 
@@ -18,7 +18,7 @@ export class AudioMixer extends EventEmitter {
     if (buffer.byteOffset % 2 === 0 && buffer.length % 2 === 0) {
       return new Int16Array(buffer.buffer, buffer.byteOffset, buffer.length / 2)
     }
-    
+
     const alignedBuffer = Buffer.from(buffer.subarray(0, buffer.length - (buffer.length % 2)))
     return new Int16Array(alignedBuffer.buffer, alignedBuffer.byteOffset, alignedBuffer.length / 2)
   }
@@ -30,7 +30,7 @@ export class AudioMixer extends EventEmitter {
 
     const mainView = this._asInt16Array(mainPCM)
     const outputView = this._asInt16Array(outputBuffer)
-    
+
     const activeLayers = []
     for (const layer of layersPCM.values()) {
       activeLayers.push({
@@ -80,7 +80,7 @@ export class AudioMixer extends EventEmitter {
 
     stream.on('data', (chunk) => {
       if (!layer.active) return
-      
+
       if (layer.ringBuffer.length > LAYER_BUFFER_SIZE * 0.8) {
         layer.paused = true
         stream.pause()
@@ -105,7 +105,7 @@ export class AudioMixer extends EventEmitter {
     })
 
     stream.once('end', () => {
-      layer.finishedFeeding = true 
+      layer.finishedFeeding = true
     })
 
     stream.once('close', () => {

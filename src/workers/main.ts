@@ -15,7 +15,7 @@ import StatsManager from '../managers/statsManager.ts'
 import TrackCacheManager from '../managers/trackCacheManager.ts'
 import { Player } from '../playback/player.ts'
 import { createPCMStream } from '../playback/processing/streamProcessor.ts'
-import { bufferPool } from '../playback/structs/BufferPool.js'
+import { bufferPool } from '../playback/structs/BufferPool.ts'
 import type { TrackInfoExtended } from '../typings/player.types.ts'
 import type {
   RoutePlannerManager as RoutePlannerManagerLike,
@@ -388,7 +388,7 @@ function setEfficiencyMode(enabled: boolean): void {
     } else {
       v8.setFlagsFromString('--no-optimize-for-size')
     }
-  } catch (_e: unknown) {}
+  } catch (_e: unknown) { }
 }
 
 function startTimers(hibernating = false): void {
@@ -957,7 +957,7 @@ async function processQueue(queueKey: string): Promise<void> {
           player &&
           typeof (player as WorkerPlayer)._sendUpdate === 'function'
         ) {
-          ;(player as WorkerPlayer)._sendUpdate()
+          ; (player as WorkerPlayer)._sendUpdate()
           result = { updated: true }
         } else {
           result = {

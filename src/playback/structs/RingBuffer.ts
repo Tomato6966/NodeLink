@@ -1,7 +1,21 @@
-import { bufferPool } from './BufferPool.js'
+import { bufferPool } from './BufferPool.ts'
 
+/**
+ * A fast, fixed-size circular buffer for audio chunks.
+ * Uses BufferPool for memory management to reduce GC pressure.
+ */
 export class RingBuffer {
-  constructor(size) {
+  private buffer: Buffer | null
+  private size: number
+  private writeOffset: number
+  private readOffset: number
+  private length: number
+
+  /**
+   * Creates a new RingBuffer.
+   * @param size The size of the buffer in bytes.
+   */
+  constructor(size: number) {
     this.buffer = bufferPool.acquire(size)
     this.size = size
     this.writeOffset = 0
@@ -9,14 +23,24 @@ export class RingBuffer {
     this.length = 0
   }
 
-  dispose() {
+  /**
+   * Releases the internal buffer back to the pool.
+   */
+  public dispose(): void {
     if (this.buffer) {
       bufferPool.release(this.buffer)
       this.buffer = null
     }
   }
 
-  write(chunk) {
+  /**
+   * Writes a chunk of data to the buffer.
+   * If the buffer is full, it overwrites the oldest data.
+   * @param chunk The data chunk to write.
+   */
+  public write(chunk: Buffer): void {
+    if (!this.buffer) return
+
     const bytesToWrite = chunk.length
     const availableAtEnd = this.size - this.writeOffset
 
@@ -37,7 +61,14 @@ export class RingBuffer {
     this.writeOffset = (this.writeOffset + bytesToWrite) % this.size
   }
 
-  read(n) {
+  /**
+   * Reads up to n bytes from the buffer.
+   * @param n The maximum number of bytes to read.
+   * @returns A Buffer containing the data, or null if empty or disposed.
+   */
+  public read(n: number): Buffer | null {
+    if (!this.buffer) return null
+
     const bytesToReadNum = Math.min(Math.max(0, n), this.length)
     if (bytesToReadNum === 0) return null
     const out = Buffer.allocUnsafe(bytesToReadNum)
@@ -60,7 +91,12 @@ export class RingBuffer {
     return out
   }
 
-  skip(n) {
+  /**
+   * Skips n bytes in the buffer.
+   * @param n The number of bytes to skip.
+   * @returns The number of bytes actually skipped.
+   */
+  public skip(n: number): number {
     const skipAmount = Math.max(0, n)
     const bytesToSkip = Math.min(skipAmount, this.length)
     this.readOffset = (this.readOffset + bytesToSkip) % this.size
@@ -68,7 +104,14 @@ export class RingBuffer {
     return bytesToSkip
   }
 
-  peek(n) {
+  /**
+   * Peeks up to n bytes from the buffer without advancing the read offset.
+   * @param n The maximum number of bytes to peek.
+   * @returns A new Buffer containing the data, or null if empty or disposed.
+   */
+  public peek(n: number): Buffer | null {
+    if (!this.buffer) return null
+
     const bytesToPeekNum = Math.min(Math.max(0, n), this.length)
     if (bytesToPeekNum === 0) return null
     const out = Buffer.allocUnsafe(bytesToPeekNum)
@@ -88,7 +131,14 @@ export class RingBuffer {
     return out
   }
 
-  getContiguous(n) {
+  /**
+   * Gets up to n contiguous bytes from the buffer, or a copied Buffer if not contiguous.
+   * @param n The maximum number of bytes to get.
+   * @returns A Buffer subarray or a new Buffer, or null if empty or disposed.
+   */
+  public getContiguous(n: number): Buffer | null {
+    if (!this.buffer) return null
+
     const bytesToPeekNum = Math.min(Math.max(0, n), this.length)
     if (bytesToPeekNum === 0) return null
     const availableAtEnd = this.size - this.readOffset
@@ -106,9 +156,28 @@ export class RingBuffer {
     return out
   }
 
-  clear() {
+  /**
+   * Clears the buffer (resets offsets and length).
+   */
+  public clear(): void {
     this.writeOffset = 0
     this.readOffset = 0
     this.length = 0
+  }
+
+  /**
+   * Gets the current amount of data in the buffer.
+   * @returns The number of bytes available to read.
+   */
+  public getLength(): number {
+    return this.length
+  }
+
+  /**
+   * Gets the total size of the buffer.
+   * @returns The buffer capacity in bytes.
+   */
+  public getSize(): number {
+    return this.size
   }
 }

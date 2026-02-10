@@ -5,7 +5,7 @@ import {
 } from 'node:stream'
 import type { FlvTagInfo } from '../../typings/playback/demuxer.types.ts'
 import { logger } from '../../utils.js'
-import { RingBuffer } from '../structs/RingBuffer.js'
+import { RingBuffer } from '../structs/RingBuffer.ts'
 
 const STATE_HEADER = 0
 const STATE_TAG_HEADER = 1
