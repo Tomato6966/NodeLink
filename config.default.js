@@ -176,7 +176,8 @@ export default {
       basePath: './local-music/'
     },
     http: {
-      enabled: true
+      enabled: true,
+      userAgent: '' // Optional: defaults to NodeLink/<version> (https://github.com/PerformanC/NodeLink)
     },
     eternalbox: {
       enabled: true,
