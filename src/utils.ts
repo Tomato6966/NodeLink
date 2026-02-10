@@ -205,7 +205,7 @@ export function initLogger(config: { logging?: LoggingConfig }): void {
  * Main logging function
  * @private
  */
-export function logger(level: LogLevel, ...args: any[]): void {
+export function logger(level: string, ...args: any[]): void {
     const effectiveLevel =
         level === 'sources' || level === 'started' || level === 'network'
             ? 'info'
@@ -231,7 +231,7 @@ export function logger(level: LogLevel, ...args: any[]): void {
         }
     }
 
-    const levels: Record<LogLevel, { label: string; color: string }> = {
+    const levels: Record<string, { label: string; color: string }> = {
         info: { label: 'INFO', color: '\x1b[1m\x1b[3;42m' },
         warn: { label: 'WARN', color: '\x1b[1m\x1b[3;43m' },
         error: { label: 'ERROR', color: '\x1b[1m\x1b[3;41m' },

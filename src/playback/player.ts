@@ -27,7 +27,7 @@ import type {
   StreamInfo,
   TrackFormat,
   TrackInfoExtended
-} from '../typings/player.types.ts'
+} from '../typings/playback/player.types.ts'
 import type { TrackUrlResult } from '../typings/sources/source.types.ts'
 import { logger } from '../utils.js'
 

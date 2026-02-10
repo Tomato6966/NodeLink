@@ -78,7 +78,7 @@ export class FlvDemuxer extends Transform {
   ): void {
     this.ringBuffer.write(chunk)
 
-    while (this.ringBuffer.length >= this.expectedSize) {
+    while (this.ringBuffer.getLength() >= this.expectedSize) {
       if (this.state === STATE_HEADER) {
         const header = this.ringBuffer.peek(3)
         if (!header || header.toString('ascii') !== FLV_SIGNATURE) {

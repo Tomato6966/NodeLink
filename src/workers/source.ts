@@ -9,7 +9,7 @@ import {
   workerData as rawWorkerData,
   Worker
 } from 'node:worker_threads'
-import type { NodeLink } from '../typings/player.types.ts'
+import type { NodeLink } from '../typings/playback/player.types.ts'
 import type {
   FrameType,
   LiveChatPayload,

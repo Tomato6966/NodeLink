@@ -8,7 +8,7 @@ import type {
   SourceManagerLike,
   StatsManagerLike,
   TrackInfoExtended
-} from './player.types.ts'
+} from '../playback/player.types.ts'
 import type {
   CredentialManager as CredentialManagerLike,
   MeaningManager as MeaningManagerLike,

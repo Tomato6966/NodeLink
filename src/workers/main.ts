@@ -16,7 +16,7 @@ import TrackCacheManager from '../managers/trackCacheManager.ts'
 import { Player } from '../playback/player.ts'
 import { createPCMStream } from '../playback/processing/streamProcessor.ts'
 import { bufferPool } from '../playback/structs/BufferPool.ts'
-import type { TrackInfoExtended } from '../typings/player.types.ts'
+import type { TrackInfoExtended } from '../typings/playback/player.types.ts'
 import type {
   RoutePlannerManager as RoutePlannerManagerLike,
   TrackInfo,
@@ -72,7 +72,7 @@ const HIBERNATION_ENABLED = config.cluster?.hibernation?.enabled !== false
 const HIBERNATION_TIMEOUT =
   config.cluster?.hibernation?.timeoutMs || 20 * 60 * 1000
 
-initLogger(config)
+initLogger(config as any)
 
 const players = new Map<string, WorkerPlayer>()
 const guildQueues = new Map<string, GuildQueueEntry>() // guildId -> { queue: [], processing: false }

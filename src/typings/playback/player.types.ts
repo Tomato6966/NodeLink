@@ -1,6 +1,6 @@
 import type { VoiceAudioStream, VoiceConnection } from '@performanc/voice'
-import type { TrackData } from './index.types.ts'
-import type { TrackStreamResult, TrackUrlResult } from './source.types.ts'
+import type { TrackData } from '../index.types.ts'
+import type { TrackStreamResult, TrackUrlResult } from '../sources/source.types.ts'
 
 /**
  * Runtime filter settings applied to an audio stream.

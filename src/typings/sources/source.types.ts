@@ -10,7 +10,7 @@ import type {
   CredentialEntry,
   CredentialManagerStats
 } from '../modules/credential.types.ts'
-import type { TrackInfoExtended } from '../playback/player.types.ts'
+import type { LoggerFn, TrackInfoExtended } from '../playback/player.types.ts'
 import type {
   StatsMetricsPayload,
   StatsSnapshot,
@@ -395,7 +395,7 @@ export interface WorkerNodeLink {
   /** Configuration options */
   options: Record<string, unknown>
   /** Logger function */
-  logger: (level: string, category: string, message: string) => void
+  logger: LoggerFn
   /** Source manager instance */
   sources?: SourceManager
   /** Lyrics manager instance */
