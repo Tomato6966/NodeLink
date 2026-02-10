@@ -8,8 +8,8 @@ import type {
   FilterInstance,
   FilterSettings,
   FiltersManagerContext
-} from '../../typings/filters.types.ts'
-import type { FiltersState } from '../../typings/player.types.ts'
+} from '../../typings/playback/filters.types.ts'
+import type { FiltersState } from '../../typings/playback/player.types.ts'
 
 import ChannelMix from '../filters/channelMix.js'
 import Chorus from '../filters/chorus.js'
