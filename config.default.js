@@ -430,6 +430,9 @@ export default {
       enabled: true
       // signatureSecret: ''
     },
+    deezer: {
+      enabled: true
+    },
     lrclib: {
       enabled: true
     },
