@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { encodeTrack, logger, makeRequest, http1makeRequest } from '../utils.js'
-import HLSHandler from '../playback/hls/HLSHandler.js'
+import HLSHandler from '../playback/hls/HLSHandler.ts'
 import PlaylistParser from '../playback/hls/PlaylistParser.js'
 
 export default class BlueskySource {
@@ -19,7 +19,7 @@ export default class BlueskySource {
   }
 
   async _getServiceEndpoint(did) {
-    let url = did.startsWith('did:web:') 
+    let url = did.startsWith('did:web:')
       ? `https://${did.slice(8)}/.well-known/did.json`
       : `https://plc.directory/${did}`
 
@@ -57,7 +57,7 @@ export default class BlueskySource {
   async search(query) {
     logger('debug', 'Bluesky', `Searching for: ${query}`)
     const searchUrl = `https://public.api.bsky.app/xrpc/app.bsky.feed.searchPosts?q=${encodeURIComponent(query)}&limit=${this.config.maxSearchResults || 10}`
-    
+
     const { body, error } = await makeRequest(searchUrl, { method: 'GET' })
     if (error || !body || !body.posts) return { loadType: 'empty', data: {} }
 
@@ -194,7 +194,7 @@ export default class BlueskySource {
 
     const videoCid = embed.cid || (embed.video && embed.video.ref ? embed.video.ref.$link : null)
     const playlistUrl = embed.playlist
-    
+
     if (!playlistUrl && !videoCid) return null
 
     const handle = post.author?.handle

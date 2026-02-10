@@ -1,5 +1,5 @@
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
-import HLSHandler from '../playback/hls/HLSHandler.js'
+import HLSHandler from '../playback/hls/HLSHandler.ts'
 
 export default class NicoVideoSource {
   constructor(nodelink) {
@@ -263,7 +263,7 @@ export default class NicoVideoSource {
       if (additionalData?.cookie) {
         headers.Cookie = additionalData.cookie
       }
-      const stream = new HLSHandler(url, { 
+      const stream = new HLSHandler(url, {
         headers,
         type: 'fmp4',
         localAddress: this.nodelink.routePlanner?.getIP(),

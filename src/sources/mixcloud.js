@@ -5,7 +5,7 @@ import {
   logger,
   makeRequest
 } from '../utils.js'
-import HLSHandler from '../playback/hls/HLSHandler.js'
+import HLSHandler from '../playback/hls/HLSHandler.ts'
 
 const DECRYPTION_KEY = 'IFYOUWANTTHEARTISTSTOGETPAIDDONOTDOWNLOADFROMMIXCLOUD'
 

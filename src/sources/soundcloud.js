@@ -6,7 +6,7 @@ import {
   logger,
   makeRequest
 } from '../utils.js'
-import HLSHandler from '../playback/hls/HLSHandler.js'
+import HLSHandler from '../playback/hls/HLSHandler.ts'
 
 const BASE_URL = 'https://api-v2.soundcloud.com'
 const SOUNDCLOUD_URL = 'https://soundcloud.com'

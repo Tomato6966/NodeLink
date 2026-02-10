@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
-import HLSHandler from '../playback/hls/HLSHandler.js'
+import HLSHandler from '../playback/hls/HLSHandler.ts'
 
 const MIXIN_KEY_ENC_TAB = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
@@ -776,9 +776,9 @@ export default class BilibiliSource {
       }
 
       if (protocol === 'hls' || url.includes('.m3u8')) {
-      const stream = new HLSHandler(url, { 
-        headers: HEADERS, 
-        type: 'mpegts', 
+      const stream = new HLSHandler(url, {
+        headers: HEADERS,
+        type: 'mpegts',
         localAddress: this.nodelink.routePlanner?.getIP(),
         startTime: additionalData?.startTime || 0
       })

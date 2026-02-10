@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { http1makeRequest, logger, makeRequest } from '../../utils.js'
-import HLSHandler from '../../playback/hls/HLSHandler.js'
+import HLSHandler from '../../playback/hls/HLSHandler.ts'
 import CipherManager from './CipherManager.js'
 import Android from './clients/Android.js'
 import AndroidVR from './clients/AndroidVR.js'

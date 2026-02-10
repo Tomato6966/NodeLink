@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
-import HLSHandler from '../playback/hls/HLSHandler.js'
+import HLSHandler from '../playback/hls/HLSHandler.ts'
 
 const AUTH = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'
 
@@ -53,7 +53,7 @@ export default class TwitterSource {
     }
 
     const url = `https://twitter.com/i/api/graphql/${operation}?variables=${encodeURIComponent(JSON.stringify(variables))}&features=${encodeURIComponent(JSON.stringify(features))}`
-    
+
     return await http1makeRequest(url, {
       headers: {
         Authorization: `Bearer ${AUTH}`,
@@ -78,12 +78,12 @@ export default class TwitterSource {
         longform_notetweets_inline_media_enabled: true,
         tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true
       }
-      
-      const { body, statusCode: _statusCode } = await this._callGraphQL('2ICDjqPd81tulZcYrtpTuQ/TweetResultByRestId', { 
-        tweetId: id, 
-        withCommunity: false, 
-        includePromotedContent: false, 
-        withVoice: true 
+
+      const { body, statusCode: _statusCode } = await this._callGraphQL('2ICDjqPd81tulZcYrtpTuQ/TweetResultByRestId', {
+        tweetId: id,
+        withCommunity: false,
+        includePromotedContent: false,
+        withVoice: true
       }, features)
 
       let result = body?.data?.tweetResult?.result
@@ -122,7 +122,7 @@ export default class TwitterSource {
         if (match) v.bitrate = parseInt(match[1]) * parseInt(match[2])
         return v
       })
-      .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0] || 
+      .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0] ||
       variants.find(v => (v.content_type || v.type) === 'application/x-mpegURL')
 
     if (!bestVariant) return { loadType: 'empty', data: {} }
@@ -157,16 +157,16 @@ export default class TwitterSource {
   async search(query) {
     try {
       const features = { responsive_web_graphql_timeline_navigation_enabled: true }
-      const { body } = await this._callGraphQL('gk_S_vsh_PyInisUnZun6Q/SearchTimeline', { 
-        rawQuery: `${query} filter:videos`, 
-        count: 10, 
+      const { body } = await this._callGraphQL('gk_S_vsh_PyInisUnZun6Q/SearchTimeline', {
+        rawQuery: `${query} filter:videos`,
+        count: 10,
         querySource: 'typed_query',
-        product: 'Latest' 
+        product: 'Latest'
       }, features)
 
       const instructions = body?.data?.search_by_raw_query?.search_timeline?.timeline?.instructions || []
       const entries = instructions.find(i => i.type === 'TimelineAddEntries')?.entries || []
-      
+
       const results = entries
         .map(e => {
           const result = e.content?.itemContent?.tweet_results?.result
@@ -193,19 +193,19 @@ export default class TwitterSource {
 
     const _videoId = track.identifier
     if (track.pluginInfo?.directUrl) {
-      return { 
-        url: track.pluginInfo.directUrl, 
+      return {
+        url: track.pluginInfo.directUrl,
         protocol: track.pluginInfo.isHLS ? 'hls' : 'https',
-        format: track.pluginInfo.isHLS ? 'm3u8' : 'mp4' 
+        format: track.pluginInfo.isHLS ? 'm3u8' : 'mp4'
       }
     }
 
     const res = await this.resolve(track.uri)
     if (res.loadType === 'track') {
-      return { 
-        url: res.data.pluginInfo.directUrl, 
+      return {
+        url: res.data.pluginInfo.directUrl,
         protocol: res.data.pluginInfo.isHLS ? 'hls' : 'https',
-        format: res.data.pluginInfo.isHLS ? 'm3u8' : 'mp4' 
+        format: res.data.pluginInfo.isHLS ? 'm3u8' : 'mp4'
       }
     }
 

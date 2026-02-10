@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 import { encodeTrack, http1makeRequest, logger } from '../utils.js'
-import HLSHandler from '../playback/hls/HLSHandler.js'
+import HLSHandler from '../playback/hls/HLSHandler.ts'
 
 export default class TwitchSource {
   constructor(nodelink) {
@@ -551,12 +551,12 @@ export default class TwitchSource {
 
   async loadStream(_track, url, protocol) {
     if (protocol === 'hls') {
-          const stream = new HLSHandler(url, { 
-            type: 'mpegts', 
+          const stream = new HLSHandler(url, {
+            type: 'mpegts',
             localAddress: this.nodelink.routePlanner?.getIP(),
             startTime: additionalData?.startTime || 0
           })
-      
+
       return { stream, type: 'mpegts' }
     }
 
