@@ -1,5 +1,5 @@
 import { IncomingHttpHeaders } from 'node:http'
-import type { NodelinkConfig } from './config.types.js'
+import type { NodelinkConfig } from '../config/config.types.ts'
 
 /**
  * Supported HTTP methods for API routes.

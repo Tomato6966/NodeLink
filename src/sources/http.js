@@ -1,5 +1,7 @@
 import { Transform } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, getVersion, http1makeRequest, logger } from '../utils.js'
+
+const DEFAULT_HTTP_USER_AGENT = `NodeLink/${getVersion()} (https://github.com/PerformanC/NodeLink)`
 
 class IcyMetadataTransform extends Transform {
   constructor(metaInt, onMetadata) {
@@ -92,6 +94,7 @@ class IcyMetadataTransform extends Transform {
 export default class HttpSource {
   constructor(nodelink) {
     this.nodelink = nodelink
+    this.config = nodelink.options.sources?.http || {}
     this.searchTerms = []
     this.priority = 10
   }
@@ -106,6 +109,8 @@ export default class HttpSource {
 
   async resolve(url) {
     try {
+      const userAgent = this.config.userAgent || DEFAULT_HTTP_USER_AGENT
+      const requestHeaders = { 'User-Agent': userAgent }
       const validAudioPrefixes = ['audio/', 'video/']
       const validApplicationTypes = ['application/octet-stream']
       const isValidMediaType = (contentType) =>
@@ -113,7 +118,7 @@ export default class HttpSource {
         validApplicationTypes.includes(contentType) ||
         contentType === ''
 
-      let data = await http1makeRequest(url, { method: 'HEAD' })
+      let data = await http1makeRequest(url, { method: 'HEAD', headers: requestHeaders })
       const headContentType = data.headers?.['content-type'] || ''
       const headOk =
         !data.error &&
@@ -123,7 +128,8 @@ export default class HttpSource {
       if (!headOk) {
         const getData = await http1makeRequest(url, {
           method: 'GET',
-          streamOnly: true
+          streamOnly: true,
+          headers: requestHeaders
         })
         if (getData?.stream) getData.stream.destroy()
         data = getData
@@ -219,11 +225,13 @@ export default class HttpSource {
 
   async loadStream(_decodedTrack, url) {
     try {
+      const userAgent = this.config.userAgent || DEFAULT_HTTP_USER_AGENT
       const opts = {
         method: 'GET',
         streamOnly: true,
         headers: {
-          'Icy-MetaData': '1'
+          'Icy-MetaData': '1',
+          'User-Agent': userAgent
         }
       }
       const response = await http1makeRequest(url, opts)

@@ -34,4 +34,4 @@ declare namespace NodeJS {
  * @remarks
  * Available globally when server is running
  */
-declare const nodelink: import('./index.types').NodelinkServer | undefined
+declare const nodelink: import('../index.types.ts').NodelinkServer | undefined

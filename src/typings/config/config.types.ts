@@ -2,7 +2,7 @@
  * Nodelink configuration type based on config.default.js
  * @public
  */
-export type NodelinkConfig = typeof import('../../config.default.js').default
+export type NodelinkConfig = typeof import('../../../config.default.js').default
 
 /**
  * Server configuration options

@@ -1,9 +1,9 @@
-import type { ApiRateLimitResult, ApiRequest } from '../typings/api.types.ts'
+import type { ApiRateLimitResult, ApiRequest } from '../typings/api/api.types.ts'
 import type {
   RateLimitConfig,
   RateLimitEntry,
   RateLimitRule
-} from '../typings/rateLimit.types.ts'
+} from '../typings/api/rateLimit.types.ts'
 import { logger } from '../utils.js'
 
 type RateLimitContext = {

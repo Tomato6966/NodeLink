@@ -4,7 +4,7 @@ import type {
   CredentialEntry,
   CredentialManagerStats,
   CredentialStorePayload
-} from '../typings/credential.types.ts'
+} from '../typings/modules/credential.types.ts'
 import { logger } from '../utils.js'
 
 const CREDENTIALS_SALT = 'nodelink-salt'

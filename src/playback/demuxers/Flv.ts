@@ -3,7 +3,7 @@ import {
   type TransformCallback,
   type TransformOptions
 } from 'node:stream'
-import type { FlvTagInfo } from '../../typings/demuxer.types.ts'
+import type { FlvTagInfo } from '../../typings/playback/demuxer.types.ts'
 import { logger } from '../../utils.js'
 import { RingBuffer } from '../structs/RingBuffer.ts'
 

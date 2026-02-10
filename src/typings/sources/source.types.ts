@@ -9,14 +9,14 @@ import type { Worker as NodeWorker } from 'node:worker_threads'
 import type {
   CredentialEntry,
   CredentialManagerStats
-} from './credential.types.ts'
-import type { TrackInfoExtended } from './player.types.ts'
+} from '../modules/credential.types.ts'
+import type { TrackInfoExtended } from '../playback/player.types.ts'
 import type {
   StatsMetricsPayload,
   StatsSnapshot,
   WorkerMetricsPayload
-} from './stats.types.ts'
-import type { TrackCacheEntry } from './trackCache.types.ts'
+} from '../api/stats.types.ts'
+import type { TrackCacheEntry } from '../playback/trackCache.types.ts'
 
 /**
  * Frame type identifier for socket communication protocol

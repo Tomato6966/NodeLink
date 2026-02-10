@@ -4,7 +4,7 @@ import type {
   StatsMetricsPayload,
   StatsSnapshot,
   WorkerMetricsPayload
-} from '../typings/stats.types.ts'
+} from '../typings/api/stats.types.ts'
 import { logger } from '../utils.js'
 
 type PromClientModule = typeof import('prom-client')

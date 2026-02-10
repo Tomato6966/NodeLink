@@ -1,11 +1,11 @@
 import type {
   ApiDosProtectionResult,
   ApiRequest
-} from '../typings/api.types.ts'
+} from '../typings/api/api.types.ts'
 import type {
   DosProtectionConfig,
   DosProtectionEntry
-} from '../typings/dosProtection.types.ts'
+} from '../typings/api/dosProtection.types.ts'
 import { logger } from '../utils.js'
 
 type DosProtectionContext = {
