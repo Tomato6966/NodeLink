@@ -1865,7 +1865,7 @@ function getBestMatch(list, original, options = {}) {
     if (isOriginalExplicit && !allowExplicit) {
       if (isItemClean) score += 500
     }
-
+ 
     if (
       normItemAuthor.includes(normOriginalAuthor) ||
       normOriginalAuthor.includes(normItemAuthor)
