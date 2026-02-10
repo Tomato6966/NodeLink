@@ -67,7 +67,11 @@ async function loadRoutes(): Promise<ApiRouteCollection> {
   try {
     const routeFiles = await fs.readdir(__dirname)
     for (const file of routeFiles) {
-      if (file !== 'index.js' && file.endsWith('.js')) {
+      if (
+        file !== 'index.js' &&
+        file !== 'index.ts' &&
+        (file.endsWith('.js') || file.endsWith('.ts'))
+      ) {
         const filePath = join(__dirname, file)
         const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
         const routeModule = (await import(fileUrl.href)) as RouteModuleImport
@@ -80,7 +84,7 @@ async function loadRoutes(): Promise<ApiRouteCollection> {
   } catch {}
 
   for (const { file, module } of routeModules) {
-    const routeName = file.replace('.js', '').toLowerCase()
+    const routeName = file.replace(/\.(js|ts)$/, '').toLowerCase()
     let pathname: string | RegExp
 
     if (routeName === 'version') {
@@ -260,9 +264,9 @@ async function requestHandler(
     sendErrorResponse(
       req,
       res,
-      dosCheck.status,
-      dosCheck.message,
-      dosCheck.message,
+      dosCheck.status ?? 403,
+      dosCheck.message ?? 'Forbidden',
+      dosCheck.message ?? 'Forbidden',
       parsedUrl.pathname,
       trace
     )
