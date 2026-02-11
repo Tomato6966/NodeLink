@@ -158,7 +158,7 @@ abstract class WebmBaseDemuxer extends Transform {
 
     if (this.skipUntil !== null) {
       const remainingToSkip = this.skipUntil - this.processed
-      const bufferLen = BigInt(this.ringBuffer.getLength())
+      const bufferLen = BigInt(this.ringBuffer.length)
       const toSkip = remainingToSkip < bufferLen ? remainingToSkip : bufferLen
 
       if (toSkip > 0n) {
@@ -177,7 +177,7 @@ abstract class WebmBaseDemuxer extends Transform {
     }
 
     while (true) {
-      const currentData = this.ringBuffer.getContiguous(this.ringBuffer.getLength())
+      const currentData = this.ringBuffer.getContiguous(this.ringBuffer.length)
       if (!currentData) break
 
       let res: TagReadResult
@@ -194,8 +194,8 @@ abstract class WebmBaseDemuxer extends Transform {
 
       if (res._skipUntil) {
         this.skipUntil = res._skipUntil
-        this.ringBuffer.skip(this.ringBuffer.getLength())
-        this.processed += BigInt(this.ringBuffer.getLength())
+        this.ringBuffer.skip(this.ringBuffer.length)
+        this.processed += BigInt(this.ringBuffer.length)
         break
       }
 

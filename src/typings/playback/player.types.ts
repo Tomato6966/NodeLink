@@ -75,7 +75,7 @@ export interface LyricsPayload {
 /**
  * Stream format indicator. Can be a simple string or a detailed object.
  */
-export type TrackFormat = string | { itag?: number; [key: string]: unknown }
+export type TrackFormat = string | { itag?: number;[key: string]: unknown }
 
 type BaseTrackInfo = NonNullable<TrackData['info']> & {
   artworkUrl: string | null
@@ -104,10 +104,10 @@ export interface PlayerTrack {
 
 export type StreamInfo =
   | (TrackUrlResult & {
-      trackInfo?: TrackInfoExtended
-      format?: TrackFormat
-      protocol?: string
-    })
+    trackInfo?: TrackInfoExtended
+    format?: TrackFormat
+    protocol?: string
+  })
   | null
 
 /**
@@ -127,6 +127,7 @@ export interface AudioResource {
  */
 export interface AudioMixer {
   autoCleanup?: boolean
+  enabled?: boolean
   mixLayers: Map<
     string,
     {
@@ -152,6 +153,9 @@ export interface AudioMixer {
     startTime: number
   }>
   clearLayers: (reason?: string) => number
+  readLayerChunks: (chunkSize: number) => Map<string, { buffer: Buffer; volume: number }>
+  mixBuffers: (mainPCM: Buffer, layersPCM: Map<string, { buffer: Buffer; volume: number }>) => Buffer
+  hasActiveLayers: () => boolean
   on: (
     event: 'mixStarted' | 'mixEnded' | 'mixError',
     listener: (data: {

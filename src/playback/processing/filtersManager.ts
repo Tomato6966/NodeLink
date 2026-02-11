@@ -10,6 +10,7 @@ import type {
   FiltersManagerContext
 } from '../../typings/playback/filters.types.ts'
 import type { FiltersState } from '../../typings/playback/player.types.ts'
+import type { IFiltersManager } from '../../typings/playback/processing.types.ts'
 
 import ChannelMix from '../filters/channelMix.js'
 import Chorus from '../filters/chorus.js'
@@ -58,7 +59,7 @@ const FILTER_CLASSES: Record<string, FilterClass> = {
  * ```
  * @public
  */
-export class FiltersManager extends Transform {
+export class FiltersManager extends Transform implements IFiltersManager {
   private readonly nodelink: FiltersManagerContext
   private activeFilters: FilterInstance[]
   private filterInstances: Record<string, FilterInstance>

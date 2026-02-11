@@ -51,10 +51,10 @@ import FlvDemuxer from '../demuxers/Flv.ts'
 import WebmOpusDemuxer from '../demuxers/WebmOpus.ts'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.ts'
 import { RingBuffer } from '../structs/RingBuffer.ts'
-import { FadeTransformer } from './FadeTransformer.js'
-import { FlowController } from './FlowController.js'
+import { FadeTransformer } from './FadeTransformer.ts'
+import { FlowController } from './FlowController.ts'
 import { FiltersManager } from './filtersManager.ts'
-import { VolumeTransformer } from './VolumeTransformer.js'
+import { VolumeTransformer } from './VolumeTransformer.ts'
 
 const AUDIO_CONFIG: AudioConfig = Object.freeze({
   sampleRate: 48000,
@@ -2082,8 +2082,7 @@ class StreamAudioResource extends BaseAudioResource {
       filters,
       volumeTransformer,
       fadeTransformer,
-      // biome-ignore lint/suspicious/noExplicitAny: complexity in flow controller types
-      audioMixer as any
+      audioMixer
     )
 
     const opusEncoder = new OpusEncoder({
