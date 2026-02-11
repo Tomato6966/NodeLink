@@ -4,7 +4,7 @@ import net from 'node:net'
 import os from 'node:os'
 import v8 from 'node:v8'
 
-import { logger } from '../utils.js'
+import { logger } from '../utils.ts'
 
 export default class WorkerManager {
   constructor(config) {

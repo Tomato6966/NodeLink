@@ -1,4 +1,4 @@
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.ts'
 
 const AUDIUS_API_BASE = 'https://discoveryprovider.audius.co'
 const TRACK_URL_PATTERN =

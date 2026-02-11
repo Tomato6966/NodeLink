@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { logger } from '../../utils.js'
+import { logger } from '../../utils.ts'
 
 export default class AESDecryptor {
   static decrypt(data, key, iv, method = 'AES-128') {

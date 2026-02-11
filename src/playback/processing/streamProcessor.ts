@@ -46,7 +46,7 @@ import type {
   SeekableStreamMeta,
   SymphoniaDecoderLike
 } from '../../typings/playback/streamProcessor.types.ts'
-import { logger } from '../../utils.js'
+import { logger } from '../../utils.ts'
 import FlvDemuxer from '../demuxers/Flv.ts'
 import WebmOpusDemuxer from '../demuxers/WebmOpus.ts'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.ts'

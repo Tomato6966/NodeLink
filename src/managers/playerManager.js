@@ -1,4 +1,4 @@
-import { logger } from '../utils.js'
+import { logger } from '../utils.ts'
 
 export default class PlayerManager {
   constructor(nodelink, sessionId) {

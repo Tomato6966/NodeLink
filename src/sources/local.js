@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { encodeTrack, logger } from '../utils.js'
+import { encodeTrack, logger } from '../utils.ts'
 
 function parseMP3Header(buffer) {
   //biome-ignore lint: declare-variable-separate

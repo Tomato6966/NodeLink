@@ -1,4 +1,4 @@
-import { generateRandomLetters, logger } from '../utils.js'
+import { generateRandomLetters, logger } from '../utils.ts'
 import PlayerManager from './playerManager.js'
 
 export default class SessionManager {

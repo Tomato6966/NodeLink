@@ -8,7 +8,7 @@ import {
   getBestMatch,
   http1makeRequest,
   logger
-} from '../utils.js'
+} from '../utils.ts'
 
 const LASTFM_PATTERN =
   /^https?:\/\/(?:www\.)?last\.fm\/(?:[a-z]{2}\/)?music\/.+/

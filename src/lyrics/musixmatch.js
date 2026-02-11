@@ -3,7 +3,7 @@ import { unlink, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
-import { http1makeRequest, logger } from '../utils.js'
+import { http1makeRequest, logger } from '../utils.ts'
 
 const APP_ID = 'web-desktop-app-v1.0'
 const TOKEN_TTL = 55000

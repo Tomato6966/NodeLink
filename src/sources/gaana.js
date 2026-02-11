@@ -1,4 +1,4 @@
-import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
 import PlaylistParser from '../playback/hls/PlaylistParser.js'
 import { PassThrough } from 'node:stream'

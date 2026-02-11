@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import fs from 'node:fs/promises'
 import type { TrackCacheEntry } from '../typings/playback/trackCache.types.ts'
-import { logger } from '../utils.js'
+import { logger } from '../utils.ts'
 
 const TRACK_CACHE_SALT = 'nodelink-track-salt'
 const DEFAULT_CACHE_FILE = './.cache/tracks.bin'

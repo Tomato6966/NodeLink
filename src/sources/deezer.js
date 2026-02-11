@@ -8,7 +8,7 @@ import {
   logger,
   getBestMatch,
   makeRequest
-} from '../utils.js'
+} from '../utils.ts'
 
 const IV = Buffer.from([0, 1, 2, 3, 4, 5, 6, 7])
 const ISRC_REGEX = /^(?:isrc:)?([A-Z]{2}-?[A-Z0-9]{3}-?\d{2}-?\d{5})$/i

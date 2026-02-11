@@ -1,4 +1,4 @@
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.ts'
 
 const _DURATION_TOLERANCE = 0.15
 

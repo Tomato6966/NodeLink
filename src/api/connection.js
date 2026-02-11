@@ -1,4 +1,4 @@
-import { sendResponse } from '../utils.js'
+import { sendResponse } from '../utils.ts'
 
 function handler(nodelink, req, res) {
   const status = nodelink.connectionManager.status

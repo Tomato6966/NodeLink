@@ -4,7 +4,7 @@ import {
   http1makeRequest,
   logger,
   makeRequest
-} from '../utils.js'
+} from '../utils.ts'
 
 export default class PandoraSource {
   constructor(nodelink) {

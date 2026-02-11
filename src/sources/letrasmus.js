@@ -3,7 +3,7 @@ import {
   getBestMatch,
   http1makeRequest,
   logger
-} from '../utils.js'
+} from '../utils.ts'
 
 const LETRAS_PATTERN =
   /^https?:\/\/(?:www\.)?letras\.(?:mus\.br|com)\/[a-z0-9-]+\/[^/]+\/?/i

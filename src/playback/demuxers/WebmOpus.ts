@@ -7,7 +7,7 @@ import type {
   WebmTagReadResult,
   WebmTrackInfo
 } from '../../typings/playback/demuxer.types.ts'
-import { logger } from '../../utils.js'
+import { logger } from '../../utils.ts'
 import { RingBuffer } from '../structs/RingBuffer.ts'
 
 const TOO_SHORT: unique symbol = Symbol('TOO_SHORT')

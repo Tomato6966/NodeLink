@@ -4,7 +4,7 @@ import type {
   RateLimitEntry,
   RateLimitRule
 } from '../typings/api/rateLimit.types.ts'
-import { logger } from '../utils.js'
+import { logger } from '../utils.ts'
 
 type RateLimitContext = {
   options?: {

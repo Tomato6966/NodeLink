@@ -1,5 +1,5 @@
 import { Transform } from 'node:stream'
-import { encodeTrack, getVersion, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, getVersion, http1makeRequest, logger } from '../utils.ts'
 
 const DEFAULT_HTTP_USER_AGENT = `NodeLink/${getVersion()} (https://github.com/PerformanC/NodeLink)`
 

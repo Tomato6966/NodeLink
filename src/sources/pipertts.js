@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, logger, makeRequest } from '../utils.js'
+import { encodeTrack, logger, makeRequest } from '../utils.ts'
 
 export default class PiperSource {
   constructor(nodelink) {

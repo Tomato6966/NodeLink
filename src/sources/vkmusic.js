@@ -1,4 +1,4 @@
-import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
 
 const API_BASE = 'https://api.vk.com/method/'

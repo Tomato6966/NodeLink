@@ -1,4 +1,4 @@
-import { sendErrorResponse, sendResponse } from '../utils.js'
+import { sendErrorResponse, sendResponse } from '../utils.ts'
 
 const LOOPBACKS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 

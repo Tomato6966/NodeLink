@@ -36,7 +36,7 @@ import type {
   WorkerNodeLink,
   WorkerPlayer
 } from '../typings/workers/worker.types.ts'
-import { cleanupHttpAgents, initLogger, logger } from '../utils.js'
+import { cleanupHttpAgents, initLogger, logger } from '../utils.ts'
 import { createVoiceRelay } from '../voice/voiceRelay.js'
 
 let lastCpuUsage: NodeJS.CpuUsage = process.cpuUsage()

@@ -3,7 +3,7 @@ import {
   http1makeRequest,
   logger,
   makeRequest
-} from '../../utils.js'
+} from '../../utils.ts'
 
 const CACHE_DURATION_MS = 12 * 60 * 60 * 1000
 const VERSION = getVersion()

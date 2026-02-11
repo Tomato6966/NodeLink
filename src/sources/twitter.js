@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
 
 const AUTH = 'AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA'

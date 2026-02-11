@@ -6,7 +6,7 @@ import type {
   DosProtectionConfig,
   DosProtectionEntry
 } from '../typings/api/dosProtection.types.ts'
-import { logger } from '../utils.js'
+import { logger } from '../utils.ts'
 
 type DosProtectionContext = {
   options?: {

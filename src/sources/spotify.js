@@ -3,7 +3,7 @@ import {
   getBestMatch,
   http1makeRequest,
   logger
-} from '../utils.js'
+} from '../utils.ts'
 import { fetchCanvas } from '../modules/spotifyCanvas.js'
 import { getLocalToken } from '../modules/spotifyAuth.js'
 

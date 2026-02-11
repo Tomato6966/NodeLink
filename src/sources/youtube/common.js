@@ -1,4 +1,4 @@
-import { encodeTrack, logger, makeRequest } from '../../utils.js'
+import { encodeTrack, logger, makeRequest } from '../../utils.ts'
 export const YOUTUBE_CONSTANTS = {
   VIDEO: 0,
   PLAYLIST: 1,

@@ -3,7 +3,7 @@ import {
   getBestMatch,
   http1makeRequest,
   logger
-} from '../utils.js'
+} from '../utils.ts'
 
 export default class ShazamSource {
   constructor(nodelink) {

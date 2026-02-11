@@ -1,7 +1,7 @@
 import { PassThrough } from 'node:stream'
 import { URLSearchParams } from 'node:url'
 
-import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.ts'
 
 export default class InstagramSource {
   constructor(nodelink) {

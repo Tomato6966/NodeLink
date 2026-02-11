@@ -3,7 +3,7 @@ import {
   getBestMatch,
   http1makeRequest,
   logger
-} from '../utils.js'
+} from '../utils.ts'
 import crypto from 'node:crypto'
 
 const BOT_USER_AGENT =

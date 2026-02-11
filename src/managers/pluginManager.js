@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { logger } from '../utils.js'
+import { logger } from '../utils.ts'
 
 const require = createRequire(import.meta.url)
 

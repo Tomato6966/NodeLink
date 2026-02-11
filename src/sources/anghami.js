@@ -1,4 +1,4 @@
-import { encodeTrack, getBestMatch, logger, makeRequest } from '../utils.js'
+import { encodeTrack, getBestMatch, logger, makeRequest } from '../utils.ts'
 
 export default class AnghamiSource {
   constructor(nodelink) {

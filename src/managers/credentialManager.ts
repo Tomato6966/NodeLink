@@ -5,7 +5,7 @@ import type {
   CredentialManagerStats,
   CredentialStorePayload
 } from '../typings/modules/credential.types.ts'
-import { logger } from '../utils.js'
+import { logger } from '../utils.ts'
 
 const CREDENTIALS_SALT = 'nodelink-salt'
 const CREDENTIALS_VERSION = 1

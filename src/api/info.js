@@ -1,5 +1,5 @@
 import process from 'node:process'
-import { getVersion } from '../utils.js'
+import { getVersion } from '../utils.ts'
 
 async function handler(nodelink, req, res, sendResponse) {
   const enabledFilters = nodelink.options.filters.enabled || {}

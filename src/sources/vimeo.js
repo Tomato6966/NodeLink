@@ -4,7 +4,7 @@ import http from 'node:http'
 import https from 'node:https'
 import { PassThrough } from 'node:stream'
 import zlib from 'node:zlib'
-import { encodeTrack, logger } from '../utils.js'
+import { encodeTrack, logger } from '../utils.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
 
 const VIMEO_PATTERNS = [

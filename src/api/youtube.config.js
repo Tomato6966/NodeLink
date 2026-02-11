@@ -1,6 +1,6 @@
 import Validator from 'fastest-validator'
 import OAuth from '../sources/youtube/OAuth.js'
-import { logger, sendErrorResponse } from '../utils.js'
+import { logger, sendErrorResponse } from '../utils.ts'
 
 const v = new Validator({ haltOnFirstError: true })
 

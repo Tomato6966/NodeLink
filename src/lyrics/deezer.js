@@ -1,4 +1,4 @@
-import { getBestMatch, logger, makeRequest } from '../utils.js'
+import { getBestMatch, logger, makeRequest } from '../utils.ts'
 
 export default class DeezerLyrics {
   constructor(nodelink) {

@@ -2,7 +2,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { alignLyrics } from '../modules/lyricsAligner.js'
-import { logger } from '../utils.js'
+import { logger } from '../utils.ts'
 
 export default class LyricsManager {
   constructor(nodelink) {

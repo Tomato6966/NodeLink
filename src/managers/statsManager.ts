@@ -5,7 +5,7 @@ import type {
   StatsSnapshot,
   WorkerMetricsPayload
 } from '../typings/api/stats.types.ts'
-import { logger } from '../utils.js'
+import { logger } from '../utils.ts'
 
 type PromClientModule = typeof import('prom-client')
 type PromRegistry = InstanceType<PromClientModule['Registry']>
@@ -40,6 +40,7 @@ const safeNumber = (value: unknown): number =>
  * @public
  */
 export default class StatsManager {
+  [key: string]: unknown
   private readonly nodelink: StatsManagerContext
   private readonly stats: StatsSnapshot
   private initialized: boolean

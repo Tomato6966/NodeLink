@@ -24,7 +24,7 @@ import {
   parseClient,
   validateProperty,
   verifyDiscordID
-} from './utils.js'
+} from './utils.ts'
 import 'dotenv/config'
 import type { ServerWebSocket } from 'bun'
 import { GatewayEvents } from './constants.ts'

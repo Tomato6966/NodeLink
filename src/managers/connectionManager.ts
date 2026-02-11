@@ -14,7 +14,7 @@ import type {
   NetworkInfo,
   PingResult
 } from '../typings/voice/connection.types.ts'
-import { http1makeRequest, logger } from '../utils.js'
+import { http1makeRequest, logger } from '../utils.ts'
 
 const execAsync = promisify(exec)
 const dnsLookup = promisify(dns.lookup)

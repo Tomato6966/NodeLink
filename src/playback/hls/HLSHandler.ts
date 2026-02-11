@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
 import type { Readable } from 'node:stream'
-import { http1makeRequest, logger } from '../../utils.js'
+import { http1makeRequest, logger } from '../../utils.ts'
 import PlaylistParser from './PlaylistParser.js'
 import SegmentFetcher from './SegmentFetcher.js'
 import type {

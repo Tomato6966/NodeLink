@@ -1,4 +1,4 @@
-import { getStats } from '../utils.js'
+import { getStats } from '../utils.ts'
 
 function handler(nodelink, req, res, sendResponse) {
   const payload = getStats(nodelink)

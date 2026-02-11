@@ -1,4 +1,4 @@
-import { http1makeRequest, logger } from '../utils.js'
+import { http1makeRequest, logger } from '../utils.ts'
 
 const SOLR_ENDPOINT = 'https://solr.sscdn.co/letras/m1/'
 

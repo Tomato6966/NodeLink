@@ -1,5 +1,5 @@
 import Validator from 'fastest-validator'
-import { sendErrorResponse, sendResponse } from '../utils.js'
+import { sendErrorResponse, sendResponse } from '../utils.ts'
 
 const v = new Validator({ haltOnFirstError: true })
 

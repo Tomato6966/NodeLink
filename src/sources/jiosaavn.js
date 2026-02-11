@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger, getBestMatch, } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger, getBestMatch, } from '../utils.ts'
 import { desEcbDecryptBase64ToUtf8 } from '../decrypters/des-ecb.js'
 
 const API_BASE = 'https://www.jiosaavn.com/api.php'

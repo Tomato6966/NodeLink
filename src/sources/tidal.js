@@ -4,7 +4,7 @@ import {
   getBestMatch,
   http1makeRequest,
   logger
-} from '../utils.js'
+} from '../utils.ts'
 
 const API_BASE = 'https://api.tidal.com/v1/'
 const CACHE_VALIDITY_DAYS = 7

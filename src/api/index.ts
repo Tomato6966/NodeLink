@@ -18,7 +18,7 @@ import {
   sendErrorResponse,
   sendResponse,
   verifyMethod
-} from '../utils.js'
+} from '../utils.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)

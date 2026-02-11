@@ -4,7 +4,7 @@ import {
   type TransformOptions
 } from 'node:stream'
 import type { FlvTagInfo } from '../../typings/playback/demuxer.types.ts'
-import { logger } from '../../utils.js'
+import { logger } from '../../utils.ts'
 import { RingBuffer } from '../structs/RingBuffer.ts'
 
 const STATE_HEADER = 0

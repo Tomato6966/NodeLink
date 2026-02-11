@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
 
 export default class TwitchSource {

@@ -1,5 +1,5 @@
 import { PassThrough } from 'node:stream'
-import { http1makeRequest, logger, makeRequest } from '../../utils.js'
+import { http1makeRequest, logger, makeRequest } from '../../utils.ts'
 import HLSHandler from '../../playback/hls/HLSHandler.ts'
 import CipherManager from './CipherManager.js'
 import Android from './clients/Android.js'

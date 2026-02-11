@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { http1makeRequest, logger } from '../utils.js'
+import { http1makeRequest, logger } from '../utils.ts'
 
 const API_BASE = 'https://api.music.yandex.net'
 const USER_AGENT = 'Yandex-Music-API'

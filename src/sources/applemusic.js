@@ -4,7 +4,7 @@ import {
   getBestMatch,
   http1makeRequest,
   logger
-} from '../utils.js'
+} from '../utils.ts'
 
 const API_BASE = 'https://api.music.apple.com/v1'
 const MAX_PAGE_ITEMS = 300

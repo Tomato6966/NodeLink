@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer'
 import { base64ToU8 } from './protor.js'
 import { appendFile } from 'node:fs/promises'
 import path from 'node:path'
-import { logger } from '../../../utils.js'
+import { logger } from '../../../utils.ts'
 import { JSDOM } from 'jsdom'
 
 const TOKENS_LOG_PATH = path.join(process.cwd(), 'po_tokens.jsonl')

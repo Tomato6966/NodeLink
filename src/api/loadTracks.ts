@@ -5,7 +5,7 @@ import type {
   ApiResponse,
   ApiSendResponse
 } from '../typings/api/api.types.ts'
-import { logger, sendErrorResponse } from '../utils.js'
+import { logger, sendErrorResponse } from '../utils.ts'
 
 const v = new Validator({ haltOnFirstError: true })
 

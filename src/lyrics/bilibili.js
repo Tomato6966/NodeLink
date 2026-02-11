@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { logger, makeRequest } from '../utils.js'
+import { logger, makeRequest } from '../utils.ts'
 
 const MIXIN_KEY_ENC_TAB = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
