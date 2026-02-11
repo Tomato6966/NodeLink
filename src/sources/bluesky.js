@@ -1,7 +1,7 @@
 import { PassThrough } from 'node:stream'
 import { encodeTrack, logger, makeRequest, http1makeRequest } from '../utils.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
-import PlaylistParser from '../playback/hls/PlaylistParser.js'
+import { parse as parsePlaylist } from '../playback/hls/PlaylistParser.ts'
 
 export default class BlueskySource {
   constructor(nodelink) {
@@ -19,12 +19,12 @@ export default class BlueskySource {
   }
 
   async _getServiceEndpoint(did) {
-    let url = did.startsWith('did:web:')
+    const url = did.startsWith('did:web:')
       ? `https://${did.slice(8)}/.well-known/did.json`
       : `https://plc.directory/${did}`
 
     const { body, error } = await makeRequest(url, { method: 'GET' })
-    if (error || !body || !body.service) return 'https://bsky.social'
+    if (error || !body?.service) return 'https://bsky.social'
 
     const pds = body.service.find(s => s.type === 'AtprotoPersonalDataServer')
     return pds?.serviceEndpoint || 'https://bsky.social'
@@ -35,7 +35,7 @@ export default class BlueskySource {
       const { body, error, statusCode } = await makeRequest(playlistUrl, { method: 'GET' })
       if (error || statusCode !== 200 || !body) return 0
 
-      const parsed = PlaylistParser.parse(body, playlistUrl)
+      const parsed = parsePlaylist(body, playlistUrl)
 
       if (parsed.isMaster) {
         if (parsed.variants && parsed.variants.length > 0) {
@@ -49,7 +49,7 @@ export default class BlueskySource {
         duration += segment.duration
       }
       return Math.round(duration * 1000)
-    } catch (e) {
+    } catch {
       return 0
     }
   }
@@ -115,7 +115,7 @@ export default class BlueskySource {
     if (!embed) throw new Error('No media found in Bluesky post')
 
     const playlistUrl = embed.playlist
-    const videoCid = embed.cid || (embed.video && embed.video.ref ? embed.video.ref.$link : null)
+    const videoCid = embed.cid || embed.video?.ref?.$link || null
 
     if (playlistUrl) {
         return {
@@ -192,7 +192,7 @@ export default class BlueskySource {
     const embed = post.embed?.media || post.embed
     if (!embed) return null
 
-    const videoCid = embed.cid || (embed.video && embed.video.ref ? embed.video.ref.$link : null)
+    const videoCid = embed.cid || embed.video?.ref?.$link || null
     const playlistUrl = embed.playlist
 
     if (!playlistUrl && !videoCid) return null

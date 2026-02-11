@@ -1,6 +1,6 @@
 import { encodeTrack, http1makeRequest, logger, getBestMatch } from '../utils.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
-import PlaylistParser from '../playback/hls/PlaylistParser.js'
+import { parse as parsePlaylist } from '../playback/hls/PlaylistParser.ts'
 import { PassThrough } from 'node:stream'
 import { createDecipheriv } from 'node:crypto'
 
@@ -71,7 +71,7 @@ export default class GaanaSource {
     return tracks.filter(Boolean)
   }
 
-  async search(query, sourceTerm, searchType = 'track') {
+  async search(query, _sourceTerm, searchType = 'track') {
     try {
       const params = {
         country: 'IN',
@@ -353,7 +353,7 @@ export default class GaanaSource {
   decryptStreamPath(encryptedData) {
     try {
       const offset = parseInt(encryptedData[0], 10)
-      if (isNaN(offset)) return ''
+      if (Number.isNaN(offset)) return ''
 
       const ciphertextB64 = encryptedData.substring(offset + 16)
       const ciphertext = Buffer.from(ciphertextB64 + '==', 'base64')
@@ -375,7 +375,7 @@ export default class GaanaSource {
         return HLS_BASE_URL + rawText.substring(pathStart)
       }
       return ''
-    } catch (e) {
+    } catch {
       return ''
     }
   }
@@ -384,17 +384,17 @@ export default class GaanaSource {
     const { body: text } = await http1makeRequest(url, { headers: this._getHeaders(), proxy: this.config.proxy })
     if (!text) throw new Error('Empty manifest')
 
-    let manifest = PlaylistParser.parse(text, url)
+    let manifest = parsePlaylist(text, url)
     if (manifest.isMaster) {
       const bestVariant = manifest.variants[0]
       const { body: variantText } = await http1makeRequest(bestVariant.url, { headers: this._getHeaders(), proxy: this.config.proxy })
-      manifest = PlaylistParser.parse(variantText, bestVariant.url)
+      manifest = parsePlaylist(variantText, bestVariant.url)
     }
 
     return manifest
   }
 
-  async loadStream(track, url, protocol, additionalData) {
+  async loadStream(_track, url, protocol, additionalData) {
     if (protocol === 'hls') {
       const stream = new HLSHandler(url, {
         type: 'mpegts',
