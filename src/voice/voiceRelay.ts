@@ -25,7 +25,12 @@ const EMPTY_BUFFER = Buffer.alloc(0)
  * @param options - Configuration options for the voice relay.
  * @returns The voice relay instance or null if disabled.
  */
-export function createVoiceRelay({ enabled, format, sendFrame, logger }: VoiceRelayOptions): VoiceRelay | null {
+export function createVoiceRelay({
+  enabled,
+  format,
+  sendFrame,
+  logger
+}: VoiceRelayOptions): VoiceRelay | null {
   if (!enabled || typeof sendFrame !== 'function') {
     return null
   }
@@ -42,7 +47,11 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }: VoiceRe
       sendFrame(frame)
     } catch (err) {
       if (logger) {
-        logger('error', 'Voice', `Failed to send voice frame: ${(err as Error).message}`)
+        logger(
+          'error',
+          'Voice',
+          `Failed to send voice frame: ${(err as Error).message}`
+        )
       }
     }
   }
@@ -59,7 +68,7 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }: VoiceRe
     if (entry.decoder) {
       try {
         if ('unpipe' in entry.stream) {
-          (entry.stream as Readable).unpipe(entry.decoder)
+          ;(entry.stream as Readable).unpipe(entry.decoder)
         }
         entry.decoder.destroy()
       } catch {
@@ -71,7 +80,11 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }: VoiceRe
     return entry
   }
 
-  const handleSpeakStart = (guildId: string, userId: string, ssrc: number): void => {
+  const handleSpeakStart = (
+    guildId: string,
+    userId: string,
+    ssrc: number
+  ): void => {
     const key = `${guildId}:${ssrc}`
     if (activeStreams.has(key)) return
 
@@ -153,7 +166,11 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }: VoiceRe
     })
   }
 
-  const handleSpeakStop = (guildId: string, userId: string, ssrc: number): void => {
+  const handleSpeakStop = (
+    guildId: string,
+    userId: string,
+    ssrc: number
+  ): void => {
     const key = `${guildId}:${ssrc}`
     const entry = cleanupStream(key)
     const finalUserId = entry?.userId || userId

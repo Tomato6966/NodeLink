@@ -1,5 +1,8 @@
 import { Buffer } from 'node:buffer'
-import type { ResolvedVoiceFormat, ParsedVoiceFrameHeader } from '../typings/voice/voice.types.ts'
+import type {
+  ResolvedVoiceFormat,
+  ParsedVoiceFrameHeader
+} from '../typings/voice/voice.types.ts'
 
 /**
  * Voice frame operation codes.
@@ -35,7 +38,10 @@ export function resolveVoiceFormat(
 ): ResolvedVoiceFormat {
   const normalized = String(format || 'opus').toLowerCase()
   if (SUPPORTED_FORMATS.has(normalized)) {
-    return { name: normalized, code: VOICE_FORMATS[normalized as keyof typeof VOICE_FORMATS] }
+    return {
+      name: normalized,
+      code: VOICE_FORMATS[normalized as keyof typeof VOICE_FORMATS]
+    }
   }
 
   if (logger) {
@@ -111,7 +117,9 @@ export function buildVoiceFrame(
  * @param buf - The buffer containing the voice frame.
  * @returns The parsed voice frame header or null if invalid.
  */
-export function parseVoiceFrameHeader(buf: Buffer): ParsedVoiceFrameHeader | null {
+export function parseVoiceFrameHeader(
+  buf: Buffer
+): ParsedVoiceFrameHeader | null {
   if (!buf || buf.length < 8) return null
   let offset = 0
 
@@ -146,4 +154,3 @@ export function parseVoiceFrameHeader(buf: Buffer): ParsedVoiceFrameHeader | nul
     payloadOffset: offset
   }
 }
-

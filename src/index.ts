@@ -336,7 +336,7 @@ class NodelinkServer extends EventEmitter {
       format: options.voiceReceive?.format || 'pcm',
       sendFrame: (frame: Buffer) => this.handleVoiceFrame(frame),
       logger
-    }) as VoiceRelay
+    }) as unknown as VoiceRelay
 
     this._globalUpdater = null
     this._statsUpdater = null
@@ -442,7 +442,7 @@ class NodelinkServer extends EventEmitter {
     for (const socket of sockets) {
       try {
         socket.send(frame)
-      } catch { }
+      } catch {}
     }
   }
 
@@ -902,9 +902,10 @@ class NodelinkServer extends EventEmitter {
             logger(
               'info',
               'Server',
-              `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version
-                ? `/\x1b[32mv${clientInfo.version}\x1b[0m`
-                : ''
+              `\x1b[36m${clientInfo.name}\x1b[0m${
+                clientInfo.version
+                  ? `/\x1b[32mv${clientInfo.version}\x1b[0m`
+                  : ''
               } resumed session with ID: ${oldSessionId}`
             )
             this.statsManager.incrementSessionResume(clientInfo.name, true)
@@ -920,8 +921,10 @@ class NodelinkServer extends EventEmitter {
               logger(
                 'info',
                 'Server',
-                `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${clientInfo.version
-                }\x1b[0m disconnected with code ${code} and reason: ${reason || 'without reason'
+                `\x1b[36m${clientInfo.name}\x1b[0m/\x1b[32mv${
+                  clientInfo.version
+                }\x1b[0m disconnected with code ${code} and reason: ${
+                  reason || 'without reason'
                 }`
               )
 
@@ -987,10 +990,12 @@ class NodelinkServer extends EventEmitter {
             logger(
               'info',
               'Server',
-              `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version
-                ? `/\x1b[32mv${clientInfo.version}\x1b[0m`
-                : ''
-              } disconnected with code ${code} and reason: ${reason || 'without reason'
+              `\x1b[36m${clientInfo.name}\x1b[0m${
+                clientInfo.version
+                  ? `/\x1b[32mv${clientInfo.version}\x1b[0m`
+                  : ''
+              } disconnected with code ${code} and reason: ${
+                reason || 'without reason'
               }`
             )
 
@@ -1151,7 +1156,7 @@ class NodelinkServer extends EventEmitter {
                     cb(Buffer.from(buf))
                     if (reqShim._endCb) reqShim._endCb()
                   })
-                  .catch(() => { })
+                  .catch(() => {})
               }
               if (event === 'end') {
                 reqShim._endCb = cb as () => void
@@ -1227,7 +1232,8 @@ class NodelinkServer extends EventEmitter {
           logger(
             'info',
             'Server',
-            `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''
+            `\x1b[36m${clientInfo.name}\x1b[0m${
+              clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''
             } connected from [External] (${ws.data.remoteAddress}) | \x1b[33mURL:\x1b[0m ${ws.data.url}`
           )
 
@@ -1247,7 +1253,7 @@ class NodelinkServer extends EventEmitter {
               if (!self.options.voiceReceive?.enabled) {
                 try {
                   wrapper.close(1008, 'Voice receive disabled')
-                } catch { }
+                } catch {}
                 return
               }
               eventName = '/v4/websocket/voice'
@@ -1256,7 +1262,7 @@ class NodelinkServer extends EventEmitter {
               eventName = '/v4/websocket/youtube/live'
               liveId = liveMatch[1]
             }
-          } catch { }
+          } catch {}
 
           if (self.socket) {
             self.socket.emit(
@@ -1304,212 +1310,217 @@ class NodelinkServer extends EventEmitter {
         RequestHandler(this, req, res)
     )
 
-      ; (this.server as http.Server).keepAliveTimeout = 65000
-      ; (this.server as http.Server).headersTimeout = 66000
+    ;(this.server as http.Server).keepAliveTimeout = 65000
+    ;(this.server as http.Server).headersTimeout = 66000
 
-      ; (this.server as http.Server).on(
-        'upgrade',
-        (
-          request: http.IncomingMessage,
-          socket: import('net').Socket,
-          head: Buffer
+    ;(this.server as http.Server).on(
+      'upgrade',
+      (
+        request: http.IncomingMessage,
+        socket: import('net').Socket,
+        head: Buffer
+      ) => {
+        const { remoteAddress, remotePort } = request.socket
+        const isInternal =
+          /^(::1|localhost|127\.0\.0\.1)/.test(remoteAddress || '') ||
+          /^::ffff:127\.0\.0\.1/.test(remoteAddress || '')
+        const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort})`
+
+        const rejectUpgrade = (
+          status: number,
+          statusText: string,
+          body: string
         ) => {
-          const { remoteAddress, remotePort } = request.socket
-          const isInternal =
-            /^(::1|localhost|127\.0\.0\.1)/.test(remoteAddress || '') ||
-            /^::ffff:127\.0\.0\.1/.test(remoteAddress || '')
-          const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort})`
-
-          const rejectUpgrade = (
-            status: number,
-            statusText: string,
-            body: string
-          ) => {
-            socket.write(
-              `HTTP/1.1 ${status} ${statusText}\r\nNodelink-Api-Version: 4\r\nIamNodelink: true\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`
-            )
-            socket.destroy()
-          }
-
-          const originalHeaders = request.headers
-          const headers: Record<string, string | string[]> = {}
-          for (const key in originalHeaders) {
-            const value = originalHeaders[key]
-            if (value !== undefined) {
-              headers[key.toLowerCase()] = value
-            }
-          }
-
-          logger(
-            'debug',
-            'Resume',
-            `Received headers (lowercased): ${JSON.stringify(headers)}`
+          socket.write(
+            `HTTP/1.1 ${status} ${statusText}\r\nNodelink-Api-Version: 4\r\nIamNodelink: true\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`
           )
+          socket.destroy()
+        }
 
-          // biome-ignore lint/complexity/useLiteralKeys: TypeScript requires index signature access
-          const authorization = headers['authorization']
-          const authValue = Array.isArray(authorization)
-            ? authorization[0]
-            : authorization
-          if (authValue !== this.options.server.password) {
+        const originalHeaders = request.headers
+        const headers: Record<string, string | string[]> = {}
+        for (const key in originalHeaders) {
+          const value = originalHeaders[key]
+          if (value !== undefined) {
+            headers[key.toLowerCase()] = value
+          }
+        }
+
+        logger(
+          'debug',
+          'Resume',
+          `Received headers (lowercased): ${JSON.stringify(headers)}`
+        )
+
+        // biome-ignore lint/complexity/useLiteralKeys: TypeScript requires index signature access
+        const authorization = headers['authorization']
+        const authValue = Array.isArray(authorization)
+          ? authorization[0]
+          : authorization
+        if (authValue !== this.options.server.password) {
+          logger(
+            'warn',
+            'Server',
+            `Unauthorized connection attempt from ${clientAddress} - Invalid password provided: ${authValue || 'None'}`
+          )
+          return rejectUpgrade(
+            401,
+            'Unauthorized',
+            'Invalid password provided.'
+          )
+        }
+        const clientNameHeader = headers['client-name']
+        const clientInfo = parseClient(
+          Array.isArray(clientNameHeader)
+            ? clientNameHeader[0]
+            : clientNameHeader
+        ) as {
+          name: string
+          version: string | undefined
+        }
+        if (!clientInfo) {
+          logger(
+            'warn',
+            'Server',
+            `Unauthorized connection attempt from ${clientAddress} - Invalid client-name provided`
+          )
+          return rejectUpgrade(
+            400,
+            'Bad Request',
+            'Invalid or missing Client-Name header.'
+          )
+        }
+
+        let sessionId = headers['session-id']
+        logger('debug', 'Resume', `Received session-id header: ${sessionId}`)
+        if (sessionId && !this.sessions.resumableSessions.has(sessionId)) {
+          logger(
+            'warn',
+            'Server',
+            `Session-ID provided by ${clientAddress} does not exist or is not resumable: ${sessionId}, creating a new session`
+          )
+          sessionId = undefined
+        }
+
+        const { pathname } = new URL(
+          request.url || '/',
+          `http://${request.headers.host || 'localhost'}`
+        )
+        const voiceMatch = pathname.match(
+          /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
+        )
+        const liveMatch = pathname.match(
+          /^\/v4\/websocket\/youtube\/live\/([^/]+)\/?$/
+        )
+
+        if (pathname === '/v4/websocket' || voiceMatch || liveMatch) {
+          if (!headers['user-id']) {
             logger(
               'warn',
               'Server',
-              `Unauthorized connection attempt from ${clientAddress} - Invalid password provided: ${authValue || 'None'}`
-            )
-            return rejectUpgrade(
-              401,
-              'Unauthorized',
-              'Invalid password provided.'
-            )
-          }
-          const clientNameHeader = headers['client-name']
-          const clientInfo = parseClient(
-            Array.isArray(clientNameHeader) ? clientNameHeader[0] : clientNameHeader
-          ) as {
-            name: string
-            version: string | undefined
-          }
-          if (!clientInfo) {
-            logger(
-              'warn',
-              'Server',
-              `Unauthorized connection attempt from ${clientAddress} - Invalid client-name provided`
+              `Unauthorized connection attempt from ${clientAddress} - Missing user ID`
             )
             return rejectUpgrade(
               400,
               'Bad Request',
-              'Invalid or missing Client-Name header.'
+              'User-Id header is missing.'
             )
           }
-
-          let sessionId = headers['session-id']
-          logger('debug', 'Resume', `Received session-id header: ${sessionId}`)
-          if (sessionId && !this.sessions.resumableSessions.has(sessionId)) {
+          const userIdHeader = headers['user-id']
+          const userId = Array.isArray(userIdHeader)
+            ? userIdHeader[0]
+            : userIdHeader
+          if (!userId || !verifyDiscordID(userId)) {
             logger(
               'warn',
               'Server',
-              `Session-ID provided by ${clientAddress} does not exist or is not resumable: ${sessionId}, creating a new session`
+              `Unauthorized connection attempt from ${clientAddress} - Invalid user ID provided`
             )
-            sessionId = undefined
+            return rejectUpgrade(400, 'Bad Request', 'Invalid User-Id header.')
           }
 
-          const { pathname } = new URL(
-            request.url || '/',
-            `http://${request.headers.host || 'localhost'}`
-          )
-          const voiceMatch = pathname.match(
-            /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
-          )
-          const liveMatch = pathname.match(
-            /^\/v4\/websocket\/youtube\/live\/([^/]+)\/?$/
-          )
-
-          if (pathname === '/v4/websocket' || voiceMatch || liveMatch) {
-            if (!headers['user-id']) {
-              logger(
-                'warn',
-                'Server',
-                `Unauthorized connection attempt from ${clientAddress} - Missing user ID`
-              )
-              return rejectUpgrade(
-                400,
-                'Bad Request',
-                'User-Id header is missing.'
-              )
-            }
-            const userIdHeader = headers['user-id']
-            const userId = Array.isArray(userIdHeader) ? userIdHeader[0] : userIdHeader
-            if (!userId || !verifyDiscordID(userId)) {
-              logger(
-                'warn',
-                'Server',
-                `Unauthorized connection attempt from ${clientAddress} - Invalid user ID provided`
-              )
-              return rejectUpgrade(400, 'Bad Request', 'Invalid User-Id header.')
-            }
-
-            if (voiceMatch && !this.options.voiceReceive?.enabled) {
-              return rejectUpgrade(
-                404,
-                'Not Found',
-                'Voice websocket endpoint is disabled.'
-              )
-            }
-
-            for (const key in headers) {
-              const value = headers[key]
-              if (typeof value === 'string') {
-                request.headers[key] = value
-              }
-            }
-
-            logger(
-              'info',
-              'Server',
-              `\x1b[36m${clientInfo.name}\x1b[0m${clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''
-              } connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
-            )
-
-            let eventName = '/v4/websocket'
-            let routeId = null
-
-            if (voiceMatch) {
-              eventName = '/v4/websocket/voice'
-              routeId = voiceMatch[1]
-            } else if (liveMatch) {
-              eventName = '/v4/websocket/youtube/live'
-              routeId = liveMatch[1]
-            }
-
-            if (isBun && !this._usingBunServer && this.socket) {
-              ; (this.socket as WebSocketServer).handleUpgrade(
-                request,
-                socket,
-                head,
-                null,
-                (ws) => {
-                  this.socket?.emit(
-                    eventName,
-                    ws as SessionSocket,
-                    request,
-                    clientInfo,
-                    sessionId,
-                    routeId
-                  )
-                }
-              )
-            } else {
-              ; (this.socket as WebSocketServer | undefined)?.handleUpgrade(
-                request,
-                socket,
-                head,
-                null,
-                (ws) =>
-                  this.socket?.emit(
-                    eventName,
-                    ws as SessionSocket,
-                    request,
-                    clientInfo,
-                    sessionId,
-                    routeId
-                  )
-              )
-            }
-          } else {
-            logger(
-              'warn',
-              'Server',
-              `Unauthorized connection attempt from ${clientAddress} - Invalid path provided`
-            )
+          if (voiceMatch && !this.options.voiceReceive?.enabled) {
             return rejectUpgrade(
               404,
               'Not Found',
-              'Invalid path for WebSocket upgrade.'
+              'Voice websocket endpoint is disabled.'
             )
           }
+
+          for (const key in headers) {
+            const value = headers[key]
+            if (typeof value === 'string') {
+              request.headers[key] = value
+            }
+          }
+
+          logger(
+            'info',
+            'Server',
+            `\x1b[36m${clientInfo.name}\x1b[0m${
+              clientInfo.version ? `/\x1b[32mv${clientInfo.version}\x1b[0m` : ''
+            } connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
+          )
+
+          let eventName = '/v4/websocket'
+          let routeId = null
+
+          if (voiceMatch) {
+            eventName = '/v4/websocket/voice'
+            routeId = voiceMatch[1]
+          } else if (liveMatch) {
+            eventName = '/v4/websocket/youtube/live'
+            routeId = liveMatch[1]
+          }
+
+          if (isBun && !this._usingBunServer && this.socket) {
+            ;(this.socket as WebSocketServer).handleUpgrade(
+              request,
+              socket,
+              head,
+              null,
+              (ws) => {
+                this.socket?.emit(
+                  eventName,
+                  ws as SessionSocket,
+                  request,
+                  clientInfo,
+                  sessionId,
+                  routeId
+                )
+              }
+            )
+          } else {
+            ;(this.socket as WebSocketServer | undefined)?.handleUpgrade(
+              request,
+              socket,
+              head,
+              null,
+              (ws) =>
+                this.socket?.emit(
+                  eventName,
+                  ws as SessionSocket,
+                  request,
+                  clientInfo,
+                  sessionId,
+                  routeId
+                )
+            )
+          }
+        } else {
+          logger(
+            'warn',
+            'Server',
+            `Unauthorized connection attempt from ${clientAddress} - Invalid path provided`
+          )
+          return rejectUpgrade(
+            404,
+            'Not Found',
+            'Invalid path for WebSocket upgrade.'
+          )
         }
-      )
+      }
+    )
 
     this.socket?.on(
       '/v4/websocket/voice',
@@ -1523,7 +1534,7 @@ class NodelinkServer extends EventEmitter {
         if (!this.options.voiceReceive?.enabled) {
           try {
             socket.close(1008, 'Voice receive disabled')
-          } catch { }
+          } catch {}
           return
         }
 
@@ -1559,7 +1570,7 @@ class NodelinkServer extends EventEmitter {
             if (decoded?.info?.sourceName?.includes('youtube')) {
               videoId = decoded.info.identifier
             }
-          } catch (_e) { }
+          } catch (_e) {}
         }
 
         if (!this.sourceWorkerManager) {
@@ -1641,33 +1652,33 @@ class NodelinkServer extends EventEmitter {
       `Attempting to listen on host: ${host}, port: ${port}`
     )
 
-      ; (this.server as http.Server).on('error', (err: NodeJS.ErrnoException) => {
-        if (err.code === 'EADDRINUSE') {
-          logger('error', 'Server', `Port ${port} is already in use.`)
-        } else if (err.code === 'EADDRNOTAVAIL') {
-          logger(
-            'error',
-            'Server',
-            `The address ${host} is not available on this machine.`
-          )
-          logger(
-            'error',
-            'Server',
-            'Please check your `host` configuration. Use "0.0.0.0" to listen on all available interfaces.'
-          )
-        } else {
-          logger('error', 'Server', `Failed to start server: ${err.message}`)
-        }
-        process.exit(1)
-      })
-
-      ; (this.server as http.Server).listen(port, host, () => {
+    ;(this.server as http.Server).on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        logger('error', 'Server', `Port ${port} is already in use.`)
+      } else if (err.code === 'EADDRNOTAVAIL') {
         logger(
-          'started',
+          'error',
           'Server',
-          `Successfully listening on host ${host}, port ${port}`
+          `The address ${host} is not available on this machine.`
         )
-      })
+        logger(
+          'error',
+          'Server',
+          'Please check your `host` configuration. Use "0.0.0.0" to listen on all available interfaces.'
+        )
+      } else {
+        logger('error', 'Server', `Failed to start server: ${err.message}`)
+      }
+      process.exit(1)
+    })
+
+    ;(this.server as http.Server).listen(port, host, () => {
+      logger(
+        'started',
+        'Server',
+        `Successfully listening on host ${host}, port ${port}`
+      )
+    })
   }
 
   /**
@@ -1803,12 +1814,12 @@ class NodelinkServer extends EventEmitter {
             unref: () => void
           }
         ).stop(true)
-          ; (
-            this.server as {
-              stop: (force: boolean) => Promise<void>
-              unref: () => void
-            }
-          ).unref()
+        ;(
+          this.server as {
+            stop: (force: boolean) => Promise<void>
+            unref: () => void
+          }
+        ).unref()
         logger('info', 'WebSocket', 'Bun server stopped successfully')
       } catch (e) {
         const error = e as Error
@@ -1981,8 +1992,8 @@ class NodelinkServer extends EventEmitter {
           try {
             // @ts-expect-error - handle.pause is from Node.js internal
             handle.pause?.()
-          } catch (_e) { }
-          ; (this.server as http.Server).emit('connection', handle)
+          } catch (_e) {}
+          ;(this.server as http.Server).emit('connection', handle)
         } catch (err) {
           const error = err as Error
           logger(
@@ -1993,7 +2004,7 @@ class NodelinkServer extends EventEmitter {
           try {
             // @ts-expect-error - handle.destroy is from Node.js internal
             handle.destroy?.()
-          } catch (_e) { }
+          } catch (_e) {}
         }
       })
     } else {
@@ -2207,8 +2218,8 @@ if (clusterEnabled && cluster.isPrimary) {
     nserver.workerManager = workerManager
 
     await nserver.start({ isClusterPrimary: true })
-      ; (global as typeof globalThis & { nodelink?: NodelinkServer }).nodelink =
-        nserver
+    ;(global as typeof globalThis & { nodelink?: NodelinkServer }).nodelink =
+      nserver
 
     let isShuttingDown = false
     const shutdown = async () => {
@@ -2283,8 +2294,8 @@ if (clusterEnabled && cluster.isPrimary) {
       false
     )
     await nserver.start()
-      ; (global as typeof globalThis & { nodelink?: NodelinkServer }).nodelink =
-        nserver
+    ;(global as typeof globalThis & { nodelink?: NodelinkServer }).nodelink =
+      nserver
 
     logger(
       'info',

@@ -388,7 +388,7 @@ function setEfficiencyMode(enabled: boolean): void {
     } else {
       v8.setFlagsFromString('--no-optimize-for-size')
     }
-  } catch (_e: unknown) { }
+  } catch (_e: unknown) {}
 }
 
 function startTimers(hibernating = false): void {
@@ -957,7 +957,7 @@ async function processQueue(queueKey: string): Promise<void> {
           player &&
           typeof (player as WorkerPlayer)._sendUpdate === 'function'
         ) {
-          ; (player as WorkerPlayer)._sendUpdate()
+          ;(player as WorkerPlayer)._sendUpdate()
           result = { updated: true }
         } else {
           result = {
