@@ -328,9 +328,9 @@ export interface RingBufferLike {
   /** Adds data to the end of the buffer. */
   write(chunk: Buffer): void
   /** Removes and returns the requested number of bytes. */
-  read(count: number): Buffer
+  read(count: number): Buffer | null
   /** Returns the requested number of bytes without removing them. */
-  peek(count: number): Buffer
+  peek(count: number): Buffer | null
   /** Discards all data in the buffer. */
   clear(): void
   /** Disposes of resources and marks the buffer as dead. */
