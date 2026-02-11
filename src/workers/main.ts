@@ -37,7 +37,7 @@ import type {
   WorkerPlayer
 } from '../typings/workers/worker.types.ts'
 import { cleanupHttpAgents, initLogger, logger } from '../utils.ts'
-import { createVoiceRelay } from '../voice/voiceRelay.js'
+import { createVoiceRelay } from '../voice/voiceRelay.ts'
 
 let lastCpuUsage: NodeJS.CpuUsage = process.cpuUsage()
 let lastCpuTime = Date.now()
