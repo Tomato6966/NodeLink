@@ -783,7 +783,7 @@ export default class SoundCloudSource {
       let type = additionalData?.format
 
       if (type === 'aac_hls') {
-        type = 'fmp4'
+        type = 'fmp4-buffered'
       } else if (type === 'mp3') {
         type = 'mp3'
       } else {
