@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
-import BlowfishCBC from '../decrypters/blowfish-cbc.js'
+import BlowfishCBC from '../decrypters/blowfish-cbc.ts'
 import {
   encodeTrack,
   http1makeRequest,
@@ -133,7 +133,11 @@ export default class DeezerSource {
       return { loadType: 'search', data: [this.buildTrack(track)] }
     }
 
-    logger('debug', 'Sources', `Searching Deezer for: "${query}" (type: ${searchType})`)
+    logger(
+      'debug',
+      'Sources',
+      `Searching Deezer for: "${query}" (type: ${searchType})`
+    )
 
     const typeMap = {
       track: 'track',
@@ -170,8 +174,7 @@ export default class DeezerSource {
           results.push(this.buildTrack(item))
         }
       }
-    } 
-    else if (searchType === 'album') {
+    } else if (searchType === 'album') {
       for (const album of items) {
         if (!album?.id) continue
 
@@ -183,7 +186,8 @@ export default class DeezerSource {
           isSeekable: true,
           isStream: false,
           uri: album.link || `https://www.deezer.com/album/${album.id}`,
-          artworkUrl: album.cover_xl || album.cover_big || album.cover_medium || null,
+          artworkUrl:
+            album.cover_xl || album.cover_big || album.cover_medium || null,
           isrc: null,
           sourceName: 'deezer',
           position: 0
@@ -197,8 +201,7 @@ export default class DeezerSource {
           }
         })
       }
-    } 
-    else if (searchType === 'playlist') {
+    } else if (searchType === 'playlist') {
       for (const playlist of items) {
         if (!playlist?.id) continue
 
@@ -209,8 +212,13 @@ export default class DeezerSource {
           identifier: playlist.id.toString(),
           isSeekable: true,
           isStream: false,
-          uri: playlist.link || `https://www.deezer.com/playlist/${playlist.id}`,
-          artworkUrl: playlist.picture_xl || playlist.picture_big || playlist.picture_medium || null,
+          uri:
+            playlist.link || `https://www.deezer.com/playlist/${playlist.id}`,
+          artworkUrl:
+            playlist.picture_xl ||
+            playlist.picture_big ||
+            playlist.picture_medium ||
+            null,
           isrc: null,
           sourceName: 'deezer',
           position: 0
@@ -224,8 +232,7 @@ export default class DeezerSource {
           }
         })
       }
-    } 
-    else if (searchType === 'artist') {
+    } else if (searchType === 'artist') {
       for (const artist of items) {
         if (!artist?.id) continue
 
@@ -237,7 +244,11 @@ export default class DeezerSource {
           isSeekable: false,
           isStream: false,
           uri: artist.link || `https://www.deezer.com/artist/${artist.id}`,
-          artworkUrl: artist.picture_xl || artist.picture_big || artist.picture_medium || null,
+          artworkUrl:
+            artist.picture_xl ||
+            artist.picture_big ||
+            artist.picture_medium ||
+            null,
           isrc: null,
           sourceName: 'deezer',
           position: 0
@@ -446,7 +457,9 @@ export default class DeezerSource {
     const albumId = item.album?.id || null
     const artistId = item.artist?.id || null
     const albumUrl = albumId ? `https://www.deezer.com/album/${albumId}` : null
-    const artistUrl = artistId ? `https://www.deezer.com/artist/${artistId}` : null
+    const artistUrl = artistId
+      ? `https://www.deezer.com/artist/${artistId}`
+      : null
     const artistArtworkUrl = item.artist?.picture_xl || null
     const previewUrl = item.preview || null
 
