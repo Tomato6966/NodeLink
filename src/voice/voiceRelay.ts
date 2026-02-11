@@ -1,37 +1,62 @@
-import discordVoice from '@performanc/voice'
+import { Buffer } from 'node:buffer'
+import type { Readable } from 'node:stream'
+
+import discordVoice, { type VoiceConnection } from '@performanc/voice'
+
 import { Decoder as OpusDecoder } from '../playback/opus/Opus.ts'
+import type {
+  ActiveStreamEntry,
+  ExtendedVoiceConnection,
+  VoiceRelay,
+  VoiceRelayOptions
+} from '../typings/voice/voice.types.ts'
 import {
   buildVoiceFrame,
   resolveVoiceFormat,
   VOICE_FORMATS,
   VOICE_FRAME_OPS
-} from './voiceFrames.js'
+} from './voiceFrames.ts'
 
 const EMPTY_BUFFER = Buffer.alloc(0)
 
-export function createVoiceRelay({ enabled, format, sendFrame, logger }) {
+/**
+ * Creates a voice relay for handling voice packet interception and forwarding.
+ *
+ * @param options - Configuration options for the voice relay.
+ * @returns The voice relay instance or null if disabled.
+ */
+export function createVoiceRelay({
+  enabled,
+  format,
+  sendFrame,
+  logger
+}: VoiceRelayOptions): VoiceRelay | null {
   if (!enabled || typeof sendFrame !== 'function') {
     return null
   }
 
   const formatInfo = resolveVoiceFormat(format, logger)
-  const activeStreams = new Map()
+  const activeStreams = new Map<string, ActiveStreamEntry>()
   let pcmEnabled = formatInfo.name === 'pcm_s16le'
   let activeFormatCode = formatInfo.code
 
-  const now = () => Date.now() >>> 0
+  const now = (): number => Date.now() >>> 0
 
-  const safeSend = (frame) => {
+  const safeSend = (frame: Buffer): void => {
     try {
       sendFrame(frame)
     } catch (err) {
       if (logger) {
-        logger('error', 'Voice', `Failed to send voice frame: ${err.message}`)
+        logger(
+          'error',
+          'Voice',
+          `Failed to send voice frame: ${(err as Error).message}`
+        )
       }
     }
   }
 
-  const cleanupStream = (key) => {
+  const cleanupStream = (key: string): ActiveStreamEntry | null => {
     const entry = activeStreams.get(key)
     if (!entry) return null
 
@@ -42,24 +67,32 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }) {
 
     if (entry.decoder) {
       try {
-        entry.stream.unpipe(entry.decoder)
+        if ('unpipe' in entry.stream) {
+          ;(entry.stream as Readable).unpipe(entry.decoder)
+        }
         entry.decoder.destroy()
-      } catch {}
+      } catch {
+        // Ignore errors during destruction
+      }
     }
 
     activeStreams.delete(key)
     return entry
   }
 
-  const handleSpeakStart = (guildId, userId, ssrc) => {
+  const handleSpeakStart = (
+    guildId: string,
+    userId: string,
+    ssrc: number
+  ): void => {
     const key = `${guildId}:${ssrc}`
     if (activeStreams.has(key)) return
 
     const stream = discordVoice.getSpeakStream(ssrc)
     if (!stream) return
 
-    let decoder = null
-    let dataStream = stream
+    let decoder: OpusDecoder | null = null
+    let dataStream: Readable | OpusDecoder = stream
     let formatCode = activeFormatCode
 
     if (pcmEnabled) {
@@ -75,7 +108,7 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }) {
           logger(
             'warn',
             'Voice',
-            `PCM decode unavailable (${err.message}); sending opus instead.`
+            `PCM decode unavailable (${(err as Error).message}); sending opus instead.`
           )
         }
       }
@@ -92,7 +125,7 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }) {
     )
     safeSend(startFrame)
 
-    const onData = (chunk) => {
+    const onData = (chunk: Buffer): void => {
       const frame = buildVoiceFrame(
         VOICE_FRAME_OPS.data,
         formatCode,
@@ -105,11 +138,11 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }) {
       safeSend(frame)
     }
 
-    const onEnd = () => {
+    const onEnd = (): void => {
       handleSpeakStop(guildId, userId, ssrc)
     }
 
-    const onError = (err) => {
+    const onError = (err: Error): void => {
       if (logger) {
         logger('warn', 'Voice', `Voice stream error: ${err?.message || err}`)
       }
@@ -133,7 +166,11 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }) {
     })
   }
 
-  const handleSpeakStop = (guildId, userId, ssrc) => {
+  const handleSpeakStop = (
+    guildId: string,
+    userId: string,
+    ssrc: number
+  ): void => {
     const key = `${guildId}:${ssrc}`
     const entry = cleanupStream(key)
     const finalUserId = entry?.userId || userId
@@ -152,15 +189,16 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }) {
     safeSend(stopFrame)
   }
 
-  const attach = (connection, guildId) => {
-    if (!connection || connection._voiceRelayAttached) return
-    connection._voiceRelayAttached = true
+  const attach = (connection: VoiceConnection, guildId: string): void => {
+    const conn = connection as ExtendedVoiceConnection
+    if (!conn || conn._voiceRelayAttached) return
+    conn._voiceRelayAttached = true
 
-    connection.on('speakStart', (userId, ssrc) => {
+    conn.on('speakStart', (userId: string, ssrc: number) => {
       handleSpeakStart(guildId, userId, ssrc)
     })
 
-    connection.on('speakEnd', (userId, ssrc) => {
+    conn.on('speakEnd', (userId: string, ssrc: number) => {
       handleSpeakStop(guildId, userId, ssrc)
     })
   }

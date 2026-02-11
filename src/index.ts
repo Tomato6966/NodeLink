@@ -65,8 +65,8 @@ import type {
   Worker
 } from './typings/index.types.ts'
 import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types.ts'
-import { parseVoiceFrameHeader } from './voice/voiceFrames.js'
-import { createVoiceRelay } from './voice/voiceRelay.js'
+import { parseVoiceFrameHeader } from './voice/voiceFrames.ts'
+import { createVoiceRelay } from './voice/voiceRelay.ts'
 
 let config: NodelinkConfig
 
@@ -336,7 +336,7 @@ class NodelinkServer extends EventEmitter {
       format: options.voiceReceive?.format || 'pcm',
       sendFrame: (frame: Buffer) => this.handleVoiceFrame(frame),
       logger
-    }) as VoiceRelay
+    }) as unknown as VoiceRelay
 
     this._globalUpdater = null
     this._statsUpdater = null
@@ -1371,7 +1371,9 @@ class NodelinkServer extends EventEmitter {
         }
         const clientNameHeader = headers['client-name']
         const clientInfo = parseClient(
-          Array.isArray(clientNameHeader) ? clientNameHeader[0] : clientNameHeader
+          Array.isArray(clientNameHeader)
+            ? clientNameHeader[0]
+            : clientNameHeader
         ) as {
           name: string
           version: string | undefined
@@ -1425,7 +1427,9 @@ class NodelinkServer extends EventEmitter {
             )
           }
           const userIdHeader = headers['user-id']
-          const userId = Array.isArray(userIdHeader) ? userIdHeader[0] : userIdHeader
+          const userId = Array.isArray(userIdHeader)
+            ? userIdHeader[0]
+            : userIdHeader
           if (!userId || !verifyDiscordID(userId)) {
             logger(
               'warn',

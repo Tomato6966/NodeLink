@@ -1,22 +1,47 @@
-const VOICE_FRAME_OPS = {
+import { Buffer } from 'node:buffer'
+import type {
+  ResolvedVoiceFormat,
+  ParsedVoiceFrameHeader
+} from '../typings/voice/voice.types.ts'
+
+/**
+ * Voice frame operation codes.
+ */
+export const VOICE_FRAME_OPS = {
   start: 1,
   stop: 2,
   data: 3
-}
+} as const
 
-const VOICE_FORMATS = {
+/**
+ * Supported voice formats.
+ */
+export const VOICE_FORMATS = {
   opus: 0,
   ogg: 1,
   pcm_s16le: 2
-}
+} as const
 
 const EMPTY_BUFFER = Buffer.alloc(0)
 const SUPPORTED_FORMATS = new Set(['opus', 'pcm_s16le'])
 
-function resolveVoiceFormat(format, logger) {
+/**
+ * Resolves the voice format based on the provided input.
+ *
+ * @param format - The voice format string to resolve.
+ * @param logger - Optional logger function to log warnings.
+ * @returns The resolved voice format with its name and code.
+ */
+export function resolveVoiceFormat(
+  format: string | null | undefined,
+  logger?: (level: string, module: string, message: string) => void
+): ResolvedVoiceFormat {
   const normalized = String(format || 'opus').toLowerCase()
   if (SUPPORTED_FORMATS.has(normalized)) {
-    return { name: normalized, code: VOICE_FORMATS[normalized] }
+    return {
+      name: normalized,
+      code: VOICE_FORMATS[normalized as keyof typeof VOICE_FORMATS]
+    }
   }
 
   if (logger) {
@@ -30,15 +55,28 @@ function resolveVoiceFormat(format, logger) {
   return { name: 'opus', code: VOICE_FORMATS.opus }
 }
 
-function buildVoiceFrame(
-  op,
-  formatCode,
-  guildId,
-  userId,
-  ssrc,
-  timestamp,
-  payload = EMPTY_BUFFER
-) {
+/**
+ * Builds a voice frame buffer.
+ *
+ * @param op - The operation code of the frame.
+ * @param formatCode - The format code of the payload.
+ * @param guildId - The ID of the guild.
+ * @param userId - The ID of the user.
+ * @param ssrc - The SSRC identifier.
+ * @param timestamp - The timestamp of the frame.
+ * @param payload - The payload buffer (default is empty).
+ * @returns The constructed voice frame as a Buffer.
+ * @throws {Error} If guildId or userId length exceeds 255 bytes.
+ */
+export function buildVoiceFrame(
+  op: number,
+  formatCode: number,
+  guildId: string,
+  userId: string,
+  ssrc: number,
+  timestamp: number,
+  payload: Buffer = EMPTY_BUFFER
+): Buffer {
   const guildBuf = Buffer.from(String(guildId || ''), 'utf8')
   const userBuf = Buffer.from(String(userId || ''), 'utf8')
 
@@ -73,7 +111,15 @@ function buildVoiceFrame(
   return buf
 }
 
-function parseVoiceFrameHeader(buf) {
+/**
+ * Parses the header of a voice frame.
+ *
+ * @param buf - The buffer containing the voice frame.
+ * @returns The parsed voice frame header or null if invalid.
+ */
+export function parseVoiceFrameHeader(
+  buf: Buffer
+): ParsedVoiceFrameHeader | null {
   if (!buf || buf.length < 8) return null
   let offset = 0
 
@@ -107,12 +153,4 @@ function parseVoiceFrameHeader(buf) {
     timestamp,
     payloadOffset: offset
   }
-}
-
-export {
-  VOICE_FRAME_OPS,
-  VOICE_FORMATS,
-  resolveVoiceFormat,
-  buildVoiceFrame,
-  parseVoiceFrameHeader
 }
