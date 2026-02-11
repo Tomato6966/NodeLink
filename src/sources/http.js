@@ -3,6 +3,14 @@ import { encodeTrack, getVersion, http1makeRequest, logger } from '../utils.js'
 
 const DEFAULT_HTTP_USER_AGENT = `NodeLink/${getVersion()} (https://github.com/PerformanC/NodeLink)`
 
+const extractUrlExtension = (rawUrl) => {
+  const sanitized = String(rawUrl || '').split('?')[0].split('#')[0]
+  const lastSlash = sanitized.lastIndexOf('/')
+  const lastDot = sanitized.lastIndexOf('.')
+  if (lastDot === -1 || lastDot < lastSlash) return ''
+  return sanitized.slice(lastDot + 1).toLowerCase()
+}
+
 class IcyMetadataTransform extends Transform {
   constructor(metaInt, onMetadata) {
     super()
@@ -239,6 +247,11 @@ export default class HttpSource {
 
       const headers = response.headers || {}
       const contentType = headers['content-type'] || ''
+      const extensionType =
+        !contentType || contentType === 'application/octet-stream'
+          ? extractUrlExtension(url)
+          : ''
+      const resolvedType = extensionType || contentType
       const httpStream = response.stream
 
       let outputStream = httpStream
@@ -275,7 +288,7 @@ export default class HttpSource {
         logger('error', 'HTTP Source', `Stream error: ${err.message}`)
       })
 
-      return { stream: outputStream, type: contentType }
+      return { stream: outputStream, type: resolvedType }
     } catch (err) {
       logger('error', 'Sources', `Failed to load http stream: ${err.message}`)
       return { exception: { message: err.message, severity: 'common' } }

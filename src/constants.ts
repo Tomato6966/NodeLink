@@ -394,7 +394,7 @@ export type EndReason = (typeof EndReasons)[keyof typeof EndReasons]
  *
  * @remarks
  * Format detection logic:
- * - OPUS: "opus", "webm"
+ * - OPUS: "opus", "webm", "weba"
  * - AAC: "aac", "mp4", "m4a", "m4v", "mov", "hls", "mpegurl", "fmp4", "mpegts"
  * - MPEG: "mpeg", "mp3"
  * - FLAC: "flac"
@@ -411,6 +411,7 @@ export type EndReason = (typeof EndReasons)[keyof typeof EndReasons]
  *
  * // File extensions
  * normalizeFormat("webm")                    // => "opus"
+ * normalizeFormat("weba")                    // => "opus"
  * normalizeFormat("m4a")                     // => "aac"
  * normalizeFormat("mp3")                     // => "mpeg"
  *
@@ -434,7 +435,11 @@ export function normalizeFormat(
   if (!type) return SupportedFormats.UNKNOWN
   const lowerType = type.toLowerCase()
 
-  if (lowerType.includes('opus') || lowerType.includes('webm'))
+  if (
+    lowerType.includes('opus') ||
+    lowerType.includes('webm') ||
+    lowerType.includes('weba')
+  )
     return SupportedFormats.OPUS
   if (
     lowerType.includes('aac') ||

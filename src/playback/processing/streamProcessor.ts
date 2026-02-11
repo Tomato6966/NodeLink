@@ -219,7 +219,8 @@ const _isMp4Format = (type: string): boolean =>
   type.indexOf('m4v') !== -1 ||
   type.indexOf('mov') !== -1
 
-const _isWebmFormat = (type: string): boolean => type.indexOf('webm') !== -1
+const _isWebmFormat = (type: string): boolean =>
+  type.includes('webm') || type.includes('weba')
 
 const _isFlvFormat = (type: string): boolean => type.indexOf('flv') !== -1
 
@@ -2188,7 +2189,7 @@ class StreamAudioResource extends BaseAudioResource {
       'FLAC (audio/flac)',
       'OGG Vorbis (audio/ogg, audio/vorbis)',
       'WAV (audio/wav)',
-      'Opus (webm/opus, ogg/opus)',
+      'Opus (webm/opus, ogg/opus, webm, weba)',
       'FLV (video/x-flv, flv)'
     ]
 
