@@ -24,7 +24,10 @@ let ACTIVE_LIB: OpusLibrary | null = null
 
 const _getLib = (): OpusLibrary => {
   if (ACTIVE_LIB) return ACTIVE_LIB
-  const libs: Array<{ name: string; pick: (mod: Record<string, unknown>) => unknown }> = [
+  const libs: Array<{
+    name: string
+    pick: (mod: Record<string, unknown>) => unknown
+  }> = [
     // biome-ignore lint: TypeScript requires bracket access for index signatures
     { name: '@toddynnn/voice-opus', pick: (m) => m['OpusEncoder'] },
     // biome-ignore lint: TypeScript requires bracket access for index signatures
@@ -43,8 +46,12 @@ const _getLib = (): OpusLibrary => {
         return ACTIVE_LIB
       }
     } catch (e: unknown) {
-      // biome-ignore lint: TypeScript requires bracket access for index signatures
-      if (e instanceof Error && (e as unknown as Record<string, unknown>)['code'] !== 'MODULE_NOT_FOUND') throw e
+      if (
+        e instanceof Error &&
+        // biome-ignore lint/complexity/useLiteralKeys: index signature requires bracket access
+        (e as unknown as Record<string, unknown>)['code'] !== 'MODULE_NOT_FOUND'
+      )
+        throw e
     }
   }
   throw new Error('No compatible Opus library found.')
@@ -60,8 +67,11 @@ const _createInstance = (
 
   let type: number | string = app
   if (name === 'opusscript' && typeof app === 'string') {
-    // biome-ignore lint: TypeScript requires bracket access for index signatures
-    type = Encoder.Application[app.toUpperCase()] ?? Encoder.Application['VOIP'] ?? 2048 // 2048 is VOIP for opusscript
+    type =
+      Encoder.Application[app.toUpperCase()] ??
+      // biome-ignore lint/complexity/useLiteralKeys: index signature requires bracket access
+      Encoder.Application['VOIP'] ??
+      2048 // 2048 is VOIP for opusscript
   }
 
   return { instance: new Encoder(rate, channels, type), lib }
@@ -80,8 +90,7 @@ const _applyCtl = (
     return
   }
 
-  const fn =
-    enc.applyEncoderCTL || enc.applyEncoderCtl || enc.encoderCTL
+  const fn = enc.applyEncoderCTL || enc.applyEncoderCtl || enc.encoderCTL
   if (typeof fn === 'function') fn.call(enc, id, val)
 }
 
@@ -209,7 +218,8 @@ export class Encoder extends Transform {
   }
 
   setFEC(enabled = true): void {
-    if (this.enc) _applyCtl(this.enc, this.lib.name, OPUS_CTL.FEC, enabled ? 1 : 0)
+    if (this.enc)
+      _applyCtl(this.enc, this.lib.name, OPUS_CTL.FEC, enabled ? 1 : 0)
   }
 
   setPLP(percent: number): void {
@@ -219,7 +229,8 @@ export class Encoder extends Transform {
   }
 
   setDTX(enabled = false): void {
-    if (this.enc) _applyCtl(this.enc, this.lib.name, OPUS_CTL.DTX, enabled ? 1 : 0)
+    if (this.enc)
+      _applyCtl(this.enc, this.lib.name, OPUS_CTL.DTX, enabled ? 1 : 0)
   }
 }
 
@@ -227,14 +238,21 @@ export class Decoder extends Transform {
   private dec: OpusDecoderInstance | null
   private lib: OpusLibrary
 
-  constructor({ rate = 48000, channels = 2 }: { rate?: number; channels?: number } = {}) {
+  constructor({
+    rate = 48000,
+    channels = 2
+  }: { rate?: number; channels?: number } = {}) {
     super({ readableObjectMode: false })
     const { instance, lib } = _createInstance(rate, channels, 'voip')
     this.dec = instance as OpusDecoderInstance
     this.lib = lib
   }
 
-  override _transform(chunk: Buffer, _encoding: string, cb: (err?: Error) => void): void {
+  override _transform(
+    chunk: Buffer,
+    _encoding: string,
+    cb: (err?: Error) => void
+  ): void {
     try {
       if (!this.dec) throw new Error('Decoder not ready.')
       this.push(this.dec.decode(chunk))

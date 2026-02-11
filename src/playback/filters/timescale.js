@@ -1,7 +1,7 @@
 import { SAMPLE_RATE } from '../../constants.ts'
 import { clamp16Bit } from './dsp/clamp16Bit.js'
-import TimeStretch from './timescale/timeStretch.js'
 import { resample } from './timescale/resampler.js'
+import TimeStretch from './timescale/timeStretch.js'
 
 const CHANNELS = 2
 const BYTES_PER_SAMPLE = 2

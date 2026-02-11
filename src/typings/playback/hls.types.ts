@@ -320,6 +320,20 @@ export interface FetchSegmentOptions {
  * @public
  */
 export interface HLSAttributes {
+  /** EXT-X-MEDIA TYPE attribute. */
+  type?: string
+  /** EXT-X-MEDIA GROUP-ID attribute. */
+  groupid?: string
+  /** EXT-X-STREAM-INF BANDWIDTH attribute. */
+  bandwidth?: string
+  /** EXT-X-STREAM-INF CODECS attribute. */
+  codecs?: string
+  /** EXT-X-STREAM-INF AUDIO attribute. */
+  audio?: string
+  /** URI attribute for EXT-X-MEDIA or EXT-X-KEY tags. */
+  uri?: string
+  /** IV attribute for EXT-X-KEY tags. */
+  iv?: string | Buffer
   [key: string]: string | Buffer | undefined
 }
 

@@ -1,17 +1,17 @@
-import { PassThrough } from 'node:stream'
 import type { Readable } from 'node:stream'
-import { http1makeRequest, logger } from '../../utils.ts'
-import { parse as parsePlaylist } from './PlaylistParser.ts'
-import SegmentFetcher from './SegmentFetcher.ts'
+import { PassThrough } from 'node:stream'
 import type {
-  HLSHandlerOptions,
   HLSFetchStrategy,
+  HLSHandlerOptions,
   HLSMediaPlaylist,
   HLSPlaylist,
   HLSSegment,
   HLSSegmentFetchResult,
   HLSVariant
 } from '../../typings/playback/hls.types.ts'
+import { http1makeRequest, logger } from '../../utils.ts'
+import { parse as parsePlaylist } from './PlaylistParser.ts'
+import SegmentFetcher from './SegmentFetcher.ts'
 
 const MAX_HISTORY = 200
 const MAX_GAP = 30

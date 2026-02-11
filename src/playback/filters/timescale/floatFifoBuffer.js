@@ -49,7 +49,9 @@ export default class FloatFifoBuffer {
     }
 
     if (this._startFrame > 0) {
-      this._buffer.set(this._buffer.subarray(this._startIndex(), this._endIndex()))
+      this._buffer.set(
+        this._buffer.subarray(this._startIndex(), this._endIndex())
+      )
       this._startFrame = 0
     }
   }

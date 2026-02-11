@@ -61,7 +61,9 @@ export default class TimeStretch {
     const output = this._drain(false)
     const start = this._selectStart(true)
     if (start === null) {
-      const fallback = this._prevOverlap ? concatFloat32([output, this._prevOverlap]) : output
+      const fallback = this._prevOverlap
+        ? concatFloat32([output, this._prevOverlap])
+        : output
       this.reset()
       return fallback
     }
@@ -129,8 +131,7 @@ export default class TimeStretch {
 
   _correlation(startFrame) {
     const overlapSamples = this.overlap * this.channels
-    const base =
-      (this._buffer.startFrame + startFrame) * this.channels
+    const base = (this._buffer.startFrame + startFrame) * this.channels
     const samples = this._buffer.buffer
 
     let score = 0
@@ -161,8 +162,7 @@ export default class TimeStretch {
       const overlapSamples = this.overlap * this.channels
       for (let i = 0; i < overlapSamples; i++) {
         const frameIndex = Math.floor(i / this.channels)
-        const fadeIn =
-          this.overlap > 1 ? frameIndex / (this.overlap - 1) : 1
+        const fadeIn = this.overlap > 1 ? frameIndex / (this.overlap - 1) : 1
         const fadeOut = 1 - fadeIn
         mixed[i] = (this._prevOverlap[i] ?? 0) * fadeOut + segment[i] * fadeIn
       }
@@ -171,7 +171,9 @@ export default class TimeStretch {
 
     const overlapStart = this._analysisHop * this.channels
     this._prevOverlap = new Float32Array(this.overlap * this.channels)
-    this._prevOverlap.set(mixed.subarray(overlapStart, overlapStart + this._prevOverlap.length))
+    this._prevOverlap.set(
+      mixed.subarray(overlapStart, overlapStart + this._prevOverlap.length)
+    )
 
     return mixed
   }

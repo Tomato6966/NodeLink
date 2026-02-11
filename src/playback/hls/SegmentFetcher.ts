@@ -1,14 +1,14 @@
 import crypto from 'node:crypto'
+import type { Readable, TransformCallback } from 'node:stream'
 import { Transform } from 'node:stream'
-import type { TransformCallback, Readable } from 'node:stream'
-import { http1makeRequest, logger } from '../../utils.ts'
 import type {
-  SegmentFetcherOptions,
+  FetchSegmentOptions,
   HLSSegment,
   HLSSegmentKey,
   HLSSegmentMap,
-  FetchSegmentOptions
+  SegmentFetcherOptions
 } from '../../typings/playback/hls.types.ts'
+import { http1makeRequest, logger } from '../../utils.ts'
 
 /**
  * A Transform stream that decrypts HLS segments on the fly.
@@ -179,10 +179,12 @@ export default class SegmentFetcher {
       if (resolved) url = resolved
     }
 
-    const headers: Record<string, string> = { ...this.headers }
+    const headers: Record<string, string> & { Range?: string } = {
+      ...this.headers
+    }
     if (segment.byteRange) {
       const end = segment.byteRange.offset + segment.byteRange.length - 1
-      headers['Range'] = `bytes=${segment.byteRange.offset}-${end}`
+      headers.Range = `bytes=${segment.byteRange.offset}-${end}`
     }
 
     const { body, stream, error, statusCode } = await http1makeRequest(url, {

@@ -14,16 +14,12 @@ export function decryptAES(
   if (!key || !iv) return data
 
   try {
-    const algorithm =
-      method === 'AES-128' ? 'aes-128-cbc' : 'aes-256-cbc'
+    const algorithm = method === 'AES-128' ? 'aes-128-cbc' : 'aes-256-cbc'
 
     const decipher = crypto.createDecipheriv(algorithm, key, iv)
     decipher.setAutoPadding(false)
 
-    return Buffer.concat([
-      decipher.update(data),
-      decipher.final()
-    ])
+    return Buffer.concat([decipher.update(data), decipher.final()])
   } catch (err) {
     const error = err as Error
     logger('error', 'AESDecryptor', `Decryption failed: ${error.message}`)

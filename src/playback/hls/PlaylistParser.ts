@@ -1,14 +1,14 @@
 import type {
-  HLSPlaylist,
+  HLSAttributes,
+  HLSAudioGroups,
+  HLSAudioRendition,
+  HLSByteRange,
   HLSMasterPlaylist,
   HLSMediaPlaylist,
-  HLSAudioGroups,
-  HLSVariant,
-  HLSByteRange,
+  HLSPlaylist,
   HLSSegmentKey,
   HLSSegmentMap,
-  HLSAttributes,
-  HLSAudioRendition
+  HLSVariant
 } from '../../typings/playback/hls.types.ts'
 
 /**
@@ -133,8 +133,8 @@ export function parseMaster(
 
     if (line.startsWith('#EXT-X-MEDIA:')) {
       const attrs = parseAttributes(line, baseUrl)
-      const type = attrs['type']
-      const groupid = attrs['groupid']
+      const type = attrs.type
+      const groupid = attrs.groupid
       if (type === 'AUDIO' && typeof groupid === 'string') {
         if (!audioGroups[groupid]) audioGroups[groupid] = []
         audioGroups[groupid].push(attrs as unknown as HLSAudioRendition)
@@ -147,9 +147,9 @@ export function parseMaster(
       const attrs = parseAttributes(attrLine, baseUrl)
       variants.push({
         url: new URL(urlLine, baseUrl).toString(),
-        bandwidth: parseInt((attrs['bandwidth'] as string) || '0', 10),
-        codecs: (attrs['codecs'] as string) || '',
-        audio: (attrs['audio'] as string) || undefined
+        bandwidth: parseInt((attrs.bandwidth as string) || '0', 10),
+        codecs: (attrs.codecs as string) || '',
+        audio: (attrs.audio as string) || undefined
       })
     }
   }
@@ -181,13 +181,13 @@ export function parseAttributes(line: string, baseUrl: string): HLSAttributes {
     match = regex.exec(line)
   }
 
-  const uri = attrs['uri']
+  const uri = attrs.uri
   if (typeof uri === 'string') {
-    attrs['uri'] = new URL(uri, baseUrl).toString()
+    attrs.uri = new URL(uri, baseUrl).toString()
   }
-  const iv = attrs['iv']
+  const iv = attrs.iv
   if (iv && typeof iv === 'string' && iv.startsWith('0x')) {
-    attrs['iv'] = Buffer.from(iv.substring(2), 'hex')
+    attrs.iv = Buffer.from(iv.substring(2), 'hex')
   }
   return attrs
 }

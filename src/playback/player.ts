@@ -658,7 +658,7 @@ export class Player {
 
     return this.connection?.statistics
       ? this.position +
-      (this.connection.statistics.packetsExpected ?? 0) * 20 * playbackSpeed
+          (this.connection.statistics.packetsExpected ?? 0) * 20 * playbackSpeed
       : 0
   }
 
@@ -1216,7 +1216,8 @@ export class Player {
           logger(
             'debug',
             'Player',
-            `Extracted SABR session state: rn=${(previousSession as { requestNumber?: number }).requestNumber
+            `Extracted SABR session state: rn=${
+              (previousSession as { requestNumber?: number }).requestNumber
             }, hasCookie=${!!(
               previousSession as {
                 nextRequestPolicy?: { playbackCookie?: unknown }
@@ -2297,7 +2298,7 @@ export class Player {
         this.connection?.audioStream
       if (!stream || !(stream as AudioResource).fadeTo) return false
       this._pendingTrackStartFade = false
-        ; (stream as AudioResource).fadeTo?.(1, section.duration, section.curve)
+      ;(stream as AudioResource).fadeTo?.(1, section.duration, section.curve)
       return true
     }
 
