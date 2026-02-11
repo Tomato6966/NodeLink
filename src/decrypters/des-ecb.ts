@@ -1,5 +1,10 @@
 import { Buffer } from 'node:buffer'
 
+/**
+ * DES initial permutation (IP) table for 64-bit blocks.
+ *
+ * Each entry is a 1-based bit position read from the input block.
+ */
 const IP = [
   58, 50, 42, 34, 26, 18, 10, 2, 60, 52, 44, 36, 28, 20, 12, 4, 62, 54, 46, 38,
   30, 22, 14, 6, 64, 56, 48, 40, 32, 24, 16, 8, 57, 49, 41, 33, 25, 17, 9, 1,
@@ -7,6 +12,11 @@ const IP = [
   31, 23, 15, 7
 ]
 
+/**
+ * DES final permutation (FP) table for 64-bit blocks.
+ *
+ * This is the inverse of the initial permutation table.
+ */
 const FP = [
   40, 8, 48, 16, 56, 24, 64, 32, 39, 7, 47, 15, 55, 23, 63, 31, 38, 6, 46, 14,
   54, 22, 62, 30, 37, 5, 45, 13, 53, 21, 61, 29, 36, 4, 44, 12, 52, 20, 60, 28,
@@ -14,31 +24,57 @@ const FP = [
   49, 17, 57, 25
 ]
 
+/**
+ * Expansion permutation table (E) for the Feistel function.
+ *
+ * Expands the 32-bit right half to 48 bits.
+ */
 const E = [
   32, 1, 2, 3, 4, 5, 4, 5, 6, 7, 8, 9, 8, 9, 10, 11, 12, 13, 12, 13, 14, 15, 16,
   17, 16, 17, 18, 19, 20, 21, 20, 21, 22, 23, 24, 25, 24, 25, 26, 27, 28, 29,
   28, 29, 30, 31, 32, 1
 ]
 
+/**
+ * P permutation table applied after S-box substitution.
+ */
 const P = [
   16, 7, 20, 21, 29, 12, 28, 17, 1, 15, 23, 26, 5, 18, 31, 10, 2, 8, 24, 14, 32,
   27, 3, 9, 19, 13, 30, 6, 22, 11, 4, 25
 ]
 
+/**
+ * Permuted Choice 1 (PC-1) table for the DES key schedule.
+ *
+ * Drops parity bits and permutes the remaining 56 key bits.
+ */
 const PC1 = [
   57, 49, 41, 33, 25, 17, 9, 1, 58, 50, 42, 34, 26, 18, 10, 2, 59, 51, 43, 35,
   27, 19, 11, 3, 60, 52, 44, 36, 63, 55, 47, 39, 31, 23, 15, 7, 62, 54, 46, 38,
   30, 22, 14, 6, 61, 53, 45, 37, 29, 21, 13, 5, 28, 20, 12, 4
 ]
 
+/**
+ * Permuted Choice 2 (PC-2) table for the DES key schedule.
+ *
+ * Compresses the 56-bit key halves into 48-bit subkeys.
+ */
 const PC2 = [
   14, 17, 11, 24, 1, 5, 3, 28, 15, 6, 21, 10, 23, 19, 12, 4, 26, 8, 16, 7, 27,
   20, 13, 2, 41, 52, 31, 37, 47, 55, 30, 40, 51, 45, 33, 48, 44, 49, 39, 56, 34,
   53, 46, 42, 50, 36, 29, 32
 ]
 
+/**
+ * Left rotation schedule for the key halves (C and D) per round.
+ */
 const SHIFTS = [1, 1, 2, 2, 2, 2, 2, 2, 1, 2, 2, 2, 2, 2, 2, 1]
 
+/**
+ * DES substitution boxes (S-boxes).
+ *
+ * Each S-box maps a 6-bit input to a 4-bit output value.
+ */
 const SBOX = [
   [
     [14, 4, 13, 1, 2, 15, 11, 8, 3, 10, 6, 12, 5, 9, 0, 7],
@@ -90,9 +126,23 @@ const SBOX = [
   ]
 ]
 
+/**
+ * Precomputed SP tables that combine S-box outputs with the P permutation.
+ */
 const SP = buildSPTables()
+/**
+ * Cache of derived DES subkeys keyed by hexadecimal key string.
+ *
+ * Keeps subkeys in memory for the lifetime of the process to avoid
+ * recomputation across repeated decryptions.
+ */
 const SUBKEY_CACHE = new Map()
 
+/**
+ * Precomputes the eight SP tables used by the Feistel function.
+ *
+ * @returns Array of eight 64-entry tables that map 6-bit inputs to 32-bit words.
+ */
 function buildSPTables(): Uint32Array[] {
   const tables = Array.from({ length: 8 }, () => new Uint32Array(64))
 
@@ -113,6 +163,13 @@ function buildSPTables(): Uint32Array[] {
   return tables
 }
 
+/**
+ * Permutes a 32-bit value using a 1-based bit table.
+ *
+ * @param value - Input word to permute.
+ * @param table - Bit positions (1..32) to read from `value`.
+ * @returns Permuted 32-bit value.
+ */
 function permute32(value: number, table: number[]): number {
   let out = 0
   for (let i = 0; i < 32; i++) {
@@ -122,16 +179,40 @@ function permute32(value: number, table: number[]): number {
   return out >>> 0
 }
 
+/**
+ * Extracts a single bit from a 64-bit value represented by two 32-bit halves.
+ *
+ * @param high - High 32-bit half.
+ * @param low - Low 32-bit half.
+ * @param pos - 1-based bit position (1 is MSB of `high`).
+ * @returns The bit value (0 or 1).
+ */
 function getBitFrom64(high: number, low: number, pos: number): number {
   if (pos <= 32) return (high >>> (32 - pos)) & 1
   return (low >>> (64 - pos)) & 1
 }
 
+/**
+ * Extracts a single bit from a 56-bit key value represented by two 28-bit halves.
+ *
+ * @param c - High 28-bit half.
+ * @param d - Low 28-bit half.
+ * @param pos - 1-based bit position (1 is MSB of `c`).
+ * @returns The bit value (0 or 1).
+ */
 function getBitFrom56(c: number, d: number, pos: number): number {
   if (pos <= 28) return (c >>> (28 - pos)) & 1
   return (d >>> (56 - pos)) & 1
 }
 
+/**
+ * Applies a permutation table to a 64-bit value.
+ *
+ * @param high - High 32-bit half.
+ * @param low - Low 32-bit half.
+ * @param table - Bit positions (1..64) to read from the input.
+ * @returns Tuple containing the permuted high and low halves.
+ */
 function permute64(
   high: number,
   low: number,
@@ -147,10 +228,28 @@ function permute64(
   return [outHigh >>> 0, outLow >>> 0]
 }
 
+/**
+ * Left-rotates a 28-bit value and masks the result.
+ *
+ * @param x - 28-bit value to rotate.
+ * @param s - Number of bits to rotate.
+ * @returns Rotated 28-bit value.
+ */
 function rotl28(x: number, s: number): number {
   return ((x << s) | (x >>> (28 - s))) & 0x0fffffff
 }
 
+/**
+ * Generates the 16 DES round subkeys for a given 8-byte key.
+ *
+ * Each subkey is stored as an 8-byte array where every byte holds one
+ * 6-bit chunk of the 48-bit subkey.
+ *
+ * @param keyBytes - 8-byte DES key material.
+ * @returns Array of 16 round subkeys.
+ * @remarks
+ * Callers should validate the key length before invoking this function.
+ */
 function makeSubkeys(keyBytes: Uint8Array | Buffer): Uint8Array[] {
   const high =
     ((keyBytes[0] ?? 0) << 24) |
@@ -194,6 +293,16 @@ function makeSubkeys(keyBytes: Uint8Array | Buffer): Uint8Array[] {
   return subkeys
 }
 
+/**
+ * DES Feistel (F) function.
+ *
+ * Expands the right half to 48 bits, XORs with the subkey, applies S-boxes,
+ * then permutes the result using the P table.
+ *
+ * @param r - Right 32-bit half.
+ * @param subkey - 48-bit subkey stored as 8 bytes.
+ * @returns 32-bit output of the Feistel function.
+ */
 function feistel(r: number, subkey: Uint8Array): number {
   let out = 0
   for (let j = 0; j < 8; j++) {
@@ -208,6 +317,15 @@ function feistel(r: number, subkey: Uint8Array): number {
   return out >>> 0
 }
 
+/**
+ * Encrypts or decrypts a single 8-byte block at the given offset.
+ *
+ * @param input - Source buffer containing the block.
+ * @param offset - Offset (in bytes) into both `input` and `out`.
+ * @param subkeys - Array of round subkeys.
+ * @param decrypt - True to decrypt, false to encrypt.
+ * @param out - Output buffer to write the block into.
+ */
 function desBlockAt(
   input: Buffer | Uint8Array,
   offset: number,
@@ -252,6 +370,14 @@ function desBlockAt(
   out[offset + 7] = fLow & 0xff
 }
 
+/**
+ * Removes PKCS#7 padding from a buffer when valid.
+ *
+ * If the padding bytes are invalid, the original buffer is returned unchanged.
+ *
+ * @param buf - Buffer with PKCS#7 padding applied.
+ * @returns Unpadded view or the original buffer.
+ */
 function pkcs7Unpad(buf: Buffer | Uint8Array): Buffer | Uint8Array {
   if (!buf.length) return buf
   const pad = buf[buf.length - 1] ?? 0
@@ -263,11 +389,22 @@ function pkcs7Unpad(buf: Buffer | Uint8Array): Buffer | Uint8Array {
 }
 
 /**
- * Decrypts a Base64-encoded encrypted string using DES in ECB mode and returns the result as a UTF-8 string.
- * @param encryptedBase64 - The Base64-encoded encrypted data.
- * @param key - The 8-byte DES encryption key.
+ * Decrypts a Base64-encoded DES-ECB payload and returns UTF-8 text.
+ *
+ * The input is decoded from Base64, decrypted with DES in ECB mode, and
+ * unpadded using PKCS#7.
+ *
+ * @param encryptedBase64 - Base64-encoded ciphertext.
+ * @param key - The 8-byte DES key.
  * @returns The decrypted UTF-8 string.
- * @throws Error if the key length is not 8 bytes or if the data length is not a multiple of 8.
+ * @throws Error if the key length is not 8 bytes.
+ * @throws Error if the ciphertext length is not a multiple of 8.
+ * @example
+ * ```ts
+ * const text = desEcbDecryptBase64ToUtf8(payload, '12345678')
+ * ```
+ * @remarks
+ * Round subkeys are cached per key to avoid recomputation on subsequent calls.
  */
 export function desEcbDecryptBase64ToUtf8(
   encryptedBase64: string,

@@ -1,7 +1,15 @@
 import { Buffer } from 'node:buffer'
 
-// Pre-computed P-Array (18 words) and S-Boxes (4 x 256 words) flattened into a single Uint32Array
-// Total size: 18 + 1024 = 1042 words
+/**
+ * Precomputed Blowfish constants (P-array and S-boxes).
+ *
+ * Stored as a flattened table of 1042 unsigned 32-bit words: the 18 P-array
+ * entries followed by the four 256-entry S-boxes. The constructor clones
+ * slices from this table before applying the key schedule.
+ *
+ * @remarks
+ * Values originate from the hexadecimal digits of pi per the Blowfish spec.
+ */
 const BF_CONST = new Uint32Array([
   // P-Array (0-17)
   0x243f6a88, 0x85a308d3, 0x13198a2e, 0x03707344, 0xa4093822, 0x299f31d0,
@@ -189,33 +197,130 @@ const BF_CONST = new Uint32Array([
   0xb74e6132, 0xce77e25b, 0x578fdfe3, 0x3ac372e6
 ])
 
+/**
+ * Coerces a number into an unsigned 32-bit word.
+ *
+ * JavaScript numbers are floating point; this normalization emulates the
+ * uint32 behavior required by Blowfish arithmetic.
+ *
+ * @param x - The value to normalize.
+ * @returns The unsigned 32-bit representation.
+ * @example
+ * ```ts
+ * u32(-1) // 4294967295
+ * ```
+ */
 function u32(x: number) {
   return x >>> 0
 }
+/**
+ * Computes the XOR of two 32-bit words and normalizes the result.
+ *
+ * @param a - Left operand.
+ * @param b - Right operand.
+ * @returns XOR result as unsigned 32-bit.
+ * @example
+ * ```ts
+ * xor(0x0f, 0xf0) // 255
+ * ```
+ */
 function xor(a: number, b: number) {
   return u32(a ^ b)
 }
+/**
+ * Adds two 32-bit words with wrap-around semantics.
+ *
+ * @param a - First operand.
+ * @param b - Second operand.
+ * @returns Sum modulo 2^32.
+ * @example
+ * ```ts
+ * add32(0xffffffff, 1) // 0
+ * ```
+ */
 function add32(a: number, b: number) {
   return u32((a + b) | 0)
 }
+/**
+ * Packs four bytes into a big-endian 32-bit word.
+ *
+ * @param b0 - Most significant byte.
+ * @param b1 - Second byte.
+ * @param b2 - Third byte.
+ * @param b3 - Least significant byte.
+ * @returns Combined 32-bit word.
+ * @example
+ * ```ts
+ * pack32(0x01, 0x02, 0x03, 0x04) // 0x01020304
+ * ```
+ */
 function pack32(b0: number, b1: number, b2: number, b3: number) {
   return u32((b0 << 24) | (b1 << 16) | (b2 << 8) | b3)
 }
-function isBytes(v: any) {
-  return v && typeof v === 'object' && typeof v.byteLength === 'number'
+/**
+ * Tests whether a value represents raw bytes.
+ *
+ * Accepts ArrayBuffer, SharedArrayBuffer, and any ArrayBufferView
+ * (including Buffer, TypedArray, and DataView).
+ *
+ * @param v - Value to test.
+ * @returns True when the value can be wrapped in a Uint8Array.
+ */
+function isBytes(
+  v: unknown
+): v is ArrayBuffer | SharedArrayBuffer | ArrayBufferView {
+  return (
+    v instanceof ArrayBuffer ||
+    (typeof SharedArrayBuffer !== 'undefined' &&
+      v instanceof SharedArrayBuffer) ||
+    ArrayBuffer.isView(v)
+  )
 }
-function toU8(v: any) {
+/**
+ * Normalizes input into a Uint8Array.
+ *
+ * Strings are encoded as UTF-8 via TextEncoder. Buffer and ArrayBuffer inputs
+ * are converted without copying where possible.
+ *
+ * @param v - Input data.
+ * @returns A Uint8Array view over the input.
+ * @throws Error when the input type is unsupported.
+ * @example
+ * ```ts
+ * const bytes = toU8('nodelink')
+ * ```
+ */
+function toU8(v: unknown): Uint8Array {
   if (v instanceof Uint8Array) return v
-  if (Buffer.isBuffer(v))
-    return new Uint8Array(v.buffer, v.byteOffset, v.byteLength)
-  if (isBytes(v)) return new Uint8Array(v)
   if (typeof v === 'string') return new TextEncoder().encode(v)
+  if (isBytes(v)) {
+    if (ArrayBuffer.isView(v)) {
+      return new Uint8Array(v.buffer, v.byteOffset, v.byteLength)
+    }
+    return new Uint8Array(v)
+  }
   throw new Error('Expected string/Buffer/ArrayBuffer/Uint8Array')
 }
 
 /**
  * Blowfish cipher in Cipher Block Chaining (CBC) mode.
- * Implementation based on the official Blowfish specification.
+ *
+ * This implementation follows the Blowfish specification and supports
+ * streaming decryption by buffering partial blocks between calls. Call
+ * {@link setIv} before decoding; the internal IV updates after every block
+ * so chunks must be processed in order.
+ *
+ * @example
+ * ```ts
+ * const cipher = new BlowfishCBC('secret-key')
+ * cipher.setIv(Buffer.from('12345678'))
+ * const partA = cipher.decode(chunkA)
+ * const partB = cipher.decode(chunkB)
+ * ```
+ *
+ * @remarks
+ * Only full 8-byte blocks are returned; remaining bytes are cached until
+ * more data arrives.
  */
 export default class BlowfishCBC {
   private p: Uint32Array
@@ -230,8 +335,16 @@ export default class BlowfishCBC {
   private _tail: Uint8Array
 
   /**
-   * Creates an instance of BlowfishCBC.
-   * @param key - The encryption key as a string or Uint8Array.
+   * Creates a BlowfishCBC instance with a prepared key schedule.
+   *
+   * Keys shorter than 72 bytes are repeated to 72 bytes per the Blowfish
+   * specification. String keys are encoded using UTF-8.
+   *
+   * @param key - The encryption key as a string or byte array.
+   * @example
+   * ```ts
+   * const cipher = new BlowfishCBC(Buffer.from(secretKey))
+   * ```
    */
   constructor(key: string | Uint8Array) {
     const keyU8 = toU8(key)
@@ -293,9 +406,17 @@ export default class BlowfishCBC {
   }
 
   /**
-   * Sets the Initialization Vector (IV) for CBC mode.
-   * @param iv - The 8-byte IV as a string, Uint8Array, or Buffer.
+   * Sets the 8-byte CBC initialization vector.
+   *
+   * This resets the chaining state so the next {@link decode} call starts
+   * from the provided IV.
+   *
+   * @param iv - 8-byte IV as a string (UTF-8), Uint8Array, or Buffer.
    * @throws Error if the IV is not exactly 8 bytes long.
+   * @example
+   * ```ts
+   * cipher.setIv(Buffer.from([0, 1, 2, 3, 4, 5, 6, 7]))
+   * ```
    */
   setIv(iv: string | Uint8Array | Buffer) {
     const iv8 = toU8(iv)
@@ -305,6 +426,12 @@ export default class BlowfishCBC {
     this._haveIv = true
   }
 
+  /**
+   * Computes the Blowfish F function for a 32-bit input word.
+   *
+   * @param xL - Left 32-bit word.
+   * @returns The F function output as unsigned 32-bit.
+   */
   private _F(xL: number) {
     const a = (xL >>> 24) & 255
     const b = (xL >>> 16) & 255
@@ -317,6 +444,13 @@ export default class BlowfishCBC {
     return res
   }
 
+  /**
+   * Encrypts a single 64-bit block using the configured key schedule.
+   *
+   * @param xL - Left 32-bit word.
+   * @param xR - Right 32-bit word.
+   * @returns Tuple containing encrypted left/right words.
+   */
   private _encryptBlock(xL: number, xR: number): [number, number] {
     for (let i = 0; i < 16; i++) {
       xL = xor(xL, this.p[i] ?? 0)
@@ -334,6 +468,13 @@ export default class BlowfishCBC {
     return [xL, xR]
   }
 
+  /**
+   * Decrypts a single 64-bit block using the configured key schedule.
+   *
+   * @param xL - Left 32-bit word.
+   * @param xR - Right 32-bit word.
+   * @returns Tuple containing decrypted left/right words.
+   */
   private _decryptBlock(xL: number, xR: number): [number, number] {
     for (let i = 17; i > 1; i--) {
       xL = xor(xL, this.p[i] ?? 0)
@@ -352,10 +493,18 @@ export default class BlowfishCBC {
   }
 
   /**
-   * Decrypts a chunk of data.
-   * @param chunk - The encrypted chunk as a string, Uint8Array, or Buffer.
-   * @returns The decrypted data as a Buffer.
+   * Decrypts a chunk of CBC-encrypted data.
+   *
+   * The input may contain partial blocks. Any trailing bytes that do not form
+   * a full 8-byte block are stored and prepended to the next call.
+   *
+   * @param chunk - Encrypted bytes as a string, Uint8Array, or Buffer.
+   * @returns Decrypted bytes for all complete blocks in the chunk.
    * @throws Error if the IV has not been set.
+   * @example
+   * ```ts
+   * const plaintext = cipher.decode(encryptedChunk)
+   * ```
    */
   decode(chunk: string | Uint8Array | Buffer) {
     if (!this._haveIv) throw new Error('IV not set')
