@@ -1,12 +1,221 @@
-import type { FiltersState } from './player.types.ts'
+
+/**
+ * Configuration for the Channel Mix filter.
+ * @public
+ */
+export interface ChannelMixSettings {
+  leftToLeft?: number
+  leftToRight?: number
+  rightToLeft?: number
+  rightToRight?: number
+}
+
+/**
+ * Configuration for the Timescale filter.
+ * @public
+ */
+export interface TimescaleSettings {
+  speed?: number
+  pitch?: number
+  rate?: number
+}
+
+/**
+ * Configuration for the Tremolo filter.
+ * @public
+ */
+export interface TremoloSettings {
+  frequency?: number
+  depth?: number
+}
+
+/**
+ * Configuration for the Vibrato filter.
+ * @public
+ */
+export interface VibratoSettings {
+  frequency?: number
+  depth?: number
+}
+
+/**
+ * Individual band configuration for the Equalizer.
+ * @public
+ */
+export interface EqualizerBand {
+  band: number
+  gain: number
+}
+
+/**
+ * Configuration for the Equalizer filter.
+ * @public
+ */
+export interface EqualizerSettings {
+  bands?: EqualizerBand[]
+}
+
+/**
+ * Configuration for the Karaoke filter.
+ * @public
+ */
+export interface KaraokeSettings {
+  level?: number
+  monoLevel?: number
+  filterBand?: number
+  filterWidth?: number
+}
+
+/**
+ * Configuration for the Echo filter.
+ * @public
+ */
+export interface EchoSettings {
+  delay?: number
+  feedback?: number
+  mix?: number
+}
+
+/**
+ * Configuration for the Reverb filter.
+ * @public
+ */
+export interface ReverbSettings {
+  roomSize?: number
+  damping?: number
+  wetLevel?: number
+  dryLevel?: number
+  width?: number
+  mix?: number
+}
+
+/**
+ * Configuration for the Distortion filter.
+ * @public
+ */
+export interface DistortionSettings {
+  sinOffset?: number
+  sinScale?: number
+  cosOffset?: number
+  cosScale?: number
+  tanOffset?: number
+  tanScale?: number
+  offset?: number
+  scale?: number
+}
+
+/**
+ * Configuration for the Rotation filter.
+ * @public
+ */
+export interface RotationSettings {
+  rotationHz?: number
+}
+
+/**
+ * Configuration for the LowPass filter.
+ * @public
+ */
+export interface LowPassSettings {
+  smoothing?: number
+}
+
+/**
+ * Configuration for the HighPass filter.
+ * @public
+ */
+export interface HighPassSettings {
+  smoothing?: number
+}
+
+/**
+ * Configuration for the Chorus filter.
+ * @public
+ */
+export interface ChorusSettings {
+  rate?: number
+  depth?: number
+  feedback?: number
+  delay?: number
+  mix?: number
+}
+
+/**
+ * Configuration for the Phaser filter.
+ * @public
+ */
+export interface PhaserSettings {
+  rate?: number
+  depth?: number
+  feedback?: number
+  delay?: number
+  mix?: number
+  stages?: number
+  minFrequency?: number
+  maxFrequency?: number
+}
+
+/**
+ * Configuration for the Flanger filter.
+ * @public
+ */
+export interface FlangerSettings {
+  rate?: number
+  depth?: number
+  feedback?: number
+  delay?: number
+  mix?: number
+}
+
+/**
+ * Configuration for the Spatial filter.
+ * @public
+ */
+export interface SpatialSettings {
+  x?: number
+  y?: number
+  z?: number
+  depth?: number
+  rate?: number
+}
+
+/**
+ * Configuration for the Compressor filter.
+ * @public
+ */
+export interface CompressorSettings {
+  threshold?: number
+  ratio?: number
+  attack?: number
+  release?: number
+  gain?: number
+  makeupGain?: number
+}
 
 /**
  * Shape of filter settings accepted by filter instances.
  * @public
  */
-export type FilterSettings =
-  | NonNullable<FiltersState['filters']>
-  | Record<string, unknown>
+export interface FilterSettings {
+  channelMix?: ChannelMixSettings
+  timescale?: TimescaleSettings
+  tremolo?: TremoloSettings
+  vibrato?: VibratoSettings
+  equalizer?: EqualizerSettings
+  karaoke?: KaraokeSettings
+  echo?: EchoSettings
+  reverb?: ReverbSettings
+  distortion?: DistortionSettings
+  rotation?: RotationSettings
+  lowpass?: LowPassSettings
+  highpass?: HighPassSettings
+  chorus?: ChorusSettings
+  phaser?: PhaserSettings
+  flanger?: FlangerSettings
+  spatial?: SpatialSettings
+  compressor?: CompressorSettings
+  [key: string]: unknown
+}
 
 /**
  * Runtime audio filter instance used by the filter pipeline.
