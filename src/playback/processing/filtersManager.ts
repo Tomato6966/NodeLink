@@ -23,6 +23,7 @@ import Highpass from '../filters/highpass.ts'
 import Karaoke from '../filters/karaoke.ts'
 import Lowpass from '../filters/lowpass.ts'
 import Phaser from '../filters/phaser.ts'
+import Phonograph from '../filters/phonograph.ts'
 import Reverb from '../filters/reverb.ts'
 import Rotation from '../filters/rotation.ts'
 import Spatial from '../filters/spatial.ts'
@@ -47,7 +48,8 @@ const FILTER_CLASSES: Record<string, FilterClass> = {
   timescale: Timescale,
   spatial: Spatial,
   reverb: Reverb,
-  flanger: Flanger
+  flanger: Flanger,
+  phonograph: Phonograph
 }
 
 /**

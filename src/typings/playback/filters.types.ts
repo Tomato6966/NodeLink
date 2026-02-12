@@ -192,6 +192,48 @@ export interface CompressorSettings {
 }
 
 /**
+ * Configuration for the Phonograph filter.
+ * @public
+ */
+export interface PhonographSettings {
+  /**
+   * Frequency of the pitch modulation (wow).
+   * @defaultValue 0.8
+   */
+  frequency?: number
+  /**
+   * Intensity of the pitch modulation (wow).
+   * @defaultValue 0.25
+   */
+  depth?: number
+  /**
+   * Amount of surface noise and crackle.
+   * @defaultValue 0.18
+   */
+  crackle?: number
+  /**
+   * Intensity of rapid pitch jitter (flutter).
+   * @defaultValue 0.18
+   */
+  flutter?: number
+  /**
+   * Room ambiance / early reflections simulation.
+   * @defaultValue 0.22
+   */
+  room?: number
+  /**
+   * Microphone Automatic Gain Control / Compression simulation.
+   * @defaultValue 0.25
+   */
+  micAgc?: number
+  /**
+   * Mechanical saturation / drive.
+   * @defaultValue 0.25
+   */
+  drive?: number
+}
+
+/**
  * Shape of filter settings accepted by filter instances.
  * @public
  */
@@ -213,6 +255,7 @@ export interface FilterSettings {
   flanger?: FlangerSettings
   spatial?: SpatialSettings
   compressor?: CompressorSettings
+  phonograph?: PhonographSettings
   [key: string]: unknown
 }
 
