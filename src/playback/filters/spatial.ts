@@ -1,31 +1,50 @@
 import { SAMPLE_RATE } from '../../constants.ts'
-import { clamp16Bit } from './dsp/clamp16Bit.js'
-import DelayLine from './dsp/delay.js'
-import LFO from './dsp/lfo.js'
+import type { FilterSettings } from '../../typings/playback/filters.types.ts'
+import { BaseFilter } from './BaseFilter.ts'
+import { clamp16Bit } from './dsp/clamp16Bit.ts'
+import DelayLine from './dsp/delay.ts'
+import LFO from './dsp/lfo.ts'
 
 const MAX_DELAY_MS = 30
 const bufferSize = Math.ceil((SAMPLE_RATE * MAX_DELAY_MS) / 1000)
 
-export default class Spatial {
+/**
+ * Applies a spatial audio effect through cross-channel delay and modulation.
+ * @public
+ */
+export default class Spatial extends BaseFilter {
+  public priority = 10
+  private leftDelay: DelayLine
+  private rightDelay: DelayLine
+  private lfo: LFO
+  private depth = 0
+  private rate = 0
+
   constructor() {
-    this.priority = 10
+    super()
     this.leftDelay = new DelayLine(bufferSize)
     this.rightDelay = new DelayLine(bufferSize)
     this.lfo = new LFO('SINE')
-
-    this.depth = 0
-    this.rate = 0
   }
 
-  update(filters) {
-    const settings = filters.spatial || {}
-    this.depth = Math.max(0, Math.min(settings.depth || 0, 1.0))
-    this.rate = settings.rate || 0
+  /**
+   * Updates the spatial settings.
+   * @param settings - Filter settings containing `spatial`.
+   */
+  public override update(settings: FilterSettings): void {
+    const spatialSettings = settings.spatial || {}
+    this.depth = Math.max(0, Math.min(spatialSettings.depth || 0, 1.0))
+    this.rate = spatialSettings.rate || 0
 
     this.lfo.update(this.rate, 1.0)
   }
 
-  process(chunk) {
+  /**
+   * Processes a PCM audio buffer.
+   * @param chunk - PCM audio chunk.
+   * @returns The processed PCM audio chunk.
+   */
+  public override process(chunk: Buffer): Buffer {
     if (this.depth === 0) {
       return chunk
     }
@@ -57,5 +76,15 @@ export default class Spatial {
     }
 
     return chunk
+  }
+
+  /**
+   * Clears the spatial state.
+   */
+  public override flush(): Buffer {
+    this.leftDelay.clear()
+    this.rightDelay.clear()
+
+    return Buffer.alloc(0)
   }
 }

@@ -1,31 +1,66 @@
 import { SAMPLE_RATE } from '../../constants.ts'
-import { clamp16Bit } from './dsp/clamp16Bit.js'
+import type { FilterSettings } from '../../typings/playback/filters.types.ts'
+import { BaseFilter } from './BaseFilter.ts'
+import { clamp16Bit } from './dsp/clamp16Bit.ts'
 
 const MAX_OUTPUT_GAIN = 0.98
 const SCALE_16 = 32768
 const INV_16 = 1 / SCALE_16
 
-export default class Karaoke {
+/**
+ * Applies a karaoke effect by vocal removal/suppression.
+ * @public
+ */
+export default class Karaoke extends BaseFilter {
+  public priority = 10
+  private level = 0
+  private monoLevel = 0
+  private filterBand = 0
+  private filterWidth = 0
+
+  private lp_b0 = 0
+  private lp_b1 = 0
+  private lp_b2 = 0
+  private lp_a1 = 0
+  private lp_a2 = 0
+  private hp_b0 = 0
+  private hp_b1 = 0
+  private hp_b2 = 0
+  private hp_a1 = 0
+  private hp_a2 = 0
+
+  private _prevGain = MAX_OUTPUT_GAIN
+  private _bufL: Float32Array | null = null
+  private _bufR: Float32Array | null = null
+  private _bufFrames = 0
+
+  private lp_left_x1 = 0
+  private lp_left_x2 = 0
+  private lp_left_y1 = 0
+  private lp_left_y2 = 0
+  private lp_right_x1 = 0
+  private lp_right_x2 = 0
+  private lp_right_y1 = 0
+  private lp_right_y2 = 0
+  private hp_left_x1 = 0
+  private hp_left_x2 = 0
+  private hp_left_y1 = 0
+  private hp_left_y2 = 0
+  private hp_right_x1 = 0
+  private hp_right_x2 = 0
+  private hp_right_y1 = 0
+  private hp_right_y2 = 0
+
   constructor() {
-    this.priority = 10
-    this.level = 0
-    this.monoLevel = 0
-    this.filterBand = 0
-    this.filterWidth = 0
-
-    this.lp_b0 = this.lp_b1 = this.lp_b2 = this.lp_a1 = this.lp_a2 = 0
-    this.hp_b0 = this.hp_b1 = this.hp_b2 = this.hp_a1 = this.hp_a2 = 0
-
-    this._prevGain = MAX_OUTPUT_GAIN
-    this._bufL = null
-    this._bufR = null
-    this._bufFrames = 0
-
+    super()
     this._resetFilterState()
     this.updateCoefficients()
   }
 
-  _resetFilterState() {
+  /**
+   * Resets the internal IIR filter state.
+   */
+  private _resetFilterState(): void {
     this.lp_left_x1 = this.lp_left_x2 = this.lp_left_y1 = this.lp_left_y2 = 0
     this.lp_right_x1 =
       this.lp_right_x2 =
@@ -40,14 +75,21 @@ export default class Karaoke {
         0
   }
 
-  _ensureBuffers(frames) {
-    if (frames <= this._bufFrames) return
+  /**
+   * Ensures internal buffers are large enough for the given number of frames.
+   * @param frames - Required number of frames.
+   */
+  private _ensureBuffers(frames: number): void {
+    if (frames <= this._bufFrames && this._bufL && this._bufR) return
     this._bufFrames = frames
     this._bufL = new Float32Array(frames)
     this._bufR = new Float32Array(frames)
   }
 
-  updateCoefficients() {
+  /**
+   * Updates the filter coefficients based on the current band and width.
+   */
+  private updateCoefficients(): void {
     const band = this.filterBand
     const widthIn = this.filterWidth
 
@@ -93,8 +135,12 @@ export default class Karaoke {
     this.hp_a2 = a2
   }
 
-  update(filters) {
-    const k = filters?.karaoke || {}
+  /**
+   * Updates the karaoke settings.
+   * @param settings - Filter settings containing `karaoke`.
+   */
+  public override update(settings: FilterSettings): void {
+    const k = settings?.karaoke || {}
     const level = k.level || 0
     const monoLevel = k.monoLevel || 0
 
@@ -107,7 +153,12 @@ export default class Karaoke {
     this._resetFilterState()
   }
 
-  process(chunk) {
+  /**
+   * Processes a PCM audio buffer.
+   * @param chunk - PCM audio chunk.
+   * @returns The processed PCM audio chunk.
+   */
+  public override process(chunk: Buffer): Buffer {
     const level = this.level
     const monoLevel = this.monoLevel
     if (!level && !monoLevel) return chunk
@@ -118,6 +169,8 @@ export default class Karaoke {
     this._ensureBuffers(frames)
     const outLBuf = this._bufL
     const outRBuf = this._bufR
+
+    if (!outLBuf || !outRBuf) return chunk
 
     const doFilter = !!(level && this.filterBand && this.filterWidth)
 
@@ -241,8 +294,8 @@ export default class Karaoke {
     for (let f = 0, bi = 0; f < frames; f++, bi += 4) {
       current += step
 
-      let outL = outLBuf[f] * current
-      let outR = outRBuf[f] * current
+      let outL = (outLBuf[f] ?? 0) * current
+      let outR = (outRBuf[f] ?? 0) * current
 
       const peak = Math.max(Math.abs(outL), Math.abs(outR))
       if (peak > 0.9999) {
@@ -275,5 +328,14 @@ export default class Karaoke {
 
     this._prevGain = target
     return chunk
+  }
+
+  /**
+   * Clears the karaoke state.
+   */
+  public override flush(): Buffer {
+    this._resetFilterState()
+    this._prevGain = MAX_OUTPUT_GAIN
+    return Buffer.alloc(0)
   }
 }

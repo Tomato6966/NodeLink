@@ -1,4 +1,8 @@
-export const Waveforms = {
+/**
+ * Set of waveform generators for LFOs.
+ * @public
+ */
+export const Waveforms: Record<string, (phase: number) => number> = {
   SINE: (phase) => Math.sin(phase),
   SQUARE: (phase) => (phase % (2 * Math.PI) < Math.PI ? 1 : -1),
   SAWTOOTH: (phase) => (phase % (2 * Math.PI)) / Math.PI - 1,
@@ -7,3 +11,5 @@ export const Waveforms = {
     return 2 * (x < 0.5 ? 2 * x : 2 - 2 * x) - 1
   }
 }
+
+export type WaveformType = keyof typeof Waveforms

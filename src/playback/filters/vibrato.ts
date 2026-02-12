@@ -1,21 +1,36 @@
 import { SAMPLE_RATE } from '../../constants.ts'
-import { clamp16Bit } from './dsp/clamp16Bit.js'
-import DelayLine from './dsp/delay.js'
-import LFO from './dsp/lfo.js'
+import type { FilterSettings } from '../../typings/playback/filters.types.ts'
+import { BaseFilter } from './BaseFilter.ts'
+import { clamp16Bit } from './dsp/clamp16Bit.ts'
+import DelayLine from './dsp/delay.ts'
+import LFO from './dsp/lfo.ts'
 
 const MAX_DELAY_MS = 20
 const bufferSize = Math.ceil((SAMPLE_RATE * MAX_DELAY_MS) / 1000)
 
-export default class Vibrato {
+/**
+ * Applies a vibrato effect (pitch modulation) using an LFO.
+ * @public
+ */
+export default class Vibrato extends BaseFilter {
+  public priority = 10
+  private lfo: LFO
+  private leftDelay: DelayLine
+  private rightDelay: DelayLine
+
   constructor() {
-    this.priority = 10
+    super()
     this.lfo = new LFO('SINE')
     this.leftDelay = new DelayLine(bufferSize)
     this.rightDelay = new DelayLine(bufferSize)
   }
 
-  update(filters) {
-    const vibratoSettings = filters.vibrato || {}
+  /**
+   * Updates the vibrato settings.
+   * @param settings - Filter settings containing `vibrato`.
+   */
+  public override update(settings: FilterSettings): void {
+    const vibratoSettings = settings.vibrato || {}
     const frequency = vibratoSettings.frequency || 0
     let depth = vibratoSettings.depth ?? 0
 
@@ -24,7 +39,12 @@ export default class Vibrato {
     this.lfo.update(frequency, depth)
   }
 
-  process(chunk) {
+  /**
+   * Processes a PCM audio buffer.
+   * @param chunk - PCM audio chunk.
+   * @returns The processed PCM audio chunk.
+   */
+  public override process(chunk: Buffer): Buffer {
     if (this.lfo.depth === 0 || this.lfo.frequency === 0) {
       this.leftDelay.clear()
       this.rightDelay.clear()
@@ -52,5 +72,15 @@ export default class Vibrato {
     }
 
     return chunk
+  }
+
+  /**
+   * Clears the vibrato state.
+   */
+  public override flush(): Buffer {
+    this.leftDelay.clear()
+    this.rightDelay.clear()
+    this.lfo.phase = 0
+    return Buffer.alloc(0)
   }
 }

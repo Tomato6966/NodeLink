@@ -1,7 +1,9 @@
 import { SAMPLE_RATE } from '../../constants.ts'
-import { clamp16Bit } from './dsp/clamp16Bit.js'
-import { resample } from './timescale/resampler.js'
-import TimeStretch from './timescale/timeStretch.js'
+import type { FilterSettings } from '../../typings/playback/filters.types.ts'
+import { BaseFilter } from './BaseFilter.ts'
+import { clamp16Bit } from './dsp/clamp16Bit.ts'
+import { resample } from './timescale/resampler.ts'
+import TimeStretch from './timescale/timeStretch.ts'
 
 const CHANNELS = 2
 const BYTES_PER_SAMPLE = 2
@@ -10,9 +12,14 @@ const FLOAT_DENOMINATOR = 32768
 const FLOAT_TO_INT_SCALE = 32767
 const EMPTY_BUFFER = Buffer.alloc(0)
 
-const concatFloat32 = (chunks) => {
+/**
+ * Concatenates multiple Float32Arrays into one.
+ * @param chunks - Array of Float32Arrays.
+ * @returns Combined Float32Array.
+ */
+const concatFloat32 = (chunks: Float32Array[]): Float32Array => {
   if (chunks.length === 0) return new Float32Array(0)
-  if (chunks.length === 1) return chunks[0]
+  if (chunks.length === 1 && chunks[0]) return chunks[0]
 
   let total = 0
   for (const chunk of chunks) total += chunk.length
@@ -25,7 +32,12 @@ const concatFloat32 = (chunks) => {
   return output
 }
 
-const int16ToFloat = (input) => {
+/**
+ * Converts Int16 audio samples to Float32.
+ * @param input - The Int16Array of samples.
+ * @returns The Float32Array of samples.
+ */
+const int16ToFloat = (input: Int16Array): Float32Array => {
   const output = new Float32Array(input.length)
   for (let i = 0; i < input.length; i++) {
     output[i] = (input[i] ?? 0) / FLOAT_DENOMINATOR
@@ -33,40 +45,63 @@ const int16ToFloat = (input) => {
   return output
 }
 
-const floatToInt16Buffer = (input) => {
+/**
+ * Converts Float32 audio samples to a 16-bit PCM Buffer.
+ * @param input - The Float32Array of samples.
+ * @returns The PCM Buffer.
+ */
+const floatToInt16Buffer = (input: Float32Array): Buffer => {
   const output = new Int16Array(input.length)
   for (let i = 0; i < input.length; i++) {
     output[i] = clamp16Bit((input[i] ?? 0) * FLOAT_TO_INT_SCALE)
   }
-  return Buffer.from(output.buffer)
+  return Buffer.from(output.buffer, output.byteOffset, output.byteLength)
 }
 
-export default class Timescale {
+/**
+ * Modulates playback speed, pitch, and rate.
+ * @public
+ */
+export default class Timescale extends BaseFilter {
+  public priority = 1
+  private speed = 1.0
+  private pitch = 1.0
+  private rate = 1.0
+
+  private _pending = EMPTY_BUFFER
+  private _bypass = true
+  private _silence = false
+  private _effectiveTempo = 1.0
+  private _effectiveRate = 1.0
+  private _usesStretch = false
+
+  private _timeStretch: TimeStretch
+
   constructor() {
-    this.priority = 1
-    this.speed = 1.0
-    this.pitch = 1.0
-    this.rate = 1.0
-
-    this._pending = EMPTY_BUFFER
-    this._bypass = true
-    this._silence = false
-    this._effectiveTempo = 1.0
-    this._effectiveRate = 1.0
-    this._usesStretch = false
-
+    super()
     this._timeStretch = new TimeStretch({
       sampleRate: SAMPLE_RATE,
       channels: CHANNELS
     })
   }
 
-  update(filters) {
-    const settings = filters.timescale || {}
+  /**
+   * Updates the timescale settings.
+   * @param settings - Filter settings containing `timescale`.
+   */
+  public override update(settings: FilterSettings): void {
+    const timescaleSettings = settings.timescale || {}
 
-    const speed = Number.isFinite(settings.speed) ? settings.speed : 1.0
-    const pitch = Number.isFinite(settings.pitch) ? settings.pitch : 1.0
-    const rate = Number.isFinite(settings.rate) ? settings.rate : 1.0
+    const speed =
+      typeof timescaleSettings.speed === 'number'
+        ? timescaleSettings.speed
+        : 1.0
+    const pitch =
+      typeof timescaleSettings.pitch === 'number'
+        ? timescaleSettings.pitch
+        : 1.0
+    const rate =
+      typeof timescaleSettings.rate === 'number' ? timescaleSettings.rate : 1.0
 
     const bypass = speed === 1.0 && pitch === 1.0 && rate === 1.0
     const silence = speed <= 0 || pitch <= 0 || rate <= 0
@@ -101,12 +136,19 @@ export default class Timescale {
     }
   }
 
-  _reset() {
+  /**
+   * Resets the timescale state.
+   */
+  private _reset(): void {
     this._pending = EMPTY_BUFFER
     this._timeStretch.reset()
   }
 
-  _processFloat(samples) {
+  /**
+   * Processes Float32 samples through time stretching and resampling.
+   * @param samples - The input Float32 samples.
+   */
+  private _processFloat(samples: Float32Array): Float32Array {
     if (samples.length === 0) return samples
 
     if (this._effectiveRate > 1) {
@@ -125,7 +167,12 @@ export default class Timescale {
     return this._usesStretch ? this._timeStretch.process(resampled) : resampled
   }
 
-  process(chunk) {
+  /**
+   * Processes a PCM audio buffer.
+   * @param chunk - PCM audio chunk.
+   * @returns The processed PCM audio chunk.
+   */
+  public override process(chunk: Buffer): Buffer {
     if (this._bypass) return chunk
     if (this._silence) return EMPTY_BUFFER
     if (!chunk || chunk.length === 0) return EMPTY_BUFFER
@@ -135,7 +182,7 @@ export default class Timescale {
     const totalFrames = Math.floor(inputBuffer.length / FRAME_SIZE)
 
     if (totalFrames === 0) {
-      this._pending = inputBuffer
+      this._pending = Buffer.from(inputBuffer)
       return EMPTY_BUFFER
     }
 
@@ -148,7 +195,7 @@ export default class Timescale {
     this._pending =
       bytesToProcess === inputBuffer.length
         ? EMPTY_BUFFER
-        : inputBuffer.subarray(bytesToProcess)
+        : Buffer.from(inputBuffer.subarray(bytesToProcess))
 
     const int16 = new Int16Array(
       processBuffer.buffer,
@@ -161,10 +208,13 @@ export default class Timescale {
     return processed.length === 0 ? EMPTY_BUFFER : floatToInt16Buffer(processed)
   }
 
-  flush() {
+  /**
+   * Flushes any pending data from the timescale state.
+   */
+  public override flush(): Buffer {
     if (this._bypass || this._silence) return EMPTY_BUFFER
 
-    const outputChunks = []
+    const outputChunks: Float32Array[] = []
 
     if (this._pending.length > 0) {
       const int16 = new Int16Array(

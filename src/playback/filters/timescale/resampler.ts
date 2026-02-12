@@ -1,4 +1,19 @@
-const cubicInterpolate = (p0, p1, p2, p3, t) => {
+/**
+ * Cubic interpolation for smoother resampling.
+ * @param p0 - Pre-previous sample.
+ * @param p1 - Previous sample.
+ * @param p2 - Next sample.
+ * @param p3 - Post-next sample.
+ * @param t - Interpolation factor (0 to 1).
+ * @returns Interpolated sample.
+ */
+const cubicInterpolate = (
+  p0: number,
+  p1: number,
+  p2: number,
+  p3: number,
+  t: number
+): number => {
   const t2 = t * t
   const t3 = t2 * t
   return (
@@ -10,12 +25,39 @@ const cubicInterpolate = (p0, p1, p2, p3, t) => {
   )
 }
 
-const sampleAt = (input, channels, frames, frameIndex, channel) => {
+/**
+ * Retrieves a sample at a specific frame and channel with clamping.
+ * @param input - Input buffer.
+ * @param channels - Number of channels.
+ * @param frames - Total number of frames.
+ * @param frameIndex - Target frame index.
+ * @param channel - Target channel.
+ * @returns Sample value.
+ */
+const sampleAt = (
+  input: Float32Array,
+  channels: number,
+  frames: number,
+  frameIndex: number,
+  channel: number
+): number => {
   const clampedIndex = Math.max(0, Math.min(frames - 1, frameIndex))
   return input[clampedIndex * channels + channel] ?? 0
 }
 
-export const resample = (input, channels, rate) => {
+/**
+ * Simple cubic resampler for Float32 audio data.
+ * @param input - Input Float32Array.
+ * @param channels - Number of channels.
+ * @param rate - Resampling rate (e.g., 0.5 to slow down, 2.0 to speed up).
+ * @returns Resampled Float32Array.
+ * @public
+ */
+export const resample = (
+  input: Float32Array,
+  channels: number,
+  rate: number
+): Float32Array => {
   if (rate === 1 || input.length === 0) return input
 
   const inputFrames = Math.floor(input.length / channels)
