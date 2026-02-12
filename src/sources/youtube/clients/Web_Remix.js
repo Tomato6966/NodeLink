@@ -27,9 +27,8 @@ export default class WebRemix extends BaseClient {
     }
   }
 
-  async requirePlayerScript() {
-    // February 2026, 06th, this client now requires player script to function
-    return true
+  requirePlayerScript() {
+    return false
   }
 
   async search(query, type, context) {

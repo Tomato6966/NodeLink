@@ -1713,20 +1713,7 @@ export class BaseClient {
       }
     }
 
-    if (playerResponse.playabilityStatus?.status !== 'OK') {
-      const message =
-        playerResponse.playabilityStatus?.reason || 'Video not playable.'
-      logger(
-        'warn',
-        `youtube-${this.name}`,
-        `Video/short ${videoId} not playable: ${message}`
-      )
-      return {
-        loadType: 'error',
-        data: { message, severity: 'common', cause: 'UpstreamPlayability' }
-      }
-    }
-
+    // Check for videoDetails first - even if not playable, we might still have metadata
     const videoDetails = playerResponse.videoDetails
     if (!videoDetails || !videoDetails.videoId) {
       logger(
@@ -1741,6 +1728,18 @@ export class BaseClient {
           severity: 'fault',
           cause: 'NoVideoDetails'
         }
+      }
+    }
+
+    if (playerResponse.playabilityStatus?.status !== 'OK') {
+      const message =
+        playerResponse.playabilityStatus?.reason || 'Video not playable.'
+      if (this.name !== 'WEB_REMIX') {
+        logger(
+          'warn',
+          `youtube-${this.name}`,
+          `Video/short ${videoId} not playable: ${message}. Still returning metadata.`
+        )
       }
     }
 
