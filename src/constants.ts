@@ -234,6 +234,7 @@ export const GatewayEvents = {
  * - `REPLACED`: Track was replaced by another track (should not auto-advance)
  * - `CLEANUP`: Track ended due to cleanup/destroy operation (internal)
  * - `GAPLESS`: Track ended for gapless transition (seamless playback)
+ * - `CROSSFADE`: Track ended because crossfade overlap started
  *
  * @example
  * ```ts
@@ -261,7 +262,9 @@ export const EndReasons = {
   /** Track ended due to cleanup or player destruction */
   CLEANUP: 'cleanup',
   /** Track ended for gapless transition to next track */
-  GAPLESS: 'gapless'
+  GAPLESS: 'gapless',
+  /** Track ended because crossfade overlap started */
+  CROSSFADE: 'crossfading'
 } as const
 
 /**

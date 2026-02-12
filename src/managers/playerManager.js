@@ -411,6 +411,41 @@ export default class PlayerManager {
     return player.setFading(fadingConfig)
   }
 
+  async setCrossfade(guildId, crossfadeConfig) {
+    const interception = await this._runInterceptors(
+      'setCrossfade',
+      guildId,
+      crossfadeConfig
+    )
+    if (interception?.handled) return interception.result
+
+    const session = this.nodelink.sessions.get(this.sessionId)
+    const playerKey = `${this.sessionId}:${guildId}`
+
+    if (this.isCluster) {
+      const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
+      if (!worker) throw new Error('Player not assigned to a worker.')
+      const result = await this.nodelink.workerManager.execute(
+        worker,
+        'playerCommand',
+        {
+          sessionId: this.sessionId,
+          guildId,
+          userId: session.userId,
+          command: 'setCrossfade',
+          args: [crossfadeConfig]
+        }
+      )
+      if (result?.playerNotFound) {
+        throw new Error('Player not found.')
+      }
+      return result
+    }
+    const player = this.players.get(playerKey)
+    if (!player) throw new Error('Player not found locally.')
+    return player.setCrossfade(crossfadeConfig)
+  }
+
   async setLoudnessNormalizer(guildId, enabled) {
     const session = this.nodelink.sessions.get(this.sessionId)
     const playerKey = `${this.sessionId}:${guildId}`

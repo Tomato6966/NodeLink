@@ -20,6 +20,7 @@ import type {
   NodeLink,
   StreamInfo
 } from '../../typings/playback/player.types.ts'
+import type { FadeCurve } from '../../typings/playback/processing.types.ts'
 import type {
   AACConfig,
   AACDecoderStreamOptions,
@@ -51,6 +52,7 @@ import FlvDemuxer from '../demuxers/Flv.ts'
 import WebmOpusDemuxer from '../demuxers/WebmOpus.ts'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.ts'
 import { RingBuffer } from '../structs/RingBuffer.ts'
+import { CrossfadeController } from './CrossfadeController.ts'
 import { FadeTransformer } from './FadeTransformer.ts'
 import { FlowController } from './FlowController.ts'
 import { FiltersManager } from './filtersManager.ts'
@@ -236,9 +238,34 @@ class BaseAudioResource {
   }
 
   protected _assignStream(stream: Transform): void {
-    const voiceStream = stream as unknown as VoiceAudioStream & Transform
+    const voiceStream = stream as unknown as VoiceAudioStream &
+      Transform & {
+        prepareCrossfade?: (
+          nextStream: Readable,
+          options: {
+            durationMs: number
+            minBufferMs?: number
+            bufferMs?: number
+          }
+        ) => boolean
+        startCrossfade?: (durationMs: number, curve?: string) => boolean
+        clearCrossfade?: () => void
+        getCrossfadeState?: () => {
+          active: boolean
+          bufferedMs: number
+          targetMs: number
+        }
+      }
     voiceStream.setVolume = (volume: number) => this.setVolume(volume)
     voiceStream.setFilters = (filters: FiltersState) => this.setFilters(filters)
+    voiceStream.prepareCrossfade = (
+      nextStream: Readable,
+      options: { durationMs: number; minBufferMs?: number; bufferMs?: number }
+    ) => this.prepareCrossfade(nextStream, options)
+    voiceStream.startCrossfade = (durationMs: number, curve?: string) =>
+      this.startCrossfade(durationMs, curve)
+    voiceStream.clearCrossfade = () => this.clearCrossfade()
+    voiceStream.getCrossfadeState = () => this.getCrossfadeState()
     this.stream = voiceStream
   }
 
@@ -278,6 +305,27 @@ class BaseAudioResource {
 
   destroy(): void {
     this._end()
+  }
+
+  prepareCrossfade(
+    _nextStream: Readable,
+    _options: { durationMs: number; minBufferMs?: number; bufferMs?: number }
+  ): boolean {
+    return false
+  }
+
+  startCrossfade(_durationMs: number, _curve?: string): boolean {
+    return false
+  }
+
+  clearCrossfade(): void {}
+
+  getCrossfadeState(): {
+    active: boolean
+    bufferedMs: number
+    targetMs: number
+  } {
+    return { active: false, bufferedMs: 0, targetMs: 0 }
   }
 
   setVolume(volume: number): void {
@@ -1856,6 +1904,7 @@ class FLVToAACStream extends Transform {
 
 class StreamAudioResource extends BaseAudioResource {
   private nodelink: NodeLink
+  private crossfadeController: CrossfadeController | null = null
 
   constructor(
     stream: Readable,
@@ -2079,6 +2128,11 @@ class StreamAudioResource extends BaseAudioResource {
       sampleRate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels
     })
+    const crossfadeController = new CrossfadeController(
+      AUDIO_CONFIG.sampleRate,
+      AUDIO_CONFIG.channels
+    )
+    this.crossfadeController = crossfadeController
 
     const flowController = new FlowController(
       filters,
@@ -2094,8 +2148,12 @@ class StreamAudioResource extends BaseAudioResource {
 
     opusEncoder.setDTX(false)
 
-    const streams: Transform[] = [pcmStream, flowController]
-    this.pipes?.push(flowController)
+    const streams: Transform[] = [
+      pcmStream,
+      crossfadeController,
+      flowController
+    ]
+    this.pipes?.push(crossfadeController, flowController)
 
     // Inject Audio Interceptors (Low-level stream manipulation)
     if (nodelink.extensions?.audioInterceptors) {
@@ -2129,6 +2187,41 @@ class StreamAudioResource extends BaseAudioResource {
     })
 
     this._assignStream(opusEncoder)
+  }
+
+  override prepareCrossfade(
+    nextStream: Readable,
+    options: { durationMs: number; minBufferMs?: number; bufferMs?: number }
+  ): boolean {
+    if (!this.crossfadeController) return false
+    this.crossfadeController.prepareNextStream(nextStream, options)
+    return true
+  }
+
+  override startCrossfade(durationMs: number, curve?: string): boolean {
+    if (!this.crossfadeController) return false
+    return this.crossfadeController.startCrossfade(
+      durationMs,
+      curve as FadeCurve
+    )
+  }
+
+  override clearCrossfade(): void {
+    this.crossfadeController?.clear()
+  }
+
+  override getCrossfadeState(): {
+    active: boolean
+    bufferedMs: number
+    targetMs: number
+  } {
+    return (
+      this.crossfadeController?.getState() ?? {
+        active: false,
+        bufferedMs: 0,
+        targetMs: 0
+      }
+    )
   }
 
   _createPCMOutputPipeline(

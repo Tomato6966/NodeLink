@@ -38,6 +38,7 @@ const updatePlayerSchema = v.compile({
   loudnessNormalizer: { type: 'boolean', optional: true },
   filters: filtersSchema,
   fading: { type: 'any', optional: true },
+  crossfade: { type: 'any', optional: true },
   voice: { ...voiceStateSchema, optional: true },
   guildId: { type: 'string', optional: true },
   $$strict: false
@@ -106,6 +107,38 @@ const sanitizeFadingConfig = (raw) => {
     if (typeof raw.ducking.curve === 'string') {
       safe.ducking.curve = raw.ducking.curve
     }
+  }
+
+  return safe
+}
+
+const sanitizeCrossfadeConfig = (raw) => {
+  const safe = {
+    enabled: false,
+    duration: 0,
+    curve: 'sinusoidal',
+    mode: 'preload',
+    minBufferMs: 250,
+    bufferMs: 0
+  }
+
+  if (!raw || typeof raw !== 'object') return safe
+  safe.enabled = raw.enabled === true
+
+  if (Number.isFinite(raw.duration)) {
+    safe.duration = Math.max(0, raw.duration)
+  }
+  if (typeof raw.curve === 'string') {
+    safe.curve = raw.curve
+  }
+  if (raw.mode === 'stream' || raw.mode === 'preload') {
+    safe.mode = raw.mode
+  }
+  if (Number.isFinite(raw.minBufferMs)) {
+    safe.minBufferMs = Math.max(0, raw.minBufferMs)
+  }
+  if (Number.isFinite(raw.bufferMs)) {
+    safe.bufferMs = Math.max(0, raw.bufferMs)
   }
 
   return safe
@@ -250,12 +283,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         await session.players.create(guildId)
 
         if (payload.voice) {
-          const {
-            endpoint,
-            token,
-            sessionId: voiceSessionId,
-            channelId
-          } = payload.voice
+          const { endpoint, token, sessionId: voiceSessionId } = payload.voice
           const currentPlayer = session.players.get(guildId)
           if (
             currentPlayer &&
@@ -404,19 +432,25 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
                 encoded: nextTrackPayload.encoded,
                 info: decodedTrack.info,
                 audioTrackId:
-                  nextTrackPayload.language || nextTrackPayload.audioTrackId || null,
+                  nextTrackPayload.language ||
+                  nextTrackPayload.audioTrackId ||
+                  null,
                 userData: nextTrackPayload.userData
               }
             }
           } else if (nextTrackPayload.identifier) {
             if (nodelink.loadTrack) {
-              const loadResult = await nodelink.loadTrack(nextTrackPayload.identifier)
+              const loadResult = await nodelink.loadTrack(
+                nextTrackPayload.identifier
+              )
               if (loadResult.loadType === 'track') {
                 trackToPreload = {
                   encoded: loadResult.data.encoded,
                   info: loadResult.data.info,
                   audioTrackId:
-                    nextTrackPayload.language || nextTrackPayload.audioTrackId || null,
+                    nextTrackPayload.language ||
+                    nextTrackPayload.audioTrackId ||
+                    null,
                   userData: nextTrackPayload.userData
                 }
               }
@@ -527,13 +561,19 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         }
 
         if (payload.fading !== undefined) {
+          logger('debug', 'PlayerUpdate', `Setting fading for guild ${guildId}`)
+          const sanitizedFading = sanitizeFadingConfig(payload.fading)
+          await session.players.setFading(guildId, sanitizedFading)
+        }
+
+        if (payload.crossfade !== undefined) {
           logger(
             'debug',
             'PlayerUpdate',
-            `Setting fading for guild ${guildId}`
+            `Setting crossfade for guild ${guildId}`
           )
-          const sanitizedFading = sanitizeFadingConfig(payload.fading)
-          await session.players.setFading(guildId, sanitizedFading)
+          const sanitizedCrossfade = sanitizeCrossfadeConfig(payload.crossfade)
+          await session.players.setCrossfade(guildId, sanitizedCrossfade)
         }
 
         if (payload.loudnessNormalizer !== undefined) {

@@ -1,3 +1,4 @@
+import type { Readable } from 'node:stream'
 import { SeekError } from '@ecliptia/seekable-stream'
 import discordVoice, {
   type VoiceAudioStream,
@@ -11,6 +12,8 @@ import type {
   AudioResource,
   CreateAudioResource,
   CreateSeekeableAudioResource,
+  CrossfadeConfig,
+  CrossfadeMode,
   FadeTimers,
   FadingConfig,
   FadingSection,
@@ -67,6 +70,11 @@ export class Player {
   private holoTrack: PlayerTrack | null = null
   private nextTrack: PlayerTrack | null = null
   private nextResource: AudioResource | null = null
+  private nextCrossfadeTrack: PlayerTrack | null = null
+  private nextCrossfadeResource: AudioResource | null = null
+  private nextCrossfadePcm: AudioResource | null = null
+  private nextCrossfadeStreamInfo: StreamInfo = null
+  private nextCrossfadeDuration = 0
   public isPaused = false
   public volumePercent: number
   public filters: FiltersState = {}
@@ -83,8 +91,14 @@ export class Player {
   public lastManualReconnect = 0
   public audioMixer: AudioMixer | null = null
   public fading?: FadingConfig
+  public crossfade?: CrossfadeConfig
   public loudnessNormalizer: boolean
   private _fadeTimers: FadeTimers = { trackEnd: null, pause: null, stop: null }
+  private _crossfadeTimer: NodeJS.Timeout | null = null
+  private _crossfadeEndTimer: NodeJS.Timeout | null = null
+  private _crossfadeIgnoreIdle = false
+  private _crossfadeToken = 0
+  private _crossfadePrepared = false
   private _isResuming = false
   private _pendingTrackStartFade = false
   private _lyricsBasePosition = 0
@@ -130,6 +144,7 @@ export class Player {
     this.guildId = options.guildId
     this.volumePercent = this.nodelink.options?.defaultVolume ?? 100
     this.fading = this.nodelink.options?.audio?.fading
+    this.crossfade = this.nodelink.options?.audio?.crossfade
     this.loudnessNormalizer =
       this.nodelink.options?.audio?.loudnessNormalizer ?? false
 
@@ -362,6 +377,10 @@ export class Player {
       endReason &&
       endingReasons.includes(endReason)
     ) {
+      if (this._crossfadeIgnoreIdle && state.reason === EndReasons.FINISHED) {
+        this._crossfadeIgnoreIdle = false
+        return
+      }
       if (
         state.reason === EndReasons.FINISHED &&
         this.nextResource &&
@@ -520,6 +539,7 @@ export class Player {
    * Resets track and lyric state after a track ends.
    */
   private _resetTrack(): void {
+    this._clearCrossfade()
     if (this.nextResource) {
       this.nextResource.destroy()
       this.nextResource = null
@@ -598,16 +618,344 @@ export class Player {
   /**
    * Emits TRACK_END event and cleans up mixer layers.
    */
-  private _emitTrackEnd(reason: EndReason): void {
+  private _emitTrackEnd(
+    reason: EndReason,
+    extra: Record<string, unknown> = {}
+  ): void {
     const trackToEmit = this.holoTrack || this.track
     this.emitEvent(GatewayEvents.TRACK_END, {
       track: trackToEmit,
-      reason: reason
+      reason: reason,
+      ...extra
     })
 
     if (this.audioMixer?.autoCleanup) {
       this.audioMixer.clearLayers('MAIN_ENDED')
     }
+  }
+
+  /**
+   * Normalizes the crossfade configuration.
+   *
+   * @remarks
+   * Returns null when crossfade is disabled or the duration is invalid.
+   */
+  private _getCrossfadeConfig(): {
+    enabled: boolean
+    durationMs: number
+    curve: string
+    mode: CrossfadeMode
+    minBufferMs: number
+    bufferMs: number
+  } | null {
+    const config = this.crossfade
+    if (!config || config.enabled !== true) return null
+
+    const durationMs =
+      Number.isFinite(config.duration) && (config.duration as number) > 0
+        ? Math.max(0, config.duration as number)
+        : 0
+    if (durationMs <= 0) return null
+
+    const curve = typeof config.curve === 'string' ? config.curve : 'sinusoidal'
+    const mode: CrossfadeMode = config.mode === 'stream' ? 'stream' : 'preload'
+    const minBufferMs =
+      Number.isFinite(config.minBufferMs) && (config.minBufferMs as number) > 0
+        ? Math.max(0, config.minBufferMs as number)
+        : durationMs
+    const bufferMs =
+      Number.isFinite(config.bufferMs) && (config.bufferMs as number) > 0
+        ? Math.max(minBufferMs, config.bufferMs as number)
+        : durationMs
+
+    return {
+      enabled: true,
+      durationMs,
+      curve,
+      mode,
+      minBufferMs,
+      bufferMs
+    }
+  }
+
+  /**
+   * Clears any scheduled or active crossfade state.
+   *
+   * @param options - Controls which buffered resources to dispose.
+   */
+  private _clearCrossfade(
+    options: { clearNext?: boolean; clearPcm?: boolean } = {}
+  ): void {
+    const { clearNext = true, clearPcm = true } = options
+    if (this._crossfadeTimer) {
+      clearTimeout(this._crossfadeTimer)
+      this._crossfadeTimer = null
+    }
+    if (this._crossfadeEndTimer) {
+      clearTimeout(this._crossfadeEndTimer)
+      this._crossfadeEndTimer = null
+    }
+    this._crossfadeIgnoreIdle = false
+    this._crossfadePrepared = false
+    this._crossfadeToken += 1
+
+    const audioStream = this.connection?.audioStream as
+      | AudioResource
+      | undefined
+    audioStream?.clearCrossfade?.()
+
+    if (clearPcm && this.nextCrossfadePcm) {
+      this.nextCrossfadePcm.destroy()
+      this.nextCrossfadePcm = null
+    }
+    if (clearNext && this.nextCrossfadeResource) {
+      this.nextCrossfadeResource.destroy()
+      this.nextCrossfadeResource = null
+    }
+    if (clearNext) {
+      this.nextCrossfadeTrack = null
+      this.nextCrossfadeStreamInfo = null
+      this.nextCrossfadeDuration = 0
+    }
+  }
+
+  /**
+   * Prepares the next track PCM buffer for crossfade.
+   */
+  private _prepareCrossfadeBuffer(config: {
+    durationMs: number
+    minBufferMs: number
+    bufferMs: number
+  }): void {
+    if (this._crossfadePrepared) return
+    const pcmResource = this.nextCrossfadePcm
+    const audioStream = this.connection?.audioStream as
+      | AudioResource
+      | undefined
+    if (!pcmResource?.stream || !audioStream?.prepareCrossfade) return
+
+    audioStream.prepareCrossfade(pcmResource.stream as unknown as Readable, {
+      durationMs: config.durationMs,
+      minBufferMs: config.minBufferMs,
+      bufferMs: config.bufferMs
+    })
+    this._crossfadePrepared = true
+  }
+
+  /**
+   * Schedules a crossfade transition when possible.
+   *
+   * @param startPosition - Current playback position in milliseconds.
+   */
+  private _scheduleCrossfade(startPosition = 0): void {
+    const config = this._getCrossfadeConfig()
+    if (
+      !config ||
+      !this.track ||
+      !this.nextCrossfadeTrack ||
+      !this.nextCrossfadeResource ||
+      !this.nextCrossfadePcm
+    )
+      return
+
+    if (config.mode === 'preload' && this.track.info.isStream) {
+      logger(
+        'debug',
+        'Crossfade',
+        `Crossfade skipped for guild ${this.guildId} because track is a stream.`
+      )
+      return
+    }
+
+    const total =
+      this.track.endTime && this.track.endTime > 0
+        ? this.track.endTime
+        : this.track.info.length || 0
+
+    if (!Number.isFinite(total) || total <= 0) {
+      if (config.mode !== 'stream') return
+    }
+
+    const durationMs = config.durationMs
+    if (durationMs <= 0) return
+    if (config.mode !== 'stream' && total > 0) {
+      const remaining = Math.max(0, total - startPosition)
+      if (remaining < durationMs) {
+        logger(
+          'debug',
+          'Crossfade',
+          `Crossfade skipped for guild ${this.guildId} (remaining ${Math.round(
+            remaining
+          )}ms < ${durationMs}ms).`
+        )
+        return
+      }
+    }
+
+    this._prepareCrossfadeBuffer({
+      durationMs,
+      minBufferMs: config.minBufferMs,
+      bufferMs: config.bufferMs
+    })
+
+    if (this._crossfadeTimer) {
+      clearTimeout(this._crossfadeTimer)
+      this._crossfadeTimer = null
+    }
+
+    const delay =
+      config.mode === 'stream'
+        ? 0
+        : Math.max(0, Math.max(0, total - startPosition) - durationMs)
+    this._crossfadeToken += 1
+    const token = this._crossfadeToken
+
+    this._crossfadeTimer = setTimeout(() => {
+      this._crossfadeTimer = null
+      this._startCrossfade(token, durationMs, config)
+    }, delay)
+  }
+
+  /**
+   * Starts the crossfade mix and emits events for the new track.
+   *
+   * @param token - Current crossfade token for race protection.
+   * @param durationMs - Crossfade duration in milliseconds.
+   * @param config - Crossfade mode/curve metadata.
+   */
+  private _startCrossfade(
+    token: number,
+    durationMs: number,
+    config: { curve: string; mode: CrossfadeMode }
+  ): void {
+    if (token !== this._crossfadeToken) return
+    if (!this.track || !this.nextCrossfadeTrack) return
+
+    const audioStream = this.connection?.audioStream as
+      | AudioResource
+      | undefined
+    const state = audioStream?.getCrossfadeState?.()
+    if (!audioStream?.startCrossfade || !state?.bufferedMs) {
+      logger(
+        'warn',
+        'Crossfade',
+        `Crossfade could not start for guild ${this.guildId} (missing buffer).`
+      )
+      this._clearCrossfade({ clearNext: true })
+      return
+    }
+
+    if (state.bufferedMs < durationMs) {
+      logger(
+        'warn',
+        'Crossfade',
+        `Crossfade skipped for guild ${this.guildId} (buffered ${Math.round(
+          state.bufferedMs
+        )}ms < ${durationMs}ms).`
+      )
+      this._clearCrossfade({ clearNext: true })
+      return
+    }
+
+    const started = audioStream.startCrossfade(durationMs, config.curve)
+    if (!started) {
+      logger(
+        'warn',
+        'Crossfade',
+        `Crossfade could not start for guild ${this.guildId} (controller rejected).`
+      )
+      this._clearCrossfade({ clearNext: true })
+      return
+    }
+
+    const previousTrack = this.track
+    const nextTrack = this.nextCrossfadeTrack
+    const nextStreamInfo = this.nextCrossfadeStreamInfo
+
+    this._crossfadeIgnoreIdle = true
+    if (this.nextResource) {
+      this.nextResource.destroy()
+      this.nextResource = null
+      this.nextTrack = null
+    }
+    this.nextCrossfadeTrack = null
+    this.nextCrossfadeStreamInfo = null
+    this.nextCrossfadeDuration = durationMs
+
+    this._emitTrackEnd(EndReasons.CROSSFADE, {
+      crossfade: {
+        durationMs,
+        mode: config.mode,
+        nextTrack: nextTrack
+      }
+    })
+
+    this.track = nextTrack
+    this.holoTrack = null
+    this.streamInfo = nextStreamInfo
+    this.position = 0
+    this._lyricsBasePosition = 0
+    this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
+    this._emitTrackStart().catch((err) => this._onError(err))
+
+    if (this._crossfadeEndTimer) clearTimeout(this._crossfadeEndTimer)
+    this._crossfadeEndTimer = setTimeout(() => {
+      this._crossfadeEndTimer = null
+      this._completeCrossfade(token, previousTrack).catch((err) =>
+        this._onError(err as Error)
+      )
+    }, durationMs)
+  }
+
+  /**
+   * Completes the crossfade transition and continues playback.
+   *
+   * @param token - Current crossfade token for race protection.
+   * @param previousTrack - Track that was fading out.
+   */
+  private async _completeCrossfade(
+    token: number,
+    previousTrack: PlayerTrack
+  ): Promise<void> {
+    if (token !== this._crossfadeToken) return
+    const resource = this.nextCrossfadeResource
+    if (!resource || !this.connection) {
+      this._clearCrossfade({ clearNext: false })
+      return
+    }
+
+    const startTime = this.nextCrossfadeDuration
+    this.position = startTime
+    this._lyricsBasePosition = startTime
+    this._lyricsBasePackets = this.connection.statistics?.packetsExpected ?? 0
+
+    const currentStream = this.connection.audioStream as AudioResource | null
+    currentStream?.clearCrossfade?.()
+
+    this._isResuming = true
+    const oldStream = this.connection.play(resource as unknown)
+    await this.waitEvent(
+      'playerStateChange',
+      (s: VoicePlayerState) => s.status === 'playing'
+    )
+    if (oldStream) {
+      oldStream.destroy()
+    }
+
+    if (this.nextCrossfadePcm) {
+      this.nextCrossfadePcm.destroy()
+      this.nextCrossfadePcm = null
+    }
+    this.nextCrossfadeResource = null
+    this._crossfadePrepared = false
+    this._crossfadeIgnoreIdle = false
+    this.nextCrossfadeDuration = 0
+
+    logger(
+      'debug',
+      'Crossfade',
+      `Crossfade completed for guild ${this.guildId} (previous: ${previousTrack.info.identifier}).`
+    )
   }
 
   /**
@@ -656,10 +1004,10 @@ export class Player {
     const timescale = this._getTimescale()
     const playbackSpeed = timescale.speed * timescale.rate
 
-    return this.connection?.statistics
-      ? this.position +
-          (this.connection.statistics.packetsExpected ?? 0) * 20 * playbackSpeed
-      : 0
+    const packets =
+      this.connection?.statistics?.packetsExpected ?? this._lyricsBasePackets
+    const deltaPackets = Math.max(0, packets - this._lyricsBasePackets)
+    return this._lyricsBasePosition + deltaPackets * 20 * playbackSpeed
   }
 
   /**
@@ -721,6 +1069,53 @@ export class Player {
       this.audioMixer,
       false,
       this.loudnessNormalizer
+    )
+    return { stream: resource }
+  }
+
+  /**
+   * Fetches a raw PCM resource for crossfade buffering.
+   *
+   * @remarks
+   * The PCM stream is decoded without filters or volume so that the main
+   * pipeline can apply processing uniformly after mixing.
+   */
+  private async _fetchPcmResource(
+    info: TrackInfoExtended,
+    urlData: TrackUrlResult & { protocol?: string; format?: TrackFormat },
+    startTime = 0
+  ): Promise<{ stream: AudioResource } | { exception: { message: string } }> {
+    await getStreamProcessor()
+    const audioResourceFactory = createAudioResource
+    if (!audioResourceFactory) {
+      return { exception: { message: 'Stream processor not initialized' } }
+    }
+
+    const additionalData: Record<string, unknown> & { startTime?: number } = {
+      ...urlData.additionalData
+    }
+    if (startTime !== undefined) additionalData.startTime = startTime
+
+    const track = urlData?.newTrack
+      ? (urlData?.newTrack?.info as TrackInfoExtended)
+      : info
+    const fetched = await this.nodelink.sources.getTrackStream(
+      track,
+      urlData.url,
+      urlData.protocol,
+      additionalData
+    )
+    if (fetched.exception) return fetched as { exception: { message: string } }
+
+    const resource = audioResourceFactory(
+      fetched.stream,
+      fetched.type || urlData.format,
+      this.nodelink,
+      {},
+      1.0,
+      null,
+      true,
+      false
     )
     return { stream: resource }
   }
@@ -955,6 +1350,7 @@ export class Player {
     this._fading('trackEndSchedule', { startPosition: startTime || 0 })
 
     this.setFilters(this.filters)
+    this._scheduleCrossfade(startTime || 0)
 
     logger('debug', 'Player', `Playing resource for guild ${this.guildId}`)
     this._stuckTime = 0
@@ -1016,6 +1412,7 @@ export class Player {
         }
 
         if (this.track) {
+          this._clearCrossfade()
           this._emitTrackEnd(EndReasons.REPLACED)
         }
 
@@ -1066,6 +1463,8 @@ export class Player {
   public async seek(position?: number, endTime?: number): Promise<boolean> {
     if (this.destroying || !this.track) return false
     if (!this.track.info.isSeekable && !this.track.info.isStream) return false
+
+    this._clearCrossfade({ clearNext: true })
 
     const seekPosition = position ?? this._realPosition()
 
@@ -1322,6 +1721,7 @@ export class Player {
       (s: VoicePlayerState) => s.status === 'playing'
     )
 
+    this._scheduleCrossfade(position)
     return true
   }
 
@@ -1406,6 +1806,7 @@ export class Player {
         oldStream.destroy()
       }
 
+      this._scheduleCrossfade(position)
       return true
     } catch (e) {
       const err = e as Error
@@ -1588,6 +1989,7 @@ export class Player {
       this.nextResource = null
       this.nextTrack = null
     }
+    this._clearCrossfade({ clearNext: true })
 
     try {
       const trackInfo = {
@@ -1608,6 +2010,62 @@ export class Player {
         this.nextResource.setVolume(this.volumePercent / 100)
       }
       this.nextResource.setFilters(this.filters)
+
+      const crossfadeConfig = this._getCrossfadeConfig()
+      if (crossfadeConfig && this.track) {
+        if (crossfadeConfig.mode === 'preload' && this.track.info.isStream) {
+          logger(
+            'debug',
+            'Crossfade',
+            `Crossfade preload skipped for guild ${this.guildId} (stream mode required).`
+          )
+          return true
+        }
+        const total =
+          this.track.endTime && this.track.endTime > 0
+            ? this.track.endTime
+            : this.track.info.length || 0
+        if (total > 0 && total < crossfadeConfig.durationMs) {
+          logger(
+            'debug',
+            'Crossfade',
+            `Crossfade preload skipped for guild ${this.guildId} (track shorter than ${crossfadeConfig.durationMs}ms).`
+          )
+          return true
+        }
+
+        const pcmFetched = await this._fetchPcmResource(
+          payload.info,
+          urlData,
+          0
+        )
+        if ('exception' in pcmFetched) return true
+
+        const crossfadeFetched = await this._fetchResource(
+          payload.info,
+          urlData,
+          crossfadeConfig.durationMs
+        )
+        if ('exception' in crossfadeFetched) return true
+
+        this.nextCrossfadeTrack = payload
+        this.nextCrossfadePcm = pcmFetched.stream
+        this.nextCrossfadeResource = crossfadeFetched.stream
+        this.nextCrossfadeStreamInfo = { ...urlData, trackInfo: payload.info }
+        this.nextCrossfadeDuration = crossfadeConfig.durationMs
+
+        if (this.volumePercent !== 100) {
+          this.nextCrossfadeResource.setVolume(this.volumePercent / 100)
+        }
+        this.nextCrossfadeResource.setFilters(this.filters)
+
+        this._prepareCrossfadeBuffer({
+          durationMs: crossfadeConfig.durationMs,
+          minBufferMs: crossfadeConfig.minBufferMs,
+          bufferMs: crossfadeConfig.bufferMs
+        })
+        this._scheduleCrossfade(this._realPosition())
+      }
 
       return true
     } catch (err) {
@@ -1665,6 +2123,8 @@ export class Player {
     )
     this.volumePercent = Math.max(0, Math.min(1000, level))
     this.connection?.audioStream?.setVolume(this.volumePercent / 100)
+    this.nextResource?.setVolume(this.volumePercent / 100)
+    this.nextCrossfadeResource?.setVolume(this.volumePercent / 100)
     this.emitEvent(GatewayEvents.VOLUME_CHANGED, { volume: this.volumePercent })
     return true
   }
@@ -1677,6 +2137,22 @@ export class Player {
    */
   public setFading(config?: FadingConfig): boolean {
     this.fading = config
+    return true
+  }
+
+  /**
+   * Sets crossfade configuration.
+   *
+   * @param config - New crossfade config; disables crossfade when undefined.
+   * @returns Always true.
+   * @example
+   * ```ts
+   * player.setCrossfade({ enabled: true, duration: 4000, mode: 'preload' })
+   * ```
+   */
+  public setCrossfade(config?: CrossfadeConfig): boolean {
+    this.crossfade = config
+    this._clearCrossfade({ clearNext: true })
     return true
   }
 
@@ -1755,6 +2231,8 @@ export class Player {
     if (this.connection?.audioStream) {
       this.connection.audioStream.setFilters(this.filters)
     }
+    this.nextResource?.setFilters(this.filters)
+    this.nextCrossfadeResource?.setFilters(this.filters)
 
     this.emitEvent(GatewayEvents.FILTERS_CHANGED, { filters: this.filters })
 
@@ -2223,6 +2701,7 @@ export class Player {
       track: this.track,
       volume: this.volumePercent,
       fading: this.fading,
+      crossfade: this.crossfade,
       loudnessNormalizer: this.loudnessNormalizer,
       paused: this.isPaused,
       filters: this.filters,
@@ -2269,6 +2748,7 @@ export class Player {
       timers.trackEnd = null
     }
 
+    if (this.crossfade?.enabled) return false
     if (!this.fading || this.fading.enabled !== true) return false
 
     let section: FadingSection | undefined | null = null

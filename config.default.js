@@ -489,6 +489,14 @@ export default {
         targetVolume: 0.3,
         curve: 'linear'
       }
+    },
+    crossfade: {
+      enabled: false,
+      duration: 0, // Crossfade duration in milliseconds
+      curve: 'sinusoidal', // linear | sine | sinusoidal
+      mode: 'preload', // preload or stream
+      minBufferMs: 250, // Minimum buffered PCM before crossfade starts
+      bufferMs: 0 // 0 = auto (use duration)
     }
   },
   voiceReceive: {

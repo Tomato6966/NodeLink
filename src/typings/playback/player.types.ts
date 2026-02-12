@@ -1,6 +1,11 @@
+import type { Readable } from 'node:stream'
 import type { VoiceAudioStream, VoiceConnection } from '@performanc/voice'
 import type { TrackData } from '../index.types.ts'
-import type { TrackStreamResult, TrackUrlResult } from '../sources/source.types.ts'
+import type {
+  TrackStreamResult,
+  TrackUrlResult
+} from '../sources/source.types.ts'
+import type { FadeCurve } from './processing.types.ts'
 
 /**
  * Runtime filter settings applied to an audio stream.
@@ -28,6 +33,60 @@ export interface FadingConfig {
   trackEnd?: FadingSection
   trackStop?: FadingSection
   seek?: FadingSection
+}
+
+/**
+ * Supported crossfade modes.
+ */
+export type CrossfadeMode = 'preload' | 'stream'
+
+/**
+ * Crossfade configuration for overlapping tracks.
+ *
+ * @example
+ * ```ts
+ * const crossfade: CrossfadeConfig = {
+ *   enabled: true,
+ *   duration: 5000,
+ *   curve: 'sinusoidal',
+ *   mode: 'preload',
+ *   minBufferMs: 250
+ * }
+ * ```
+ */
+export interface CrossfadeConfig {
+  /**
+   * Enables crossfade handling.
+   */
+  enabled?: boolean
+
+  /**
+   * Crossfade duration in milliseconds.
+   */
+  duration?: number
+
+  /**
+   * Fading curve to use during crossfade.
+   */
+  curve?: FadeCurve
+
+  /**
+   * Crossfade mode.
+   *
+   * - `preload`: overlaps when the next track is preloaded.
+   * - `stream`: starts overlap immediately after preload (useful for streams).
+   */
+  mode?: CrossfadeMode
+
+  /**
+   * Minimum buffered audio (ms) required before crossfade begins.
+   */
+  minBufferMs?: number
+
+  /**
+   * Maximum buffer window for the next track (ms).
+   */
+  bufferMs?: number
 }
 
 /**
@@ -75,7 +134,7 @@ export interface LyricsPayload {
 /**
  * Stream format indicator. Can be a simple string or a detailed object.
  */
-export type TrackFormat = string | { itag?: number;[key: string]: unknown }
+export type TrackFormat = string | { itag?: number; [key: string]: unknown }
 
 type BaseTrackInfo = NonNullable<TrackData['info']> & {
   artworkUrl: string | null
@@ -104,10 +163,10 @@ export interface PlayerTrack {
 
 export type StreamInfo =
   | (TrackUrlResult & {
-    trackInfo?: TrackInfoExtended
-    format?: TrackFormat
-    protocol?: string
-  })
+      trackInfo?: TrackInfoExtended
+      format?: TrackFormat
+      protocol?: string
+    })
   | null
 
 /**
@@ -118,6 +177,29 @@ export interface AudioResource {
   setFilters(filters: FiltersState): void
   setFadeVolume?(volume: number): void
   fadeTo?(volume: number, durationMs: number, curve?: string): void
+  /**
+   * Buffers the next PCM stream for crossfading.
+   */
+  prepareCrossfade?: (
+    stream: Readable,
+    options: { durationMs: number; minBufferMs?: number; bufferMs?: number }
+  ) => boolean
+  /**
+   * Starts crossfading with the buffered PCM stream.
+   */
+  startCrossfade?: (durationMs: number, curve?: string) => boolean
+  /**
+   * Clears any buffered crossfade data.
+   */
+  clearCrossfade?: () => void
+  /**
+   * Reports buffered crossfade state.
+   */
+  getCrossfadeState?: () => {
+    active: boolean
+    bufferedMs: number
+    targetMs: number
+  }
   destroy(): void
   stream?: VoiceAudioStream | null
 }
@@ -153,8 +235,13 @@ export interface AudioMixer {
     startTime: number
   }>
   clearLayers: (reason?: string) => number
-  readLayerChunks: (chunkSize: number) => Map<string, { buffer: Buffer; volume: number }>
-  mixBuffers: (mainPCM: Buffer, layersPCM: Map<string, { buffer: Buffer; volume: number }>) => Buffer
+  readLayerChunks: (
+    chunkSize: number
+  ) => Map<string, { buffer: Buffer; volume: number }>
+  mixBuffers: (
+    mainPCM: Buffer,
+    layersPCM: Map<string, { buffer: Buffer; volume: number }>
+  ) => Buffer
   hasActiveLayers: () => boolean
   on: (
     event: 'mixStarted' | 'mixEnded' | 'mixError',
@@ -195,6 +282,7 @@ export interface NodeLinkOptions {
     resamplingQuality?: string
     lookaheadMs?: number
     gateThresholdLUFS?: number
+    crossfade?: CrossfadeConfig
   }
   mix?: {
     enabled?: boolean
@@ -331,6 +419,7 @@ export interface PlayerStateJSON {
   track: PlayerTrack | null
   volume: number
   fading?: FadingConfig | undefined
+  crossfade?: CrossfadeConfig | undefined
   loudnessNormalizer: boolean
   paused: boolean
   filters: FiltersState
