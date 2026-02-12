@@ -1,4 +1,7 @@
-import type { FilterInstance, FilterSettings } from '../../typings/playback/filters.types.ts'
+import type {
+  FilterInstance,
+  FilterSettings
+} from '../../typings/playback/filters.types.ts'
 
 /**
  * Base class for all audio filters.
@@ -6,27 +9,27 @@ import type { FilterInstance, FilterSettings } from '../../typings/playback/filt
  * @public
  */
 export abstract class BaseFilter implements FilterInstance {
-    /**
-     * The priority of the filter. Lower values run first.
-     */
-    public abstract priority: number
+  /**
+   * The priority of the filter. Lower values run first.
+   */
+  public abstract priority: number
 
-    /**
-     * Processes a PCM audio buffer.
-     * @param chunk - PCM audio chunk.
-     * @returns The processed PCM audio chunk.
-     */
-    public abstract process(chunk: Buffer): Buffer
+  /**
+   * Processes a PCM audio buffer.
+   * @param chunk - PCM audio chunk.
+   * @returns The processed PCM audio chunk.
+   */
+  public abstract process(chunk: Buffer): Buffer
 
-    /**
-     * Updates the filter settings.
-     * @param settings - Filter settings payload.
-     */
-    public abstract update(settings: FilterSettings): void
+  /**
+   * Updates the filter settings.
+   * @param settings - Filter settings payload.
+   */
+  public abstract update(settings: FilterSettings): void
 
-    /**
-     * Flushes any pending buffered data.
-     * @returns The remaining PCM audio data.
-     */
-    public abstract flush(): Buffer
+  /**
+   * Flushes any pending buffered data.
+   * @returns The remaining PCM audio data.
+   */
+  public abstract flush(): Buffer
 }

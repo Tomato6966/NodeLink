@@ -7,16 +7,22 @@
  * @param t - Interpolation factor (0 to 1).
  * @returns Interpolated sample.
  */
-const cubicInterpolate = (p0: number, p1: number, p2: number, p3: number, t: number): number => {
-    const t2 = t * t
-    const t3 = t2 * t
-    return (
-        0.5 *
-        (2 * p1 +
-            (-p0 + p2) * t +
-            (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
-            (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
-    )
+const cubicInterpolate = (
+  p0: number,
+  p1: number,
+  p2: number,
+  p3: number,
+  t: number
+): number => {
+  const t2 = t * t
+  const t3 = t2 * t
+  return (
+    0.5 *
+    (2 * p1 +
+      (-p0 + p2) * t +
+      (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+      (-p0 + 3 * p1 - 3 * p2 + p3) * t3)
+  )
 }
 
 /**
@@ -28,9 +34,15 @@ const cubicInterpolate = (p0: number, p1: number, p2: number, p3: number, t: num
  * @param channel - Target channel.
  * @returns Sample value.
  */
-const sampleAt = (input: Float32Array, channels: number, frames: number, frameIndex: number, channel: number): number => {
-    const clampedIndex = Math.max(0, Math.min(frames - 1, frameIndex))
-    return input[clampedIndex * channels + channel] ?? 0
+const sampleAt = (
+  input: Float32Array,
+  channels: number,
+  frames: number,
+  frameIndex: number,
+  channel: number
+): number => {
+  const clampedIndex = Math.max(0, Math.min(frames - 1, frameIndex))
+  return input[clampedIndex * channels + channel] ?? 0
 }
 
 /**
@@ -41,36 +53,40 @@ const sampleAt = (input: Float32Array, channels: number, frames: number, frameIn
  * @returns Resampled Float32Array.
  * @public
  */
-export const resample = (input: Float32Array, channels: number, rate: number): Float32Array => {
-    if (rate === 1 || input.length === 0) return input
+export const resample = (
+  input: Float32Array,
+  channels: number,
+  rate: number
+): Float32Array => {
+  if (rate === 1 || input.length === 0) return input
 
-    const inputFrames = Math.floor(input.length / channels)
-    if (inputFrames === 0) return new Float32Array(0)
+  const inputFrames = Math.floor(input.length / channels)
+  if (inputFrames === 0) return new Float32Array(0)
 
-    const outputFrames = Math.max(0, Math.floor(inputFrames / rate))
-    if (outputFrames === 0) return new Float32Array(0)
+  const outputFrames = Math.max(0, Math.floor(inputFrames / rate))
+  if (outputFrames === 0) return new Float32Array(0)
 
-    const output = new Float32Array(outputFrames * channels)
+  const output = new Float32Array(outputFrames * channels)
 
-    for (let outFrame = 0; outFrame < outputFrames; outFrame++) {
-        const sourceFrame = outFrame * rate
-        const baseFrame = Math.floor(sourceFrame)
-        const frac = sourceFrame - baseFrame
+  for (let outFrame = 0; outFrame < outputFrames; outFrame++) {
+    const sourceFrame = outFrame * rate
+    const baseFrame = Math.floor(sourceFrame)
+    const frac = sourceFrame - baseFrame
 
-        for (let channel = 0; channel < channels; channel++) {
-            const p0 = sampleAt(input, channels, inputFrames, baseFrame - 1, channel)
-            const p1 = sampleAt(input, channels, inputFrames, baseFrame, channel)
-            const p2 = sampleAt(input, channels, inputFrames, baseFrame + 1, channel)
-            const p3 = sampleAt(input, channels, inputFrames, baseFrame + 2, channel)
-            output[outFrame * channels + channel] = cubicInterpolate(
-                p0,
-                p1,
-                p2,
-                p3,
-                frac
-            )
-        }
+    for (let channel = 0; channel < channels; channel++) {
+      const p0 = sampleAt(input, channels, inputFrames, baseFrame - 1, channel)
+      const p1 = sampleAt(input, channels, inputFrames, baseFrame, channel)
+      const p2 = sampleAt(input, channels, inputFrames, baseFrame + 1, channel)
+      const p3 = sampleAt(input, channels, inputFrames, baseFrame + 2, channel)
+      output[outFrame * channels + channel] = cubicInterpolate(
+        p0,
+        p1,
+        p2,
+        p3,
+        frac
+      )
     }
+  }
 
-    return output
+  return output
 }

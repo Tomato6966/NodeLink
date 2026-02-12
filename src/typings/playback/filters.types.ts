@@ -1,4 +1,3 @@
-
 /**
  * Configuration for the Channel Mix filter.
  * @public
