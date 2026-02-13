@@ -1530,9 +1530,7 @@ export class Player {
       }
 
       const source = this.nodelink.sources.getSource(sourceName)
-      const canNativeSeek =
-        sourceName === 'deezer' ||
-        (source && typeof source.loadStream === 'function')
+      const canNativeSeek = source && typeof source.loadStream === 'function'
 
       if (this.streamInfo?.protocol === 'sabr') {
         seekPromise = this._seekUsingSource(
@@ -1542,7 +1540,6 @@ export class Player {
       } else if (
         !unsupportedSources.includes(sourceName) &&
         this.streamInfo?.url &&
-        sourceName !== 'deezer' &&
         this.streamInfo.protocol !== 'hls'
       ) {
         seekPromise = this._seekeableSeek(

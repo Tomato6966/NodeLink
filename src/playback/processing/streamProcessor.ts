@@ -226,6 +226,142 @@ const _isWebmFormat = (type: string): boolean =>
 
 const _isFlvFormat = (type: string): boolean => type.indexOf('flv') !== -1
 
+const _extFromUrl = (url: string): string => {
+  try {
+    const p = new URL(url).pathname
+    const m = p.match(/\.([a-z0-9]+)$/i)
+    return (m?.[1] ?? '').toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
+const _toArrayBufferWithFileStart = (
+  buf: Buffer,
+  fileStart: number
+): ArrayBuffer & { fileStart?: number } => {
+  const ab = buf.buffer.slice(
+    buf.byteOffset,
+    buf.byteOffset + buf.byteLength
+  ) as ArrayBuffer & { fileStart?: number }
+  ab.fileStart = fileStart
+  return ab
+}
+
+async function _fetchRange(
+  url: string,
+  start: number,
+  endInclusive: number
+): Promise<Buffer> {
+  const res = await fetch(url, {
+    headers: { Range: `bytes=${start}-${endInclusive}` }
+  })
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} while fetching range`)
+  }
+  const ab = await res.arrayBuffer()
+  return Buffer.from(ab)
+}
+
+async function _openRangeStream(url: string, start: number): Promise<Readable> {
+  const res = await fetch(url, {
+    headers: { Range: `bytes=${start}-` }
+  })
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} while opening range stream`)
+  }
+  // @ts-expect-error - Node.js Readable.fromWeb accepts ReadableStream
+  return Readable.fromWeb(res.body)
+}
+
+type MP4BoxSeekResult = number | { offset?: number; time?: number }
+
+const _seekOffset = (res: MP4BoxSeekResult): number => {
+  if (typeof res === 'number') return res
+  const off = res && typeof res === 'object' ? res.offset : undefined
+  return off ?? NaN
+}
+
+async function _buildMp4SeekOptions(
+  url: string,
+  seekTimeMs: number
+): Promise<MP4ToAACStreamOptions> {
+  const mp4 = MP4Box.createFile() as unknown as MP4BoxFile
+
+  const prefetch: MP4PrefetchChunk[] = []
+  let readyInfo: MP4BoxInfo | null = null
+  let nextStart = 0
+
+  await new Promise<void>(async (resolve, reject) => {
+    mp4.onError = (e: string) => reject(new Error(`MP4Box init error: ${e}`))
+    mp4.onReady = (info: MP4BoxInfo) => {
+      readyInfo = info
+      resolve()
+    }
+
+    const CHUNK = 512 * 1024
+    const MAX_FETCHES = 40
+
+    try {
+      for (let i = 0; i < MAX_FETCHES && !readyInfo; i++) {
+        const buf = await _fetchRange(url, nextStart, nextStart + CHUNK - 1)
+        const ab = _toArrayBufferWithFileStart(buf, nextStart)
+
+        prefetch.push({ fileStart: nextStart, data: ab })
+        const appended = mp4.appendBuffer(ab)
+
+        if (typeof appended === 'number') {
+          nextStart = appended
+        } else {
+          nextStart += ab.byteLength
+        }
+
+        if (!Number.isFinite(nextStart) || nextStart < 0) break
+      }
+      if (!readyInfo) {
+        reject(
+          new Error('Could not parse MP4 metadata (moov not found quickly).')
+        )
+      }
+    } catch (e) {
+      reject(e)
+    }
+  })
+
+  const audioTrack = readyInfo!.tracks.find((t: MP4BoxTrack) =>
+    t.codec?.startsWith('mp4a')
+  )
+  if (!audioTrack) {
+    throw new Error('No AAC track found in MP4/M4A')
+  }
+
+  // Make seek meaningful by configuring extraction for this track
+  mp4.setExtractionOptions(audioTrack.id, null, { nbSamples: 1 })
+
+  const seekTimeSec = seekTimeMs / 1000
+  const mp4boxFile = mp4 as unknown as {
+    seek: (time: number, async: boolean) => MP4BoxSeekResult
+  }
+  const seekRes = mp4boxFile.seek(seekTimeSec, true) as MP4BoxSeekResult
+  const startOffset = _seekOffset(seekRes)
+
+  try {
+    mp4.stop()
+  } catch {}
+
+  if (!Number.isFinite(startOffset) || startOffset < 0) {
+    throw new Error(
+      `MP4Box seek returned invalid offset: ${JSON.stringify(seekRes)}`
+    )
+  }
+
+  return {
+    prefetch,
+    baseFileStart: startOffset,
+    seekTimeSec
+  }
+}
+
 class BaseAudioResource {
   pipes: (Readable | Transform)[] | null
   stream: (VoiceAudioStream & Transform) | null
@@ -1211,22 +1347,31 @@ class AACDecoderStream extends Transform {
     callback()
   }
 }
+type MP4PrefetchChunk = { fileStart: number; data: ArrayBuffer }
+
+type MP4ToAACStreamOptions = TransformOptions & {
+  prefetch?: MP4PrefetchChunk[]
+  baseFileStart?: number
+  seekTimeSec?: number
+}
+
 class MP4ToAACStream extends Transform {
   private mp4boxFile: MP4BoxFile | null
   private audioConfig: AACConfig | null
   private offset: number
   private _aborted: boolean
+  private _prefetchDone: boolean
+  private _opts: MP4ToAACStreamOptions
 
-  constructor(options: TransformOptions = {}) {
-    super({
-      ...options,
-      highWaterMark: AUDIO_CONFIG.highWaterMark
-    })
+  constructor(options: MP4ToAACStreamOptions = {}) {
+    super({ ...options, highWaterMark: AUDIO_CONFIG.highWaterMark })
 
+    this._opts = options
     this.mp4boxFile = MP4Box.createFile() as unknown as MP4BoxFile
     this.audioConfig = null
-    this.offset = 0
+    this.offset = options.baseFileStart ?? 0
     this._aborted = false
+    this._prefetchDone = false
 
     this._setupMP4BoxHandlers()
   }
@@ -1236,65 +1381,87 @@ class MP4ToAACStream extends Transform {
     this._cleanupMp4Box()
   }
 
+  private _appendPrefetchIfNeeded(): void {
+    if (this._prefetchDone || !this.mp4boxFile) return
+    this._prefetchDone = true
+
+    const prefetch = this._opts.prefetch ?? []
+    for (const chunk of prefetch) {
+      const ab = chunk.data as ArrayBuffer & { fileStart?: number }
+      ab.fileStart = chunk.fileStart
+      this.mp4boxFile.appendBuffer(ab)
+    }
+  }
+
   _setupMP4BoxHandlers(): void {
     if (!this.mp4boxFile) return
+
+    this.mp4boxFile.onError = (e: string): void => {
+      throw new Error(`MP4Box error: ${e}`)
+    }
 
     this.mp4boxFile.onReady = (info: MP4BoxInfo): void => {
       if (this._aborted || !this.mp4boxFile) return
 
-      try {
-        const audioTrack = info.tracks.find((t: MP4BoxTrack) =>
-          t.codec?.startsWith('mp4a')
-        )
+      const audioTrack = info.tracks.find((t: MP4BoxTrack) =>
+        t.codec?.startsWith('mp4a')
+      )
+      if (!audioTrack) throw new Error('No AAC track found in MP4')
 
-        if (!audioTrack) {
-          this.emit('error', new Error('No AAC track found in MP4'))
-          return
+      this.audioConfig = this._getAudioConfig(audioTrack)
+
+      this.mp4boxFile.setExtractionOptions(audioTrack.id, null, {
+        nbSamples: 50
+      })
+
+      if (typeof this._opts.seekTimeSec === 'number') {
+        const mp4boxFile = this.mp4boxFile as unknown as {
+          seek: (time: number, async: boolean) => MP4BoxSeekResult
+        }
+        const seekRes = mp4boxFile.seek(
+          this._opts.seekTimeSec,
+          true
+        ) as MP4BoxSeekResult
+        const expectedOffset = _seekOffset(seekRes)
+
+        if (
+          typeof this._opts.baseFileStart === 'number' &&
+          this._opts.baseFileStart !== expectedOffset
+        ) {
+          logger(
+            'warn',
+            'MP4ToAACStream',
+            `MP4 seek mismatch: stream starts at ${this._opts.baseFileStart} but MP4Box requested ${expectedOffset}`
+          )
         }
 
-        this.audioConfig = this._getAudioConfig(audioTrack)
-        this.mp4boxFile.setExtractionOptions(audioTrack.id, null, {
-          nbSamples: 1
-        })
-        this.mp4boxFile.start()
-      } catch (err) {
-        this.emit(
-          'error',
-          new Error(`MP4 initialization error: ${(err as Error).message}`)
-        )
+        if (typeof this._opts.baseFileStart !== 'number') {
+          this.offset = expectedOffset
+        }
       }
+
+      this.mp4boxFile.start()
     }
 
     this.mp4boxFile.onSamples = (
-      _id: number,
+      id: number,
       _user: unknown,
       samples: MP4BoxSample[]
     ): void => {
-      if (this._aborted) return
+      if (this._aborted || !this.mp4boxFile) return
+      if (!samples?.length) return
 
-      try {
-        if (!samples || !Array.isArray(samples)) return
+      for (const sample of samples) this._emitSampleWithADTS(sample)
 
-        for (const sample of samples) {
-          if (sample?.data && !this._aborted) {
-            this._emitSampleWithADTS(sample)
-          }
+      const last: unknown = samples[samples.length - 1]
+      if (last && typeof last === 'object' && 'number' in last) {
+        const mp4boxFile = this.mp4boxFile as unknown as {
+          releaseUsedSamples: (trackId: number, sampleNumber: number) => void
         }
-      } catch (err) {
-        if (!this._aborted) {
-          this.emit(
-            'error',
-            new Error(
-              `MP4Box sample processing error: ${(err as Error).message}`
-            )
-          )
-        }
-      }
-    }
-
-    this.mp4boxFile.onError = (e: string): void => {
-      if (!this._aborted) {
-        this.emit('error', new Error(`MP4Box error: ${e}`))
+        mp4boxFile.releaseUsedSamples(
+          id,
+          (last as { number: number }).number + 1
+        )
       }
     }
   }
@@ -1357,6 +1524,8 @@ class MP4ToAACStream extends Transform {
     }
 
     try {
+      this._appendPrefetchIfNeeded()
+
       const arrayBuffer =
         chunk instanceof ArrayBuffer
           ? chunk
@@ -1371,8 +1540,8 @@ class MP4ToAACStream extends Transform {
 
       this.mp4boxFile.appendBuffer(arrayBuffer)
       callback()
-    } catch {
-      callback()
+    } catch (err) {
+      callback(err as Error)
     }
   }
 
@@ -2042,7 +2211,18 @@ class StreamAudioResource extends BaseAudioResource {
         return decoder
       }
     } else if (_isMp4Format(lowerType)) {
-      const demuxer = new MP4ToAACStream()
+      const seekOpts = (
+        stream as unknown as { __mp4SeekOptions?: MP4ToAACStreamOptions }
+      ).__mp4SeekOptions
+      const demuxer = new MP4ToAACStream(
+        seekOpts
+          ? {
+              prefetch: seekOpts.prefetch,
+              baseFileStart: seekOpts.baseFileStart,
+              seekTimeSec: seekOpts.seekTimeSec
+            }
+          : {}
+      )
       streams.push(demuxer)
     }
 
@@ -2327,6 +2507,51 @@ export const createSeekeableAudioResource = async (
   audioMixer: AudioMixer | null = null
 ): Promise<StreamAudioResource | ErrorResponse> => {
   try {
+    const hinted = String(player.streamInfo?.format ?? '').toLowerCase()
+    const ext = _extFromUrl(url)
+    const containerGuess = hinted || ext
+
+    if (_isMp4Format(containerGuess)) {
+      const mp4Seek = await _buildMp4SeekOptions(url, seekTime)
+
+      const ranged = await _openRangeStream(url, mp4Seek.baseFileStart ?? 0)
+
+      const passthroughStream = new PassThrough({
+        highWaterMark: AUDIO_CONFIG.highWaterMark
+      })
+
+      ;(
+        passthroughStream as unknown as {
+          __mp4SeekOptions?: MP4ToAACStreamOptions
+        }
+      ).__mp4SeekOptions = mp4Seek
+
+      passthroughStream.once('finish', () => {
+        passthroughStream.emit('finishBuffering')
+      })
+
+      pipeline(
+        ranged,
+        passthroughStream,
+        (err: NodeJS.ErrnoException | null) => {
+          if (err) passthroughStream.emit('error', err)
+        }
+      )
+
+      const format = hinted || (ext ? ext : 'm4a')
+
+      return new StreamAudioResource(
+        passthroughStream,
+        format,
+        nodelink,
+        initialFilters,
+        volume,
+        audioMixer,
+        false,
+        player.loudnessNormalizer
+      )
+    }
+
     const { stream, meta } = (await seekableStream(
       url,
       seekTime,
