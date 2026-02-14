@@ -3,7 +3,6 @@ import { base64ToU8 } from './protor.js'
 import { appendFile } from 'node:fs/promises'
 import path from 'node:path'
 import { logger } from '../../../utils.ts'
-import { JSDOM } from 'jsdom'
 
 const TOKENS_LOG_PATH = path.join(process.cwd(), 'po_tokens.jsonl')
 
@@ -157,6 +156,20 @@ export class PoTokenManager {
 
     this._dom = null
     this._prevGlobals = null
+    this._idleTimer = null
+  }
+
+  _refreshIdleTimer() {
+    if (this._idleTimer) clearTimeout(this._idleTimer)
+    this._idleTimer = setTimeout(() => {
+      logger(
+        'debug',
+        'PoToken',
+        'Idle timeout reached. Cleaning up JSDOM resources.'
+      )
+      this.reset()
+    }, 10 * 60 * 1000) // 10 minutes
+    if (this._idleTimer.unref) this._idleTimer.unref()
   }
 
   _applyDomGlobals(dom) {
@@ -312,6 +325,7 @@ export class PoTokenManager {
     )
 
     this._cleanupDom()
+    const { JSDOM } = await import('jsdom')
     this._dom = new JSDOM(
       '<!DOCTYPE html><html lang="en"><head><title></title></head><body></body></html>',
       {
@@ -421,6 +435,8 @@ export class PoTokenManager {
         () => {}
       )
 
+      this._refreshIdleTimer()
+
       return {
         poToken: contentPoToken,
         visitorData: this.visitorData,
@@ -443,9 +459,7 @@ export class PoTokenManager {
         () => {}
       )
 
-      this.botguard = null
-      this.minter = null
-      this._cleanupDom()
+      this.reset()
 
       return { poToken: null, visitorData: null, legacyPoToken: null }
     }
@@ -490,6 +504,9 @@ export class PoTokenManager {
         'PoToken',
         `StreamingPoToken generated. Length: ${sessionPoToken.length}`
       )
+
+      this._refreshIdleTimer()
+
       return sessionPoToken
     } catch (error) {
       logger(
@@ -497,9 +514,7 @@ export class PoTokenManager {
         'PoToken',
         `Failed to generate streaming token: ${error.message}`
       )
-      this.botguard = null
-      this.minter = null
-      this._cleanupDom()
+      this.reset()
       return null
     }
   }
@@ -546,6 +561,10 @@ export class PoTokenManager {
 
   reset() {
     logger('debug', 'PoToken', 'Resetting PoTokenManager state')
+    if (this._idleTimer) {
+      clearTimeout(this._idleTimer)
+      this._idleTimer = null
+    }
     this.botguard = null
     this.minter = null
     this.visitorData = null
