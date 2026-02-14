@@ -114,13 +114,13 @@ class SourceWorkerManager {
 
     const processCount =
       this.nodelink.options.cluster?.specializedSourceWorker?.count || 1
-    cluster.setupPrimary({ exec: './src/workers/source' })
+    cluster.setupPrimary({ exec: './src/workers/source.ts' })
 
     for (let i = 0; i < processCount; i++) {
       this._forkWorker()
     }
 
-    cluster.setupPrimary({ exec: './src/index.js' })
+    cluster.setupPrimary({ exec: './src/index.ts' })
 
     cluster.on('exit', (worker, _code, _signal) => {
       if (worker.workerType !== 'source') return
@@ -134,9 +134,9 @@ class SourceWorkerManager {
       this.workers.splice(index, 1)
       this.workerLoads.delete(worker.id)
 
-      cluster.setupPrimary({ exec: './src/workers/source' })
+      cluster.setupPrimary({ exec: './src/workers/source.ts' })
       this._forkWorker()
-      cluster.setupPrimary({ exec: './src/index.js' })
+      cluster.setupPrimary({ exec: './src/index.ts' })
     })
   }
 

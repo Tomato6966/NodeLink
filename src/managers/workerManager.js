@@ -695,7 +695,7 @@ export default class WorkerManager {
       return null
     }
 
-    cluster.setupPrimary({ exec: './src/index.js' })
+    cluster.setupPrimary({ exec: './src/index.ts' })
     const worker = cluster.fork({
       EVENT_SOCKET_PATH: this.socketPath,
       COMMAND_SOCKET_PATH: this.commandSocketPath,
