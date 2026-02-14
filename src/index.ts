@@ -3,13 +3,9 @@ import { EventEmitter } from 'node:events'
 import http from 'node:http'
 import WebSocketServer from '@performanc/pwsl-server'
 
-import RequestHandler from './api/index.ts'
-import ConnectionManager from './managers/connectionManager.ts'
-import CredentialManager from './managers/credentialManager.ts'
 import RoutePlannerManager from './managers/routePlannerManager.js'
 import SessionManager from './managers/sessionManager.js'
 import StatsManager from './managers/statsManager.ts'
-import TrackCacheManager from './managers/trackCacheManager.ts'
 import {
   applyEnvOverrides,
   checkForUpdates,
@@ -31,12 +27,14 @@ import { GatewayEvents } from './constants.ts'
 import DosProtectionManager from './managers/dosProtectionManager.ts'
 import type LyricsManager from './managers/lyricsManager.js'
 import type MeaningManager from './managers/meaningManager.js'
-import PlayerManager from './managers/playerManager.js'
+import type ConnectionManager from './managers/connectionManager.ts'
+import type CredentialManager from './managers/credentialManager.ts'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.ts'
 import type SourcesManager from './managers/sourceManager.js'
-import SourceWorkerManager from './managers/sourceWorkerManager.js'
-import WorkerManager from './managers/workerManager.js'
+import type SourceWorkerManager from './managers/sourceWorkerManager.js'
+import type TrackCacheManager from './managers/trackCacheManager.ts'
+import type WorkerManager from './managers/workerManager.js'
 import type { NodelinkConfig } from './typings/config/config.types.ts'
 import type {
   AudioInterceptorExtension,
@@ -67,6 +65,101 @@ import type {
 import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types.ts'
 import { parseVoiceFrameHeader } from './voice/voiceFrames.ts'
 import { createVoiceRelay } from './voice/voiceRelay.ts'
+
+type RequestHandlerType = typeof import('./api/index.ts').default
+let requestHandlerPromise: Promise<RequestHandlerType> | null = null
+
+const getRequestHandler = async (): Promise<RequestHandlerType> => {
+  if (!requestHandlerPromise) {
+    requestHandlerPromise = import('./api/index.ts').then(
+      (module) => module.default
+    )
+  }
+  return requestHandlerPromise
+}
+
+const memoryTraceEnabled =
+  process.env['NODELINK_MEMORY_TRACE']?.toLowerCase() === 'true'
+
+const memoryTrace = (stage: string): void => {
+  if (!memoryTraceEnabled) return
+
+  const m = process.memoryUsage()
+  const toMB = (value: number): string => (value / 1024 / 1024).toFixed(2)
+  process.stdout.write(
+    `[MEM] ${stage} rss=${toMB(m.rss)}MB heapUsed=${toMB(m.heapUsed)}MB heapTotal=${toMB(m.heapTotal)}MB external=${toMB(m.external)}MB\n`
+  )
+}
+
+let playerManagerClassPromise: Promise<PlayerManagerConstructor> | null = null
+const getPlayerManagerClass = async (): Promise<PlayerManagerConstructor> => {
+  if (!playerManagerClassPromise) {
+    playerManagerClassPromise = import('./managers/playerManager.js').then(
+      (module) => module.default as unknown as PlayerManagerConstructor
+    )
+  }
+
+  return playerManagerClassPromise
+}
+
+let workerManagerClassPromise: Promise<typeof import('./managers/workerManager.js').default> | null =
+  null
+const getWorkerManagerClass = async (): Promise<
+  typeof import('./managers/workerManager.js').default
+> => {
+  if (!workerManagerClassPromise) {
+    workerManagerClassPromise = import('./managers/workerManager.js').then(
+      (module) => module.default
+    )
+  }
+
+  return workerManagerClassPromise
+}
+
+let sourceWorkerManagerClassPromise: Promise<
+  typeof import('./managers/sourceWorkerManager.js').default
+> | null = null
+const getSourceWorkerManagerClass = async (): Promise<
+  typeof import('./managers/sourceWorkerManager.js').default
+> => {
+  if (!sourceWorkerManagerClassPromise) {
+    sourceWorkerManagerClassPromise = import(
+      './managers/sourceWorkerManager.js'
+    ).then((module) => module.default)
+  }
+
+  return sourceWorkerManagerClassPromise
+}
+
+let credentialManagerClassPromise: Promise<
+  typeof import('./managers/credentialManager.ts').default
+> | null = null
+const getCredentialManagerClass = async (): Promise<
+  typeof import('./managers/credentialManager.ts').default
+> => {
+  if (!credentialManagerClassPromise) {
+    credentialManagerClassPromise = import('./managers/credentialManager.ts').then(
+      (module) => module.default
+    )
+  }
+
+  return credentialManagerClassPromise
+}
+
+let trackCacheManagerClassPromise: Promise<
+  typeof import('./managers/trackCacheManager.ts').default
+> | null = null
+const getTrackCacheManagerClass = async (): Promise<
+  typeof import('./managers/trackCacheManager.ts').default
+> => {
+  if (!trackCacheManagerClassPromise) {
+    trackCacheManagerClassPromise = import('./managers/trackCacheManager.ts').then(
+      (module) => module.default
+    )
+  }
+
+  return trackCacheManagerClassPromise
+}
 
 let config: NodelinkConfig
 
@@ -127,6 +220,7 @@ if (!cluster.isWorker) {
 }
 
 await checkForUpdates()
+memoryTrace('bootstrap:after-check-for-updates')
 
 /**
  * Wrapper for Bun's ServerWebSocket that implements EventEmitter
@@ -246,9 +340,11 @@ class NodelinkServer extends EventEmitter {
   meanings: MeaningManager | null
   _sourceInitPromise: Promise<void>
   routePlanner: RoutePlannerManager
-  credentialManager: CredentialManager
-  trackCacheManager: TrackCacheManager
-  connectionManager: ConnectionManager
+  credentialManager: CredentialManager | null
+  trackCacheManager: TrackCacheManager | null
+  _persistenceManagersInitPromise: Promise<void> | null
+  connectionManager: ConnectionManager | null
+  _connectionManagerInitPromise: Promise<void> | null
   statsManager: StatsManager
   rateLimitManager: RateLimitManager
   dosProtectionManager: DosProtectionManager
@@ -289,10 +385,13 @@ class NodelinkServer extends EventEmitter {
       | true
       | false
 
+    memoryTrace('constructor:start')
+
     this.sessions = new SessionManager(
       this,
-      PlayerManagerClass as unknown as typeof PlayerManager
+      PlayerManagerClass
     )
+    memoryTrace('constructor:after-session-manager')
     this.sources = null
     this.lyrics = null
     this.meanings = null
@@ -300,17 +399,23 @@ class NodelinkServer extends EventEmitter {
     this._sourceInitPromise = this._initSources(isClusterPrimary, options)
 
     this.routePlanner = new RoutePlannerManager(this)
-    this.credentialManager = new CredentialManager(this)
-    this.trackCacheManager = new TrackCacheManager(this)
-    this.connectionManager = new ConnectionManager(this)
+    memoryTrace('constructor:after-route-planner')
+    this.credentialManager = null
+    memoryTrace('constructor:after-credential-manager')
+    this.trackCacheManager = null
+    memoryTrace('constructor:after-track-cache-manager')
+    this._persistenceManagersInitPromise = null
+    this.connectionManager = null
+    this._connectionManagerInitPromise = null
     this.statsManager = new StatsManager(this)
+    memoryTrace('constructor:after-stats-manager')
     this.rateLimitManager = new RateLimitManager(this)
+    memoryTrace('constructor:after-rate-limit-manager')
     this.dosProtectionManager = new DosProtectionManager(this)
+    memoryTrace('constructor:after-dos-protection-manager')
     this.pluginManager = new PluginManager(this)
-    this.sourceWorkerManager =
-      isClusterPrimary && options.cluster?.specializedSourceWorker?.enabled
-        ? new SourceWorkerManager(this)
-        : null
+    memoryTrace('constructor:after-plugin-manager')
+    this.sourceWorkerManager = null
     this.workerManager = null
     this.version = String(getVersion())
     this.gitInfo = getGitInfo()
@@ -337,6 +442,7 @@ class NodelinkServer extends EventEmitter {
       sendFrame: (frame: Buffer) => this.handleVoiceFrame(frame),
       logger
     }) as unknown as VoiceRelay
+    memoryTrace('constructor:after-voice-relay')
 
     this._globalUpdater = null
     this._statsUpdater = null
@@ -349,6 +455,9 @@ class NodelinkServer extends EventEmitter {
     } else {
       this.socket = new WebSocketServer()
     }
+    memoryTrace('constructor:after-socket-server')
+
+    memoryTrace('constructor:end')
 
     logger('info', 'Server', `version ${this.version}`)
     logger(
@@ -382,6 +491,59 @@ class NodelinkServer extends EventEmitter {
       this.lyrics = new lyricsMan(this)
       this.meanings = new meaningMan(this)
     }
+  }
+
+  async _ensureConnectionManager(): Promise<void> {
+    if (this.connectionManager) return
+    if (this._connectionManagerInitPromise) {
+      await this._connectionManagerInitPromise
+      return
+    }
+
+    this._connectionManagerInitPromise = import(
+      './managers/connectionManager.ts'
+    )
+      .then(({ default: ConnectionManagerClass }) => {
+        if (!this.connectionManager) {
+          this.connectionManager = new ConnectionManagerClass(this)
+        }
+      })
+      .finally(() => {
+        this._connectionManagerInitPromise = null
+      })
+
+    await this._connectionManagerInitPromise
+  }
+
+  async _ensurePersistenceManagers(): Promise<void> {
+    if (this.credentialManager && this.trackCacheManager) return
+    if (this._persistenceManagersInitPromise) {
+      await this._persistenceManagersInitPromise
+      return
+    }
+
+    this._persistenceManagersInitPromise = Promise.all([
+      getCredentialManagerClass(),
+      getTrackCacheManagerClass()
+    ])
+      .then(([CredentialManagerClass, TrackCacheManagerClass]) => {
+        if (!this.credentialManager) {
+          this.credentialManager = new CredentialManagerClass(
+            this as unknown as { options: Record<string, unknown> }
+          ) as unknown as CredentialManager
+        }
+
+        if (!this.trackCacheManager) {
+          this.trackCacheManager = new TrackCacheManagerClass(
+            this as unknown as { options: Record<string, unknown> }
+          ) as unknown as TrackCacheManager
+        }
+      })
+      .finally(() => {
+        this._persistenceManagersInitPromise = null
+      })
+
+    await this._persistenceManagersInitPromise
   }
 
   /**
@@ -1209,7 +1371,25 @@ class NodelinkServer extends EventEmitter {
             }
           }
 
-          RequestHandler(self, reqShim, resShim)
+          void getRequestHandler()
+            .then((handler) =>
+              handler(
+                self as unknown as Parameters<RequestHandlerType>[0],
+                reqShim as unknown as RequestShim,
+                resShim
+              )
+            )
+            .catch((error: Error) => {
+              logger(
+                'error',
+                'Server',
+                `Failed to handle Bun request: ${error.message}`
+              )
+              if (!resShim._status || resShim._status < 400) {
+                resShim.writeHead(500, { 'Content-Type': 'text/plain' })
+              }
+              resShim.end('Internal Server Error')
+            })
         })
       },
 
@@ -1306,8 +1486,23 @@ class NodelinkServer extends EventEmitter {
     }
 
     this.server = http.createServer(
-      (req: http.IncomingMessage, res: http.ServerResponse) =>
-        RequestHandler(this, req, res)
+      (req: http.IncomingMessage, res: http.ServerResponse) => {
+        void getRequestHandler()
+          .then((handler) =>
+            handler(this as unknown as Parameters<RequestHandlerType>[0], req, res)
+          )
+          .catch((error: Error) => {
+            logger(
+              'error',
+              'Server',
+              `Failed to handle HTTP request: ${error.message}`
+            )
+            if (!res.headersSent) {
+              res.writeHead(500, { 'Content-Type': 'text/plain' })
+            }
+            res.end('Internal Server Error')
+          })
+      }
     )
 
     ;(this.server as http.Server).keepAliveTimeout = 65000
@@ -1949,35 +2144,67 @@ class NodelinkServer extends EventEmitter {
   async start(
     startOptions: { isClusterPrimary?: boolean; isClusterWorker?: boolean } = {}
   ): Promise<NodelinkServer> {
+    memoryTrace('start:enter')
     this._validateConfig()
 
-    await this.credentialManager.load()
-    await this.trackCacheManager.load()
-    await this.statsManager.initialize()
+    if (!startOptions.isClusterPrimary) {
+      await this._ensurePersistenceManagers()
+      await this.credentialManager?.load()
+      memoryTrace('start:after-credential-load')
+      await this.trackCacheManager?.load()
+      memoryTrace('start:after-trackcache-load')
+    } else {
+      memoryTrace('start:skip-persistence-load-primary')
+    }
+    if (!startOptions.isClusterPrimary) {
+      await this.statsManager.initialize()
+      memoryTrace('start:after-stats-init')
+    } else {
+      memoryTrace('start:skip-stats-init-primary')
+    }
 
     // Ensure sources are initialized before proceeding
     if (this._sourceInitPromise) await this._sourceInitPromise
+    memoryTrace('start:after-source-init')
 
     await this.pluginManager.load('master')
+    memoryTrace('start:after-master-plugin-load')
+
+    if (
+      startOptions.isClusterPrimary &&
+      this.options.cluster?.specializedSourceWorker?.enabled &&
+      !this.sourceWorkerManager
+    ) {
+      const SourceWorkerManagerClass = await getSourceWorkerManagerClass()
+      this.sourceWorkerManager = new SourceWorkerManagerClass(this)
+      memoryTrace('start:after-source-worker-manager-ctor')
+    }
 
     if (this.sourceWorkerManager) {
       await this.sourceWorkerManager.start()
+      memoryTrace('start:after-source-worker-manager-start')
     }
 
     const specEnabled = this.options.cluster?.specializedSourceWorker?.enabled
 
     if (!startOptions.isClusterPrimary) {
+      await this._ensureConnectionManager()
+      memoryTrace('start:after-connection-manager')
       await this.pluginManager.load('worker')
+      memoryTrace('start:after-worker-plugin-load')
     }
 
     if (this.sources && (!startOptions.isClusterPrimary || !specEnabled)) {
       await this.sources?.loadFolder()
       await this.lyrics?.loadFolder()
       await this.meanings?.loadFolder()
+      memoryTrace('start:after-sources-load')
     }
 
     this._setupSocketEvents()
+    memoryTrace('start:after-setup-socket-events')
     this._createServer()
+    memoryTrace('start:after-create-server')
 
     if (startOptions.isClusterWorker) {
       logger(
@@ -2021,7 +2248,8 @@ class NodelinkServer extends EventEmitter {
       this._startHeartbeat()
     }
 
-    this.connectionManager.start()
+    this.connectionManager?.start()
+    memoryTrace('start:ready')
     return this
   }
 
@@ -2180,6 +2408,7 @@ if (clusterEnabled && cluster.isPrimary) {
       })
     ).default
 
+    const CredentialManagerClass = await getCredentialManagerClass()
     const mockNodelink: {
       options: NodelinkConfig
       credentialManager: CredentialManager
@@ -2187,9 +2416,9 @@ if (clusterEnabled && cluster.isPrimary) {
       options: config,
       credentialManager: null as unknown as CredentialManager
     }
-    mockNodelink.credentialManager = new CredentialManager(
+    mockNodelink.credentialManager = new CredentialManagerClass(
       mockNodelink as unknown as INodelinkServer
-    )
+    ) as unknown as CredentialManager
     const validator = new OAuth(mockNodelink as unknown as INodelinkServer)
     await validator.validateCurrentTokens()
 
@@ -2207,14 +2436,20 @@ if (clusterEnabled && cluster.isPrimary) {
     }
   }
 
-  const workerManager = new WorkerManager(config)
+  const WorkerManagerClass = await getWorkerManagerClass()
+  memoryTrace('primary:after-worker-manager-class-import')
+  const PlayerManagerClass = await getPlayerManagerClass()
+  memoryTrace('primary:after-player-manager-class-import')
+  const workerManager = new WorkerManagerClass(config)
+  memoryTrace('primary:after-worker-manager-ctor')
 
   const serverInstancePromise = (async () => {
     const nserver = new NodelinkServer(
       config,
-      PlayerManager as unknown as PlayerManagerConstructor,
+      PlayerManagerClass,
       true
     )
+    memoryTrace('primary:after-server-ctor')
     nserver.workerManager = workerManager
 
     await nserver.start({ isClusterPrimary: true })
@@ -2247,8 +2482,8 @@ if (clusterEnabled && cluster.isPrimary) {
 
       nserver._stopHeartbeat()
 
-      await nserver.credentialManager.forceSave()
-      await nserver.trackCacheManager.forceSave()
+      await nserver.credentialManager?.forceSave()
+      await nserver.trackCacheManager?.forceSave()
 
       workerManager.destroy()
 
@@ -2288,9 +2523,10 @@ if (clusterEnabled && cluster.isPrimary) {
   await import('./workers/main.ts')
 } else {
   const serverInstancePromise = (async () => {
+    const PlayerManagerClass = await getPlayerManagerClass()
     const nserver = new NodelinkServer(
       config,
-      PlayerManager as unknown as PlayerManagerConstructor,
+      PlayerManagerClass,
       false
     )
     await nserver.start()
@@ -2316,8 +2552,8 @@ if (clusterEnabled && cluster.isPrimary) {
 
       nserver._stopHeartbeat()
 
-      await nserver.credentialManager.forceSave()
-      await nserver.trackCacheManager.forceSave()
+      await nserver.credentialManager?.forceSave()
+      await nserver.trackCacheManager?.forceSave()
 
       await nserver._cleanupWebSocketServer()
 

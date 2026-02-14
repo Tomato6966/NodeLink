@@ -45,7 +45,9 @@ const getErrorCode = (error: unknown): string | undefined => {
  */
 export default class CredentialManager {
   private readonly nodelink: CredentialManagerContext
-  private readonly key: Buffer
+  private readonly password: string
+  private key: Buffer
+  private legacyKey: Buffer | null
   private readonly filePath: string
   private readonly tempFilePath: string
   private readonly saveDelayMs: number
@@ -62,8 +64,9 @@ export default class CredentialManager {
    */
   constructor(nodelink: CredentialManagerContext) {
     this.nodelink = nodelink
-    const password = this._resolvePassword(nodelink.options)
-    this.key = crypto.scryptSync(password, CREDENTIALS_SALT, 32)
+    this.password = this._resolvePassword(nodelink.options)
+    this.key = this._deriveFastKey(this.password)
+    this.legacyKey = null
     this.filePath = DEFAULT_CREDENTIALS_PATH
     this.tempFilePath = `${DEFAULT_CREDENTIALS_PATH}.tmp`
     this.saveDelayMs = DEFAULT_SAVE_DELAY_MS
@@ -84,10 +87,20 @@ export default class CredentialManager {
       const data = await fs.readFile(this.filePath)
       if (data.length < 32) return
 
-      const payload = this._decodePayload(data)
+      let payload: CredentialStorePayload
+      let migratedFromLegacy = false
+
+      try {
+        payload = this._decodePayload(data, this.key)
+      } catch {
+        const legacyKey = this._getLegacyKey()
+        payload = this._decodePayload(data, legacyKey)
+        migratedFromLegacy = true
+      }
+
       this.credentials = new Map(Object.entries(payload.entries))
       const expiredCount = this._purgeExpired()
-      if (expiredCount > 0) this.save()
+      if (expiredCount > 0 || migratedFromLegacy) this.save()
 
       this.lastLoadedAt = Date.now()
       logger(
@@ -240,6 +253,21 @@ export default class CredentialManager {
     return password
   }
 
+  private _deriveFastKey(password: string): Buffer {
+    return crypto
+      .createHash('sha256')
+      .update(`${CREDENTIALS_SALT}:${password}`)
+      .digest()
+  }
+
+  private _getLegacyKey(): Buffer {
+    if (!this.legacyKey) {
+      this.legacyKey = crypto.scryptSync(this.password, CREDENTIALS_SALT, 32)
+    }
+
+    return this.legacyKey
+  }
+
   private _getValidEntry(key: string): CredentialEntry<unknown> | null {
     const entry = this.credentials.get(key)
     if (!entry) return null
@@ -271,12 +299,12 @@ export default class CredentialManager {
     return expiredCount
   }
 
-  private _decodePayload(data: Buffer): CredentialStorePayload {
+  private _decodePayload(data: Buffer, key: Buffer): CredentialStorePayload {
     const iv = data.subarray(0, 16)
     const tag = data.subarray(16, 32)
     const encrypted = data.subarray(32)
 
-    const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, iv)
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
     decipher.setAuthTag(tag)
 
     const decrypted = Buffer.concat([

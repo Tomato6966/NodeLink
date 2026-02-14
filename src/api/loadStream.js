@@ -1,6 +1,5 @@
 import { pipeline } from 'node:stream'
 import Validator from 'fastest-validator'
-import { createPCMStream } from '../playback/processing/streamProcessor.ts'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.ts'
 
 const v = new Validator({ haltOnFirstError: true })
@@ -11,6 +10,17 @@ const loadStreamSchema = v.compile({
   position: { type: 'number', min: 0, optional: true },
   filters: { type: 'any', optional: true }
 })
+
+let createPCMStreamPromise = null
+
+const getCreatePCMStream = async () => {
+  if (!createPCMStreamPromise) {
+    createPCMStreamPromise = import(
+      '../playback/processing/streamProcessor.ts'
+    ).then((module) => module.createPCMStream)
+  }
+  return createPCMStreamPromise
+}
 
 async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
   if (!nodelink.options.enableLoadStreamEndpoint) {
@@ -186,6 +196,7 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
       )
     }
 
+    const createPCMStream = await getCreatePCMStream()
     const pcmStream = createPCMStream(
       fetched.stream,
       fetched.type || urlResult.format,

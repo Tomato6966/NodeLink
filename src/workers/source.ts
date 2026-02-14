@@ -61,27 +61,30 @@ if (isMainThread) {
     logger: utils.logger
   }
 
-  const threadCount = specConfig.microWorkers ?? Math.min(2, os.cpus().length)
+  const maxThreadCount = Math.max(
+    1,
+    specConfig.microWorkers ?? Math.min(2, os.cpus().length)
+  )
+  const initialThreadCount = 1
   const TASKS_PER_WORKER = specConfig.tasksPerWorker ?? 32
+  const SCALE_UP_THRESHOLD = specConfig.scaleUpThreshold ?? 30
+  const SCALE_UP_COOLDOWN_MS = specConfig.scaleCooldownMs ?? 1000
   const workerPool: MicroWorker[] = []
   const taskQueue: TaskData[] = []
+  let lastScaleUpAt = 0
 
   nodelink.logger(
     'info',
     'SourceWorker',
-    `Spawning ${threadCount} micro-workers for API tasks...`
+    `Starting ${initialThreadCount}/${maxThreadCount} micro-worker(s) for API tasks...`
   )
 
-  /**
-   * Spawns micro-workers and sets up message handling
-   * @internal
-   */
-  for (let i = 0; i < threadCount; i++) {
+  const createMicroWorker = (threadNumber: number): void => {
     const worker = new Worker(__filename, {
       workerData: {
         config,
         silentLogs: specConfig.silentLogs ?? false,
-        threadId: i + 1
+        threadId: threadNumber
       } satisfies WorkerData
     }) as MicroWorker
 
@@ -94,7 +97,7 @@ if (isMainThread) {
         nodelink.logger(
           'info',
           'SourceWorker',
-          `Micro-worker ${i + 1} is ready.`
+          `Micro-worker ${threadNumber} is ready.`
         )
         processNextTask()
       } else if (msg.type === 'result') {
@@ -118,7 +121,48 @@ if (isMainThread) {
       }
     })
 
+    worker.on('exit', (code) => {
+      const idx = workerPool.indexOf(worker)
+      if (idx !== -1) workerPool.splice(idx, 1)
+      nodelink.logger(
+        'warn',
+        'SourceWorker',
+        `Micro-worker ${threadNumber} exited with code ${code}`
+      )
+    })
+
     workerPool.push(worker)
+  }
+
+  const getTotalLoad = (): number => {
+    let total = 0
+    for (const worker of workerPool) total += worker.load || 0
+    return total
+  }
+
+  const maybeScaleUpMicroWorkers = (): void => {
+    if (workerPool.length >= maxThreadCount) return
+
+    const now = Date.now()
+    if (now - lastScaleUpAt < SCALE_UP_COOLDOWN_MS) return
+
+    const totalLoad = getTotalLoad() + taskQueue.length
+    const threshold = workerPool.length * SCALE_UP_THRESHOLD
+    if (totalLoad <= threshold) return
+
+    const nextThreadNumber = workerPool.length + 1
+    createMicroWorker(nextThreadNumber)
+    lastScaleUpAt = now
+
+    nodelink.logger(
+      'info',
+      'SourceWorker',
+      `Scaling micro-workers: ${workerPool.length}/${maxThreadCount} (load=${totalLoad}, threshold=${threshold})`
+    )
+  }
+
+  for (let i = 0; i < initialThreadCount; i++) {
+    createMicroWorker(i + 1)
   }
 
   const sockets: SocketMap = new Map()
@@ -297,6 +341,8 @@ if (isMainThread) {
   function processNextTask(): void {
     if (taskQueue.length === 0) return
 
+    maybeScaleUpMicroWorkers()
+
     let bestWorker: MicroWorker | null = null
     let minLoad = Number.POSITIVE_INFINITY
 
@@ -329,6 +375,7 @@ if (isMainThread) {
     if (msg.type !== 'sourceTask') return
     if (msg.payload) {
       taskQueue.push(msg.payload)
+      maybeScaleUpMicroWorkers()
       processNextTask()
     }
   })

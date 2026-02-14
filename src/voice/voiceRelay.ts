@@ -1,9 +1,7 @@
 import { Buffer } from 'node:buffer'
 import type { Readable } from 'node:stream'
 
-import discordVoice, { type VoiceConnection } from '@performanc/voice'
-
-import { Decoder as OpusDecoder } from '../playback/opus/Opus.ts'
+import type { VoiceConnection } from '@performanc/voice'
 import type {
   ActiveStreamEntry,
   ExtendedVoiceConnection,
@@ -18,6 +16,30 @@ import {
 } from './voiceFrames.ts'
 
 const EMPTY_BUFFER = Buffer.alloc(0)
+type DiscordVoiceModule = typeof import('@performanc/voice')
+type OpusModule = typeof import('../playback/opus/Opus.ts')
+type OpusDecoderInstance = InstanceType<OpusModule['Decoder']>
+
+let voiceRuntimePromise:
+  | Promise<{
+      discordVoice: DiscordVoiceModule['default']
+      OpusDecoder: OpusModule['Decoder']
+    }>
+  | null = null
+
+const getVoiceRuntime = async () => {
+  if (!voiceRuntimePromise) {
+    voiceRuntimePromise = Promise.all([
+      import('@performanc/voice'),
+      import('../playback/opus/Opus.ts')
+    ]).then(([discordVoiceModule, opusModule]) => ({
+      discordVoice: discordVoiceModule.default,
+      OpusDecoder: opusModule.Decoder
+    }))
+  }
+
+  return voiceRuntimePromise
+}
 
 /**
  * Creates a voice relay for handling voice packet interception and forwarding.
@@ -80,19 +102,20 @@ export function createVoiceRelay({
     return entry
   }
 
-  const handleSpeakStart = (
+  const handleSpeakStart = async (
     guildId: string,
     userId: string,
     ssrc: number
-  ): void => {
+  ): Promise<void> => {
+    const { discordVoice, OpusDecoder } = await getVoiceRuntime()
     const key = `${guildId}:${ssrc}`
     if (activeStreams.has(key)) return
 
     const stream = discordVoice.getSpeakStream(ssrc)
     if (!stream) return
 
-    let decoder: OpusDecoder | null = null
-    let dataStream: Readable | OpusDecoder = stream
+    let decoder: OpusDecoderInstance | null = null
+    let dataStream: Readable | OpusDecoderInstance = stream
     let formatCode = activeFormatCode
 
     if (pcmEnabled) {
@@ -195,7 +218,15 @@ export function createVoiceRelay({
     conn._voiceRelayAttached = true
 
     conn.on('speakStart', (userId: string, ssrc: number) => {
-      handleSpeakStart(guildId, userId, ssrc)
+      void handleSpeakStart(guildId, userId, ssrc).catch((err: Error) => {
+        if (logger) {
+          logger(
+            'warn',
+            'Voice',
+            `Failed to initialize voice relay stream: ${err.message}`
+          )
+        }
+      })
     })
 
     conn.on('speakEnd', (userId: string, ssrc: number) => {

@@ -63,18 +63,20 @@ type ProxyAgentConstructor = new (options: {
   getProxyForUrl: () => string
 }) => http.Agent | https.Agent
 
-/**
- * Optional proxy-agent constructor loaded at runtime.
- *
- * When unavailable, proxy support gracefully falls back with a warning.
- * @internal
- */
 let ProxyAgent: ProxyAgentConstructor | null = null
-try {
-  const mod = await import('proxy-agent')
-  ProxyAgent = (mod.ProxyAgent || mod.default) as ProxyAgentConstructor
-} catch {
-  ProxyAgent = null
+let proxyAgentInitAttempted = false
+
+const getProxyAgent = async (): Promise<ProxyAgentConstructor | null> => {
+  if (proxyAgentInitAttempted) return ProxyAgent
+
+  proxyAgentInitAttempted = true
+  try {
+    const mod = await import('proxy-agent')
+    ProxyAgent = (mod.ProxyAgent || mod.default) as ProxyAgentConstructor
+  } catch {
+    ProxyAgent = null
+  }
+  return ProxyAgent
 }
 
 /**
@@ -1460,13 +1462,14 @@ async function http1makeRequest(
 
       if (!agent) {
         if (proxy?.url) {
-          if (ProxyAgent) {
+          const proxyAgent = await getProxyAgent()
+          if (proxyAgent) {
             const proxyUrl = new URL(proxy.url)
             if (proxy.username && proxy.password) {
               proxyUrl.username = proxy.username
               proxyUrl.password = proxy.password
             }
-            agent = new ProxyAgent({ getProxyForUrl: () => proxyUrl.href })
+            agent = new proxyAgent({ getProxyForUrl: () => proxyUrl.href })
             logger(
               'debug',
               'Network',

@@ -10,8 +10,7 @@ import type {
   ApiResponse,
   ApiRouteCollection,
   ApiRouteDefinition,
-  ApiRouteModule,
-  ApiRouteModuleEntry
+  ApiRouteModule
 } from '../typings/api/api.types.ts'
 import {
   logger,
@@ -62,7 +61,6 @@ const parseContentLength = (value: string | string[] | undefined): number => {
 async function loadRoutes(): Promise<ApiRouteCollection> {
   const staticRoutes = new Map<string, ApiRouteDefinition>()
   const dynamicRoutes: ApiRouteCollection['dynamicRoutes'] = []
-  const routeModules: ApiRouteModuleEntry[] = []
 
   try {
     const routeFiles = await fs.readdir(__dirname)
@@ -75,43 +73,37 @@ async function loadRoutes(): Promise<ApiRouteCollection> {
         const filePath = join(__dirname, file)
         const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
         const routeModule = (await import(fileUrl.href)) as RouteModuleImport
-        routeModules.push({
-          file,
-          module: resolveRouteModule(routeModule)
-        })
+        const module = resolveRouteModule(routeModule)
+        const routeName = file.replace(/\.(js|ts)$/, '').toLowerCase()
+        let pathname: string | RegExp
+
+        if (routeName === 'version') {
+          pathname = '/version'
+        } else if (routeName.includes('.')) {
+          const parts = routeName.split('.')
+          const basePattern = parts
+            .map((part) => (part === 'id' ? '(?:id|[A-Za-z0-9]+)' : part))
+            .join('/')
+          pathname = new RegExp(
+            `^/${PATH_VERSION}/${basePattern}(?:/[A-Za-z0-9]+)?/?$`
+          )
+        } else {
+          pathname = `/${PATH_VERSION}/${routeName}`
+        }
+
+        const routeData: ApiRouteDefinition = {
+          handler: module.handler,
+          methods: module.methods ?? defaultMethods
+        }
+
+        if (pathname instanceof RegExp) {
+          dynamicRoutes.push([pathname, routeData])
+        } else {
+          staticRoutes.set(pathname, routeData)
+        }
       }
     }
   } catch {}
-
-  for (const { file, module } of routeModules) {
-    const routeName = file.replace(/\.(js|ts)$/, '').toLowerCase()
-    let pathname: string | RegExp
-
-    if (routeName === 'version') {
-      pathname = '/version'
-    } else if (routeName.includes('.')) {
-      const parts = routeName.split('.')
-      const basePattern = parts
-        .map((part) => (part === 'id' ? '(?:id|[A-Za-z0-9]+)' : part))
-        .join('/')
-      pathname = new RegExp(
-        `^/${PATH_VERSION}/${basePattern}(?:/[A-Za-z0-9]+)?/?$`
-      )
-    } else {
-      pathname = `/${PATH_VERSION}/${routeName}`
-    }
-
-    const routeData: ApiRouteDefinition = {
-      handler: module.handler,
-      methods: module.methods ?? defaultMethods
-    }
-
-    if (pathname instanceof RegExp) {
-      dynamicRoutes.push([pathname, routeData])
-    } else {
-      staticRoutes.set(pathname, routeData)
-    }
-  }
 
   dynamicRoutes.sort((a, b) => b[0].source.length - a[0].source.length)
 

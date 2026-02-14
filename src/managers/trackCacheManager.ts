@@ -40,7 +40,9 @@ const getErrorCode = (error: unknown): string | undefined => {
  */
 export default class TrackCacheManager {
   private readonly nodelink: TrackCacheContext
-  private readonly key: Buffer
+  private readonly password: string
+  private key: Buffer
+  private legacyKey: Buffer | null
   private readonly filePath: string
   private cache: Map<string, TrackCacheEntry<unknown>>
   private saveTimeout: NodeJS.Timeout | null
@@ -51,8 +53,9 @@ export default class TrackCacheManager {
    */
   constructor(nodelink: TrackCacheContext) {
     this.nodelink = nodelink
-    const password = this._resolvePassword(nodelink.options)
-    this.key = crypto.scryptSync(password, TRACK_CACHE_SALT, 32)
+    this.password = this._resolvePassword(nodelink.options)
+    this.key = this._deriveFastKey(this.password)
+    this.legacyKey = null
     this.filePath = DEFAULT_CACHE_FILE
     this.cache = new Map()
     this.saveTimeout = null
@@ -66,11 +69,21 @@ export default class TrackCacheManager {
       const data = await fs.readFile(this.filePath)
       if (data.length < 32) return
 
-      const store = this._decodeStore(data)
+      let store: Record<string, TrackCacheEntry<unknown>>
+      let migratedFromLegacy = false
+
+      try {
+        store = this._decodeStore(data, this.key)
+      } catch {
+        const legacyKey = this._getLegacyKey()
+        store = this._decodeStore(data, legacyKey)
+        migratedFromLegacy = true
+      }
+
       this.cache = new Map(Object.entries(store))
 
       const expiredCount = this._purgeExpired()
-      if (expiredCount > 0) this.save()
+      if (expiredCount > 0 || migratedFromLegacy) this.save()
 
       logger(
         'debug',
@@ -180,6 +193,21 @@ export default class TrackCacheManager {
     return password
   }
 
+  private _deriveFastKey(password: string): Buffer {
+    return crypto
+      .createHash('sha256')
+      .update(`${TRACK_CACHE_SALT}:${password}`)
+      .digest()
+  }
+
+  private _getLegacyKey(): Buffer {
+    if (!this.legacyKey) {
+      this.legacyKey = crypto.scryptSync(this.password, TRACK_CACHE_SALT, 32)
+    }
+
+    return this.legacyKey
+  }
+
   private _purgeExpired(): number {
     const now = Date.now()
     let expiredCount = 0
@@ -192,12 +220,15 @@ export default class TrackCacheManager {
     return expiredCount
   }
 
-  private _decodeStore(data: Buffer): Record<string, TrackCacheEntry<unknown>> {
+  private _decodeStore(
+    data: Buffer,
+    key: Buffer
+  ): Record<string, TrackCacheEntry<unknown>> {
     const iv = data.subarray(0, 16)
     const tag = data.subarray(16, 32)
     const encrypted = data.subarray(32)
 
-    const decipher = crypto.createDecipheriv('aes-256-gcm', this.key, iv)
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv)
     decipher.setAuthTag(tag)
 
     const decrypted = Buffer.concat([

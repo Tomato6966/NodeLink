@@ -13,8 +13,6 @@ import RoutePlannerManager from '../managers/routePlannerManager.js'
 import SourceManager from '../managers/sourceManager.js'
 import StatsManager from '../managers/statsManager.ts'
 import TrackCacheManager from '../managers/trackCacheManager.ts'
-import { Player } from '../playback/player.ts'
-import { createPCMStream } from '../playback/processing/streamProcessor.ts'
 import { bufferPool } from '../playback/structs/BufferPool.ts'
 import type { TrackInfoExtended } from '../typings/playback/player.types.ts'
 import type {
@@ -38,6 +36,30 @@ import type {
 } from '../typings/workers/worker.types.ts'
 import { cleanupHttpAgents, initLogger, logger } from '../utils.ts'
 import { createVoiceRelay } from '../voice/voiceRelay.ts'
+
+type WorkerPlayerClass = typeof import('../playback/player.ts').Player
+type CreatePCMStreamFn = typeof import('../playback/processing/streamProcessor.ts').createPCMStream
+
+let playerClassPromise: Promise<WorkerPlayerClass> | null = null
+let createPCMStreamPromise: Promise<CreatePCMStreamFn> | null = null
+
+const getPlayerClass = async (): Promise<WorkerPlayerClass> => {
+  if (!playerClassPromise) {
+    playerClassPromise = import('../playback/player.ts').then(
+      (module) => module.Player
+    )
+  }
+  return playerClassPromise
+}
+
+const getCreatePCMStream = async (): Promise<CreatePCMStreamFn> => {
+  if (!createPCMStreamPromise) {
+    createPCMStreamPromise = import('../playback/processing/streamProcessor.ts').then(
+      (module) => module.createPCMStream
+    )
+  }
+  return createPCMStreamPromise
+}
 
 let lastCpuUsage: NodeJS.CpuUsage = process.cpuUsage()
 let lastCpuTime = Date.now()
@@ -676,6 +698,7 @@ async function startLoadStream(
     throw new Error(fetched.exception.message || 'Failed to load stream')
   }
 
+  const createPCMStream = await getCreatePCMStream()
   const pcmStream = createPCMStream(
     fetched.stream,
     fetched.type || (urlResult.format as string) || 'unknown',
@@ -805,7 +828,8 @@ async function processQueue(queueKey: string): Promise<void> {
           }
         }
 
-        const player = new Player({
+        const PlayerClass = await getPlayerClass()
+        const player = new PlayerClass({
           nodelink,
           session: mockSession,
           guildId
@@ -910,7 +934,8 @@ async function processQueue(queueKey: string): Promise<void> {
           }
         }
 
-        const player = new Player({
+        const PlayerClass = await getPlayerClass()
+        const player = new PlayerClass({
           nodelink,
           session: mockSession,
           guildId

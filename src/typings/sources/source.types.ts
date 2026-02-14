@@ -42,6 +42,10 @@ export interface SourceWorkerConfig {
   microWorkers?: number
   /** Maximum tasks per micro-worker before queuing */
   tasksPerWorker?: number
+  /** Queue/load threshold per active micro-worker to trigger scaling up */
+  scaleUpThreshold?: number
+  /** Minimum milliseconds between scale-up operations */
+  scaleCooldownMs?: number
   /** Whether to suppress debug/info logs from micro-workers */
   silentLogs?: boolean
 }

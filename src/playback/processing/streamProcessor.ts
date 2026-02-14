@@ -7,7 +7,6 @@ import {
   type TransformCallback,
   type TransformOptions
 } from 'node:stream'
-import LibSampleRate from '@alexanderolsen/libsamplerate-js'
 import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js'
 import { SeekError, seekableStream } from '@ecliptia/seekable-stream'
 import type { VoiceAudioStream } from '@performanc/voice'
@@ -58,6 +57,19 @@ import { FlowController } from './FlowController.ts'
 import { FiltersManager } from './filtersManager.ts'
 import { VolumeTransformer } from './VolumeTransformer.ts'
 
+type LibSampleRateModule = typeof import('@alexanderolsen/libsamplerate-js')
+let libSampleRatePromise: Promise<LibSampleRateModule> | null = null
+
+const getLibSampleRate = async (): Promise<LibSampleRateModule> => {
+  if (!libSampleRatePromise) {
+    libSampleRatePromise = import('@alexanderolsen/libsamplerate-js').then(
+      (module) => module as unknown as LibSampleRateModule
+    )
+  }
+
+  return libSampleRatePromise
+}
+
 const AUDIO_CONFIG: AudioConfig = Object.freeze({
   sampleRate: 48000,
   channels: 2,
@@ -104,9 +116,10 @@ const SAMPLE_RATES: readonly number[] = Object.freeze([
 const EMPTY_BUFFER: Buffer = Buffer.alloc(0)
 
 const _getResamplerConverterType = (
-  quality: ResamplingQuality
+  quality: ResamplingQuality,
+  libSampleRate: LibSampleRateModule
 ): ConverterType => {
-  const types = LibSampleRate.ConverterType
+  const types = libSampleRate.ConverterType
   const qualityMap: Record<string, ConverterType> = {
     best: types.SRC_SINC_BEST_QUALITY,
     medium: types.SRC_SINC_MEDIUM_QUALITY,
@@ -799,13 +812,15 @@ class SymphoniaDecoderStream extends Transform {
     if (this._aborted) return EMPTY_BUFFER
 
     if (!this.resampler) {
-      this.resampler = await LibSampleRate.create(
+      const libSampleRate = await getLibSampleRate()
+      this.resampler = await libSampleRate.create(
         channels,
         inputRate,
         AUDIO_CONFIG.sampleRate,
         {
           converterType: _getResamplerConverterType(
-            this.resamplingQuality as ResamplingQuality
+            this.resamplingQuality as ResamplingQuality,
+            libSampleRate
             // biome-ignore lint/suspicious/noExplicitAny: library type mismatch
           ) as any
         }
@@ -1277,21 +1292,21 @@ class AACDecoderStream extends Transform {
                 this.push(Buffer.from(pcmInt16.buffer))
               } else {
                 if (!this.resamplerCreationPromise) {
-                  this.resamplerCreationPromise = LibSampleRate.create(
-                    2,
-                    sampleRate,
-                    48000,
-                    {
-                      converterType: _getResamplerConverterType(
-                        this.resamplingQuality as ResamplingQuality
-                        // biome-ignore lint/suspicious/noExplicitAny: library type mismatch
-                      ) as any
-                    }
-                  ).then((resampler: ResamplerLike) => {
-                    this.resampler = resampler
-                    this.resamplerCreationPromise = null
-                    return resampler
-                  })
+                  this.resamplerCreationPromise = getLibSampleRate()
+                    .then((libSampleRate) =>
+                      libSampleRate.create(2, sampleRate, 48000, {
+                        converterType: _getResamplerConverterType(
+                          this.resamplingQuality as ResamplingQuality,
+                          libSampleRate
+                          // biome-ignore lint/suspicious/noExplicitAny: library type mismatch
+                        ) as any
+                      })
+                    )
+                    .then((resampler: ResamplerLike) => {
+                      this.resampler = resampler
+                      this.resamplerCreationPromise = null
+                      return resampler
+                    })
                 }
 
                 const resampler = await this.resamplerCreationPromise

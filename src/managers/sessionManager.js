@@ -1,8 +1,10 @@
 import { generateRandomLetters, logger } from '../utils.ts'
-import PlayerManager from './playerManager.js'
 
 export default class SessionManager {
-  constructor(nodelink, PlayerManagerClass = PlayerManager) {
+  constructor(nodelink, PlayerManagerClass) {
+    if (!PlayerManagerClass) {
+      throw new Error('SessionManager requires a PlayerManagerClass instance')
+    }
     this.nodelink = nodelink
     this.PlayerManagerClass = PlayerManagerClass
     this.activeSessions = new Map()

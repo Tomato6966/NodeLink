@@ -2,7 +2,7 @@
   "name": "nodelink",
   "version": "3.6.0",
   "scripts": {
-    "start": "node --dns-result-order=ipv4first --openssl-legacy-provider --import tsx src/index.ts",
+    "start": "node --dns-result-order=ipv4first --import tsx src/index.ts",
     "start:bun": "bun run --dns-result-order=ipv4first src/index.js",
     "type-check": "tsc --noEmit",
     "prepare": "husky"

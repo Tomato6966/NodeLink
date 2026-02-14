@@ -10,6 +10,15 @@ class SourceWorkerManager {
     this.workers = []
     this.requests = new Map()
     this.workerLoads = new Map() // worker.id -> pending count
+    this.maxWorkers = Math.max(
+      1,
+      nodelink.options.cluster?.specializedSourceWorker?.count || 1
+    )
+    this.scaleUpThreshold =
+      nodelink.options.cluster?.specializedSourceWorker?.scaleUpThreshold || 30
+    this.scaleCooldownMs =
+      nodelink.options.cluster?.specializedSourceWorker?.scaleCooldownMs || 1500
+    this.lastScaleUpAt = 0
     this.socketPath =
       os.platform() === 'win32'
         ? `\\\\.\\pipe\\nodelink-source-${crypto.randomBytes(8).toString('hex')}`
@@ -112,13 +121,9 @@ class SourceWorkerManager {
       })
     })
 
-    const processCount =
-      this.nodelink.options.cluster?.specializedSourceWorker?.count || 1
     cluster.setupPrimary({ exec: './src/workers/source.ts' })
-
-    for (let i = 0; i < processCount; i++) {
-      this._forkWorker()
-    }
+    // Start with one source worker and scale up based on demand.
+    this._forkWorker()
 
     cluster.setupPrimary({ exec: './src/index.ts' })
 
@@ -134,9 +139,14 @@ class SourceWorkerManager {
       this.workers.splice(index, 1)
       this.workerLoads.delete(worker.id)
 
-      cluster.setupPrimary({ exec: './src/workers/source.ts' })
-      this._forkWorker()
-      cluster.setupPrimary({ exec: './src/index.ts' })
+      // Keep at least one source worker alive.
+      if (this.workers.length === 0) {
+        cluster.setupPrimary({ exec: './src/workers/source.ts' })
+        this._forkWorker()
+        cluster.setupPrimary({ exec: './src/index.ts' })
+      } else {
+        this._tryScaleUp(true)
+      }
     })
   }
 
@@ -167,6 +177,39 @@ class SourceWorkerManager {
   _decrementLoad(workerId) {
     const load = this.workerLoads.get(workerId) || 0
     this.workerLoads.set(workerId, Math.max(0, load - 1))
+    this._tryScaleUp(false)
+  }
+
+  _getTotalLoad() {
+    let total = 0
+    for (const load of this.workerLoads.values()) {
+      total += load || 0
+    }
+    return total
+  }
+
+  _tryScaleUp(force = false) {
+    if (this.workers.length >= this.maxWorkers) return false
+
+    const now = Date.now()
+    if (!force && now - this.lastScaleUpAt < this.scaleCooldownMs) return false
+
+    const totalLoad = this._getTotalLoad()
+    const threshold = this.workers.length * this.scaleUpThreshold
+
+    if (!force && totalLoad <= threshold) return false
+
+    cluster.setupPrimary({ exec: './src/workers/source.ts' })
+    this._forkWorker()
+    cluster.setupPrimary({ exec: './src/index.ts' })
+    this.lastScaleUpAt = now
+
+    logger(
+      'info',
+      'SourceCluster',
+      `Scaling up source workers: ${this.workers.length}/${this.maxWorkers} (load=${totalLoad}, threshold=${threshold})`
+    )
+    return true
   }
 
   _cleanupRequest(id, request) {
@@ -231,6 +274,7 @@ class SourceWorkerManager {
     }, 60000)
     this.requests.set(id, request)
     this.workerLoads.set(bestWorker.id, minLoad + 1)
+    this._tryScaleUp(false)
 
     res.on?.('close', () => {
       this._cleanupRequest(id, request)
