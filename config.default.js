@@ -295,6 +295,22 @@ export default {
       getOAuthToken: false,
       hl: 'en',
       gl: 'US',
+      fallbackSources: [
+        'soundcloud',
+        'deezer',
+        'jiosaavn',
+        'qobuz',
+        'gaana',
+        'vkmusic',
+        'yandexmusic',
+        'audiomack',
+        'bandcamp',
+        'audius',
+        'mixcloud',
+        'bilibili',
+        'bluesky',
+        'nicovideo'
+      ], // Internal fallback chain when YouTube stream URL fails
       clients: {
         search: ['Android'], // Clients used for searching tracks
         playback: [
