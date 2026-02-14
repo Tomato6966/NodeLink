@@ -1,6 +1,8 @@
 import net from 'node:net'
 import os from 'node:os'
+import { resolve as resolvePath } from 'node:path'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
+import { pathToFileURL } from 'node:url'
 import v8 from 'node:v8'
 
 import { GatewayEvents } from '../constants.ts'
@@ -81,11 +83,13 @@ try {
 }
 
 let config: NodeLinkConfig
+const resolveRootConfigUrl = (fileName: string): string =>
+  pathToFileURL(resolvePath(process.cwd(), fileName)).href
 try {
-  config = (await import('../../config.js'))
+  config = (await import(resolveRootConfigUrl('config.js')))
     .default as unknown as NodeLinkConfig
 } catch {
-  config = (await import('../../config.default.js'))
+  config = (await import(resolveRootConfigUrl('config.default.js')))
     .default as unknown as NodeLinkConfig
 }
 

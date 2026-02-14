@@ -1,7 +1,8 @@
 import type { Socket } from 'node:net'
 import net from 'node:net'
 import os from 'node:os'
-import { fileURLToPath } from 'node:url'
+import { resolve as resolvePath } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { MessagePort } from 'node:worker_threads'
 import {
   isMainThread,
@@ -33,6 +34,9 @@ const __filename = fileURLToPath(import.meta.url)
  * Spawns and manages a pool of micro-workers for handling source API tasks
  */
 if (isMainThread) {
+  const resolveRootConfigUrl = (fileName: string): string =>
+    pathToFileURL(resolvePath(process.cwd(), fileName)).href
+
   /**
    * Loads NodeLink configuration
    * @returns Configuration object
@@ -40,9 +44,9 @@ if (isMainThread) {
    */
   async function loadConfig(): Promise<Record<string, unknown>> {
     try {
-      return (await import('../../config.js')).default
+      return (await import(resolveRootConfigUrl('config.js'))).default
     } catch {
-      return (await import('../../config.default.js')).default
+      return (await import(resolveRootConfigUrl('config.default.js'))).default
     }
   }
 

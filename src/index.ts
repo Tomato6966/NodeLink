@@ -1,6 +1,8 @@
 import cluster from 'node:cluster'
 import { EventEmitter } from 'node:events'
 import http from 'node:http'
+import { resolve as resolvePath } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import WebSocketServer from '@performanc/pwsl-server'
 
 import RoutePlannerManager from './managers/routePlannerManager.js'
@@ -162,14 +164,17 @@ const getTrackCacheManagerClass = async (): Promise<
 }
 
 let config: NodelinkConfig
+const resolveRootConfigUrl = (fileName: string): string =>
+  pathToFileURL(resolvePath(process.cwd(), fileName)).href
 
 try {
-  config = (await import('../config.js')).default as unknown as NodelinkConfig
+  config = (await import(resolveRootConfigUrl('config.js')))
+    .default as unknown as NodelinkConfig
 } catch (e) {
   const error = e as ConfigLoadError
   if (error.code === 'ERR_MODULE_NOT_FOUND' || error.code === 'ENOENT') {
     try {
-      config = (await import('../config.default.js'))
+      config = (await import(resolveRootConfigUrl('config.default.js')))
         .default as unknown as NodelinkConfig
       console.log(
         '[WARN] Config: config.js not found, using config.default.js. It is recommended to create a config.js file for your own configuration.'

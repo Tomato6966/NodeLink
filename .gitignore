@@ -25,3 +25,5 @@
 !scripts
 !scripts/**
 !tsconfig.json
+!dist
+!dist/**

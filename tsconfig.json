@@ -12,7 +12,9 @@
     ],
     "allowJs": true,
     "checkJs": false,
-    "noEmit": true,
+    "noEmit": false,
+    "outDir": "dist",
+    "rewriteRelativeImportExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "strict": true,
@@ -30,8 +32,7 @@
   "include": [
     "src/**/*",
     "plugins/**/*",
-    "scripts/**/*",
-    "config.default.js"
+    "scripts/**/*"
   ],
   "exclude": [
     "node_modules",
