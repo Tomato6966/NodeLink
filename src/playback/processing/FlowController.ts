@@ -6,6 +6,7 @@ import type {
 import type {
   IFadeTransformer,
   IFiltersManager,
+  ITapeTransformer,
   IVolumeTransformer
 } from '../../typings/playback/processing.types.ts'
 
@@ -19,6 +20,7 @@ export class FlowController extends Transform {
   private readonly filters: IFiltersManager
   private readonly volume: IVolumeTransformer
   private readonly fade: IFadeTransformer
+  private readonly tape: ITapeTransformer
   private readonly audioMixer: AudioMixer | null
   private pending: Buffer
 
@@ -27,12 +29,14 @@ export class FlowController extends Transform {
    * @param filters - The FiltersManager instance.
    * @param volume - The VolumeTransformer instance.
    * @param fade - The FadeTransformer instance.
+   * @param tape - The TapeTransformer instance.
    * @param audioMixer - Optional AudioMixer instance.
    */
   constructor(
     filters: IFiltersManager,
     volume: IVolumeTransformer,
     fade: IFadeTransformer,
+    tape: ITapeTransformer,
     audioMixer: AudioMixer | null = null
   ) {
     super({ highWaterMark: FRAME_SIZE * 4 })
@@ -40,6 +44,7 @@ export class FlowController extends Transform {
     this.filters = filters
     this.volume = volume
     this.fade = fade
+    this.tape = tape
     this.audioMixer = audioMixer
     this.pending = Buffer.alloc(0)
   }
@@ -78,6 +83,24 @@ export class FlowController extends Transform {
     this.fade.fadeTo(volume, durationMs, curve)
   }
 
+  /**
+   * Schedules a tape effect.
+   * @param durationMs - Duration of the ramp in milliseconds.
+   * @param type - Ramp type ('start' or 'stop').
+   * @param curve - Fading curve type.
+   */
+  public tapeTo(
+    durationMs: number,
+    type: 'start' | 'stop',
+    curve?: string
+  ): void {
+    this.tape.tapeTo(durationMs, type, curve)
+  }
+
+  public checkTapeRampCompleted(): boolean {
+    return this.tape.checkRampCompleted()
+  }
+
   public override _transform(
     chunk: Buffer,
     _encoding: BufferEncoding,
@@ -93,6 +116,7 @@ export class FlowController extends Transform {
       let output: Buffer = processed
 
       output = this.filters.process(output)
+      output = this.tape.process(output)
       output = this.volume.process(output)
       output = this.fade.process(output)
 
@@ -122,6 +146,7 @@ export class FlowController extends Transform {
     remaining = Buffer.concat([remaining, this.filters.flush()])
 
     if (remaining.length > 0) {
+      remaining = this.tape.process(remaining)
       remaining = this.volume.process(remaining)
       remaining = this.fade.process(remaining)
 

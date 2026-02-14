@@ -22,6 +22,7 @@ export interface FiltersState {
 export interface FadingSection {
   duration: number
   curve?: string
+  type?: 'volume' | 'tape' | 'both'
 }
 
 /**
@@ -33,6 +34,8 @@ export interface FadingConfig {
   trackEnd?: FadingSection
   trackStop?: FadingSection
   seek?: FadingSection
+  pause?: FadingSection
+  resume?: FadingSection
 }
 
 /**
@@ -177,6 +180,7 @@ export interface AudioResource {
   setFilters(filters: FiltersState): void
   setFadeVolume?(volume: number): void
   fadeTo?(volume: number, durationMs: number, curve?: string): void
+  tapeTo?(durationMs: number, type: 'start' | 'stop', curve?: string): void
   /**
    * Buffers the next PCM stream for crossfading.
    */

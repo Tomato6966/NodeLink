@@ -1126,7 +1126,7 @@ export class Player {
   private _sendUpdate(): boolean {
     if (
       !this.connection ||
-      this.isPaused ||
+      (this.isPaused && !this._fadeTimers.pause) ||
       this.connStatus === 'destroyed' ||
       this.destroying
     )
@@ -2090,17 +2090,22 @@ export class Player {
       `Setting pause to ${shouldPause} for guild ${this.guildId}`
     )
 
-    const wasResuming = this.isPaused && !shouldPause
-    this.isPaused = shouldPause
-    this._isResuming = wasResuming
-
-    if (this.connection?.audioStream) {
-      if (shouldPause) {
-        this.connection.pause?.('requested')
-      } else {
-        this.connection.unpause?.('requested')
+    if (shouldPause) {
+      if (this._fading('pause')) {
+        this.isPaused = true
+        this.emitEvent(GatewayEvents.PAUSE, { paused: true })
+        return true
       }
+
+      this.isPaused = true
+      this.connection?.pause?.('requested')
+    } else {
+      this.isPaused = false
+      this._isResuming = true
+      this._fading('resume')
+      this.connection?.unpause?.('requested')
     }
+
     this.emitEvent(GatewayEvents.PAUSE, { paused: this.isPaused })
     return true
   }
@@ -2731,7 +2736,7 @@ export class Player {
   }
 
   /**
-   * Handles fading actions for start/stop/seek events.
+   * Handles fading and tape actions for start/stop/seek events.
    */
   private _fading(
     action:
@@ -2741,7 +2746,9 @@ export class Player {
       | 'trackEndSchedule'
       | 'trackStop'
       | 'seek'
-      | 'seekPrepare',
+      | 'seekPrepare'
+      | 'pause'
+      | 'resume',
     payload: { resource?: AudioResource; startPosition?: number } = {}
   ): boolean {
     const timers = this._fadeTimers
@@ -2771,17 +2778,26 @@ export class Player {
       section = this.fading.trackStart
     else if (action === 'trackEndSchedule') section = this.fading.trackEnd
     else if (action === 'trackStop') section = this.fading.trackStop
-    else if (action === 'seek') section = this.fading.seek
-    else if (action === 'seekPrepare') section = this.fading.seek
+    else if (action === 'seek' || action === 'seekPrepare')
+      section = this.fading.seek
+    else if (action === 'pause') section = this.fading.pause
+    else if (action === 'resume') section = this.fading.resume
     else return false
 
     if (!section || !Number.isFinite(section.duration) || section.duration <= 0)
       return false
 
+    const fadeType = section.type || 'volume'
+
     if (action === 'trackStartArm') {
       const resource = payload.resource
-      if (!resource?.setFadeVolume) return false
-      resource.setFadeVolume(0)
+      if (!resource) return false
+      if (fadeType === 'volume' || fadeType === 'both') {
+        if (resource.setFadeVolume) resource.setFadeVolume(0)
+      }
+      if (fadeType === 'tape' || fadeType === 'both') {
+        if (resource.tapeTo) resource.tapeTo(0, 'stop')
+      }
       this._pendingTrackStartFade = true
       return true
     }
@@ -2791,32 +2807,135 @@ export class Player {
       const stream =
         (payload.resource as AudioResource | undefined)?.stream ||
         this.connection?.audioStream
-      if (!stream || !(stream as AudioResource).fadeTo) return false
+      if (!stream) return false
       this._pendingTrackStartFade = false
-      ;(stream as AudioResource).fadeTo?.(1, section.duration, section.curve)
+
+      if (fadeType === 'volume' || fadeType === 'both') {
+        if ((stream as AudioResource).fadeTo)
+          (stream as AudioResource).fadeTo?.(1, section.duration, section.curve)
+      }
+      if (fadeType === 'tape' || fadeType === 'both') {
+        if ((stream as AudioResource).tapeTo)
+          (stream as AudioResource).tapeTo?.(
+            section.duration,
+            'start',
+            section.curve
+          )
+      }
       return true
     }
 
     if (action === 'seekPrepare') {
       const resource = payload.resource
-      if (!resource?.setFadeVolume) return false
-      resource.setFadeVolume(0)
+      if (!resource) return false
+      if (fadeType === 'volume' || fadeType === 'both') {
+        if (resource.setFadeVolume) resource.setFadeVolume(0)
+      }
+      if (fadeType === 'tape' || fadeType === 'both') {
+        if (resource.tapeTo) resource.tapeTo(0, 'stop')
+      }
       return true
     }
 
     if (action === 'seek') {
       const stream = this.connection?.audioStream as AudioResource | undefined
-      if (!stream?.setFadeVolume) return false
-      stream.setFadeVolume(0)
-      stream.fadeTo?.(1, section.duration, section.curve)
+      if (!stream) return false
+
+      if (fadeType === 'volume' || fadeType === 'both') {
+        if (stream.setFadeVolume) stream.setFadeVolume(0)
+        stream.fadeTo?.(1, section.duration, section.curve)
+      }
+      if (fadeType === 'tape' || fadeType === 'both') {
+        stream.tapeTo?.(section.duration, 'start', section.curve)
+      }
+      return true
+    }
+
+    if (action === 'pause') {
+      const stream = this.connection?.audioStream as AudioResource | undefined
+      if (!stream) return false
+      if (timers.pause) {
+        if (timers.pause instanceof Object && 'interval' in timers.pause) {
+          const pauseTimer = timers.pause as {
+            interval: NodeJS.Timeout
+            timeout?: NodeJS.Timeout
+          }
+          clearInterval(pauseTimer.interval)
+          if (pauseTimer.timeout) clearTimeout(pauseTimer.timeout)
+        } else {
+          clearTimeout(timers.pause as NodeJS.Timeout)
+        }
+      }
+
+      if (fadeType === 'volume' || fadeType === 'both') {
+        stream.fadeTo?.(0, section.duration, section.curve)
+      }
+      if (fadeType === 'tape' || fadeType === 'both') {
+        stream.tapeTo?.(section.duration, 'stop', section.curve)
+      }
+
+      // Active monitoring of the ramp completion
+      const startTime = Date.now()
+      const checkInterval = setInterval(() => {
+        const isRampDone = stream.checkTapeRampCompleted?.()
+        const isTimeUp = Date.now() - startTime > section.duration + 500 // Safety timeout
+
+        if (isRampDone || isTimeUp) {
+          clearInterval(checkInterval)
+
+          // Pipeline Drain Delay: Wait for the last frames to clear the Opus encoder and network buffers
+          // Fine-tuned to 300ms to ensure absolute silence in Discord buffer before pausing
+          const drainTimeout = setTimeout(() => {
+            this.connection?.pause?.('requested')
+            timers.pause = null
+          }, 300)
+
+          if (timers.pause) {
+            ;(
+              timers.pause as {
+                interval: NodeJS.Timeout
+                timeout?: NodeJS.Timeout
+              }
+            ).timeout = drainTimeout
+          }
+        }
+      }, 10)
+
+      timers.pause = { interval: checkInterval } as {
+        interval: NodeJS.Timeout
+        timeout?: NodeJS.Timeout
+      }
+      return true
+    }
+
+    if (action === 'resume') {
+      const stream = this.connection?.audioStream as AudioResource | undefined
+      if (!stream) return false
+
+      if (fadeType === 'volume' || fadeType === 'both') {
+        if (stream.setFadeVolume) stream.setFadeVolume(0)
+        stream.fadeTo?.(1, section.duration, section.curve)
+      }
+      if (fadeType === 'tape' || fadeType === 'both') {
+        // Force reset to minimum rate before starting the ramp to avoid residuous slow audio
+        stream.tapeTo?.(0, 'stop')
+        stream.tapeTo?.(section.duration, 'start', section.curve)
+      }
       return true
     }
 
     if (action === 'trackStop') {
       const stream = this.connection?.audioStream as AudioResource | undefined
-      if (!stream?.fadeTo) return false
+      if (!stream) return false
       if (timers.stop) clearTimeout(timers.stop)
-      stream.fadeTo(0, section.duration, section.curve)
+
+      if (fadeType === 'volume' || fadeType === 'both') {
+        stream.fadeTo?.(0, section.duration, section.curve)
+      }
+      if (fadeType === 'tape' || fadeType === 'both') {
+        stream.tapeTo?.(section.duration, 'stop', section.curve)
+      }
+
       timers.stop = setTimeout(() => {
         this.connection?.stop(EndReasons.STOPPED)
         if (timers.stop) {
@@ -2842,8 +2961,13 @@ export class Player {
 
       timers.trackEnd = setTimeout(() => {
         const stream = this.connection?.audioStream as AudioResource | undefined
-        if (stream?.fadeTo) {
-          stream.fadeTo(0, fadeDuration, section.curve)
+        if (stream) {
+          if (fadeType === 'volume' || fadeType === 'both') {
+            stream.fadeTo?.(0, fadeDuration, section.curve)
+          }
+          if (fadeType === 'tape' || fadeType === 'both') {
+            stream.tapeTo?.(fadeDuration, 'stop', section.curve)
+          }
         }
         if (timers.trackEnd) {
           clearTimeout(timers.trackEnd)

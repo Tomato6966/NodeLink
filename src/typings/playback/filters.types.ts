@@ -192,6 +192,25 @@ export interface CompressorSettings {
 }
 
 /**
+ * Configuration for the Tape filter.
+ * @public
+ */
+export interface TapeSettings {
+  /**
+   * Ramp duration in milliseconds.
+   */
+  duration?: number
+  /**
+   * Ramp type.
+   */
+  type?: 'start' | 'stop'
+  /**
+   * Fading curve.
+   */
+  curve?: string
+}
+
+/**
  * Configuration for the Phonograph filter.
  * @public
  */
@@ -256,6 +275,7 @@ export interface FilterSettings {
   spatial?: SpatialSettings
   compressor?: CompressorSettings
   phonograph?: PhonographSettings
+  tape?: TapeSettings
   [key: string]: unknown
 }
 

@@ -479,30 +479,52 @@ export default {
     lookaheadMs: 5, // Limiter lookahead buffer in milliseconds
     gateThresholdLUFS: -60, // Silence threshold for AGC gate
     fading: {
-      enabled: false,
+      enabled: false, // Master switch for all fades
+      // type meanings:
+      // volume = only amplitude fades, tape = pitch/speed ramps, both = simultaneous fade and ramp
       // curve meanings:
-      // linear = constant rate, exponential = slow start then faster,
-      // logarithmic = fast start then slower, s-curve = smooth start/end
+      // linear = constant rate, exponential = slow start then faster, sinusoidal = smooth s-curve
       trackStart: {
-        duration: 0,
-        curve: 'linear'
+        // Effect when a new track begins
+        duration: 0, // ms
+        curve: 'linear',
+        type: 'volume' // volume, tape, both
       },
       trackEnd: {
+        // Effect triggered automatically before track finishes
         duration: 0,
-        curve: 'linear'
+        curve: 'linear',
+        type: 'volume'
       },
       trackStop: {
+        // Effect when manually stopping or skipping
         duration: 0,
-        curve: 'linear'
+        curve: 'linear',
+        type: 'volume'
       },
       seek: {
+        // Effect applied after a seek operation
         duration: 0,
-        curve: 'linear'
+        curve: 'linear',
+        type: 'volume'
+      },
+      pause: {
+        // Effect applied when pausing playback
+        duration: 0,
+        curve: 'sinusoidal',
+        type: 'tape'
+      },
+      resume: {
+        // Effect applied when resuming from pause
+        duration: 0,
+        curve: 'sinusoidal',
+        type: 'tape'
       },
       ducking: {
+        // Partial fade out for overlay events (e.g., TTS, notifications)
         enabled: false,
-        duration: 0,
-        targetVolume: 0.3,
+        duration: 0, // ms
+        targetVolume: 0.3, // Volume multiplier (0.3 = 30%)
         curve: 'linear'
       }
     },

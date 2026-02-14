@@ -53,6 +53,7 @@ import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.ts'
 import { RingBuffer } from '../structs/RingBuffer.ts'
 import { CrossfadeController } from './CrossfadeController.ts'
 import { FadeTransformer } from './FadeTransformer.ts'
+import { TapeTransformer } from './TapeTransformer.ts'
 import { FlowController } from './FlowController.ts'
 import { FiltersManager } from './filtersManager.ts'
 import { VolumeTransformer } from './VolumeTransformer.ts'
@@ -341,7 +342,7 @@ async function _buildMp4SeekOptions(
     }
   })
 
-  const audioTrack = readyInfo!.tracks.find((t: MP4BoxTrack) =>
+  const audioTrack = readyInfo?.tracks.find((t: MP4BoxTrack) =>
     t.codec?.startsWith('mp4a')
   )
   if (!audioTrack) {
@@ -415,6 +416,7 @@ class BaseAudioResource {
       this.startCrossfade(durationMs, curve)
     voiceStream.clearCrossfade = () => this.clearCrossfade()
     voiceStream.getCrossfadeState = () => this.getCrossfadeState()
+    voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted()
     this.stream = voiceStream
   }
 
@@ -475,6 +477,10 @@ class BaseAudioResource {
     targetMs: number
   } {
     return { active: false, bufferedMs: 0, targetMs: 0 }
+  }
+
+  checkTapeRampCompleted(): boolean {
+    return false
   }
 
   setVolume(volume: number): void {
@@ -2323,6 +2329,11 @@ class StreamAudioResource extends BaseAudioResource {
       sampleRate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels
     })
+    const tapeTransformer = new TapeTransformer({
+      type: 's16le',
+      sampleRate: AUDIO_CONFIG.sampleRate,
+      channels: AUDIO_CONFIG.channels
+    })
     const crossfadeController = new CrossfadeController(
       AUDIO_CONFIG.sampleRate,
       AUDIO_CONFIG.channels
@@ -2333,6 +2344,7 @@ class StreamAudioResource extends BaseAudioResource {
       filters,
       volumeTransformer,
       fadeTransformer,
+      tapeTransformer,
       audioMixer
     )
 
@@ -2417,6 +2429,26 @@ class StreamAudioResource extends BaseAudioResource {
         targetMs: 0
       }
     )
+  }
+
+  override checkTapeRampCompleted(): boolean {
+    if (!this.pipes) return false
+
+    const flowController = this.pipes.find(
+      (p) => p instanceof FlowController
+    ) as FlowController | undefined
+    return flowController?.checkTapeRampCompleted() ?? false
+  }
+
+  tapeTo(durationMs: number, type: 'start' | 'stop', curve?: string): void {
+    if (!this.pipes) return
+
+    const flowController = this.pipes.find(
+      (p) => p instanceof FlowController
+    ) as FlowController | undefined
+    if (flowController) {
+      flowController.tapeTo(durationMs, type, curve)
+    }
   }
 
   _createPCMOutputPipeline(
