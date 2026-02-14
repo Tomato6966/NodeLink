@@ -2494,28 +2494,46 @@ export class Player {
   public async subscribeLyrics(
     skipTrackSource: boolean | string | undefined
   ): Promise<void> {
-    if (this.isLyricsSubscribed) return
-    this.isLyricsSubscribed = true
-    this.skipTrackSource =
-      skipTrackSource === 'true' || skipTrackSource === true
+    return new Promise((resolve) => {
+      if (this.isLyricsSubscribed) {
+        return resolve()
+      }
 
-    if (this.track && !this.isPaused) {
-      await this._loadLyrics()
-    }
+      this.isLyricsSubscribed = true
+      this.skipTrackSource =
+        skipTrackSource === 'true' || skipTrackSource === true
+
+      if (this.track && !this.isPaused) {
+        this._loadLyrics().catch((error: unknown) => {
+          const errorMessage =
+            error instanceof Error ? error.message : String(error)
+          logger(
+            'warn',
+            'Lyrics',
+            `Failed to load lyrics for guild ${this.guildId}: ${errorMessage}`
+          )
+        })
+      }
+
+      return resolve()
+    })
   }
 
   /**
    * Unsubscribes from lyrics events.
    */
-  public unsubscribeLyrics(): void {
-    this.isLyricsSubscribed = false
-    this.skipTrackSource = false
-    this.currentLyrics = null
-    this.lyricsLineIndex = -1
-    if (this._lyricsMarkerTimer) {
-      clearTimeout(this._lyricsMarkerTimer)
-      this._lyricsMarkerTimer = null
-    }
+  public async unsubscribeLyrics(): Promise<void> {
+    return new Promise((resolve) => {
+      this.isLyricsSubscribed = false
+      this.skipTrackSource = false
+      this.currentLyrics = null
+      this.lyricsLineIndex = -1
+      if (this._lyricsMarkerTimer) {
+        clearTimeout(this._lyricsMarkerTimer)
+        this._lyricsMarkerTimer = null
+      }
+      return resolve()
+    })
   }
 
   /**

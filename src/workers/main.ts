@@ -99,6 +99,17 @@ initLogger(config as any)
 const players = new Map<string, WorkerPlayer>()
 const guildQueues = new Map<string, GuildQueueEntry>() // guildId -> { queue: [], processing: false }
 const activeStreams = new Map<string, ActiveStreamEntry>()
+const PARALLEL_COMMANDS = new Set([
+  'loadTracks',
+  'loadLyrics',
+  'loadMeaning',
+  'loadChapters',
+  'getSources',
+  'getTrackUrl',
+  'loadStream',
+  'cancelStream',
+  'updateYoutubeConfig'
+])
 const sendProcessMessage = (
   payload: unknown,
   onError?: (error: unknown) => void
@@ -745,7 +756,10 @@ function cancelStream(streamId: string): boolean {
 async function processQueue(queueKey: string): Promise<void> {
   const queueEntry = guildQueues.get(queueKey)
   if (!queueEntry || queueEntry.queue.length === 0) {
-    if (queueEntry) queueEntry.processing = false
+    if (queueEntry) {
+      queueEntry.processing = false
+      if (queueEntry.queue.length === 0) guildQueues.delete(queueKey)
+    }
     return
   }
 
@@ -1166,7 +1180,10 @@ async function processQueue(queueKey: string): Promise<void> {
     if (queueEntry && queueEntry.queue.length > 0) {
       setImmediate(() => processQueue(queueKey))
     } else {
-      if (queueEntry) queueEntry.processing = false
+      if (queueEntry) {
+        queueEntry.processing = false
+        if (queueEntry.queue.length === 0) guildQueues.delete(queueKey)
+      }
     }
   }
 }
@@ -1181,21 +1198,25 @@ function enqueueCommand(
 ): void {
   if (!type || !requestId) return
 
-  const guildId =
+  const guildIdFromPayload =
     payload && typeof payload === 'object' && 'guildId' in payload
       ? (payload as { guildId?: string }).guildId || 'global'
       : 'global'
-  if (!guildQueues.has(guildId)) {
-    guildQueues.set(guildId, {
+  const queueKey = PARALLEL_COMMANDS.has(type)
+    ? `parallel:${requestId}`
+    : guildIdFromPayload
+
+  if (!guildQueues.has(queueKey)) {
+    guildQueues.set(queueKey, {
       queue: [] as WorkerCommand[],
       processing: false
     })
   }
 
-  const queueEntry = guildQueues.get(guildId)
+  const queueEntry = guildQueues.get(queueKey)
   queueEntry?.queue.push({ type, requestId, payload })
 
-  if (!queueEntry?.processing) setImmediate(() => processQueue(guildId))
+  if (!queueEntry?.processing) setImmediate(() => processQueue(queueKey))
 }
 
 process.on('message', (msg: unknown) => {
