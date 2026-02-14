@@ -24,15 +24,48 @@ export default class BilibiliSource {
       /https?:\/\/(?:www\.)?bilibili\.com\/bangumi\/play\/(ep|ss)(\d+)/,
       /https?:\/\/(?:www\.)?bilibili\.com\/audio\/(au|am)(\d+)/,
       /https?:\/\/live\.bilibili\.com\/(\d+)/,
-      /https?:\/\/space\.bilibili\.com\/(\d+)/
+      /https?:\/\/space\.bilibili\.com\/(\d+)/,
+      /^https?:\/\/b23\.tv\/.+/i
     ]
-    this.searchTerms = ['bilibili']
+    this.searchTerms = ['bilisearch', 'bilibili']
     this.priority = 100
     this.wbiKeys = null
     this.wbiKeysExpiry = 0
+
+    this.buvid3 = this.generateBuvid3()
+    this.buvid4 = this.generateBuvid4()
+
     this.cookie = this.nodelink.options.sources?.bilibili?.sessdata
       ? `SESSDATA=${this.nodelink.options.sources.bilibili.sessdata}`
       : ''
+  }
+
+  generateBuvid3() {
+    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    let result = ''
+    for (let i = 0; i < 32; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    return result
+  }
+
+  generateBuvid4() {
+    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    let result = ''
+    for (let i = 0; i < 36; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length))
+    }
+    return result
+  }
+
+  buildCookieHeader() {
+    const baseCookie = `buvid3=${this.buvid3}; buvid4=${this.buvid4}; CURRENT_FNVAL=4048`
+    
+    if (this.cookie) {
+      return `${baseCookie}; ${this.cookie}`
+    }
+    
+    return baseCookie
   }
 
   async setup() {
@@ -60,7 +93,7 @@ export default class BilibiliSource {
       'https://api.bilibili.com/x/web-interface/nav',
       {
         method: 'GET',
-        headers: { ...HEADERS, Cookie: this.cookie }
+        headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
       }
     )
 
@@ -126,7 +159,7 @@ export default class BilibiliSource {
           method: 'GET',
           headers: {
             ...HEADERS,
-            Cookie: this.cookie,
+            Cookie: this.buildCookieHeader(),
             Referer: 'https://search.bilibili.com/'
           }
         }
@@ -145,7 +178,7 @@ export default class BilibiliSource {
             method: 'GET',
             headers: {
               ...HEADERS,
-              Cookie: this.cookie,
+              Cookie: this.buildCookieHeader(),
               Referer: 'https://search.bilibili.com/'
             }
           }
@@ -214,10 +247,162 @@ export default class BilibiliSource {
     }
   }
 
+  async resolveShortUrl(shortUrl) {
+    try {
+      const { body } = await makeRequest(shortUrl, {
+        method: 'GET',
+        headers: HEADERS,
+        maxRedirects: 3,
+        timeout: 5000
+      })
+
+      if (body && typeof body === 'string') {
+        const match = body.match(/rel=["']canonical["'][^>]+href=["']([^"']+)["']/)
+        if (match) {
+          return match[1]
+        }
+      }
+
+      return shortUrl
+    } catch (error) {
+      logger('warn', 'Bilibili', `Error: ${error.message}`)
+      return shortUrl
+    }
+  }
+  
+  extractPageParameter(url) {
+    try {
+      const pageMatch = url.match(/[?&]p=(\d+)/)
+      return pageMatch ? parseInt(pageMatch[1]) : 0
+    } catch (error) {
+      return 0
+    }
+  }
+
+  loadSingleVideo(videoData) {
+    const trackInfo = {
+      identifier: videoData.bvid,
+      isSeekable: true,
+      author: videoData.owner.name,
+      length: videoData.duration * 1000,
+      isStream: false,
+      position: 0,
+      title: videoData.title,
+      uri: `https://www.bilibili.com/video/${videoData.bvid}`,
+      artworkUrl: videoData.pic,
+      isrc: null,
+      sourceName: 'bilibili'
+    }
+
+    return {
+      loadType: 'track',
+      data: {
+        encoded: encodeTrack(trackInfo),
+        info: trackInfo,
+        pluginInfo: {
+          aid: videoData.aid,
+          cid: videoData.cid,
+          bvid: videoData.bvid
+        }
+      }
+    }
+  }
+
+  loadVideoPage(videoData, pageIndex) {
+    const pages = videoData.pages || []
+
+    if (pageIndex < 0 || pageIndex >= pages.length) {
+      logger('warn', 'Bilibili', `Invalid page index: ${pageIndex}, using first page`)
+      return this.loadSingleVideo(videoData)
+    }
+
+    const pageData = pages[pageIndex]
+    const trackInfo = {
+      identifier: `${videoData.bvid}?p=${pageData.page}`,
+      isSeekable: true,
+      author: videoData.owner.name,
+      length: pageData.duration * 1000,
+      isStream: false,
+      position: 0,
+      title: `${videoData.title} - ${pageData.part}`,
+      uri: `https://www.bilibili.com/video/${videoData.bvid}?p=${pageData.page}`,
+      artworkUrl: videoData.pic,
+      isrc: null,
+      sourceName: 'bilibili'
+    }
+
+    logger('debug', 'Bilibili', `Created track from page ${pageIndex + 1}: ${trackInfo.title}`)
+
+    return {
+      loadType: 'track',
+      data: {
+        encoded: encodeTrack(trackInfo),
+        info: trackInfo,
+        pluginInfo: {
+          aid: videoData.aid,
+          cid: pageData.cid,
+          bvid: videoData.bvid,
+          page: pageData.page
+        }
+      }
+    }
+  }
+
+  loadVideoAnthology(videoData) {
+    const pages = videoData.pages || []
+
+    const tracks = pages.map((page) => {
+      const trackInfo = {
+        identifier: `${videoData.bvid}?p=${page.page}`,
+        isSeekable: true,
+        author: videoData.owner.name,
+        length: page.duration * 1000,
+        isStream: false,
+        position: 0,
+        title: `${videoData.title} - ${page.part}`,
+        uri: `https://www.bilibili.com/video/${videoData.bvid}?p=${page.page}`,
+        artworkUrl: videoData.pic,
+        isrc: null,
+        sourceName: 'bilibili'
+      }
+
+      return {
+        encoded: encodeTrack(trackInfo),
+        info: trackInfo,
+        pluginInfo: {
+          aid: videoData.aid,
+          cid: page.cid,
+          bvid: videoData.bvid,
+          page: page.page
+        }
+      }
+    })
+
+    logger('debug', 'Bilibili', `Created playlist: ${videoData.title} with ${tracks.length} tracks`)
+
+    return {
+      loadType: 'playlist',
+      data: {
+        info: {
+          name: videoData.title,
+          selectedTrack: 0
+        },
+        tracks
+      }
+    }
+  }
+
   async resolve(url) {
+    if (url.includes('b23.tv')) {
+      url = await this.resolveShortUrl(url)
+      logger('debug', 'Bilibili', `Resolved short URL to: ${url}`)
+    }
+    
     const videoMatch = url.match(this.patterns[0])
     if (videoMatch) {
       const bvidOrAvid = videoMatch[1]
+      const requestedPage = this.extractPageParameter(url)
+
       try {
         let apiUrl = `https://api.bilibili.com/x/web-interface/view?`
         if (bvidOrAvid.startsWith('BV')) {
@@ -228,7 +413,7 @@ export default class BilibiliSource {
 
         const { body } = await makeRequest(apiUrl, {
           method: 'GET',
-          headers: { ...HEADERS, Cookie: this.cookie }
+          headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
         })
 
         if (body.code !== 0) {
@@ -240,51 +425,21 @@ export default class BilibiliSource {
         }
 
         const data = body.data
-        const trackInfo = {
-          identifier: data.bvid,
-          isSeekable: true,
-          author: data.owner.name,
-          length: data.duration * 1000,
-          isStream: false,
-          position: 0,
-          title: data.title,
-          uri: `https://www.bilibili.com/video/${data.bvid}`,
-          artworkUrl: data.pic,
-          isrc: null,
-          sourceName: 'bilibili'
-        }
+        const pages = data.pages || []
 
-        if (data.pages && data.pages.length > 1) {
-          const tracks = data.pages.map((page) => {
-            const pageTrack = { ...trackInfo }
-            pageTrack.title = `${data.title} - ${page.part}`
-            pageTrack.length = page.duration * 1000
-            pageTrack.identifier = `${data.bvid}?p=${page.page}`
-            pageTrack.uri = `https://www.bilibili.com/video/${data.bvid}?p=${page.page}`
+        logger('debug', 'Bilibili', `Video has ${pages.length} page(s)`)
 
-            return {
-              encoded: encodeTrack(pageTrack),
-              info: pageTrack,
-              pluginInfo: { aid: data.aid, cid: page.cid, bvid: data.bvid }
-            }
-          })
-
-          return {
-            loadType: 'playlist',
-            data: {
-              info: { name: data.title, selectedTrack: 0 },
-              tracks
-            }
+        if (pages.length > 1) {
+          if (requestedPage > 0) {
+            logger('debug', 'Bilibili', `Loading specific page ${requestedPage}`)
+            return this.loadVideoPage(data, requestedPage - 1)
+          } else {
+            logger('debug', 'Bilibili', `Loading as playlist`)
+            return this.loadVideoAnthology(data)
           }
-        }
-
-        return {
-          loadType: 'track',
-          data: {
-            encoded: encodeTrack(trackInfo),
-            info: trackInfo,
-            pluginInfo: { aid: data.aid, cid: data.cid, bvid: data.bvid }
-          }
+        } else {
+          logger('debug', 'Bilibili', `Loading as single video`)
+          return this.loadSingleVideo(data)
         }
       } catch (e) {
         return { exception: { message: e.message, severity: 'fault' } }
@@ -306,7 +461,7 @@ export default class BilibiliSource {
 
         const { body } = await makeRequest(apiUrl, {
           method: 'GET',
-          headers: { ...HEADERS, Cookie: this.cookie }
+          headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
         })
 
         if (body.code !== 0)
@@ -374,7 +529,7 @@ export default class BilibiliSource {
             `https://www.bilibili.com/audio/music-service-c/web/song/info?sid=${id}`,
             {
               method: 'GET',
-              headers: { ...HEADERS, Cookie: this.cookie }
+              headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
             }
           )
 
@@ -408,7 +563,7 @@ export default class BilibiliSource {
             `https://www.bilibili.com/audio/music-service-c/web/song/of-menu?sid=${id}&pn=1&ps=100`,
             {
               method: 'GET',
-              headers: { ...HEADERS, Cookie: this.cookie }
+              headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
             }
           )
 
@@ -439,7 +594,7 @@ export default class BilibiliSource {
             `https://www.bilibili.com/audio/music-service-c/web/menu/info?sid=${id}`,
             {
               method: 'GET',
-              headers: { ...HEADERS, Cookie: this.cookie }
+              headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
             }
           )
 
@@ -467,7 +622,7 @@ export default class BilibiliSource {
           `https://api.live.bilibili.com/room/v1/Room/get_info?room_id=${id}`,
           {
             method: 'GET',
-            headers: { ...HEADERS, Cookie: this.cookie }
+            headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
           }
         )
 
@@ -523,7 +678,7 @@ export default class BilibiliSource {
           `https://api.bilibili.com/x/space/wbi/arc/search?${query}`,
           {
             method: 'GET',
-            headers: { ...HEADERS, Cookie: this.cookie }
+            headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
           }
         )
 
@@ -593,7 +748,7 @@ export default class BilibiliSource {
           `https://www.bilibili.com/audio/music-service-c/web/url?sid=${sid}`,
           {
             method: 'GET',
-            headers: { ...HEADERS, Cookie: this.cookie }
+            headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
           }
         )
         if (body.code !== 0 || !body.data.cdns)
@@ -614,7 +769,7 @@ export default class BilibiliSource {
           `https://api.live.bilibili.com/xlive/web-room/v2/index/getRoomPlayInfo?room_id=${roomId}&protocol=0,1&format=0,2&codec=0,1&qn=10000&platform=web&pt=web&no_playurl=0&mask=0`,
           {
             method: 'GET',
-            headers: { ...HEADERS, Cookie: this.cookie }
+            headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
           }
         )
 
@@ -659,7 +814,7 @@ export default class BilibiliSource {
             additionalData: {
               headers: {
                 ...HEADERS,
-                Cookie: this.cookie,
+                Cookie: this.buildCookieHeader(),
                 Referer: `https://live.bilibili.com/${roomId}`
               }
             }
@@ -678,7 +833,7 @@ export default class BilibiliSource {
           `https://api.bilibili.com/x/web-interface/view?bvid=${bvid}`,
           {
             method: 'GET',
-            headers: { ...HEADERS, Cookie: this.cookie }
+            headers: { ...HEADERS, Cookie: this.buildCookieHeader() }
           }
         )
         if (body.code !== 0)
@@ -711,7 +866,7 @@ export default class BilibiliSource {
             'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             Referer: 'https://www.bilibili.com/',
-            Cookie: this.cookie
+            Cookie: this.buildCookieHeader()
           }
         }
       )
@@ -751,7 +906,7 @@ export default class BilibiliSource {
             Referer: 'https://www.bilibili.com/',
             'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            Cookie: this.cookie
+            Cookie: this.buildCookieHeader()
           }
         }
       }
@@ -814,7 +969,10 @@ export default class BilibiliSource {
 
       response.stream.on('error', (err) => {
         logger('error', 'Bilibili', `Upstream stream error: ${err.message}`)
-        if (!stream.destroyed) stream.destroy(err)
+        if (!stream.destroyed) {
+          stream.emit('finishBuffering') 
+          stream.destroy(err)
+        }
       })
 
       return { stream: stream, type: type }
