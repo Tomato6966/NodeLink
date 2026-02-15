@@ -686,8 +686,8 @@ export class Player {
         }
         try {
             const source = this.nodelink.sources.getSource(track.info.sourceName);
-            if (source && typeof source.resolveHoloTrack === 'function') {
-                const holoTrack = await source.resolveHoloTrack(track, {
+            if (source && typeof source['resolveHoloTrack'] === 'function') {
+                const holoTrack = await source['resolveHoloTrack'](track, {
                     fetchChannelInfo: this.nodelink.options.fetchChannelInfo,
                     resolveExternalLinks: this.nodelink.options.resolveExternalLinks
                 });
@@ -899,7 +899,7 @@ export class Player {
             ...this.track.info,
             audioTrackId: this.track.audioTrackId
         };
-        const urlData = await this.nodelink.sources.getTrackUrl(trackInfo, null, this._isRecovering);
+        const urlData = await this.nodelink.sources.getTrackUrl(trackInfo, undefined, this._isRecovering);
         if (!this.track)
             return false;
         this.streamInfo = { ...urlData, trackInfo: this.track.info };
@@ -1261,7 +1261,7 @@ export class Player {
             ...this.track.info,
             audioTrackId: this.track.audioTrackId
         };
-        const urlData = await this.nodelink.sources.getTrackUrl(trackInfo, null, this._isRecovering);
+        const urlData = await this.nodelink.sources.getTrackUrl(trackInfo, undefined, this._isRecovering);
         if (!this.track)
             return false;
         this.streamInfo = { ...urlData, trackInfo: this.track.info };

@@ -326,7 +326,7 @@ else {
      */
     const [{ createPCMStream }, { default: SourceManager }, { default: LyricsManager }, { default: MeaningManager }, { default: CredentialManager }, { default: TrackCacheManager }, { default: RoutePlannerManager }, { default: StatsManager }] = await Promise.all([
         import("../playback/processing/streamProcessor.js"),
-        import('../managers/sourceManager.js'),
+        import("../managers/sourceManager.js"),
         import('../managers/lyricsManager.js'),
         import('../managers/meaningManager.js'),
         import("../managers/credentialManager.js"),
@@ -412,8 +412,8 @@ else {
     const handleLiveChat = async (id, socketPath, payload) => {
         const videoId = payload.videoId;
         const yt = nodelink.sources?.getSource('youtube');
-        if (!yt)
-            throw new Error('YouTube source not available in worker');
+        if (!yt || !yt.liveChat)
+            throw new Error('YouTube source or live chat not available in worker');
         activeChats.set(id, true);
         try {
             const chat = await yt.liveChat.getLiveChat(videoId);

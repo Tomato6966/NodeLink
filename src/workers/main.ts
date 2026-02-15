@@ -19,12 +19,14 @@ import { bufferPool } from '../playback/structs/BufferPool.ts'
 import type { TrackInfoExtended } from '../typings/playback/player.types.ts'
 import type {
   RoutePlannerManager as RoutePlannerManagerLike,
+  SourceInstance,
   TrackInfo,
   TrackStreamResult,
   TrackUrlResult
 } from '../typings/sources/source.types.ts'
 import type {
   ActiveStreamEntry,
+  AudioInterceptor,
   CreatePlayerPayload,
   GuildQueueEntry,
   LoadStreamPayload,
@@ -33,6 +35,7 @@ import type {
   RestorePlayerPayload,
   WorkerCommand,
   WorkerCommandPayload,
+  WorkerInterceptor,
   WorkerNodeLink,
   WorkerPlayer
 } from '../typings/workers/worker.types.ts'
@@ -40,7 +43,8 @@ import { cleanupHttpAgents, initLogger, logger } from '../utils.ts'
 import { createVoiceRelay } from '../voice/voiceRelay.ts'
 
 type WorkerPlayerClass = typeof import('../playback/player.ts').Player
-type CreatePCMStreamFn = typeof import('../playback/processing/streamProcessor.ts').createPCMStream
+type CreatePCMStreamFn =
+  typeof import('../playback/processing/streamProcessor.ts').createPCMStream
 
 let playerClassPromise: Promise<WorkerPlayerClass> | null = null
 let createPCMStreamPromise: Promise<CreatePCMStreamFn> | null = null
@@ -56,9 +60,9 @@ const getPlayerClass = async (): Promise<WorkerPlayerClass> => {
 
 const getCreatePCMStream = async (): Promise<CreatePCMStreamFn> => {
   if (!createPCMStreamPromise) {
-    createPCMStreamPromise = import('../playback/processing/streamProcessor.ts').then(
-      (module) => module.createPCMStream
-    )
+    createPCMStreamPromise = import(
+      '../playback/processing/streamProcessor.ts'
+    ).then((module) => module.createPCMStream)
   }
   return createPCMStreamPromise
 }
@@ -359,11 +363,11 @@ const nodelink: WorkerNodeLink = {
     workerInterceptors: [],
     audioInterceptors: []
   },
-  registerWorkerInterceptor: (fn) => {
+  registerWorkerInterceptor: (fn: WorkerInterceptor) => {
     nodelink.extensions.workerInterceptors.push(fn)
     logger('info', 'Worker', 'Registered worker command interceptor')
   },
-  registerSource: (name, source) => {
+  registerSource: (name: string, source: SourceInstance) => {
     if (!nodelink.sources) {
       logger(
         'warn',
@@ -375,18 +379,18 @@ const nodelink: WorkerNodeLink = {
     nodelink.sources.sources.set(name, source)
     logger('info', 'Worker', `Registered custom source: ${name}`)
   },
-  registerFilter: (name, filter) => {
+  registerFilter: (name: string, filter: unknown) => {
     if (!nodelink.extensions.filters) nodelink.extensions.filters = new Map()
     nodelink.extensions.filters.set(name, filter)
     logger('info', 'Worker', `Registered custom filter: ${name}`)
   },
-  registerAudioInterceptor: (interceptor) => {
+  registerAudioInterceptor: (interceptor: AudioInterceptor) => {
     if (!nodelink.extensions.audioInterceptors)
       nodelink.extensions.audioInterceptors = []
     nodelink.extensions.audioInterceptors.push(interceptor)
     logger('info', 'Worker', 'Registered custom audio interceptor')
   }
-}
+} as unknown as WorkerNodeLink
 
 const createdVoiceRelay = createVoiceRelay({
   enabled: config.voiceReceive?.enabled,

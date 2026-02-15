@@ -1,6 +1,5 @@
-import Validator from 'fastest-validator';
+import { validator } from "../validators.js";
 import { decodeTrack, logger, sendErrorResponse } from "../utils.js";
-const v = new Validator({ haltOnFirstError: true });
 const mixTrackSchema = {
     type: 'object',
     props: {
@@ -10,12 +9,12 @@ const mixTrackSchema = {
     },
     $$strict: false
 };
-const createMixSchema = v.compile({
+const createMixSchema = validator.compile({
     track: mixTrackSchema,
     volume: { type: 'number', min: 0, max: 1, optional: true },
     $$strict: false
 });
-const pathSchema = v.compile({
+const pathSchema = validator.compile({
     sessionId: { type: 'string', empty: false },
     guildId: { type: 'string', pattern: /^\d{17,20}$/, messages: { stringPattern: 'guildId must be 17-20 digits' } }
 });

@@ -1,7 +1,6 @@
-import Validator from 'fastest-validator';
+import { validator } from "../validators.js";
 import { logger, makeRequest, sendErrorResponse } from "../utils.js";
-const v = new Validator({ haltOnFirstError: true });
-const refreshTokenSchema = v.compile({
+const refreshTokenSchema = validator.compile({
     refreshToken: { type: 'string', min: 1, empty: false }
 });
 async function handler(_nodelink, req, res, sendResponse, parsedUrl) {

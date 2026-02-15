@@ -7,15 +7,15 @@ import type { Socket } from 'node:net'
 import type { Readable } from 'node:stream'
 import type { Worker as NodeWorker } from 'node:worker_threads'
 import type {
-  CredentialEntry,
-  CredentialManagerStats
-} from '../modules/credential.types.ts'
-import type { LoggerFn, TrackInfoExtended } from '../playback/player.types.ts'
-import type {
   StatsMetricsPayload,
   StatsSnapshot,
   WorkerMetricsPayload
 } from '../api/stats.types.ts'
+import type {
+  CredentialEntry,
+  CredentialManagerStats
+} from '../modules/credential.types.ts'
+import type { LoggerFn, TrackInfoExtended } from '../playback/player.types.ts'
 import type { TrackCacheEntry } from '../playback/trackCache.types.ts'
 
 /**
@@ -328,9 +328,9 @@ export interface TrackInfo {
   /** Track source URI */
   uri: string
   /** Artwork/thumbnail URL */
-  artworkUrl?: string
+  artworkUrl?: string | null
   /** International Standard Recording Code */
-  isrc?: string
+  isrc?: string | null
   /** Source name (e.g., 'youtube', 'spotify') */
   sourceName: string
 }
@@ -392,6 +392,110 @@ export interface LiveChatPollResult {
 }
 
 /**
+ * Result returned by search / resolve calls.
+ * @public
+ */
+export interface SourceResult {
+  /** Type of load (track, playlist, search, empty, error) */
+  loadType?: string
+  /** Data returned (TrackData, PlaylistInfo, etc.) */
+  data?: unknown
+  /** Exception if call failed */
+  exception?: {
+    /** Error message */
+    message: string
+    /** Error severity level */
+    severity?: string
+    /** Error cause */
+    cause?: string
+    /** Detailed error objects */
+    errors?: unknown[]
+  }
+}
+
+/**
+ * Represents a loaded source instance (e.g. YouTube, SoundCloud, HTTP).
+ * @public
+ */
+export interface SourceInstance {
+  /** Called once during initialization; returns true if ready. */
+  setup?: () => Promise<boolean>
+  /** Search for tracks by query. */
+  search?: (
+    query: string,
+    sourceName?: string,
+    searchType?: string
+  ) => Promise<SourceResult>
+  /** Resolve a URL to track/playlist data. */
+  resolve?: (url: string, type?: string) => Promise<SourceResult>
+  /** Get a playable URL for a track. */
+  getTrackUrl?: (
+    trackInfo: TrackInfo | TrackInfoExtended,
+    itag?: number,
+    isRecovering?: boolean
+  ) => Promise<
+    TrackUrlResult & {
+      protocol?: string
+      format?: string | { itag?: number; [key: string]: unknown }
+      trackInfo?: TrackInfoExtended
+      additionalData?: Record<string, unknown>
+    }
+  >
+  /** Fetch an audio stream for a track. */
+  loadStream?: (
+    track: TrackInfo | TrackInfoExtended,
+    url: string,
+    protocol?: string,
+    additionalData?: Record<string, unknown>
+  ) => Promise<
+    TrackStreamResult & { type?: string; exception?: { message: string } }
+  >
+  /** Get chapters for a track (e.g. YouTube chapters). */
+  getChapters?: (trackInfo: TrackInfo | TrackInfoExtended) => Promise<unknown[]>
+  /** Additional source names that this source responds to. */
+  additionalsSourceName?: string[]
+  /** Search term prefixes (e.g. 'scsearch'). */
+  searchTerms?: string[]
+  /** Recommendation term prefixes. */
+  recommendationTerm?: string[]
+  /** URL regex patterns that this source handles. */
+  patterns?: RegExp[]
+  /** Priority for URL pattern matching (higher wins). */
+  priority?: number
+  /** Live chat handler (YouTube). */
+  handleLiveChat?: (socket: unknown, videoId: string) => Promise<unknown>
+  /** Live chat accessor (YouTube). */
+  liveChat?: {
+    /** Get live chat instance */
+    getLiveChat: (videoId: string) => Promise<LiveChat | null>
+  }
+  /** OAuth credentials (source-specific). */
+  oauth?: {
+    refreshToken?: string | null
+    accessToken?: string | null
+    tokenExpiry?: number
+    cleanup?: () => void
+  }
+  /** YouTube internal context. */
+  ytContext?: { client?: { visitorData?: string | null } }
+  /** Source-native seek (Deezer/SABR). */
+  resolveHoloTrack?: (
+    track: {
+      info: TrackInfoExtended
+      userData?: unknown
+      [key: string]: unknown
+    },
+    options: { fetchChannelInfo?: boolean; resolveExternalLinks?: boolean }
+  ) => Promise<{
+    info: TrackInfoExtended
+    userData?: unknown
+    [key: string]: unknown
+  } | null>
+  /** Catch-all for source-specific fields. */
+  [key: string]: unknown
+}
+
+/**
  * Minimal NodeLink context for workers
  * @public
  */
@@ -422,32 +526,43 @@ export interface WorkerNodeLink {
  */
 export interface SourceManager {
   /** Resolve URL to track(s) */
-  resolve: (url: string) => Promise<unknown>
+  resolve: (url: string) => Promise<SourceResult>
   /** Search for tracks */
-  search: (source: string, query: string) => Promise<unknown>
+  search: (source: string, query: string) => Promise<SourceResult>
   /** Unified search across sources */
-  unifiedSearch: (query: string) => Promise<unknown>
+  unifiedSearch: (query: string) => Promise<SourceResult>
   /** Get track URL */
   getTrackUrl: (
     track: TrackInfo | TrackInfoExtended,
     itag?: number,
-    ...args: unknown[]
-  ) => Promise<TrackUrlResult & { protocol?: string; format?: unknown; additionalData?: Record<string, unknown> }>
+    isRecovering?: boolean
+  ) => Promise<
+    TrackUrlResult & {
+      protocol?: string
+      format?: string | { itag?: number; [key: string]: unknown }
+      trackInfo?: TrackInfoExtended
+      additionalData?: Record<string, unknown>
+    }
+  >
   /** Get track stream */
   getTrackStream: (
     track: TrackInfo | TrackInfoExtended,
     url: string,
-    protocol: string,
-    additionalData: Record<string, unknown>
-  ) => Promise<TrackStreamResult & { type?: string; exception?: { message: string } }>
+    protocol?: string,
+    additionalData?: Record<string, unknown>
+  ) => Promise<
+    TrackStreamResult & { type?: string; exception?: { message: string } }
+  >
   /** Get track chapters */
-  getChapters: (track: { info?: TrackInfo | TrackInfoExtended }) => Promise<unknown>
+  getChapters: (track: {
+    info?: TrackInfo | TrackInfoExtended
+  }) => Promise<unknown[]>
   /** Get source by name */
-  getSource: (name: string) => Record<string, unknown> | undefined
+  getSource: (name: string) => SourceInstance | null
   /** Load sources from folder */
   loadFolder: () => Promise<void>
   /** Primary source instances keyed by source name */
-  sources: Map<string, unknown>
+  sources: Map<string, SourceInstance>
   /** Get names of all enabled sources */
   getEnabledSourceNames: () => string[]
 }
@@ -647,6 +762,8 @@ export interface RoutePlannerManager {
   initialize?: () => Promise<void>
   /** Dispose route planner */
   dispose?: () => Promise<void>
+  /** Get an IP address */
+  getIP?: () => string | null | undefined
 }
 
 /**

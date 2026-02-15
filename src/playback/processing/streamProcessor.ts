@@ -2552,7 +2552,9 @@ export const createSeekeableAudioResource = async (
   initialFilters: FiltersState,
   player: { streamInfo: StreamInfo; loudnessNormalizer?: boolean },
   volume: number = 1.0,
-  audioMixer: AudioMixer | null = null
+  audioMixer: AudioMixer | null = null,
+  returnPCM: boolean = false,
+  enableAGC: boolean = true
 ): Promise<StreamAudioResource | ErrorResponse> => {
   try {
     const hinted = String(player.streamInfo?.format ?? '').toLowerCase()
@@ -2595,8 +2597,8 @@ export const createSeekeableAudioResource = async (
         initialFilters,
         volume,
         audioMixer,
-        false,
-        player.loudnessNormalizer
+        returnPCM,
+        returnPCM ? true : (player.loudnessNormalizer ?? enableAGC)
       )
     }
 
@@ -2628,8 +2630,8 @@ export const createSeekeableAudioResource = async (
       initialFilters,
       volume,
       audioMixer,
-      false,
-      player.loudnessNormalizer
+      returnPCM,
+      returnPCM ? true : (player.loudnessNormalizer ?? enableAGC)
     )
   } catch (err) {
     const cause = err instanceof SeekError ? err.code : 'UNKNOWN'

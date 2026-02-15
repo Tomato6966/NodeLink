@@ -19,7 +19,7 @@ import LyricsManager from '../managers/lyricsManager.js';
 import MeaningManager from '../managers/meaningManager.js';
 import PluginManager from '../managers/pluginManager.js';
 import RoutePlannerManager from '../managers/routePlannerManager.js';
-import SourceManager from '../managers/sourceManager.js';
+import SourceManager from "../managers/sourceManager.js";
 import StatsManager from "../managers/statsManager.js";
 import TrackCacheManager from "../managers/trackCacheManager.js";
 import { bufferPool } from "../playback/structs/BufferPool.js";

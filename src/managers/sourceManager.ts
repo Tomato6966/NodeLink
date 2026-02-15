@@ -1,8 +1,16 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { TrackInfoExtended } from '../typings/playback/player.types.ts'
+import type { VoiceConnection } from '@performanc/voice'
 import type {
+  SourceManagerLike,
+  TrackFormat,
+  TrackInfoExtended
+} from '../typings/playback/player.types.ts'
+import type {
+  SourceInstance,
+  SourceResult,
+  TrackCacheManager,
   TrackInfo,
   TrackStreamResult,
   TrackUrlResult
@@ -10,107 +18,42 @@ import type {
 import { logger } from '../utils.ts'
 
 /**
- * Represents a loaded source instance (e.g. YouTube, SoundCloud, HTTP).
- * Sources are plain JS classes with optional properties describing
- * their search terms, URL patterns, and priority.
- */
-interface SourceInstance {
-  /** Called once during initialization; returns true if ready. */
-  setup: () => Promise<boolean>
-  /** Search for tracks by query. */
-  search?: (query: string, ...args: unknown[]) => Promise<unknown>
-  /** Resolve a URL to track/playlist data. */
-  resolve?: (url: string) => Promise<unknown>
-  /** Get a playable URL for a track. */
-  getTrackUrl?: (
-    trackInfo: TrackInfo | TrackInfoExtended,
-    ...args: unknown[]
-  ) => Promise<TrackUrlResult & { protocol?: string; format?: unknown; additionalData?: Record<string, unknown> }>
-  /** Fetch an audio stream for a track. */
-  loadStream?: (
-    track: TrackInfo | TrackInfoExtended,
-    url: string,
-    protocol?: string,
-    additionalData?: Record<string, unknown>
-  ) => Promise<TrackStreamResult & { type?: string; exception?: { message: string } }>
-  /** Get chapters for a track (e.g. YouTube chapters). */
-  getChapters?: (trackInfo: TrackInfo | TrackInfoExtended) => Promise<unknown>
-  /** Additional source names that this source responds to. */
-  additionalsSourceName?: string[]
-  /** Search term prefixes (e.g. 'scsearch'). */
-  searchTerms?: string[]
-  /** Recommendation term prefixes. */
-  recommendationTerm?: string[]
-  /** URL regex patterns that this source handles. */
-  patterns?: RegExp[]
-  /** Priority for URL pattern matching (higher wins). */
-  priority?: number
-  /** Live chat accessor (YouTube). */
-  liveChat?: {
-    getLiveChat: (videoId: string) => Promise<unknown>
-  }
-  /** OAuth credentials (source-specific). */
-  oauth?: {
-    refreshToken?: string | null
-    accessToken?: string | null
-    tokenExpiry?: number
-  }
-  /** YouTube internal context. */
-  ytContext?: { client?: { visitorData?: string } }
-  /** Catch-all for source-specific fields. */
-  [key: string]: unknown
-}
-
-/**
- * Entry in the pattern map used for URL-to-source routing.
- */
-interface PatternEntry {
-  /** Compiled regex pattern */
-  regex: RegExp
-  /** Source key to route to */
-  sourceName: string
-  /** Matching priority (higher wins) */
-  priority: number
-}
-
-/**
  * Context object passed to the SourcesManager constructor.
  * Must expose the NodeLink options and a stats manager for instrumentation.
  */
-interface SourcesManagerContext {
-  options: Record<string, unknown> & {
-    sources?: Record<
-      string,
-      { enabled?: boolean } | undefined
-    >
+export interface SourcesManagerContext {
+  options: {
+    sources?: Record<string, { enabled?: boolean } | undefined>
     defaultSearchSource?: string | string[]
     unifiedSearchSources?: string[]
     maxSearchResults?: number
     maxAlbumPlaylistLength?: number
+    defaultVolume?: number
+    enableHoloTracks?: boolean
+    fetchChannelInfo?: boolean
+    resolveExternalLinks?: boolean
+    audio?: {
+      loudnessNormalizer?: boolean
+    }
   }
   statsManager?: {
     incrementSourceSuccess?: (source: string) => void
     incrementSourceFailure?: (source: string) => void
+    incrementPlaybackEvent?: (event: string) => void
   }
-  credentialManager?: { get: <T = unknown>(key: string) => T | null }
-  trackCacheManager?: {
-    get: <T = unknown>(source: string, identifier: string) => T | null
-    set: (source: string, identifier: string, value: unknown, ttlMs?: number) => void
-  }
-  routePlanner?: { getIP?: () => string | undefined }
+  credentialManager?: {
+    get: <T = unknown>(key: string) => T | null
+    set: (key: string, value: unknown, ttlMs?: number) => void
+  } | null
+  trackCacheManager?: TrackCacheManager | null
+  routePlanner?: { getIP?: () => string | null | undefined }
+  workerManager?: unknown
+  sourceWorkerManager?: unknown
+  voiceRelay?: { attach?: (connection: VoiceConnection, guildId: string) => void }
   [key: string]: unknown
 }
 
-/**
- * Result returned by search / resolve calls.
- */
-interface SourceResult {
-  loadType?: string
-  data?: unknown
-  exception?: { message: string; severity?: string }
-}
-
-export default class SourcesManager {
+export default class SourcesManager implements SourceManagerLike {
   nodelink: SourcesManagerContext
   sources: Map<string, SourceInstance>
   sourceMap: Map<string, SourceInstance>
@@ -152,12 +95,12 @@ export default class SourcesManager {
 
       if (!enabled) return
 
-      const Mod = (mod['default'] || mod) as new (
+      const Mod = (mod.default || mod) as new (
         ctx: SourcesManagerContext
       ) => SourceInstance
       const instance = new Mod(this.nodelink)
 
-      if (await instance.setup()) {
+      if (instance.setup && (await instance.setup())) {
         this.sources.set(sourceKey, instance)
         this.sourceMap.set(sourceKey, instance)
 
@@ -207,7 +150,7 @@ export default class SourcesManager {
           const filePath = path.join(sourcesDir, file)
           const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`)
           const mod = await import(fileUrl.href)
-          await processSource(name, mod as Record<string, unknown>)
+          await processSource(name, mod)
         })
       )
     } catch (e) {
@@ -225,7 +168,7 @@ export default class SourcesManager {
 
   async _instrumentedSourceCall(
     sourceName: string,
-    method: string,
+    method: 'search' | 'resolve' | 'getChapters' | 'loadStream',
     ...args: unknown[]
   ): Promise<SourceResult> {
     const instance = this.sourceMap.get(sourceName)
@@ -242,13 +185,13 @@ export default class SourcesManager {
     }
 
     try {
-      const fn = (instance as Record<string, (...a: unknown[]) => Promise<SourceResult>>)[method] as
+      const fn = (instance as Record<string, unknown>)[method] as
         | ((...a: unknown[]) => Promise<SourceResult>)
         | undefined
       if (!fn) {
         throw new Error(`Method ${method} not found on source ${sourceName}`)
       }
-      const result = await fn.call(instance, ...args)
+      const result = await fn.apply(instance, args)
       if (result.loadType === 'error') {
         this.nodelink.statsManager?.incrementSourceFailure?.(sourceName)
       } else {
@@ -418,34 +361,53 @@ export default class SourcesManager {
   async getTrackUrl(
     track: TrackInfo | TrackInfoExtended,
     itag?: number,
-    ...args: unknown[]
-  ): Promise<TrackUrlResult & { protocol?: string; format?: unknown; additionalData?: Record<string, unknown> }> {
+    isRecovering?: boolean
+  ): Promise<
+    TrackUrlResult & {
+      protocol?: string
+      format?: TrackFormat
+      trackInfo?: TrackInfoExtended
+      additionalData?: Record<string, unknown>
+    }
+  > {
     const instance = this.sourceMap.get(track.sourceName)
     if (!instance?.getTrackUrl) {
-      throw new Error(`Source ${track.sourceName} not found or does not support getTrackUrl`)
+      throw new Error(
+        `Source ${track.sourceName} not found or does not support getTrackUrl`
+      )
     }
-    return await instance.getTrackUrl(track, itag, ...args)
+    return await instance.getTrackUrl(track, itag, isRecovering)
   }
 
   async getTrackStream(
     track: TrackInfo | TrackInfoExtended,
     url: string,
-    protocol: string,
-    additionalData: Record<string, unknown>
-  ): Promise<TrackStreamResult & { type?: string; exception?: { message: string } }> {
+    protocol?: string,
+    additionalData?: Record<string, unknown>
+  ): Promise<
+    TrackStreamResult & { type?: string; exception?: { message: string } }
+  > {
     const instance = this.sourceMap.get(track.sourceName)
     if (!instance?.loadStream) {
-      throw new Error(`Source ${track.sourceName} not found or does not support loadStream`)
+      throw new Error(
+        `Source ${track.sourceName} not found or does not support loadStream`
+      )
     }
     return await instance.loadStream(track, url, protocol, additionalData)
   }
 
-  async getChapters(track: { info?: TrackInfo | TrackInfoExtended }): Promise<unknown> {
+  async getChapters(track: {
+    info?: TrackInfo | TrackInfoExtended
+  }): Promise<unknown[]> {
     const sourceName = track.info?.sourceName
     if (!sourceName) return []
 
     const instance = this.sourceMap.get(sourceName)
-    if (!instance || typeof instance.getChapters !== 'function' || !track.info) {
+    if (
+      !instance ||
+      typeof instance.getChapters !== 'function' ||
+      !track.info
+    ) {
       return []
     }
     return await instance.getChapters(track.info)
@@ -455,8 +417,8 @@ export default class SourcesManager {
     return Array.from(this.sources.values())
   }
 
-  getSource(name: string): SourceInstance | undefined {
-    return this.sourceMap.get(name)
+  getSource(name: string): SourceInstance | null {
+    return this.sourceMap.get(name) || null
   }
 
   getEnabledSourceNames(): string[] {
@@ -471,4 +433,16 @@ export default class SourcesManager {
     }
     return enabledNames
   }
+}
+
+/**
+ * Entry in the pattern map used for URL-to-source routing.
+ */
+interface PatternEntry {
+  /** Compiled regex pattern */
+  regex: RegExp
+  /** Source key to route to */
+  sourceName: string
+  /** Matching priority (higher wins) */
+  priority: number
 }

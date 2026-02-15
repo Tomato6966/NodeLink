@@ -1,6 +1,5 @@
-import Validator from 'fastest-validator';
+import { validator } from "../validators.js";
 import { sendErrorResponse, sendResponse } from "../utils.js";
-const v = new Validator({ haltOnFirstError: true });
 function getStatus(nodelink, req, res) {
     const routePlanner = nodelink.routePlanner;
     const now = Date.now();
@@ -34,7 +33,7 @@ function getStatus(nodelink, req, res) {
     };
     sendResponse(req, res, status, 200);
 }
-const freeAddressSchema = v.compile({
+const freeAddressSchema = validator.compile({
     address: { type: 'string', empty: false }
 });
 function freeAddress(nodelink, req, res) {

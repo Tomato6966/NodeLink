@@ -1,7 +1,6 @@
-import Validator from 'fastest-validator';
+import { validator } from "../validators.js";
 import { logger, sendErrorResponse } from "../utils.js";
-const v = new Validator({ haltOnFirstError: true });
-const sessionPatchSchema = v.compile({
+const sessionPatchSchema = validator.compile({
     resuming: { type: 'boolean', optional: true },
     timeout: { type: 'number', min: 0, optional: true },
     $$strict: false

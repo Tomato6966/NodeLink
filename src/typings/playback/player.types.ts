@@ -162,6 +162,7 @@ export interface PlayerTrack {
   userData?: unknown
   audioTrackId?: string
   pluginInfo?: Record<string, unknown>
+  [key: string]: unknown
 }
 
 export type StreamInfo =
@@ -265,7 +266,10 @@ export interface AudioMixer {
  */
 export interface FadeTimers {
   trackEnd: NodeJS.Timeout | null
-  pause: NodeJS.Timeout | { interval: NodeJS.Timeout; timeout?: NodeJS.Timeout } | null
+  pause:
+    | NodeJS.Timeout
+    | { interval: NodeJS.Timeout; timeout?: NodeJS.Timeout }
+    | null
   stop: NodeJS.Timeout | null
 }
 
@@ -303,7 +307,7 @@ export interface NodeLinkOptions {
 export interface SourceManagerLike {
   getTrackUrl: (
     trackInfo: TrackInfoExtended,
-    arg1?: unknown,
+    itag?: number,
     isRecovering?: boolean
   ) => Promise<
     TrackUrlResult & {
@@ -321,13 +325,9 @@ export interface SourceManagerLike {
   ) => Promise<
     TrackStreamResult & { type?: string; exception?: { message: string } }
   >
-  getSource: (name: string) => {
-    loadStream?: (...args: unknown[]) => unknown
-    resolveHoloTrack?: (
-      track: PlayerTrack,
-      options: { fetchChannelInfo?: boolean; resolveExternalLinks?: boolean }
-    ) => Promise<PlayerTrack | null>
-  } | null
+  getSource: (
+    name: string
+  ) => import('../sources/source.types.ts').SourceInstance | null
 }
 
 /**
@@ -381,6 +381,7 @@ export interface NodeLink {
   lyrics: LyricsManagerLike
   statistics?: { players?: number }
   extensions?: { audioInterceptors?: unknown[] } & Record<string, unknown>
+  [key: string]: unknown
 }
 
 /**

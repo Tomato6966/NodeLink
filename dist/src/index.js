@@ -349,7 +349,7 @@ class NodelinkServer extends EventEmitter {
     async _initSources(isClusterPrimary, _options) {
         if (!isClusterPrimary) {
             const [{ default: sourceMan }, { default: lyricsMan }, { default: meaningMan }] = await Promise.all([
-                import('./managers/sourceManager.js'),
+                import("./managers/sourceManager.js"),
                 import('./managers/lyricsManager.js'),
                 import('./managers/meaningManager.js')
             ]);
@@ -1107,7 +1107,13 @@ class NodelinkServer extends EventEmitter {
                     socket.close(1008, 'YouTube source not enabled');
                     return;
                 }
-                yt.handleLiveChat(socket, videoId);
+                const liveChatFn = yt.handleLiveChat;
+                if (typeof liveChatFn === 'function') {
+                    liveChatFn.call(yt, socket, videoId);
+                }
+                else {
+                    socket.close(1008, 'YouTube live chat not supported');
+                }
                 return;
             }
             logger('info', 'YouTube-LiveChat', `Delegating live chat for video: ${videoId} to worker`);

@@ -1920,7 +1920,7 @@ class StreamAudioResource extends BaseAudioResource {
     }
 }
 export const createAudioResource = (stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false, enableAGC = true) => new StreamAudioResource(stream, type, nodelink, initialFilters, volume, audioMixer, returnPCM, enableAGC);
-export const createSeekeableAudioResource = async (url, seekTime, endTime, nodelink, initialFilters, player, volume = 1.0, audioMixer = null) => {
+export const createSeekeableAudioResource = async (url, seekTime, endTime, nodelink, initialFilters, player, volume = 1.0, audioMixer = null, returnPCM = false, enableAGC = true) => {
     try {
         const hinted = String(player.streamInfo?.format ?? '').toLowerCase();
         const ext = _extFromUrl(url);
@@ -1940,7 +1940,7 @@ export const createSeekeableAudioResource = async (url, seekTime, endTime, nodel
                     passthroughStream.emit('error', err);
             });
             const format = hinted || (ext ? ext : 'm4a');
-            return new StreamAudioResource(passthroughStream, format, nodelink, initialFilters, volume, audioMixer, false, player.loudnessNormalizer);
+            return new StreamAudioResource(passthroughStream, format, nodelink, initialFilters, volume, audioMixer, returnPCM, returnPCM ? true : (player.loudnessNormalizer ?? enableAGC));
         }
         const { stream, meta } = (await seekableStream(url, seekTime, endTime, {}));
         const passthroughStream = new PassThrough({
@@ -1954,7 +1954,7 @@ export const createSeekeableAudioResource = async (url, seekTime, endTime, nodel
                 passthroughStream.emit('error', err);
         });
         const format = meta.codec?.container || player.streamInfo?.format;
-        return new StreamAudioResource(passthroughStream, format, nodelink, initialFilters, volume, audioMixer, false, player.loudnessNormalizer);
+        return new StreamAudioResource(passthroughStream, format, nodelink, initialFilters, volume, audioMixer, returnPCM, returnPCM ? true : (player.loudnessNormalizer ?? enableAGC));
     }
     catch (err) {
         const cause = err instanceof SeekError ? err.code : 'UNKNOWN';

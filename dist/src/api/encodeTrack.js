@@ -1,7 +1,6 @@
-import Validator from 'fastest-validator';
+import { validator } from "../validators.js";
 import { encodeTrack, logger, sendErrorResponse } from "../utils.js";
-const v = new Validator({ haltOnFirstError: true });
-const encodeTrackSchema = v.compile({
+const encodeTrackSchema = validator.compile({
     track: { type: 'string', empty: false, messages: { required: 'Missing track parameter.', stringEmpty: 'Missing track parameter.' } }
 });
 function handler(_nodelink, req, res, sendResponse, parsedUrl) {

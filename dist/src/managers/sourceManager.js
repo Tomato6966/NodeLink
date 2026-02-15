@@ -11,6 +11,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from "../utils.js";
 export default class SourcesManager {
+    nodelink;
+    sources;
+    sourceMap;
+    searchAliasMap;
+    patternMap;
     constructor(nodelink) {
         this.nodelink = nodelink;
         this.sources = new Map();
@@ -30,13 +35,13 @@ export default class SourcesManager {
             const isYouTube = name === 'youtube' || name.includes('YouTube.js');
             const sourceKey = isYouTube ? 'youtube' : name;
             const enabled = isYouTube
-                ? this.nodelink.options.sources.youtube?.enabled
-                : !!this.nodelink.options.sources[sourceKey]?.enabled;
+                ? this.nodelink.options.sources?.['youtube']?.enabled
+                : !!this.nodelink.options.sources?.[sourceKey]?.enabled;
             if (!enabled)
                 return;
-            const Mod = mod.default || mod;
+            const Mod = (mod['default'] || mod);
             const instance = new Mod(this.nodelink);
-            if (await instance.setup()) {
+            if (instance.setup && (await instance.setup())) {
                 this.sources.set(sourceKey, instance);
                 this.sourceMap.set(sourceKey, instance);
                 if (Array.isArray(instance.additionalsSourceName)) {
@@ -76,7 +81,7 @@ export default class SourcesManager {
                 const name = path.basename(file, '.js').toLowerCase();
                 const filePath = path.join(sourcesDir, file);
                 const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`);
-                const mod = await import(__rewriteRelativeImportExtension(fileUrl));
+                const mod = await import(__rewriteRelativeImportExtension(fileUrl.href));
                 await processSource(name, mod);
             }));
         }
@@ -87,22 +92,27 @@ export default class SourcesManager {
     }
     async _instrumentedSourceCall(sourceName, method, ...args) {
         const instance = this.sourceMap.get(sourceName);
-        if (!instance || typeof instance[method] !== 'function') {
-            this.nodelink.statsManager.incrementSourceFailure(sourceName || 'unknown');
+        if (!instance ||
+            typeof instance[method] !== 'function') {
+            this.nodelink.statsManager?.incrementSourceFailure?.(sourceName || 'unknown');
             throw new Error(`Source ${sourceName} not found or does not support ${method}`);
         }
         try {
-            const result = await instance[method](...args);
+            const fn = instance[method];
+            if (!fn) {
+                throw new Error(`Method ${method} not found on source ${sourceName}`);
+            }
+            const result = await fn.apply(instance, args);
             if (result.loadType === 'error') {
-                this.nodelink.statsManager.incrementSourceFailure(sourceName);
+                this.nodelink.statsManager?.incrementSourceFailure?.(sourceName);
             }
             else {
-                this.nodelink.statsManager.incrementSourceSuccess(sourceName);
+                this.nodelink.statsManager?.incrementSourceSuccess?.(sourceName);
             }
             return result;
         }
         catch (e) {
-            this.nodelink.statsManager.incrementSourceFailure(sourceName);
+            this.nodelink.statsManager?.incrementSourceFailure?.(sourceName);
             throw e;
         }
     }
@@ -119,7 +129,7 @@ export default class SourcesManager {
         let searchQuery = query;
         if (query.includes(':')) {
             const parts = query.split(':');
-            const possibleType = parts[0].toLowerCase();
+            const possibleType = (parts[0] ?? '').toLowerCase();
             const types = ['playlist', 'artist', 'album', 'channel', 'track'];
             if (types.includes(possibleType)) {
                 searchType = possibleType;
@@ -137,7 +147,9 @@ export default class SourcesManager {
         for (const source of defaultSources) {
             try {
                 const result = await this.search(source, query);
-                if (result.loadType === 'search' && result.data.length > 0) {
+                if (result.loadType === 'search' &&
+                    Array.isArray(result.data) &&
+                    result.data.length > 0) {
                     return result;
                 }
             }
@@ -148,9 +160,9 @@ export default class SourcesManager {
         return { loadType: 'empty', data: {} };
     }
     async unifiedSearch(query) {
-        const searchSources = this.nodelink.options.unifiedSearchSources || [
+        const searchSources = (this.nodelink.options.unifiedSearchSources || [
             'youtube'
-        ];
+        ]);
         logger('debug', 'Sources', `Performing unified search for "${query}" on [${searchSources.join(', ')}]`);
         const searchPromises = searchSources.map((sourceName) => this._instrumentedSourceCall(sourceName, 'search', query).catch((e) => {
             logger('warn', 'Sources', `A source (${sourceName}) failed during unified search: ${e.message}`);
@@ -180,9 +192,9 @@ export default class SourcesManager {
     }
     async resolve(url) {
         let sourceName = null;
-        for (let i = 0; i < this.patternMap.length; i++) {
-            if (this.patternMap[i].regex.test(url)) {
-                sourceName = this.patternMap[i].sourceName;
+        for (const entry of this.patternMap) {
+            if (entry.regex.test(url)) {
+                sourceName = entry.sourceName;
                 break;
             }
         }
@@ -207,12 +219,18 @@ export default class SourcesManager {
     async reload() {
         await this.loadFolder();
     }
-    async getTrackUrl(track, itag, ...args) {
+    async getTrackUrl(track, itag, isRecovering) {
         const instance = this.sourceMap.get(track.sourceName);
-        return await instance.getTrackUrl(track, itag, ...args);
+        if (!instance?.getTrackUrl) {
+            throw new Error(`Source ${track.sourceName} not found or does not support getTrackUrl`);
+        }
+        return await instance.getTrackUrl(track, itag, isRecovering);
     }
     async getTrackStream(track, url, protocol, additionalData) {
         const instance = this.sourceMap.get(track.sourceName);
+        if (!instance?.loadStream) {
+            throw new Error(`Source ${track.sourceName} not found or does not support loadStream`);
+        }
         return await instance.loadStream(track, url, protocol, additionalData);
     }
     async getChapters(track) {
@@ -220,7 +238,7 @@ export default class SourcesManager {
         if (!sourceName)
             return [];
         const instance = this.sourceMap.get(sourceName);
-        if (!instance || typeof instance.getChapters !== 'function') {
+        if (!instance || typeof instance.getChapters !== 'function' || !track.info) {
             return [];
         }
         return await instance.getChapters(track.info);
@@ -229,13 +247,16 @@ export default class SourcesManager {
         return Array.from(this.sources.values());
     }
     getSource(name) {
-        return this.sourceMap.get(name);
+        return this.sourceMap.get(name) || null;
     }
     getEnabledSourceNames() {
         const enabledNames = [];
-        for (const sourceName in this.nodelink.options.sources) {
-            if (this.nodelink.options.sources[sourceName]?.enabled) {
-                enabledNames.push(sourceName);
+        const sources = this.nodelink.options.sources;
+        if (sources) {
+            for (const sourceName in sources) {
+                if (sources[sourceName]?.enabled) {
+                    enabledNames.push(sourceName);
+                }
             }
         }
         return enabledNames;

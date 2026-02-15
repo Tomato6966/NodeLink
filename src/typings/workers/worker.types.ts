@@ -13,6 +13,7 @@ import type {
   CredentialManager as CredentialManagerLike,
   MeaningManager as MeaningManagerLike,
   RoutePlannerManager as RoutePlannerManagerLike,
+  SourceInstance as SourceInstanceBase,
   SourceManager as SourceManagerBase,
   TrackCacheManager as TrackCacheManagerLike,
   TrackInfo,
@@ -92,9 +93,10 @@ export interface WorkerNodeLink extends NodeLink {
   pluginManager: PluginManagerLike
   extensions: WorkerExtensions
   registerWorkerInterceptor: (fn: WorkerInterceptor) => void
-  registerSource: (name: string, source: unknown) => void
+  registerSource: (name: string, source: SourceInstanceBase) => void
   registerFilter: (name: string, filter: unknown) => void
   registerAudioInterceptor: (fn: AudioInterceptor) => void
+  [key: string]: unknown
 }
 
 /**
@@ -148,38 +150,7 @@ export type WorkerPlayer = {
 /**
  * Source manager interface with worker-only helpers.
  */
-export type WorkerSourceManager = SourceManagerLike &
-  Omit<SourceManagerBase, 'getTrackUrl' | 'getTrackStream' | 'getSource'> & {
-    getTrackUrl: (
-      trackInfo: TrackInfo | TrackInfoExtended,
-      itag?: number
-    ) => Promise<
-      TrackUrlResult & {
-        protocol?: string
-        format?: unknown
-        trackInfo?: TrackInfoExtended
-        additionalData?: Record<string, unknown>
-      }
-    >
-    getTrackStream: (
-      trackInfo: TrackInfo | TrackInfoExtended,
-      url: string,
-      protocol?: string,
-      additionalData?: Record<string, unknown>
-    ) => Promise<
-      TrackStreamResult & { type?: string; exception?: { message: string } }
-    >
-    getSource: (name: string) => {
-      oauth?: {
-        refreshToken?: string | null
-        accessToken?: string | null
-        tokenExpiry?: number
-      }
-      ytContext?: { client?: { visitorData?: string } }
-    } | null
-    sources: Map<string, unknown>
-    getEnabledSourceNames: () => string[]
-  }
+export type WorkerSourceManager = SourceManagerBase
 
 /**
  * Stats manager used in workers.

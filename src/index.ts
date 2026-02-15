@@ -26,11 +26,11 @@ import {
 import 'dotenv/config'
 import type { ServerWebSocket } from 'bun'
 import { GatewayEvents } from './constants.ts'
+import type ConnectionManager from './managers/connectionManager.ts'
+import type CredentialManager from './managers/credentialManager.ts'
 import DosProtectionManager from './managers/dosProtectionManager.ts'
 import type LyricsManager from './managers/lyricsManager.js'
 import type MeaningManager from './managers/meaningManager.js'
-import type ConnectionManager from './managers/connectionManager.ts'
-import type CredentialManager from './managers/credentialManager.ts'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.ts'
 import type SourcesManager from './managers/sourceManager.ts'
@@ -104,8 +104,9 @@ const getPlayerManagerClass = async (): Promise<PlayerManagerConstructor> => {
   return playerManagerClassPromise
 }
 
-let workerManagerClassPromise: Promise<typeof import('./managers/workerManager.js').default> | null =
-  null
+let workerManagerClassPromise: Promise<
+  typeof import('./managers/workerManager.js').default
+> | null = null
 const getWorkerManagerClass = async (): Promise<
   typeof import('./managers/workerManager.js').default
 > => {
@@ -140,9 +141,9 @@ const getCredentialManagerClass = async (): Promise<
   typeof import('./managers/credentialManager.ts').default
 > => {
   if (!credentialManagerClassPromise) {
-    credentialManagerClassPromise = import('./managers/credentialManager.ts').then(
-      (module) => module.default
-    )
+    credentialManagerClassPromise = import(
+      './managers/credentialManager.ts'
+    ).then((module) => module.default)
   }
 
   return credentialManagerClassPromise
@@ -155,9 +156,9 @@ const getTrackCacheManagerClass = async (): Promise<
   typeof import('./managers/trackCacheManager.ts').default
 > => {
   if (!trackCacheManagerClassPromise) {
-    trackCacheManagerClassPromise = import('./managers/trackCacheManager.ts').then(
-      (module) => module.default
-    )
+    trackCacheManagerClassPromise = import(
+      './managers/trackCacheManager.ts'
+    ).then((module) => module.default)
   }
 
   return trackCacheManagerClassPromise
@@ -208,7 +209,7 @@ else if (typeof config.cluster?.workers === 'number')
   _configuredWorkers = config.cluster.workers
 
 // biome-ignore lint/suspicious/noExplicitAny: Config type alignment
-initLogger(config as any)
+initLogger(config as unknown as { logging?: import('./typings/utils.types.ts').LoggingConfig })
 
 const isBun = typeof Bun !== 'undefined'
 
@@ -365,7 +366,8 @@ class NodelinkServer extends EventEmitter {
   _globalUpdater: NodeJS.Timeout | null
   _statsUpdater: NodeJS.Timeout | null
   supportedSourcesCache: string[] | null
-  _heartbeatInterval: NodeJS.Timeout | null
+  _heartbeatInterval: NodeJS.Timeout | null;
+  [key: string]: unknown
 
   /**
    * Creates a new NodeLink server instance
@@ -392,10 +394,7 @@ class NodelinkServer extends EventEmitter {
 
     memoryTrace('constructor:start')
 
-    this.sessions = new SessionManager(
-      this,
-      PlayerManagerClass
-    )
+    this.sessions = new SessionManager(this, PlayerManagerClass)
     memoryTrace('constructor:after-session-manager')
     this.sources = null
     this.lyrics = null
@@ -1141,7 +1140,11 @@ class NodelinkServer extends EventEmitter {
             this.statsManager.setWebsocketConnections(sessionCount)
           }
         } else {
-          const sessionId = this.sessions.create(request as unknown as RequestShim, socket, clientInfo)
+          const sessionId = this.sessions.create(
+            request as unknown as RequestShim,
+            socket,
+            clientInfo
+          )
 
           const sessionCount = this.sessions.activeSessions?.size || 0
           this.statsManager.setWebsocketConnections(sessionCount)
@@ -1494,7 +1497,11 @@ class NodelinkServer extends EventEmitter {
       (req: http.IncomingMessage, res: http.ServerResponse) => {
         void getRequestHandler()
           .then((handler) =>
-            handler(this as unknown as Parameters<RequestHandlerType>[0], req, res)
+            handler(
+              this as unknown as Parameters<RequestHandlerType>[0],
+              req,
+              res
+            )
           )
           .catch((error: Error) => {
             logger(
@@ -1781,7 +1788,12 @@ class NodelinkServer extends EventEmitter {
             socket.close(1008, 'YouTube source not enabled')
             return
           }
-          yt.handleLiveChat(socket, videoId)
+          const liveChatFn = yt.handleLiveChat
+          if (typeof liveChatFn === 'function') {
+            liveChatFn.call(yt, socket, videoId)
+          } else {
+            socket.close(1008, 'YouTube live chat not supported')
+          }
           return
         }
 
@@ -1967,7 +1979,10 @@ class NodelinkServer extends EventEmitter {
 
       const stats = getStats(this)
       const workerMetrics = this.workerManager
-        ? this.workerManager.getWorkerMetrics() as Record<string, import('./typings/api/stats.types.ts').WorkerMetricsEntry>
+        ? (this.workerManager.getWorkerMetrics() as Record<
+            string,
+            import('./typings/api/stats.types.ts').WorkerMetricsEntry
+          >)
         : null
       this.statsManager.updateStatsMetrics(
         stats,
@@ -2281,7 +2296,10 @@ class NodelinkServer extends EventEmitter {
       const now = Date.now()
       const stats = getStats(this)
       const workerMetrics = this.workerManager
-        ? this.workerManager.getWorkerMetrics() as Record<string, import('./typings/api/stats.types.ts').WorkerMetricsEntry>
+        ? (this.workerManager.getWorkerMetrics() as Record<
+            string,
+            import('./typings/api/stats.types.ts').WorkerMetricsEntry
+          >)
         : null
       this.statsManager.updateStatsMetrics(
         stats,
@@ -2318,7 +2336,10 @@ class NodelinkServer extends EventEmitter {
       )
       return
     }
-    this.sources.sources.set(name, source)
+    this.sources.sources.set(
+      name,
+      source as unknown as import('./typings/sources/source.types.ts').SourceInstance
+    )
     logger('info', 'Server', `Registered custom source: ${name}`)
   }
 
@@ -2452,11 +2473,7 @@ if (clusterEnabled && cluster.isPrimary) {
   memoryTrace('primary:after-worker-manager-ctor')
 
   const serverInstancePromise = (async () => {
-    const nserver = new NodelinkServer(
-      config,
-      PlayerManagerClass,
-      true
-    )
+    const nserver = new NodelinkServer(config, PlayerManagerClass, true)
     memoryTrace('primary:after-server-ctor')
     nserver.workerManager = workerManager
 
@@ -2532,11 +2549,7 @@ if (clusterEnabled && cluster.isPrimary) {
 } else {
   const serverInstancePromise = (async () => {
     const PlayerManagerClass = await getPlayerManagerClass()
-    const nserver = new NodelinkServer(
-      config,
-      PlayerManagerClass,
-      false
-    )
+    const nserver = new NodelinkServer(config, PlayerManagerClass, false)
     await nserver.start()
     ;(global as typeof globalThis & { nodelink?: NodelinkServer }).nodelink =
       nserver

@@ -1,8 +1,7 @@
 import { pipeline } from 'node:stream';
-import Validator from 'fastest-validator';
+import { validator } from "../validators.js";
 import { decodeTrack, logger, sendErrorResponse } from "../utils.js";
-const v = new Validator({ haltOnFirstError: true });
-const loadStreamSchema = v.compile({
+const loadStreamSchema = validator.compile({
     encodedTrack: { type: 'string', empty: false },
     volume: { type: 'number', min: 0, max: 1000, optional: true },
     position: { type: 'number', min: 0, optional: true },
@@ -106,13 +105,30 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
         if (urlResult.exception) {
             return sendErrorResponse(req, res, 500, 'Internal Server Error', urlResult.exception.message, parsedUrl.pathname);
         }
-        const additionalData = { ...urlResult.additionalData, startTime: position };
-        const fetched = await nodelink.sources.getTrackStream(urlResult.newTrack?.info || decodedTrack.info, urlResult.url, urlResult.protocol, additionalData);
-        if (fetched.exception) {
-            return sendErrorResponse(req, res, 500, 'Internal Server Error', fetched.exception.message, parsedUrl.pathname);
+        const { createAudioResource, createSeekeableAudioResource } = await import("../playback/processing/streamProcessor.js");
+        const sourceName = decodedTrack.info.sourceName;
+        const isHls = urlResult.protocol === 'hls';
+        const isSabr = urlResult.protocol === 'sabr';
+        const isLocal = sourceName === 'local';
+        let pcmStream;
+        let fetchedStream;
+        if (urlResult.url && !isHls && !isLocal && !isSabr) {
+            const resource = await createSeekeableAudioResource(urlResult.url, position, undefined, nodelink, filters, { streamInfo: urlResult, loudnessNormalizer: nodelink.options.audio?.loudnessNormalizer }, volume / 100, null, true);
+            if (resource.exception) {
+                return sendErrorResponse(req, res, 500, 'Internal Server Error', resource.exception.message, parsedUrl.pathname);
+            }
+            pcmStream = resource.stream;
         }
-        const createPCMStream = await getCreatePCMStream();
-        const pcmStream = createPCMStream(fetched.stream, fetched.type || urlResult.format, nodelink, volume / 100, filters);
+        else {
+            const additionalData = { ...urlResult.additionalData, startTime: position };
+            const fetched = await nodelink.sources.getTrackStream(urlResult.newTrack?.info || decodedTrack.info, urlResult.url, urlResult.protocol, additionalData);
+            if (fetched.exception) {
+                return sendErrorResponse(req, res, 500, 'Internal Server Error', fetched.exception.message, parsedUrl.pathname);
+            }
+            fetchedStream = fetched.stream;
+            const resource = createAudioResource(fetched.stream, fetched.type || urlResult.format, nodelink, filters, volume / 100, null, true, true);
+            pcmStream = resource.stream;
+        }
         pcmStream.on('error', (err) => {
             logger('error', 'LoadStream', `Pipeline component error: ${err.message} (${err.code})`);
         });
@@ -127,14 +143,14 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
             }
             if (!pcmStream.destroyed)
                 pcmStream.destroy();
-            if (fetched.stream && !fetched.stream.destroyed)
-                fetched.stream.destroy();
+            if (fetchedStream && !fetchedStream.destroyed)
+                fetchedStream.destroy();
         });
         res.on('close', () => {
             if (!pcmStream.destroyed)
                 pcmStream.destroy();
-            if (fetched.stream && !fetched.stream.destroyed)
-                fetched.stream.destroy();
+            if (fetchedStream && !fetchedStream.destroyed)
+                fetchedStream.destroy();
         });
     }
     catch (err) {

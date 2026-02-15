@@ -1,8 +1,7 @@
-import Validator from 'fastest-validator';
+import { validator } from "../validators.js";
 import OAuth from '../sources/youtube/OAuth.js';
 import { logger, sendErrorResponse } from "../utils.js";
-const v = new Validator({ haltOnFirstError: true });
-const configSchema = v.compile({
+const configSchema = validator.compile({
     refreshToken: { type: 'string', min: 1, optional: true },
     visitorData: { type: 'string', min: 1, optional: true },
     $$strict: false

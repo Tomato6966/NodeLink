@@ -1,7 +1,6 @@
-import Validator from 'fastest-validator';
+import { validator } from "../validators.js";
 import { encodeTrack, logger, sendErrorResponse } from "../utils.js";
-const v = new Validator({ haltOnFirstError: true });
-const encodedTracksSchema = v.compile({
+const encodedTracksSchema = validator.compile({
     $$root: true,
     type: 'array',
     min: 1,

@@ -414,7 +414,7 @@ if (isMainThread) {
   const nodelink: WorkerNodeLink = {
     options: config,
     logger: utils.logger
-  }
+  } as unknown as WorkerNodeLink
 
   /**
    * Dynamically imports and initializes all required managers
@@ -448,7 +448,9 @@ if (isMainThread) {
   nodelink.routePlanner = new RoutePlannerManager(
     nodelink
   ) as unknown as WorkerNodeLink['routePlanner']
-  nodelink.sources = new SourceManager(nodelink)
+  nodelink.sources = new SourceManager(
+    nodelink as unknown as import('../managers/sourceManager.ts').SourcesManagerContext
+  )
   nodelink.lyrics = new LyricsManager(nodelink)
   nodelink.meanings = new MeaningManager(nodelink)
 
@@ -539,7 +541,8 @@ if (isMainThread) {
   ): Promise<void> => {
     const videoId = payload.videoId
     const yt = nodelink.sources?.getSource('youtube')
-    if (!yt) throw new Error('YouTube source not available in worker')
+    if (!yt || !yt.liveChat)
+      throw new Error('YouTube source or live chat not available in worker')
 
     activeChats.set(id, true)
 
