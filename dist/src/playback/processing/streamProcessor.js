@@ -3,7 +3,6 @@ import { PassThrough, Readable, Transform, pipeline } from 'node:stream';
 import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js';
 import { SeekError, seekableStream } from '@ecliptia/seekable-stream';
 import { SymphoniaDecoder } from '@toddynnn/symphonia-decoder';
-import * as MP4Box from 'mp4box';
 import { normalizeFormat, SupportedFormats } from "../../constants.js";
 import { logger } from "../../utils.js";
 import FlvDemuxer from "../demuxers/Flv.js";
@@ -1045,15 +1044,30 @@ class MP4ToAACStream extends Transform {
     _aborted;
     _prefetchDone;
     _opts;
+    _initPromise;
     constructor(options = {}) {
         super({ ...options, highWaterMark: AUDIO_CONFIG.highWaterMark });
         this._opts = options;
-        this.mp4boxFile = MP4Box.createFile();
+        this.mp4boxFile = null;
         this.audioConfig = null;
         this.offset = options.baseFileStart ?? 0;
         this._aborted = false;
         this._prefetchDone = false;
-        this._setupMP4BoxHandlers();
+        this._initPromise = null;
+    }
+    async _initMp4Box() {
+        if (this.mp4boxFile)
+            return;
+        if (this._initPromise) {
+            await this._initPromise;
+            return;
+        }
+        this._initPromise = (async () => {
+            const mp4Box = await getMP4Box();
+            this.mp4boxFile = mp4Box.createFile();
+            this._setupMP4BoxHandlers();
+        })();
+        await this._initPromise;
     }
     abort() {
         this._aborted = true;
@@ -1146,12 +1160,17 @@ class MP4ToAACStream extends Transform {
             channelCount: track.audio.channel_count
         };
     }
-    _transform(chunk, _encoding, callback) {
-        if (this._aborted || !this.mp4boxFile) {
+    async _transform(chunk, _encoding, callback) {
+        if (this._aborted) {
             callback();
             return;
         }
         try {
+            await this._initMp4Box();
+            if (!this.mp4boxFile) {
+                callback();
+                return;
+            }
             this._appendPrefetchIfNeeded();
             const arrayBuffer = chunk instanceof ArrayBuffer
                 ? chunk

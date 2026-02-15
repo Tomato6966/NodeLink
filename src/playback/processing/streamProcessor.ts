@@ -11,7 +11,6 @@ import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js'
 import { SeekError, seekableStream } from '@ecliptia/seekable-stream'
 import type { VoiceAudioStream } from '@performanc/voice'
 import { SymphoniaDecoder } from '@toddynnn/symphonia-decoder'
-import * as MP4Box from 'mp4box'
 import { normalizeFormat, SupportedFormats } from '../../constants.ts'
 import type {
   AudioMixer,
@@ -1397,18 +1396,34 @@ class MP4ToAACStream extends Transform {
   private _aborted: boolean
   private _prefetchDone: boolean
   private _opts: MP4ToAACStreamOptions
+  private _initPromise: Promise<void> | null
 
   constructor(options: MP4ToAACStreamOptions = {}) {
     super({ ...options, highWaterMark: AUDIO_CONFIG.highWaterMark })
 
     this._opts = options
-    this.mp4boxFile = MP4Box.createFile() as unknown as MP4BoxFile
+    this.mp4boxFile = null
     this.audioConfig = null
     this.offset = options.baseFileStart ?? 0
     this._aborted = false
     this._prefetchDone = false
+    this._initPromise = null
+  }
 
-    this._setupMP4BoxHandlers()
+  private async _initMp4Box(): Promise<void> {
+    if (this.mp4boxFile) return
+    if (this._initPromise) {
+      await this._initPromise
+      return
+    }
+
+    this._initPromise = (async () => {
+      const mp4Box = await getMP4Box()
+      this.mp4boxFile = mp4Box.createFile() as unknown as MP4BoxFile
+      this._setupMP4BoxHandlers()
+    })()
+
+    await this._initPromise
   }
 
   abort(): void {
@@ -1548,17 +1563,23 @@ class MP4ToAACStream extends Transform {
     }
   }
 
-  override _transform(
+  override async _transform(
     chunk: Buffer,
     _encoding: BufferEncoding,
     callback: TransformCallback
-  ): void {
-    if (this._aborted || !this.mp4boxFile) {
+  ): Promise<void> {
+    if (this._aborted) {
       callback()
       return
     }
 
     try {
+      await this._initMp4Box()
+      if (!this.mp4boxFile) {
+        callback()
+        return
+      }
+
       this._appendPrefetchIfNeeded()
 
       const arrayBuffer =
