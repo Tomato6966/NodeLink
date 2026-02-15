@@ -17,6 +17,13 @@ import { FlowController } from "./FlowController.js";
 import { FiltersManager } from "./filtersManager.js";
 import { VolumeTransformer } from "./VolumeTransformer.js";
 let libSampleRatePromise = null;
+let mp4BoxPromise = null;
+const getMP4Box = async () => {
+    if (!mp4BoxPromise) {
+        mp4BoxPromise = import('mp4box');
+    }
+    return mp4BoxPromise;
+};
 const getLibSampleRate = async () => {
     if (!libSampleRatePromise) {
         libSampleRatePromise = import('@alexanderolsen/libsamplerate-js').then((module) => module);
@@ -188,7 +195,8 @@ const _seekOffset = (res) => {
     return off ?? NaN;
 };
 async function _buildMp4SeekOptions(url, seekTimeMs) {
-    const mp4 = MP4Box.createFile();
+    const mp4Box = await getMP4Box();
+    const mp4 = mp4Box.createFile();
     const prefetch = [];
     let readyInfo = null;
     let nextStart = 0;

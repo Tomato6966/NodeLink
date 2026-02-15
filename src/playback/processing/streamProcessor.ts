@@ -61,6 +61,16 @@ import { VolumeTransformer } from './VolumeTransformer.ts'
 type LibSampleRateModule = typeof import('@alexanderolsen/libsamplerate-js')
 let libSampleRatePromise: Promise<LibSampleRateModule> | null = null
 
+type MP4BoxModule = typeof import('mp4box')
+let mp4BoxPromise: Promise<MP4BoxModule> | null = null
+
+const getMP4Box = async (): Promise<MP4BoxModule> => {
+  if (!mp4BoxPromise) {
+    mp4BoxPromise = import('mp4box')
+  }
+  return mp4BoxPromise
+}
+
 const getLibSampleRate = async (): Promise<LibSampleRateModule> => {
   if (!libSampleRatePromise) {
     libSampleRatePromise = import('@alexanderolsen/libsamplerate-js').then(
@@ -301,7 +311,8 @@ async function _buildMp4SeekOptions(
   url: string,
   seekTimeMs: number
 ): Promise<MP4ToAACStreamOptions> {
-  const mp4 = MP4Box.createFile() as unknown as MP4BoxFile
+  const mp4Box = await getMP4Box()
+  const mp4 = mp4Box.createFile() as unknown as MP4BoxFile
 
   const prefetch: MP4PrefetchChunk[] = []
   let readyInfo: MP4BoxInfo | null = null
