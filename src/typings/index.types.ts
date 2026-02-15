@@ -5,6 +5,8 @@ import type { ServerWebSocket } from 'bun'
 import type { ApiMiddlewareExtension, ApiRouteExtension } from './api/api.types.ts'
 import type { NodelinkConfig } from './config/config.types.ts'
 import type { ClientInfo } from './shared.types.js'
+import type { PlayerVoiceState } from './playback/player.types.ts'
+import type { WorkerMetricsEntry } from './api/stats.types.ts'
 
 /**
  * Data associated with a Bun WebSocket connection
@@ -25,7 +27,7 @@ export interface BunSocketData {
   /**
    * HTTP request headers from the WebSocket upgrade request
    */
-  reqHeaders: Record<string, string | string[]>
+  reqHeaders: http.IncomingHttpHeaders
 
   /**
    * Remote IP address of the client
@@ -372,7 +374,7 @@ export interface HttpRequest {
   /**
    * Request headers
    */
-  headers: Record<string, string | string[]>
+  headers: http.IncomingHttpHeaders
 
   /**
    * Request body
@@ -541,6 +543,11 @@ export interface Player {
    * Emits an event to the client
    */
   emitEvent: (event: string, data: EventData) => void
+
+  /**
+   * Destroys the player instance
+   */
+  destroy?: () => void
 }
 
 /**
@@ -837,12 +844,13 @@ export interface PlayerManagerInstance {
   /**
    * Creates a player for a guild
    */
-  create: (guildId: string) => Player
+  create: (guildId: string, voice: PlayerVoiceState) => Promise<Player>
 
   /**
    * Destroys a player
+   * @returns A promise that resolves when the player is destroyed
    */
-  destroy: (guildId: string) => void
+  destroy: (guildId: string) => Promise<void>
 }
 
 /**
@@ -854,6 +862,11 @@ export interface Session {
    * Unique session ID
    */
   id: string
+
+  /**
+   * Discord user ID associated with the session
+   */
+  userId?: string | string[]
 
   /**
    * WebSocket connection
@@ -884,6 +897,16 @@ export interface Session {
    * Client information
    */
   clientInfo: ClientInfo
+
+  /**
+   * Session timeout in seconds
+   */
+  timeout: number
+
+  /**
+   * Timeout handle for session destruction
+   */
+  timeoutFuture: NodeJS.Timeout | null
 }
 
 /**
@@ -945,7 +968,7 @@ export interface ResponseShim {
    * Response headers
    * @internal
    */
-  _headers: Record<string, string | string[]>
+  _headers: http.OutgoingHttpHeaders
 
   /**
    * Response body chunks
@@ -1070,8 +1093,8 @@ export interface VoiceRelay {
  * @public
  */
 export type PlayerManagerConstructor = new (
-  session: Session,
-  options?: Record<string, string | number | boolean>
+  nodelink: NodelinkServer,
+  sessionId: string
 ) => PlayerManagerInstance
 
 /**
@@ -1198,6 +1221,34 @@ export interface WorkerMetrics {
 }
 
 /**
+ * Context required by the ConnectionManager.
+ * Supports both main server and worker processes.
+ * @public
+ */
+export interface ConnectionManagerContext {
+  /**
+   * Server or worker configuration.
+   */
+  options: {
+    connection?: import('./voice/connection.types.ts').ConnectionConfig
+  }
+
+  /**
+   * Session manager (only available on main server).
+   */
+  sessions?: {
+    /**
+     * Gets all session values.
+     */
+    values: () => IterableIterator<{
+      socket: {
+        send: (data: string | Buffer) => boolean
+      } | null
+    }>
+  }
+}
+
+/**
  * Nodelink server instance
  * @public
  */
@@ -1269,7 +1320,7 @@ export interface NodelinkServer {
     /**
      * Gets worker metrics
      */
-    getWorkerMetrics: () => WorkerMetrics[]
+    getWorkerMetrics: () => Record<string, WorkerMetricsEntry>
   } | null
 
   /**
