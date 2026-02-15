@@ -1,7 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { VoiceConnection } from '@performanc/voice'
 import type {
   SourceManagerLike,
   TrackFormat,
@@ -35,6 +34,7 @@ export interface SourcesManagerContext {
     audio?: {
       loudnessNormalizer?: boolean
     }
+    [key: string]: unknown
   }
   statsManager?: {
     incrementSourceSuccess?: (source: string) => void
@@ -49,7 +49,6 @@ export interface SourcesManagerContext {
   routePlanner?: { getIP?: () => string | null | undefined }
   workerManager?: unknown
   sourceWorkerManager?: unknown
-  voiceRelay?: { attach?: (connection: VoiceConnection, guildId: string) => void }
   [key: string]: unknown
 }
 
@@ -95,7 +94,7 @@ export default class SourcesManager implements SourceManagerLike {
 
       if (!enabled) return
 
-      const Mod = (mod.default || mod) as new (
+      const Mod = (mod['default'] || mod) as new (
         ctx: SourcesManagerContext
       ) => SourceInstance
       const instance = new Mod(this.nodelink)

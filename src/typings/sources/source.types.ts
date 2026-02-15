@@ -501,7 +501,16 @@ export interface SourceInstance {
  */
 export interface WorkerNodeLink {
   /** Configuration options */
-  options: Record<string, unknown>
+  options: Record<string, unknown> & {
+    sources?: Record<string, { enabled?: boolean } | undefined>
+    audio?: {
+      loudnessNormalizer?: boolean
+      resamplingQuality?: string
+    }
+    metrics?: {
+      enabled?: boolean
+    }
+  }
   /** Logger function */
   logger: LoggerFn
   /** Source manager instance */
@@ -518,6 +527,8 @@ export interface WorkerNodeLink {
   routePlanner?: RoutePlannerManager
   /** Stats manager instance */
   statsManager?: StatsManager
+  /** Catch-all for dynamic properties. */
+  [key: string]: unknown
 }
 
 /**

@@ -13,13 +13,14 @@ type PromCounter = InstanceType<PromClientModule['Counter']>
 type PromGauge = InstanceType<PromClientModule['Gauge']>
 type PromCollector = ReturnType<PromClientModule['collectDefaultMetrics']>
 
-type StatsManagerOptions = {
+export type StatsManagerOptions = {
   metrics?: {
     enabled?: boolean
   }
+  [key: string]: unknown
 }
 
-type StatsManagerContext = {
+export type StatsManagerContext = {
   options: StatsManagerOptions
 }
 

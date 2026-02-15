@@ -324,7 +324,7 @@ else {
      * Dynamically imports and initializes all required managers
      * @internal
      */
-    const [{ createPCMStream }, { default: SourceManager }, { default: LyricsManager }, { default: MeaningManager }, { default: CredentialManager }, { default: TrackCacheManager }, { default: RoutePlannerManager }, { default: StatsManager }] = await Promise.all([
+    const [{ createPCMStream, createSeekeableAudioResource }, { default: SourceManager }, { default: LyricsManager }, { default: MeaningManager }, { default: CredentialManager }, { default: TrackCacheManager }, { default: RoutePlannerManager }, { default: StatsManager }] = await Promise.all([
         import("../playback/processing/streamProcessor.js"),
         import("../managers/sourceManager.js"),
         import('../managers/lyricsManager.js'),
@@ -498,16 +498,32 @@ else {
             if (!urlResult || urlResult.exception) {
                 throw new Error(urlResult?.exception?.message || 'Failed to get track URL');
             }
-            const additionalData = {
-                ...(urlResult.additionalData || {}),
-                startTime: payload?.position || 0
-            };
-            fetched =
-                (await nodelink.sources?.getTrackStream(urlResult.newTrack?.info || trackInfo, urlResult.url, urlResult.protocol, additionalData)) || null;
-            if (!fetched || fetched.exception) {
-                throw new Error(fetched?.exception?.message || 'Failed to load stream');
+            const sourceName = urlResult.newTrack?.info?.sourceName || trackInfo.sourceName;
+            const isHls = urlResult.protocol === 'hls';
+            const isSabr = urlResult.protocol === 'sabr';
+            const isLocal = sourceName === 'local';
+            if (urlResult.url && !isHls && !isLocal && !isSabr) {
+                const resource = await createSeekeableAudioResource(urlResult.url, payload?.position || 0, undefined, nodelink, {}, {
+                    streamInfo: urlResult,
+                    loudnessNormalizer: nodelink.options.audio?.loudnessNormalizer
+                }, (payload?.volume ?? 100) / 100, null, true);
+                if ('exception' in resource) {
+                    throw new Error(resource.exception.message);
+                }
+                pcmStream = resource.stream;
             }
-            pcmStream = createPCMStream(fetched.stream, fetched.type || urlResult.format || 'unknown', nodelink, (payload?.volume ?? 100) / 100, payload?.filters || {});
+            else {
+                const additionalData = {
+                    ...(urlResult.additionalData || {}),
+                    startTime: payload?.position || 0
+                };
+                fetched =
+                    (await nodelink.sources?.getTrackStream(urlResult.newTrack?.info || trackInfo, urlResult.url, urlResult.protocol, additionalData)) || null;
+                if (!fetched || fetched.exception) {
+                    throw new Error(fetched?.exception?.message || 'Failed to load stream');
+                }
+                pcmStream = createPCMStream(fetched.stream, fetched.type || urlResult.format || 'unknown', nodelink, (payload?.volume ?? 100) / 100, payload?.filters || {});
+            }
             pcmStream.on('data', (chunk) => {
                 if (!finished)
                     sendStreamChunkFromWorker(id, socketPath, chunk);

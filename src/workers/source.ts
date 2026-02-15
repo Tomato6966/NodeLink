@@ -15,7 +15,6 @@ import type {
   FrameType,
   LiveChatPayload,
   LiveChatPollResult,
-  LoadStreamPayload,
   MicroWorker,
   SocketMap,
   SourceWorkerConfig,
@@ -25,6 +24,10 @@ import type {
   WorkerMessageType,
   WorkerNodeLink
 } from '../typings/sources/source.types.ts'
+import type {
+  LoadStreamPayload,
+  PCMStream
+} from '../typings/workers/worker.types.ts'
 import * as utils from '../utils.ts'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -421,7 +424,7 @@ if (isMainThread) {
    * @internal
    */
   const [
-    { createPCMStream },
+    { createPCMStream, createSeekeableAudioResource },
     { default: SourceManager },
     { default: LyricsManager },
     { default: MeaningManager },
@@ -441,7 +444,7 @@ if (isMainThread) {
   ])
 
   nodelink.statsManager = new StatsManager(
-    nodelink
+    nodelink as unknown as import('../managers/statsManager.ts').StatsManagerContext
   ) as unknown as WorkerNodeLink['statsManager']
   nodelink.credentialManager = new CredentialManager(nodelink)
   nodelink.trackCacheManager = new TrackCacheManager(nodelink)
@@ -616,7 +619,7 @@ if (isMainThread) {
     let fetched: Awaited<
       ReturnType<typeof nodelink.sources.getTrackStream>
     > | null = null
-    let pcmStream: ReturnType<typeof createPCMStream> | null = null
+    let pcmStream: PCMStream | null = null
     let finished = false
 
     const cleanup = (): void => {
@@ -649,30 +652,58 @@ if (isMainThread) {
         )
       }
 
-      const additionalData = {
-        ...(urlResult.additionalData || {}),
-        startTime: payload?.position || 0
-      }
+      const sourceName = urlResult.newTrack?.info?.sourceName || trackInfo.sourceName
+      const isHls = urlResult.protocol === 'hls'
+      const isSabr = urlResult.protocol === 'sabr'
+      const isLocal = sourceName === 'local'
 
-      fetched =
-        (await nodelink.sources?.getTrackStream(
-          urlResult.newTrack?.info || trackInfo,
+      if (urlResult.url && !isHls && !isLocal && !isSabr) {
+        const resource = await createSeekeableAudioResource(
           urlResult.url,
-          urlResult.protocol,
-          additionalData
-        )) || null
+          payload?.position || 0,
+          undefined,
+          nodelink as unknown as NodeLink,
+          {},
+          { 
+            streamInfo: urlResult, 
+            loudnessNormalizer: (nodelink.options as unknown as { audio?: { loudnessNormalizer?: boolean } }).audio?.loudnessNormalizer 
+          },
+          (payload?.volume ?? 100) / 100,
+          null,
+          true
+        )
 
-      if (!fetched || fetched.exception) {
-        throw new Error(fetched?.exception?.message || 'Failed to load stream')
+        if ('exception' in resource) {
+          throw new Error(resource.exception.message)
+        }
+
+        pcmStream = resource.stream as unknown as PCMStream
+      } else {
+        const additionalData = {
+          ...(urlResult.additionalData || {}),
+          startTime: payload?.position || 0
+        }
+
+        fetched =
+          (await nodelink.sources?.getTrackStream(
+            urlResult.newTrack?.info || trackInfo,
+            urlResult.url,
+            urlResult.protocol,
+            additionalData
+          )) || null
+
+        if (!fetched || fetched.exception) {
+          throw new Error(fetched?.exception?.message || 'Failed to load stream')
+        }
+
+        pcmStream = createPCMStream(
+          fetched.stream,
+          fetched.type || (urlResult.format as string) || 'unknown',
+          nodelink as unknown as NodeLink,
+          (payload?.volume ?? 100) / 100,
+          payload?.filters || {}
+        ) as unknown as PCMStream
       }
-
-      pcmStream = createPCMStream(
-        fetched.stream,
-        fetched.type || (urlResult.format as string) || 'unknown',
-        nodelink as unknown as NodeLink,
-        (payload?.volume ?? 100) / 100,
-        payload?.filters || {}
-      )
 
       pcmStream.on('data', (chunk: Buffer) => {
         if (!finished) sendStreamChunkFromWorker(id, socketPath, chunk)

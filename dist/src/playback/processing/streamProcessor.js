@@ -1925,6 +1925,7 @@ export const createSeekeableAudioResource = async (url, seekTime, endTime, nodel
         const hinted = String(player.streamInfo?.format ?? '').toLowerCase();
         const ext = _extFromUrl(url);
         const containerGuess = hinted || ext;
+        logger('debug', 'StreamProcessor', `createSeekeableAudioResource called for ${url} | seekTime: ${seekTime}ms | containerGuess: ${containerGuess}`);
         if (_isMp4Format(containerGuess)) {
             const mp4Seek = await _buildMp4SeekOptions(url, seekTime);
             const ranged = await _openRangeStream(url, mp4Seek.baseFileStart ?? 0);

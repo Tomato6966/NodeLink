@@ -2561,6 +2561,12 @@ export const createSeekeableAudioResource = async (
     const ext = _extFromUrl(url)
     const containerGuess = hinted || ext
 
+    logger(
+      'debug',
+      'StreamProcessor',
+      `createSeekeableAudioResource called for ${url} | seekTime: ${seekTime}ms | containerGuess: ${containerGuess}`
+    )
+
     if (_isMp4Format(containerGuess)) {
       const mp4Seek = await _buildMp4SeekOptions(url, seekTime)
 

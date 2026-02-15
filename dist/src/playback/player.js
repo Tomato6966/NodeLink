@@ -2084,7 +2084,9 @@ export class Player {
                         timers.pause = null;
                     }, 300);
                     const pauseTimer = timers.pause;
-                    if (pauseTimer && typeof pauseTimer === 'object' && 'interval' in pauseTimer) {
+                    if (pauseTimer &&
+                        typeof pauseTimer === 'object' &&
+                        'interval' in pauseTimer) {
                         pauseTimer.timeout = drainTimeout;
                     }
                 }

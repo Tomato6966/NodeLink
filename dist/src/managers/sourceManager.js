@@ -238,7 +238,9 @@ export default class SourcesManager {
         if (!sourceName)
             return [];
         const instance = this.sourceMap.get(sourceName);
-        if (!instance || typeof instance.getChapters !== 'function' || !track.info) {
+        if (!instance ||
+            typeof instance.getChapters !== 'function' ||
+            !track.info) {
             return [];
         }
         return await instance.getChapters(track.info);

@@ -126,7 +126,7 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
                 return sendErrorResponse(req, res, 500, 'Internal Server Error', fetched.exception.message, parsedUrl.pathname);
             }
             fetchedStream = fetched.stream;
-            const resource = createAudioResource(fetched.stream, fetched.type || urlResult.format, nodelink, filters, volume / 100, null, true, true);
+            const resource = createAudioResource(fetched.stream, fetched.type || urlResult.format, nodelink, filters, volume / 100, null, true, nodelink.options.audio?.loudnessNormalizer);
             pcmStream = resource.stream;
         }
         pcmStream.on('error', (err) => {
