@@ -329,7 +329,7 @@ export const SupportedFormats = {
  * @remarks
  * Format detection logic:
  * - OPUS: "opus", "webm", "weba"
- * - AAC: "aac", "mp4", "m4a", "m4v", "mov", "hls", "mpegurl", "fmp4", "mpegts"
+ * - AAC: "aac", "mp4", "m4a", "m4v", "mov", "quicktime", "hls", "mpegurl", "fmp4", "mpegts"
  * - MPEG: "mpeg", "mp3"
  * - FLAC: "flac"
  * - OGG_VORBIS: "ogg", "vorbis"
@@ -376,6 +376,7 @@ export function normalizeFormat(type) {
         lowerType.includes('m4a') ||
         lowerType.includes('m4v') ||
         lowerType.includes('mov') ||
+        lowerType.includes('quicktime') ||
         lowerType.includes('hls') ||
         lowerType.includes('mpegurl') ||
         lowerType.includes('fmp4') ||

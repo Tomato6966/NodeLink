@@ -233,7 +233,8 @@ const _isMp4Format = (type: string): boolean =>
   type.indexOf('mp4') !== -1 ||
   type.indexOf('m4a') !== -1 ||
   type.indexOf('m4v') !== -1 ||
-  type.indexOf('mov') !== -1
+  type.indexOf('mov') !== -1 ||
+  type.indexOf('quicktime') !== -1
 
 const _isWebmFormat = (type: string): boolean =>
   type.includes('webm') || type.includes('weba')
@@ -2507,7 +2508,7 @@ class StreamAudioResource extends BaseAudioResource {
   _createUnsupportedFormatError(type: string): Error {
     const supportedFormats = [
       'MP3 (audio/mpeg)',
-      'AAC (audio/aac, audio/aacp, mp4, m4a, m4v, mov, hls, mpegurl, fmp4, mpegts)',
+      'AAC (audio/aac, audio/aacp, video/quicktime, mp4, m4a, m4v, mov, hls, mpegurl, fmp4, mpegts)',
       'FLAC (audio/flac)',
       'OGG Vorbis (audio/ogg, audio/vorbis)',
       'WAV (audio/wav)',

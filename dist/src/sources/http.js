@@ -2,7 +2,9 @@ import { Transform } from 'node:stream';
 import { encodeTrack, getVersion, http1makeRequest, logger } from "../utils.js";
 const DEFAULT_HTTP_USER_AGENT = `NodeLink/${getVersion()} (https://github.com/PerformanC/NodeLink)`;
 const extractUrlExtension = (rawUrl) => {
-    const sanitized = String(rawUrl || '').split('?')[0].split('#')[0];
+    const sanitized = String(rawUrl || '')
+        .split('?')[0]
+        .split('#')[0];
     const lastSlash = sanitized.lastIndexOf('/');
     const lastDot = sanitized.lastIndexOf('.');
     if (lastDot === -1 || lastDot < lastSlash)
@@ -116,7 +118,10 @@ export default class HttpSource {
             const isValidMediaType = (contentType) => validAudioPrefixes.some((prefix) => contentType.startsWith(prefix)) ||
                 validApplicationTypes.includes(contentType) ||
                 contentType === '';
-            let data = await http1makeRequest(url, { method: 'HEAD', headers: requestHeaders });
+            let data = await http1makeRequest(url, {
+                method: 'HEAD',
+                headers: requestHeaders
+            });
             const headContentType = data.headers?.['content-type'] || '';
             const headOk = !data.error &&
                 (data.statusCode || 0) < 400 &&
@@ -171,13 +176,23 @@ export default class HttpSource {
         }
     }
     buildTrack(url, headers, isStream) {
-        const title = headers['icy-name'] || 'Unknown';
+        const title = headers['icy-name'] ||
+            headers['content-disposition'].split('filename="')[1].split('"')[0] ||
+            'Unknown';
         const description = headers['icy-description'] || '';
         const genre = headers['icy-genre'] || '';
         const stationUrl = headers['icy-url'] || url;
         const icyBr = headers['icy-br'];
         const audioInfo = headers['ice-audio-info'];
         const bitrate = Number.parseInt(icyBr || audioInfo?.split(';')?.[0]?.split('=')?.[1] || 0, 10);
+        let artworkUrl = null;
+        if (url.startsWith('https://cdn.discordapp.com') &&
+            headers['content-type']?.includes('video/')) {
+            const cleanedUrl = url.endsWith('&') ? url.slice(0, -1) : url;
+            const base = cleanedUrl.replace('https://cdn.discordapp.com', 'https://media.discordapp.net');
+            const separator = base.includes('?') ? '&' : '?';
+            artworkUrl = `${base}${separator}format=webp`; // will choose webp over jpeg, since its discord's default format ig.
+        }
         const track = {
             identifier: url,
             isSeekable: !isStream,
@@ -198,6 +213,7 @@ export default class HttpSource {
                 bitrate,
                 genre,
                 stationUrl,
+                artworkUrl,
                 icyBr,
                 audioInfo
             }
