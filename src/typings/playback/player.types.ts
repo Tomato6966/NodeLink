@@ -181,6 +181,7 @@ export interface AudioResource {
   setFadeVolume?(volume: number): void
   fadeTo?(volume: number, durationMs: number, curve?: string): void
   tapeTo?(durationMs: number, type: 'start' | 'stop', curve?: string): void
+  checkTapeRampCompleted?(): boolean
   /**
    * Buffers the next PCM stream for crossfading.
    */
@@ -264,7 +265,7 @@ export interface AudioMixer {
  */
 export interface FadeTimers {
   trackEnd: NodeJS.Timeout | null
-  pause: NodeJS.Timeout | null
+  pause: NodeJS.Timeout | { interval: NodeJS.Timeout; timeout?: NodeJS.Timeout } | null
   stop: NodeJS.Timeout | null
 }
 

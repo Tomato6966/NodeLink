@@ -247,7 +247,19 @@ export default class AppleMusicSource {
     }
   }
 
-  _buildTrack(item, artworkOverride = null) {
+  _extractVideoUrl(attributes) {
+    if (!attributes?.editorialVideo) return null
+    const ev = attributes.editorialVideo
+    return (
+      ev.motionDetailSquare?.video ||
+      ev.motionDetailTall?.video ||
+      ev.motionArtistFullscreen16x9?.video ||
+      ev.motionArtistSquare1x1?.video ||
+      null
+    )
+  }
+
+  _buildTrack(item, artworkOverride = null, videoOverride = null) {
     if (!item?.id) return null
 
     const attributes = item.attributes || {}
@@ -269,6 +281,7 @@ export default class AppleMusicSource {
     }
 
     const previewUrl = attributes.previews?.[0]?.url || null
+    const hlsVideoUrl = videoOverride || this._extractVideoUrl(attributes)
 
     const trackInfo = {
       identifier: item.id,
@@ -289,6 +302,7 @@ export default class AppleMusicSource {
     if (albumUrl) pluginInfo.albumUrl = albumUrl
     if (artistUrl) pluginInfo.artistUrl = artistUrl
     if (previewUrl) pluginInfo.previewUrl = previewUrl
+    if (hlsVideoUrl) pluginInfo.hlsVideoUrl = hlsVideoUrl
 
     return {
       encoded: encodeTrack(trackInfo),
@@ -319,7 +333,7 @@ export default class AppleMusicSource {
       const apiType = typeMap[searchType] || 'songs'
 
       const data = await this._apiRequest(
-        `/catalog/${this.country}/search?term=${encodedQuery}&limit=${limit}&types=${apiType}&extend=artistUrl`
+        `/catalog/${this.country}/search?term=${encodedQuery}&limit=${limit}&types=${apiType}&extend=artistUrl,editorialVideo`
       )
 
       const results = []
@@ -336,6 +350,7 @@ export default class AppleMusicSource {
           if (!album?.id) continue
 
           const artwork = this._parseArtwork(album.attributes?.artwork)
+          const video = this._extractVideoUrl(album.attributes)
 
           const info = {
             title: album.attributes?.name || 'Unknown Album',
@@ -355,7 +370,8 @@ export default class AppleMusicSource {
             info,
             pluginInfo: {
               type: 'album',
-              trackCount: album.attributes?.trackCount || null
+              trackCount: album.attributes?.trackCount || null,
+              hlsVideoUrl: video
             }
           })
         }
@@ -365,6 +381,7 @@ export default class AppleMusicSource {
           if (!playlist?.id) continue
 
           const artwork = this._parseArtwork(playlist.attributes?.artwork)
+          const video = this._extractVideoUrl(playlist.attributes)
 
           const info = {
             title: playlist.attributes?.name || 'Unknown Playlist',
@@ -384,7 +401,8 @@ export default class AppleMusicSource {
             info,
             pluginInfo: {
               type: 'playlist',
-              trackCount: playlist.attributes?.trackCount || null
+              trackCount: playlist.attributes?.trackCount || null,
+              hlsVideoUrl: video
             }
           })
         }
@@ -394,6 +412,7 @@ export default class AppleMusicSource {
           if (!artist?.id) continue
 
           const artwork = this._parseArtwork(artist.attributes?.artwork)
+          const video = this._extractVideoUrl(artist.attributes)
 
           const info = {
             title: artist.attributes?.name || 'Unknown Artist',
@@ -411,7 +430,7 @@ export default class AppleMusicSource {
           results.push({
             encoded: encodeTrack(info),
             info,
-            pluginInfo: { type: 'artist' }
+            pluginInfo: { type: 'artist', hlsVideoUrl: video }
           })
         }
       }
@@ -457,24 +476,38 @@ export default class AppleMusicSource {
 
   async _resolveTrack(id) {
     const data = await this._apiRequest(
-      `/catalog/${this.country}/songs/${id}?extend=artistUrl`
+      `/catalog/${this.country}/songs/${id}?extend=artistUrl,editorialVideo&include=albums`
     )
     if (!data?.data?.[0]) {
       return { exception: { message: 'Track not found.', severity: 'common' } }
     }
 
-    return { loadType: 'track', data: this._buildTrack(data.data[0]) }
+    const song = data.data[0]
+    let video = this._extractVideoUrl(song.attributes)
+
+    if (!video && song.relationships?.albums?.data?.[0]?.id) {
+      const albumId = song.relationships.albums.data[0].id
+      const albumData = await this._apiRequest(
+        `/catalog/${this.country}/albums/${albumId}?extend=editorialVideo`
+      )
+      if (albumData?.data?.[0]) {
+        video = this._extractVideoUrl(albumData.data[0].attributes)
+      }
+    }
+
+    return { loadType: 'track', data: this._buildTrack(song, null, video) }
   }
 
   async _resolveAlbum(id) {
     const albumData = await this._apiRequest(
-      `/catalog/${this.country}/albums/${id}?extend=artistUrl`
+      `/catalog/${this.country}/albums/${id}?extend=artistUrl,editorialVideo`
     )
     if (!albumData?.data?.[0]) {
       return { exception: { message: 'Album not found.', severity: 'common' } }
     }
 
     const album = albumData.data[0]
+    const editorialVideo = this._extractVideoUrl(album.attributes)
     const baseTracks = album.relationships?.tracks?.data || []
 
     const total = album.relationships?.tracks?.meta?.total || baseTracks.length
@@ -498,7 +531,8 @@ export default class AppleMusicSource {
               artwork: album.attributes.artwork
             }
           },
-          artwork
+          artwork,
+          editorialVideo
         )
       )
       .filter(Boolean)
@@ -514,7 +548,7 @@ export default class AppleMusicSource {
 
   async _resolvePlaylist(id) {
     const playlistResponse = await this._apiRequest(
-      `/catalog/${this.country}/playlists/${id}`
+      `/catalog/${this.country}/playlists/${id}?extend=editorialVideo`
     )
     if (!playlistResponse?.data?.[0]) {
       return {
@@ -523,6 +557,7 @@ export default class AppleMusicSource {
     }
 
     const playlist = playlistResponse.data[0]
+    const editorialVideo = this._extractVideoUrl(playlist.attributes)
     const baseTracks = playlist.relationships?.tracks?.data || []
 
     const total =
@@ -538,7 +573,7 @@ export default class AppleMusicSource {
     const artwork = this._parseArtwork(playlist.attributes.artwork)
 
     const tracks = all
-      .map((item) => this._buildTrack(item, artwork))
+      .map((item) => this._buildTrack(item, artwork, editorialVideo))
       .filter(Boolean)
 
     return {
@@ -551,29 +586,34 @@ export default class AppleMusicSource {
   }
 
   async _resolveArtist(id) {
+    const artistInfo = await this._apiRequest(
+      `/catalog/${this.country}/artists/${id}?extend=editorialVideo`
+    )
+    if (!artistInfo?.data?.[0]) {
+      return { exception: { message: 'Artist not found.', severity: 'common' } }
+    }
+
+    const artistObj = artistInfo.data[0]
+    const artwork = this._parseArtwork(artistObj.attributes?.artwork)
+    const editorialVideo = this._extractVideoUrl(artistObj.attributes)
+
     const topTracksData = await this._apiRequest(
       `/catalog/${this.country}/artists/${id}/view/top-songs`
     )
     if (!topTracksData?.data) {
-      return { exception: { message: 'Artist not found.', severity: 'common' } }
+      return { exception: { message: 'Artist top songs not found.', severity: 'common' } }
     }
 
-    const artistInfo = await this._apiRequest(
-      `/catalog/${this.country}/artists/${id}`
-    )
-    const artist = artistInfo?.data?.[0]?.attributes?.name || 'Artist'
-    const artwork = this._parseArtwork(
-      artistInfo?.data?.[0]?.attributes?.artwork
-    )
+    const artistName = artistObj.attributes?.name || 'Artist'
 
     const tracks = topTracksData.data
-      .map((trackData) => this._buildTrack(trackData, artwork))
+      .map((trackData) => this._buildTrack(trackData, artwork, editorialVideo))
       .filter(Boolean)
 
     return {
       loadType: 'playlist',
       data: {
-        info: { name: `${artist}'s Top Tracks`, selectedTrack: 0 },
+        info: { name: `${artistName}'s Top Tracks`, selectedTrack: 0 },
         tracks
       }
     }

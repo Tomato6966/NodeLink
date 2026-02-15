@@ -2756,7 +2756,14 @@ export class Player {
 
     if (action === 'reset') {
       if (timers.trackEnd) clearTimeout(timers.trackEnd)
-      if (timers.pause) clearTimeout(timers.pause)
+      if (timers.pause) {
+        if (timers.pause instanceof Object && 'interval' in timers.pause) {
+          clearInterval(timers.pause.interval)
+          if (timers.pause.timeout) clearTimeout(timers.pause.timeout)
+        } else {
+          clearTimeout(timers.pause as NodeJS.Timeout)
+        }
+      }
       if (timers.stop) clearTimeout(timers.stop)
       timers.trackEnd = null
       timers.pause = null
@@ -2890,21 +2897,14 @@ export class Player {
             timers.pause = null
           }, 300)
 
-          if (timers.pause) {
-            ;(
-              timers.pause as {
-                interval: NodeJS.Timeout
-                timeout?: NodeJS.Timeout
-              }
-            ).timeout = drainTimeout
+          const pauseTimer = timers.pause
+          if (pauseTimer && typeof pauseTimer === 'object' && 'interval' in pauseTimer) {
+            pauseTimer.timeout = drainTimeout
           }
         }
       }, 10)
 
-      timers.pause = { interval: checkInterval } as {
-        interval: NodeJS.Timeout
-        timeout?: NodeJS.Timeout
-      }
+      timers.pause = { interval: checkInterval }
       return true
     }
 

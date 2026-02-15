@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer'
+import { Transform, type TransformCallback } from 'node:stream'
 
 type FadeCurve = 'linear' | 'exponential' | 'sinusoidal'
 
@@ -21,12 +22,8 @@ interface TapeState {
 /**
  * Resampling audio transformer that implements tape-like start/stop effects.
  * Uses Cubic Hermite Spline interpolation for high-quality pitch/speed shifting.
- *
- * @remarks
- * Maintains a sliding window input buffer. To avoid "looping" or "jumps",
- * the precision of the read pointer is maintained during buffer compaction.
  */
-export class TapeTransformer {
+export class TapeTransformer extends Transform {
   private readonly sampleRate: number
   private readonly channels: number
   private currentRate = 1.0
@@ -40,6 +37,7 @@ export class TapeTransformer {
   private readonly maxBufferSize: number
 
   constructor(options: { sampleRate?: number; channels?: number } = {}) {
+    super()
     this.sampleRate = options.sampleRate ?? 48000
     this.channels = options.channels ?? 2
     // 10 seconds buffer to handle extreme deceleration and pipeline jitter
@@ -103,23 +101,30 @@ export class TapeTransformer {
     }
   }
 
-  /**
-   * Processes a PCM S16LE chunk.
-   * Produces an output chunk of the same frame size to maintain pacing.
-   */
+  override _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: TransformCallback
+  ): void {
+    if (chunk.length === 0) {
+      callback()
+      return
+    }
+
+    const output = this.process(chunk)
+    this.push(output)
+    callback()
+  }
+
   public process(chunk: Buffer): Buffer {
     if (chunk.length === 0) return chunk
 
     const incomingSamples = chunk.length / 2
     const incomingFrames = incomingSamples / this.channels
 
-    // 1. Ensure space in input buffer
     if (this.inputWritePos + incomingSamples > this.maxBufferSize) {
       this._compact()
-
-      // If STILL no space after compaction, we must drop oldest data but keep continuity
       if (this.inputWritePos + incomingSamples > this.maxBufferSize) {
-        // Shift read pointer forward to make room, but keep it sample-aligned
         const samplesToDrop =
           Math.ceil(incomingSamples / this.channels) * this.channels
         this.inputReadPos = Math.max(0, this.inputReadPos - samplesToDrop)
@@ -127,18 +132,14 @@ export class TapeTransformer {
       }
     }
 
-    // 2. Convert to Float and push to buffer
     for (let i = 0; i < incomingSamples; i++) {
       this.inputBuffer[this.inputWritePos++] = chunk.readInt16LE(i * 2) / 32767
     }
 
-    // 3. Prepare output
     const outI16 = new Int16Array(incomingSamples)
-
-    // 4. Resample with Cubic Hermite Spline
     const sampleDurationMs = 1000 / this.sampleRate
+
     for (let f = 0; f < incomingFrames; f++) {
-      // Update ramp
       if (this.tape) {
         this.tape.elapsedMs += sampleDurationMs
         const t = Math.min(1.0, this.tape.elapsedMs / this.tape.durationMs)
@@ -154,31 +155,19 @@ export class TapeTransformer {
         }
       }
 
-      // If we are stopped and the ramp is done, we stay in silence
-      if (this.currentRate <= 0.01 && !this.tape) {
-        break
-      }
+      if (this.currentRate <= 0.01 && !this.tape) break
 
-      // Check if we have enough samples for cubic interpolation (need p0, p1, p2, p3)
       const iPos = Math.floor(this.inputReadPos / this.channels) * this.channels
-      // We need up to iPos + 2*channels for p3
-      if (iPos + this.channels * 3 >= this.inputWritePos) {
-        // Not enough data yet, we'll return what we have (rest is silence)
-        break
-      }
+      if (iPos + this.channels * 3 >= this.inputWritePos) break
 
       const frac = (this.inputReadPos - iPos) / this.channels
 
       for (let c = 0; c < this.channels; c++) {
-        // Cubic points
-        const p0 =
-          this.inputBuffer[iPos - this.channels + c] ??
-          this.inputBuffer[iPos + c]
-        const p1 = this.inputBuffer[iPos + c]
-        const p2 = this.inputBuffer[iPos + this.channels + c]
-        const p3 = this.inputBuffer[iPos + this.channels * 2 + c]
+        const p0 = this.inputBuffer[iPos - this.channels + c] ?? this.inputBuffer[iPos + c] ?? 0
+        const p1 = this.inputBuffer[iPos + c] ?? 0
+        const p2 = this.inputBuffer[iPos + this.channels + c] ?? 0
+        const p3 = this.inputBuffer[iPos + this.channels * 2 + c] ?? 0
 
-        // Catmull-Rom formulation
         const val =
           0.5 *
           (2 * p1 +
@@ -195,7 +184,6 @@ export class TapeTransformer {
       this.inputReadPos += this.currentRate * this.channels
     }
 
-    // Periodically compact buffer to keep pointers low
     if (this.inputReadPos > this.sampleRate * this.channels * 2) {
       this._compact()
     }
@@ -204,7 +192,6 @@ export class TapeTransformer {
   }
 
   private _compact(): void {
-    // Crucial: Keep the fractional part of inputReadPos to maintain phase continuity!
     const integralReadPos =
       Math.floor(this.inputReadPos / this.channels) * this.channels
     const fractionalReadPos = this.inputReadPos - integralReadPos

@@ -342,7 +342,8 @@ async function _buildMp4SeekOptions(
     }
   })
 
-  const audioTrack = readyInfo?.tracks.find((t: MP4BoxTrack) =>
+  const info = readyInfo as MP4BoxInfo | null
+  const audioTrack = info?.tracks.find((t: MP4BoxTrack) =>
     t.codec?.startsWith('mp4a')
   )
   if (!audioTrack) {
@@ -405,6 +406,7 @@ class BaseAudioResource {
           bufferedMs: number
           targetMs: number
         }
+        checkTapeRampCompleted?: () => boolean
       }
     voiceStream.setVolume = (volume: number) => this.setVolume(volume)
     voiceStream.setFilters = (filters: FiltersState) => this.setFilters(filters)
@@ -2330,7 +2332,6 @@ class StreamAudioResource extends BaseAudioResource {
       channels: AUDIO_CONFIG.channels
     })
     const tapeTransformer = new TapeTransformer({
-      type: 's16le',
       sampleRate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels
     })
