@@ -1,10 +1,8 @@
 import { pipeline } from 'node:stream'
-import Validator from 'fastest-validator'
+import { validator } from '../validators.ts'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.ts'
 
-const v = new Validator({ haltOnFirstError: true })
-
-const loadStreamSchema = v.compile({
+const loadStreamSchema = validator.compile({
   encodedTrack: { type: 'string', empty: false },
   volume: { type: 'number', min: 0, max: 1000, optional: true },
   position: { type: 'number', min: 0, optional: true },

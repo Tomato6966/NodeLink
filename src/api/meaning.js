@@ -1,9 +1,7 @@
-import Validator from 'fastest-validator'
+import { validator } from '../validators.ts'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.ts'
 
-const v = new Validator({ haltOnFirstError: true })
-
-const meaningSchema = v.compile({
+const meaningSchema = validator.compile({
   encodedTrack: {
     type: 'string',
     empty: false,

@@ -1,13 +1,11 @@
-import Validator from 'fastest-validator'
+import { validator } from '../validators.ts'
 import { logger, sendErrorResponse } from '../utils.ts'
 
-const v = new Validator({ haltOnFirstError: true })
-
-const querySchema = v.compile({
+const querySchema = validator.compile({
   skipTrackSource: { type: 'string', optional: true }
 })
 
-const pathSchema = v.compile({
+const pathSchema = validator.compile({
   sessionId: { type: 'string', empty: false },
   guildId: { type: 'string', pattern: /^\d{17,20}$/, messages: { stringPattern: 'guildId must be 17-20 digits' } }
 })

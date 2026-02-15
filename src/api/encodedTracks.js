@@ -1,9 +1,7 @@
-import Validator from 'fastest-validator'
+import { validator } from '../validators.ts'
 import { encodeTrack, logger, sendErrorResponse } from '../utils.ts'
 
-const v = new Validator({ haltOnFirstError: true })
-
-const encodedTracksSchema = v.compile({
+const encodedTracksSchema = validator.compile({
   $$root: true,
   type: 'array',
   min: 1,

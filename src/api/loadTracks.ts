@@ -1,4 +1,4 @@
-import Validator from 'fastest-validator'
+import { validator } from '../validators.ts'
 import type {
   ApiNodelinkServer,
   ApiRequest,
@@ -12,13 +12,6 @@ import type {
   LoadTracksWorkerRequest
 } from '../typings/api/loadTracks.types.ts'
 import { logger, sendErrorResponse } from '../utils.ts'
-
-/**
- * Validator instance for the loadTracks route.
- *
- * Early abort keeps responses consistent while reducing work on invalid input.
- */
-const v = new Validator({ haltOnFirstError: true })
 
 /**
  * Quick protocol matcher for absolute URLs.
@@ -43,7 +36,7 @@ const IDENTIFIER_REQUIRED_MESSAGE = 'identifier parameter is required.'
  *
  * Ensures the identifier parameter is present and non-empty.
  */
-const loadTracksSchema = v.compile({
+const loadTracksSchema = validator.compile({
   identifier: {
     type: 'string',
     empty: false,

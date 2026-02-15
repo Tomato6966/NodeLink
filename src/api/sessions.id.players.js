@@ -1,7 +1,5 @@
-import Validator from 'fastest-validator'
+import { validator } from '../validators.ts'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.ts'
-
-const v = new Validator({ haltOnFirstError: true })
 
 // Use unknown -> any in fastest-validator
 const filtersSchema = { type: 'any', optional: true }
@@ -27,7 +25,7 @@ const updatePlayerTrackSchema = {
   $$strict: false
 }
 
-const updatePlayerSchema = v.compile({
+const updatePlayerSchema = validator.compile({
   track: { ...updatePlayerTrackSchema, optional: true },
   nextTrack: { ...updatePlayerTrackSchema, optional: true },
   encodedTrack: { type: 'string', nullable: true, optional: true },
@@ -44,12 +42,12 @@ const updatePlayerSchema = v.compile({
   $$strict: false
 })
 
-const queryParamsSchema = v.compile({
+const queryParamsSchema = validator.compile({
   noReplace: { type: 'string', nullable: true, optional: true },
   $$strict: false
 })
 
-const pathSchema = v.compile({
+const pathSchema = validator.compile({
   sessionId: { type: 'string', empty: false },
   guildId: {
     type: 'string',

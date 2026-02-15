@@ -1,14 +1,12 @@
-import Validator from 'fastest-validator'
+import { validator } from '../validators.ts'
 import { logger, sendErrorResponse } from '../utils.ts'
 
-const v = new Validator({ haltOnFirstError: true })
-
-const updateMixSchema = v.compile({
+const updateMixSchema = validator.compile({
   volume: { type: 'number', min: 0, max: 1, optional: false },
   $$strict: false
 })
 
-const pathSchema = v.compile({
+const pathSchema = validator.compile({
   sessionId: { type: 'string', empty: false },
   guildId: { type: 'string', pattern: /^\d{17,20}$/, messages: { stringPattern: 'guildId must be 17-20 digits' } },
   mixId: { type: 'string', empty: false }

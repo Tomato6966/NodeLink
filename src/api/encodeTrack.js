@@ -1,9 +1,7 @@
-import Validator from 'fastest-validator'
+import { validator } from '../validators.ts'
 import { encodeTrack, logger, sendErrorResponse } from '../utils.ts'
 
-const v = new Validator({ haltOnFirstError: true })
-
-const encodeTrackSchema = v.compile({
+const encodeTrackSchema = validator.compile({
   track: { type: 'string', empty: false, messages: { required: 'Missing track parameter.', stringEmpty: 'Missing track parameter.' } }
 })
 

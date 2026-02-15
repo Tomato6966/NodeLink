@@ -1,9 +1,7 @@
-import Validator from 'fastest-validator'
+import { validator } from '../validators.ts'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.ts'
 
-const v = new Validator({ haltOnFirstError: true })
-
-const loadLyricsSchema = v.compile({
+const loadLyricsSchema = validator.compile({
   encodedTrack: { type: 'string', empty: false, messages: { required: 'Missing encodedTrack parameter.', stringEmpty: 'Missing encodedTrack parameter.' } },
   lang: { type: 'string', optional: true }
 })
