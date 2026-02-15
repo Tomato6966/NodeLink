@@ -33,7 +33,7 @@ import type ConnectionManager from './managers/connectionManager.ts'
 import type CredentialManager from './managers/credentialManager.ts'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.ts'
-import type SourcesManager from './managers/sourceManager.js'
+import type SourcesManager from './managers/sourceManager.ts'
 import type SourceWorkerManager from './managers/sourceWorkerManager.js'
 import type TrackCacheManager from './managers/trackCacheManager.ts'
 import type WorkerManager from './managers/workerManager.js'
@@ -488,7 +488,7 @@ class NodelinkServer extends EventEmitter {
         { default: lyricsMan },
         { default: meaningMan }
       ] = await Promise.all([
-        import('./managers/sourceManager.js'),
+        import('./managers/sourceManager.ts'),
         import('./managers/lyricsManager.js'),
         import('./managers/meaningManager.js')
       ])

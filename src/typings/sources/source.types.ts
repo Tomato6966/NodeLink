@@ -428,20 +428,28 @@ export interface SourceManager {
   /** Unified search across sources */
   unifiedSearch: (query: string) => Promise<unknown>
   /** Get track URL */
-  getTrackUrl: (trackInfo: TrackInfo) => Promise<TrackUrlResult>
+  getTrackUrl: (
+    track: TrackInfo | TrackInfoExtended,
+    itag?: number,
+    ...args: unknown[]
+  ) => Promise<TrackUrlResult & { protocol?: string; format?: unknown; additionalData?: Record<string, unknown> }>
   /** Get track stream */
   getTrackStream: (
-    trackInfo: TrackInfo,
+    track: TrackInfo | TrackInfoExtended,
     url: string,
     protocol: string,
     additionalData: Record<string, unknown>
-  ) => Promise<TrackStreamResult>
+  ) => Promise<TrackStreamResult & { type?: string; exception?: { message: string } }>
   /** Get track chapters */
-  getChapters: (track: { info: TrackInfo }) => Promise<unknown>
+  getChapters: (track: { info?: TrackInfo | TrackInfoExtended }) => Promise<unknown>
   /** Get source by name */
-  getSource: (name: string) => YouTubeSource | null
+  getSource: (name: string) => Record<string, unknown> | undefined
   /** Load sources from folder */
   loadFolder: () => Promise<void>
+  /** Primary source instances keyed by source name */
+  sources: Map<string, unknown>
+  /** Get names of all enabled sources */
+  getEnabledSourceNames: () => string[]
 }
 
 /**

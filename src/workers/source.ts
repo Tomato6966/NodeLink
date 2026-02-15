@@ -431,7 +431,7 @@ if (isMainThread) {
     { default: StatsManager }
   ] = await Promise.all([
     import('../playback/processing/streamProcessor.ts'),
-    import('../managers/sourceManager.js'),
+    import('../managers/sourceManager.ts'),
     import('../managers/lyricsManager.js'),
     import('../managers/meaningManager.js'),
     import('../managers/credentialManager.ts'),
