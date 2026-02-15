@@ -685,7 +685,8 @@ class NodelinkServer extends EventEmitter {
                     }));
                     while (session.eventQueue.length > 0) {
                         const event = session.eventQueue.shift();
-                        socket.send(event);
+                        if (event)
+                            socket.send(event);
                     }
                     for (const [playerKey, playerInfo] of session.players.players.entries()) {
                         if (this.workerManager) {
@@ -876,8 +877,8 @@ class NodelinkServer extends EventEmitter {
                                     for (const v of value)
                                         headers.append(key, v);
                                 }
-                                else {
-                                    headers.set(key, value);
+                                else if (value !== undefined) {
+                                    headers.set(key, String(value));
                                 }
                             }
                             const response = new Response(finalBody, {
@@ -1013,6 +1014,8 @@ class NodelinkServer extends EventEmitter {
                 return rejectUpgrade(400, 'Bad Request', 'Invalid or missing Client-Name header.');
             }
             let sessionId = headers['session-id'];
+            if (Array.isArray(sessionId))
+                sessionId = sessionId[0];
             logger('debug', 'Resume', `Received session-id header: ${sessionId}`);
             if (sessionId && !this.sessions.resumableSessions.has(sessionId)) {
                 logger('warn', 'Server', `Session-ID provided by ${clientAddress} does not exist or is not resumable: ${sessionId}, creating a new session`);
@@ -1411,9 +1414,9 @@ class NodelinkServer extends EventEmitter {
             memoryTrace('start:after-source-worker-manager-start');
         }
         const specEnabled = this.options.cluster?.specializedSourceWorker?.enabled;
+        await this._ensureConnectionManager();
+        memoryTrace('start:after-connection-manager');
         if (!startOptions.isClusterPrimary) {
-            await this._ensureConnectionManager();
-            memoryTrace('start:after-connection-manager');
             await this.pluginManager.load('worker');
             memoryTrace('start:after-worker-plugin-load');
         }

@@ -1115,7 +1115,7 @@ class NodelinkServer extends EventEmitter {
 
             while (session.eventQueue.length > 0) {
               const event = session.eventQueue.shift()
-              socket.send(event)
+              if (event) socket.send(event)
             }
 
             for (const [
@@ -1141,7 +1141,7 @@ class NodelinkServer extends EventEmitter {
             this.statsManager.setWebsocketConnections(sessionCount)
           }
         } else {
-          const sessionId = this.sessions.create(request, socket, clientInfo)
+          const sessionId = this.sessions.create(request as unknown as RequestShim, socket, clientInfo)
 
           const sessionCount = this.sessions.activeSessions?.size || 0
           this.statsManager.setWebsocketConnections(sessionCount)
@@ -1346,7 +1346,7 @@ class NodelinkServer extends EventEmitter {
               this._headers[name] = value
             },
             getHeader(name: string) {
-              return this._headers[name]
+              return this._headers[name] as string | string[] | undefined
             },
             end(data?: string | Buffer) {
               if (data) this._body.push(data)
@@ -1360,8 +1360,8 @@ class NodelinkServer extends EventEmitter {
               for (const [key, value] of Object.entries(this._headers)) {
                 if (Array.isArray(value)) {
                   for (const v of value) headers.append(key, v)
-                } else {
-                  headers.set(key, value)
+                } else if (value !== undefined) {
+                  headers.set(key, String(value))
                 }
               }
 
@@ -1409,7 +1409,7 @@ class NodelinkServer extends EventEmitter {
           const { clientInfo, sessionId, reqHeaders } = ws.data
 
           const reqShim: ReqShim = {
-            headers: reqHeaders,
+            headers: reqHeaders as Record<string, string | string[]>,
             url: ws.data.url,
             socket: { remoteAddress: ws.data.remoteAddress }
           }
@@ -1592,6 +1592,8 @@ class NodelinkServer extends EventEmitter {
         }
 
         let sessionId = headers['session-id']
+        if (Array.isArray(sessionId)) sessionId = sessionId[0]
+
         logger('debug', 'Resume', `Received session-id header: ${sessionId}`)
         if (sessionId && !this.sessions.resumableSessions.has(sessionId)) {
           logger(
@@ -1965,7 +1967,7 @@ class NodelinkServer extends EventEmitter {
 
       const stats = getStats(this)
       const workerMetrics = this.workerManager
-        ? this.workerManager.getWorkerMetrics()
+        ? this.workerManager.getWorkerMetrics() as Record<string, import('./typings/api/stats.types.ts').WorkerMetricsEntry>
         : null
       this.statsManager.updateStatsMetrics(
         stats,
@@ -2192,9 +2194,10 @@ class NodelinkServer extends EventEmitter {
 
     const specEnabled = this.options.cluster?.specializedSourceWorker?.enabled
 
+    await this._ensureConnectionManager()
+    memoryTrace('start:after-connection-manager')
+
     if (!startOptions.isClusterPrimary) {
-      await this._ensureConnectionManager()
-      memoryTrace('start:after-connection-manager')
       await this.pluginManager.load('worker')
       memoryTrace('start:after-worker-plugin-load')
     }
@@ -2278,7 +2281,7 @@ class NodelinkServer extends EventEmitter {
       const now = Date.now()
       const stats = getStats(this)
       const workerMetrics = this.workerManager
-        ? this.workerManager.getWorkerMetrics()
+        ? this.workerManager.getWorkerMetrics() as Record<string, import('./typings/api/stats.types.ts').WorkerMetricsEntry>
         : null
       this.statsManager.updateStatsMetrics(
         stats,

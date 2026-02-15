@@ -409,7 +409,7 @@ nodelink.meanings = new MeaningManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(
   nodelink
 ) as RoutePlannerManagerLike
-nodelink.connectionManager = new ConnectionManager(nodelink)
+nodelink.connectionManager = new ConnectionManager(nodelink as any)
 nodelink.pluginManager = new PluginManager(nodelink)
 
 function setEfficiencyMode(enabled: boolean): void {

@@ -49,6 +49,9 @@ export default class ConnectionManager {
     status;
     metrics;
     isChecking;
+    _networkCache;
+    _lastSpeedTestTime;
+    _lastPingMs;
     constructor(nodelink) {
         this.nodelink = nodelink;
         this.config = nodelink.options.connection || {};
@@ -56,6 +59,9 @@ export default class ConnectionManager {
         this.status = 'unknown';
         this.metrics = { timestamp: Date.now() };
         this.isChecking = false;
+        this._networkCache = null;
+        this._lastSpeedTestTime = 0;
+        this._lastPingMs = undefined;
     }
     /**
      * Starts the periodic connection monitor.
@@ -84,66 +90,97 @@ export default class ConnectionManager {
         if (this.isChecking)
             return;
         this.isChecking = true;
-        const endpoints = this._getEndpoints();
+        const now = Date.now();
         const dnsResult = await this._testDnsConnectivity();
         const pingResult = await this._testPing();
         const networkInfo = await this._getNetworkInfo();
-        for (const endpoint of endpoints) {
-            try {
-                const result = await this._runSpeedTest(endpoint);
-                if (!result) {
-                    continue;
-                }
-                const { speedMbps, downloadedBytes, durationSeconds, latencyMs } = result;
-                const newStatus = this._classifyStatus(speedMbps);
-                this.metrics = {
-                    speed: {
-                        bps: result.speedBps,
-                        kbps: result.speedKbps,
-                        mbps: Number.parseFloat(speedMbps.toFixed(2))
-                    },
-                    downloadedBytes,
-                    durationSeconds: Number.parseFloat(durationSeconds.toFixed(2)),
-                    latencyMs,
-                    endpoint,
-                    dns: dnsResult,
-                    ping: pingResult,
-                    network: networkInfo,
-                    timestamp: Date.now()
-                };
-                const shouldLog = this.config.logAllChecks || newStatus !== this.status;
-                if (shouldLog) {
-                    const logSummary = this._formatLogSummary(newStatus);
-                    if (newStatus === 'bad') {
-                        logger('warn', 'Network', `Connection is very slow (${speedMbps.toFixed(2)} Mbps). ${logSummary}`);
-                    }
-                    else {
-                        logger('network', 'ConnectionManager', `Connection speed: ${this.metrics.speed?.mbps} Mbps (${newStatus}). ${logSummary}`);
-                    }
-                }
-                if (newStatus !== this.status) {
-                    this.status = newStatus;
-                    this.broadcastStatus();
-                }
-                else if (this.config.logAllChecks) {
-                    this.broadcastStatus();
-                }
-                this.isChecking = false;
-                return;
+        const currentPing = pingResult?.avgMs;
+        let shouldRunSpeedTest = false;
+        /**
+         * Determine if a speed test should be performed:
+         * 1. Initial run
+         * 2. 25 minutes (1,500,000ms) since the last test
+         * 3. Drastic ping change (>50% increase or >100ms increase)
+         */
+        if (this._lastSpeedTestTime === 0 || now - this._lastSpeedTestTime > 1500000) {
+            shouldRunSpeedTest = true;
+        }
+        else if (currentPing !== undefined && this._lastPingMs !== undefined) {
+            const pingDiff = currentPing - this._lastPingMs;
+            if (currentPing > this._lastPingMs * 1.5 || pingDiff > 100) {
+                shouldRunSpeedTest = true;
+                logger('debug', 'ConnectionManager', `Ping instability detected (${this._lastPingMs}ms -> ${currentPing}ms). Triggering immediate speed test.`);
             }
-            catch (_error) { }
+        }
+        this._lastPingMs = currentPing;
+        if (shouldRunSpeedTest) {
+            const endpoints = this._getEndpoints();
+            for (const endpoint of endpoints) {
+                try {
+                    const result = await this._runSpeedTest(endpoint);
+                    if (!result)
+                        continue;
+                    const { speedMbps, downloadedBytes, durationSeconds, latencyMs } = result;
+                    const newStatus = this._classifyStatus(speedMbps);
+                    this.metrics = {
+                        speed: {
+                            bps: result.speedBps,
+                            kbps: result.speedKbps,
+                            mbps: Number.parseFloat(speedMbps.toFixed(2))
+                        },
+                        downloadedBytes,
+                        durationSeconds: Number.parseFloat(durationSeconds.toFixed(2)),
+                        latencyMs,
+                        endpoint,
+                        dns: dnsResult,
+                        ping: pingResult,
+                        network: networkInfo,
+                        timestamp: now
+                    };
+                    this._lastSpeedTestTime = now;
+                    this._updateStatusAndLog(newStatus);
+                    this.isChecking = false;
+                    return;
+                }
+                catch (_error) { }
+            }
+        }
+        else {
+            this.metrics = {
+                ...this.metrics,
+                dns: dnsResult,
+                ping: pingResult,
+                network: networkInfo,
+                timestamp: now
+            };
+            this.broadcastStatus();
         }
         this.isChecking = false;
-        if (this.status !== 'disconnected') {
+        if (this._lastSpeedTestTime === 0 && this.status !== 'disconnected') {
             this.status = 'disconnected';
             this.metrics = {
                 dns: dnsResult,
                 ping: pingResult,
                 network: networkInfo,
                 error: 'All connection tests failed',
-                timestamp: Date.now()
+                timestamp: now
             };
-            logger('warn', 'ConnectionManager', `Connection status: disconnected. ${this._formatLogSummary(this.status)}`);
+            this.broadcastStatus();
+        }
+    }
+    _updateStatusAndLog(newStatus) {
+        const shouldLog = this.config.logAllChecks || newStatus !== this.status;
+        if (shouldLog) {
+            const logSummary = this._formatLogSummary(newStatus);
+            if (newStatus === 'bad') {
+                logger('warn', 'Network', `Connection is very slow (${this.metrics.speed?.mbps} Mbps). ${logSummary}`);
+            }
+            else {
+                logger('network', 'ConnectionManager', `Connection speed: ${this.metrics.speed?.mbps} Mbps (${newStatus}). ${logSummary}`);
+            }
+        }
+        if (newStatus !== this.status || this.config.logAllChecks) {
+            this.status = newStatus;
             this.broadcastStatus();
         }
     }
@@ -225,7 +262,10 @@ export default class ConnectionManager {
         const { stream, error, statusCode } = await httpRequest(endpoint.url, {
             method: 'GET',
             streamOnly: true,
-            timeout: this.config.timeout || 10000
+            timeout: this.config.timeout || 10000,
+            headers: {
+                'Accept-Encoding': 'identity'
+            }
         }, this.nodelink);
         if (!stream || error || statusCode !== 200) {
             return null;

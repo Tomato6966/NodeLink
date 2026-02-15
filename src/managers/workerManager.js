@@ -1050,6 +1050,10 @@ export default class WorkerManager {
     }
   }
 
+  /**
+   * Gets worker metrics for all active workers.
+   * @returns {Record<string, import('../typings/api/stats.types.ts').WorkerMetricsEntry>}
+   */
   getWorkerMetrics() {
     const workerMetrics = {}
     const now = Date.now()
