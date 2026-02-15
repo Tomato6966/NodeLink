@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
-const API_BASE = 'https://api.music.apple.com/v1';
+const API_BASE = 'https://amp-api.music.apple.com/v1';
 const MAX_PAGE_ITEMS = 300;
 const BATCH_SIZE_DEFAULT = 5;
 const _CACHE_VALIDITY_DAYS = 7;
@@ -153,7 +153,8 @@ export default class AppleMusicSource {
                 headers: {
                     Authorization: `Bearer ${this.mediaApiToken}`,
                     Accept: 'application/json',
-                    Origin: this.tokenOrigin ? `https://${this.tokenOrigin}` : undefined
+                    Origin: 'https://music.apple.com',
+                    Referer: 'https://music.apple.com/'
                 }
             });
             if (statusCode === 401) {
@@ -178,8 +179,11 @@ export default class AppleMusicSource {
         const ev = attributes.editorialVideo;
         return (ev.motionDetailSquare?.video ||
             ev.motionDetailTall?.video ||
+            ev.motionSquareVideo1x1?.video ||
             ev.motionArtistFullscreen16x9?.video ||
             ev.motionArtistSquare1x1?.video ||
+            ev.motionArtistSquare?.video ||
+            ev.motionArtistFullscreen?.video ||
             null);
     }
     _buildTrack(item, artworkOverride = null, videoOverride = null) {
