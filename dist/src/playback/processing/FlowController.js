@@ -8,6 +8,7 @@ export class FlowController extends Transform {
     filters;
     volume;
     fade;
+    tape;
     audioMixer;
     pending;
     /**
@@ -15,13 +16,15 @@ export class FlowController extends Transform {
      * @param filters - The FiltersManager instance.
      * @param volume - The VolumeTransformer instance.
      * @param fade - The FadeTransformer instance.
+     * @param tape - The TapeTransformer instance.
      * @param audioMixer - Optional AudioMixer instance.
      */
-    constructor(filters, volume, fade, audioMixer = null) {
+    constructor(filters, volume, fade, tape, audioMixer = null) {
         super({ highWaterMark: FRAME_SIZE * 4 });
         this.filters = filters;
         this.volume = volume;
         this.fade = fade;
+        this.tape = tape;
         this.audioMixer = audioMixer;
         this.pending = Buffer.alloc(0);
     }
@@ -55,6 +58,18 @@ export class FlowController extends Transform {
     fadeTo(volume, durationMs, curve) {
         this.fade.fadeTo(volume, durationMs, curve);
     }
+    /**
+     * Schedules a tape effect.
+     * @param durationMs - Duration of the ramp in milliseconds.
+     * @param type - Ramp type ('start' or 'stop').
+     * @param curve - Fading curve type.
+     */
+    tapeTo(durationMs, type, curve) {
+        this.tape.tapeTo(durationMs, type, curve);
+    }
+    checkTapeRampCompleted() {
+        return this.tape.checkRampCompleted();
+    }
     _transform(chunk, _encoding, callback) {
         this.pending = Buffer.concat([this.pending, chunk]);
         while (this.pending.length >= FRAME_SIZE) {
@@ -63,6 +78,7 @@ export class FlowController extends Transform {
             this.pending = Buffer.from(this.pending.subarray(FRAME_SIZE));
             let output = processed;
             output = this.filters.process(output);
+            output = this.tape.process(output);
             output = this.volume.process(output);
             output = this.fade.process(output);
             if (this.audioMixer &&
@@ -85,6 +101,7 @@ export class FlowController extends Transform {
         this.pending = Buffer.alloc(0);
         remaining = Buffer.concat([remaining, this.filters.flush()]);
         if (remaining.length > 0) {
+            remaining = this.tape.process(remaining);
             remaining = this.volume.process(remaining);
             remaining = this.fade.process(remaining);
             if (this.audioMixer &&

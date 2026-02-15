@@ -12,6 +12,7 @@ import { Decoder as OpusDecoder, Encoder as OpusEncoder } from "../opus/Opus.js"
 import { RingBuffer } from "../structs/RingBuffer.js";
 import { CrossfadeController } from "./CrossfadeController.js";
 import { FadeTransformer } from "./FadeTransformer.js";
+import { TapeTransformer } from "./TapeTransformer.js";
 import { FlowController } from "./FlowController.js";
 import { FiltersManager } from "./filtersManager.js";
 import { VolumeTransformer } from "./VolumeTransformer.js";
@@ -221,7 +222,8 @@ async function _buildMp4SeekOptions(url, seekTimeMs) {
             reject(e);
         }
     });
-    const audioTrack = readyInfo.tracks.find((t) => t.codec?.startsWith('mp4a'));
+    const info = readyInfo;
+    const audioTrack = info?.tracks.find((t) => t.codec?.startsWith('mp4a'));
     if (!audioTrack) {
         throw new Error('No AAC track found in MP4/M4A');
     }
@@ -261,6 +263,7 @@ class BaseAudioResource {
         voiceStream.startCrossfade = (durationMs, curve) => this.startCrossfade(durationMs, curve);
         voiceStream.clearCrossfade = () => this.clearCrossfade();
         voiceStream.getCrossfadeState = () => this.getCrossfadeState();
+        voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted();
         this.stream = voiceStream;
     }
     _end() {
@@ -296,6 +299,9 @@ class BaseAudioResource {
     clearCrossfade() { }
     getCrossfadeState() {
         return { active: false, bufferedMs: 0, targetMs: 0 };
+    }
+    checkTapeRampCompleted() {
+        return false;
     }
     setVolume(volume) {
         if (!this.pipes)
@@ -1773,9 +1779,13 @@ class StreamAudioResource extends BaseAudioResource {
             sampleRate: AUDIO_CONFIG.sampleRate,
             channels: AUDIO_CONFIG.channels
         });
+        const tapeTransformer = new TapeTransformer({
+            sampleRate: AUDIO_CONFIG.sampleRate,
+            channels: AUDIO_CONFIG.channels
+        });
         const crossfadeController = new CrossfadeController(AUDIO_CONFIG.sampleRate, AUDIO_CONFIG.channels);
         this.crossfadeController = crossfadeController;
-        const flowController = new FlowController(filters, volumeTransformer, fadeTransformer, audioMixer);
+        const flowController = new FlowController(filters, volumeTransformer, fadeTransformer, tapeTransformer, audioMixer);
         const opusEncoder = new OpusEncoder({
             rate: AUDIO_CONFIG.sampleRate,
             channels: AUDIO_CONFIG.channels
@@ -1837,6 +1847,20 @@ class StreamAudioResource extends BaseAudioResource {
             bufferedMs: 0,
             targetMs: 0
         });
+    }
+    checkTapeRampCompleted() {
+        if (!this.pipes)
+            return false;
+        const flowController = this.pipes.find((p) => p instanceof FlowController);
+        return flowController?.checkTapeRampCompleted() ?? false;
+    }
+    tapeTo(durationMs, type, curve) {
+        if (!this.pipes)
+            return;
+        const flowController = this.pipes.find((p) => p instanceof FlowController);
+        if (flowController) {
+            flowController.tapeTo(durationMs, type, curve);
+        }
     }
     _createPCMOutputPipeline(pcmStream, volume, enableAGC = true) {
         if (volume !== 1.0 || enableAGC) {

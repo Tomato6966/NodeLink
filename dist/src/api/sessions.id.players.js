@@ -54,10 +54,12 @@ const pathSchema = v.compile({
 const sanitizeFadingConfig = (raw) => {
     const safe = {
         enabled: false,
-        trackStart: { duration: 0, curve: 'linear' },
-        trackEnd: { duration: 0, curve: 'linear' },
-        trackStop: { duration: 0, curve: 'linear' },
-        seek: { duration: 0, curve: 'linear' },
+        trackStart: { duration: 0, curve: 'linear', type: 'volume' },
+        trackEnd: { duration: 0, curve: 'linear', type: 'volume' },
+        trackStop: { duration: 0, curve: 'linear', type: 'volume' },
+        seek: { duration: 0, curve: 'linear', type: 'volume' },
+        pause: { duration: 0, curve: 'linear', type: 'volume' },
+        resume: { duration: 0, curve: 'linear', type: 'volume' },
         ducking: {
             enabled: false,
             duration: 0,
@@ -78,11 +80,16 @@ const sanitizeFadingConfig = (raw) => {
         if (typeof section.curve === 'string') {
             safe[key].curve = section.curve;
         }
+        if (['volume', 'tape', 'both'].includes(section.type)) {
+            safe[key].type = section.type;
+        }
     };
     updateSection('trackStart');
     updateSection('trackEnd');
     updateSection('trackStop');
     updateSection('seek');
+    updateSection('pause');
+    updateSection('resume');
     if (raw.ducking && typeof raw.ducking === 'object') {
         safe.ducking.enabled = raw.ducking.enabled === true;
         if (Number.isFinite(raw.ducking.duration)) {
