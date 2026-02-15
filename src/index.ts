@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import WebSocketServer from '@performanc/pwsl-server'
 
 import RoutePlannerManager from './managers/routePlannerManager.js'
-import SessionManager from './managers/sessionManager.js'
+import SessionManager from './managers/sessionManager.ts'
 import StatsManager from './managers/statsManager.ts'
 import {
   applyEnvOverrides,

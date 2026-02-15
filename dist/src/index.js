@@ -13,7 +13,7 @@ import { resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import WebSocketServer from '@performanc/pwsl-server';
 import RoutePlannerManager from './managers/routePlannerManager.js';
-import SessionManager from './managers/sessionManager.js';
+import SessionManager from "./managers/sessionManager.js";
 import StatsManager from "./managers/statsManager.js";
 import { applyEnvOverrides, checkForUpdates, cleanupHttpAgents, cleanupLogger, decodeTrack, getGitInfo, getStats, getVersion, initLogger, logger, parseClient, validateProperty, verifyDiscordID } from "./utils.js";
 import 'dotenv/config';
