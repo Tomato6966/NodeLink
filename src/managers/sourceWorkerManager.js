@@ -108,12 +108,31 @@ class SourceWorkerManager {
         ? `\\\\.\\pipe\\nodelink-source-${crypto.randomBytes(8).toString('hex')}`
         : `/tmp/nodelink-source-${crypto.randomBytes(8).toString('hex')}.sock`
     this.server = null
+    this.isDestroying = false
+    this._onClusterExit = null
+    this.clientSockets = new Set()
+  }
+
+  _safeUnlinkSocketPath() {
+    if (!this.socketPath || os.platform() === 'win32') return
+    try {
+      if (fs.existsSync(this.socketPath)) fs.unlinkSync(this.socketPath)
+    } catch {}
   }
 
   async start() {
+    this._safeUnlinkSocketPath()
     this.server = net.createServer((socket) => {
+      this.clientSockets.add(socket)
       const frameChunks = []
       let frameBytes = 0
+
+      socket.on('error', () => {
+        // Ignore per-connection transport errors (EPIPE/ECONNRESET).
+      })
+      socket.on('close', () => {
+        this.clientSockets.delete(socket)
+      })
 
       const peekBytes = (count) => {
         const first = frameChunks[0]
@@ -186,9 +205,15 @@ class SourceWorkerManager {
                 }
                 request.res.writeHead(request.options?.statusCode || 200)
               }
-              request.res.write(payload)
+              try {
+                request.res.write(payload)
+              } catch {
+                this._cleanupRequest(id, request)
+              }
             } else if (type === 1) {
-              request.res.end()
+              try {
+                request.res.end()
+              } catch {}
               this._cleanupRequest(id, request)
             } else if (type === 3) {
               if (request.timeout) {
@@ -200,9 +225,17 @@ class SourceWorkerManager {
               } else if (!request.res.headersSent) {
                 request.res.setHeader('Content-Type', 'application/json')
                 request.res.writeHead(200)
-                request.res.write(payload)
+                try {
+                  request.res.write(payload)
+                } catch {
+                  this._cleanupRequest(id, request)
+                }
               } else {
-                request.res.write(payload)
+                try {
+                  request.res.write(payload)
+                } catch {
+                  this._cleanupRequest(id, request)
+                }
               }
             } else if (type === 2) {
               const errorMsg = payload.toString('utf8')
@@ -254,8 +287,9 @@ class SourceWorkerManager {
 
     cluster.setupPrimary({ exec: resolvePlaybackExecPath() })
 
-    cluster.on('exit', (worker, _code, _signal) => {
+    this._onClusterExit = (worker, _code, _signal) => {
       if (worker.workerType !== 'source') return
+      if (this.isDestroying) return
 
       logger(
         'warn',
@@ -277,7 +311,8 @@ class SourceWorkerManager {
       } else {
         this._tryScaleUp(true)
       }
-    })
+    }
+    cluster.on('exit', this._onClusterExit)
   }
 
   _forkWorker() {
@@ -319,6 +354,7 @@ class SourceWorkerManager {
   }
 
   _tryScaleUp(force = false) {
+    if (this.isDestroying) return false
     if (this.workers.length >= this.maxWorkers) return false
 
     const now = Date.now()
@@ -344,6 +380,64 @@ class SourceWorkerManager {
       `Scaling up source workers: ${this.workers.length}/${this.maxWorkers} (load=${totalLoad}, threshold=${threshold})`
     )
     return true
+  }
+
+  destroy() {
+    this.isDestroying = true
+
+    if (this._onClusterExit) {
+      try {
+        cluster.off('exit', this._onClusterExit)
+      } catch {}
+      this._onClusterExit = null
+    }
+
+    for (const request of this.requests.values()) {
+      try {
+        if (request.timeout) clearTimeout(request.timeout)
+      } catch {}
+      try {
+        if (!request.res.headersSent) {
+          request.res.writeHead(503, { 'Content-Type': 'application/json' })
+          request.res.end(
+            JSON.stringify({
+              timestamp: Date.now(),
+              status: 503,
+              error: 'Service Unavailable',
+              message: 'Source worker manager shutting down.',
+              path: request.req?.url
+            })
+          )
+        } else {
+          request.res.end()
+        }
+      } catch {}
+    }
+    this.requests.clear()
+    this.workerLoads.clear()
+
+    for (const socket of this.clientSockets) {
+      try {
+        socket.destroy()
+      } catch {}
+    }
+    this.clientSockets.clear()
+
+    if (this.server) {
+      try {
+        this.server.close()
+      } catch {}
+      this.server = null
+    }
+
+    this._safeUnlinkSocketPath()
+
+    for (const worker of this.workers) {
+      try {
+        if (worker?.isConnected()) worker.process.kill()
+      } catch {}
+    }
+    this.workers = []
   }
 
   _cleanupRequest(id, request) {

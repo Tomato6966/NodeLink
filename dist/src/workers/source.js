@@ -168,11 +168,23 @@ if (isMainThread) {
         if (existing)
             return existing;
         return new Promise((resolve, reject) => {
+            let settled = false;
             const socket = net.createConnection(path, () => {
+                settled = true;
+                socket.off('error', onConnectError);
+                socket.on('error', () => {
+                    sockets.delete(path);
+                });
                 sockets.set(path, socket);
                 resolve(socket);
             });
-            socket.on('error', reject);
+            const onConnectError = (err) => {
+                if (settled)
+                    return;
+                settled = true;
+                reject(err);
+            };
+            socket.on('error', onConnectError);
             socket.on('close', () => sockets.delete(path));
         });
     }
@@ -276,16 +288,26 @@ if (isMainThread) {
      * @internal
      */
     function sendFrame(socket, id, type, payloadBuf) {
+        if (socket.destroyed || socket.writable === false)
+            return;
         const idBuf = Buffer.from(id, 'utf8');
         const header = Buffer.alloc(6);
         header.writeUInt8(idBuf.length, 0);
         header.writeUInt8(type, 1);
         header.writeUInt32BE(payloadBuf.length, 2);
-        socket.cork();
-        socket.write(header);
-        socket.write(idBuf);
-        socket.write(payloadBuf);
-        socket.uncork();
+        try {
+            socket.cork();
+            socket.write(header);
+            socket.write(idBuf);
+            socket.write(payloadBuf);
+            socket.uncork();
+        }
+        catch {
+            try {
+                socket.destroy();
+            }
+            catch { }
+        }
     }
     /**
      * Processes next task in queue by assigning to least-loaded worker

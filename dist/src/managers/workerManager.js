@@ -9,6 +9,9 @@ import v8 from 'node:v8';
 import { logger } from "../utils.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const createSocketPath = (name) => os.platform() === 'win32'
+    ? `\\\\.\\pipe\\nodelink-${name}-${crypto.randomBytes(8).toString('hex')}`
+    : `/tmp/nodelink-${name}-${crypto.randomBytes(8).toString('hex')}.sock`;
 const resolveExecPath = () => {
     const distIndex = path.resolve(__dirname, '../index.js');
     if (fs.existsSync(distIndex))
@@ -112,17 +115,14 @@ export default class WorkerManager {
             lagPenaltyLimit: config.cluster.scaling?.lagPenaltyLimit || 60,
             cpuPenaltyLimit: config.cluster.scaling?.cpuPenaltyLimit || 0.85
         };
-        this.socketPath =
-            os.platform() === 'win32'
-                ? `\\\\.\\pipe\\nodelink-events-${crypto.randomBytes(8).toString('hex')}`
-                : `/tmp/nodelink-events-${crypto.randomBytes(8).toString('hex')}.sock`;
+        this.socketPath = createSocketPath('events');
         this.server = null;
-        this.commandSocketPath =
-            os.platform() === 'win32'
-                ? `\\\\.\\pipe\\nodelink-commands-${crypto.randomBytes(8).toString('hex')}`
-                : `/tmp/nodelink-commands-${crypto.randomBytes(8).toString('hex')}.sock`;
+        this.commandSocketPath = createSocketPath('commands');
         this.commandServer = null;
         this.commandSockets = new Map();
+        this.eventSockets = new Set();
+        this.socketRotateInProgress = false;
+        this.lastSocketRotateAt = 0;
         logger('info', 'Cluster', `Primary PID ${process.pid} - WorkerManager initialized. Min: ${this.minWorkers}, Max: ${this.maxWorkers} workers`);
         this._startSocketServer();
         this._startCommandSocketServer();
@@ -317,9 +317,15 @@ export default class WorkerManager {
         logger('debug', 'Cluster', `Worker ${workerId} failure history updated: ${JSON.stringify(history)}`);
     }
     _startSocketServer() {
+        this._safeUnlinkSocketPath(this.socketPath);
         this.server = net.createServer((socket) => {
+            this.eventSockets.add(socket);
             const frameChunks = [];
             let frameBytes = 0;
+            socket.on('error', () => {
+                // Ignore per-connection transport errors (EPIPE/ECONNRESET).
+            });
+            socket.on('close', () => this.eventSockets.delete(socket));
             const peekBytes = (count) => {
                 const first = frameChunks[0];
                 if (first && first.length >= count)
@@ -431,6 +437,7 @@ export default class WorkerManager {
         });
     }
     _startCommandSocketServer() {
+        this._safeUnlinkSocketPath(this.commandSocketPath);
         this.commandServer = net.createServer((socket) => {
             const frameChunks = [];
             let frameBytes = 0;
@@ -528,6 +535,72 @@ export default class WorkerManager {
             logger('info', 'Cluster', `Command socket server listening at ${this.commandSocketPath}`);
         });
     }
+    _safeUnlinkSocketPath(socketPath) {
+        if (!socketPath || os.platform() === 'win32')
+            return;
+        try {
+            if (fs.existsSync(socketPath))
+                fs.unlinkSync(socketPath);
+        }
+        catch { }
+    }
+    _rotateSocketServers(reason = 'unknown', sourceWorkerId = 'unknown') {
+        const now = Date.now();
+        if (this.socketRotateInProgress)
+            return;
+        if (now - this.lastSocketRotateAt < 5000)
+            return;
+        this.socketRotateInProgress = true;
+        this.lastSocketRotateAt = now;
+        const oldEventPath = this.socketPath;
+        const oldCommandPath = this.commandSocketPath;
+        logger('warn', 'Cluster', `Rotating internal sockets after ${reason} (worker ${sourceWorkerId})`);
+        for (const socket of this.eventSockets) {
+            try {
+                socket.destroy();
+            }
+            catch { }
+        }
+        this.eventSockets.clear();
+        for (const socket of this.commandSockets.values()) {
+            try {
+                socket.destroy();
+            }
+            catch { }
+        }
+        this.commandSockets.clear();
+        try {
+            this.server?.close();
+        }
+        catch { }
+        this.server = null;
+        try {
+            this.commandServer?.close();
+        }
+        catch { }
+        this.commandServer = null;
+        this._safeUnlinkSocketPath(oldEventPath);
+        this._safeUnlinkSocketPath(oldCommandPath);
+        this.socketPath = createSocketPath('events');
+        this.commandSocketPath = createSocketPath('commands');
+        this._startSocketServer();
+        this._startCommandSocketServer();
+        for (const worker of this.workers) {
+            if (!worker?.isConnected())
+                continue;
+            try {
+                worker.send({
+                    type: 'rotateSocketPaths',
+                    eventSocketPath: this.socketPath,
+                    commandSocketPath: this.commandSocketPath
+                });
+            }
+            catch { }
+        }
+        setTimeout(() => {
+            this.socketRotateInProgress = false;
+        }, 1000);
+    }
     _registerCommandSocket(pid, socket) {
         const worker = this.workers.find((w) => w.process.pid === pid);
         if (!worker)
@@ -552,19 +625,29 @@ export default class WorkerManager {
     }
     _sendCommandSocketFrame(workerId, type, requestId, payloadBuf) {
         const socket = this.commandSockets.get(workerId);
-        if (!socket || socket.destroyed)
+        if (!socket || socket.destroyed || socket.writable === false)
             return false;
         const idBuf = Buffer.from(requestId, 'utf8');
         const header = Buffer.alloc(6);
         header.writeUInt8(idBuf.length, 0);
         header.writeUInt8(type, 1);
         header.writeUInt32BE(payloadBuf.length, 2);
-        socket.cork();
-        const okHeader = socket.write(header);
-        const okId = socket.write(idBuf);
-        const okPayload = socket.write(payloadBuf);
-        socket.uncork();
-        return okHeader && okId && okPayload;
+        try {
+            socket.cork();
+            const okHeader = socket.write(header);
+            const okId = socket.write(idBuf);
+            const okPayload = socket.write(payloadBuf);
+            socket.uncork();
+            return okHeader && okId && okPayload;
+        }
+        catch {
+            this._removeCommandSocket(socket);
+            try {
+                socket.destroy();
+            }
+            catch { }
+            return false;
+        }
     }
     _handleStreamChunk(streamId, payload) {
         const request = this.streamRequests.get(streamId);
@@ -583,13 +666,24 @@ export default class WorkerManager {
             }
             request.res.writeHead(request.options?.statusCode || 200);
         }
-        request.res.write(payload);
+        try {
+            request.res.write(payload);
+        }
+        catch {
+            this._cleanupStreamRequest(streamId, true);
+        }
     }
     _handleStreamEnd(streamId) {
         const request = this.streamRequests.get(streamId);
         if (!request)
             return;
-        request.res.end();
+        try {
+            request.res.end();
+        }
+        catch {
+            this._cleanupStreamRequest(streamId, true);
+            return;
+        }
         this._cleanupStreamRequest(streamId, false);
     }
     _handleStreamError(streamId, errorMsg) {
@@ -607,7 +701,10 @@ export default class WorkerManager {
             }));
         }
         else {
-            request.res.end();
+            try {
+                request.res.end();
+            }
+            catch { }
         }
         this._cleanupStreamRequest(streamId, false);
     }
@@ -803,6 +900,9 @@ export default class WorkerManager {
                 logger('info', 'Cluster', `Syncing live YouTube config to new worker ${worker.id}`);
                 this.execute(worker, 'updateYoutubeConfig', this.liveYoutubeConfig).catch((err) => logger('error', 'Cluster', `Failed to sync config to worker ${worker.id}: ${err.message}`));
             }
+        }
+        else if (msg.type === 'workerSocketDisconnected') {
+            this._rotateSocketServers(msg.socketType || 'unknown', worker.id);
         }
         else if (msg.type === 'ready' && worker.onSourceReady) {
             // This part might be handled by SourceWorkerManager if integrated deeper,
@@ -1024,12 +1124,29 @@ export default class WorkerManager {
             catch { }
         }
         this.commandSockets.clear();
+        for (const socket of this.eventSockets) {
+            try {
+                socket.destroy();
+            }
+            catch { }
+        }
+        this.eventSockets.clear();
+        if (this.server) {
+            try {
+                this.server.close();
+            }
+            catch { }
+            this.server = null;
+        }
         if (this.commandServer) {
             try {
                 this.commandServer.close();
             }
             catch { }
+            this.commandServer = null;
         }
+        this._safeUnlinkSocketPath(this.socketPath);
+        this._safeUnlinkSocketPath(this.commandSocketPath);
         logger('info', 'Cluster', 'WorkerManager destroyed. All workers terminated.');
     }
     delegateStream(req, res, payload, options = {}) {

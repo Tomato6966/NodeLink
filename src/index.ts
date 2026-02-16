@@ -1793,6 +1793,12 @@ class NodelinkServer extends EventEmitter {
         socket: import('net').Socket,
         head: Buffer
       ) => {
+        // Guard upgrade sockets against EPIPE/ECONNRESET races when clients disconnect mid-upgrade.
+        socket.on('error', (err: NodeJS.ErrnoException) => {
+          if (err?.code === 'EPIPE' || err?.code === 'ECONNRESET') return
+          logger('debug', 'Server', `Upgrade socket error: ${err.message}`)
+        })
+
         const { remoteAddress, remotePort } = request.socket
         const isInternal =
           /^(::1|localhost|127\.0\.0\.1)/.test(remoteAddress || '') ||
@@ -1804,10 +1810,26 @@ class NodelinkServer extends EventEmitter {
           statusText: string,
           body: string
         ) => {
-          socket.write(
-            `HTTP/1.1 ${status} ${statusText}\r\nNodelink-Api-Version: 4\r\nIamNodelink: true\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`
-          )
-          socket.destroy()
+          if (socket.destroyed || !socket.writable) {
+            try {
+              socket.destroy()
+            } catch {}
+            return
+          }
+
+          const payload =
+            `HTTP/1.1 ${status} ${statusText}\r\n` +
+            'Nodelink-Api-Version: 4\r\n' +
+            'IamNodelink: true\r\n' +
+            'Content-Type: text/plain\r\n' +
+            `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n` +
+            body
+
+          socket.end(payload, () => {
+            try {
+              socket.destroy()
+            } catch {}
+          })
         }
 
         const originalHeaders = request.headers
@@ -2848,6 +2870,7 @@ if (clusterEnabled && cluster.isPrimary) {
       await nserver.credentialManager?.forceSave()
       await nserver.trackCacheManager?.forceSave()
 
+      nserver.sourceWorkerManager?.destroy?.()
       workerManager.destroy()
 
       await nserver._cleanupWebSocketServer()
@@ -2914,6 +2937,7 @@ if (clusterEnabled && cluster.isPrimary) {
       await nserver.credentialManager?.forceSave()
       await nserver.trackCacheManager?.forceSave()
 
+      nserver.sourceWorkerManager?.destroy?.()
       await nserver._cleanupWebSocketServer()
 
       if ((nserver.server as http.Server)?.listening) {

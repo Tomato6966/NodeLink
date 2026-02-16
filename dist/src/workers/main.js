@@ -573,106 +573,165 @@ const sendProcessMessage = (payload, onError) => {
 };
 const { EVENT_SOCKET_PATH, COMMAND_SOCKET_PATH, NODE_UNIQUE_ID } = process.env;
 let eventSocket = null;
-const eventSocketPath = EVENT_SOCKET_PATH;
-if (eventSocketPath) {
-    const connect = () => {
-        const socket = net.createConnection(eventSocketPath, () => {
-            eventSocket = socket;
-            logger('info', 'Worker', 'Connected to Master event socket');
-        });
-        socket.on('error', () => {
-            eventSocket = null;
-            setTimeout(connect, 1000);
-        });
-        socket.on('close', () => {
-            eventSocket = null;
-            setTimeout(connect, 1000);
-        });
-    };
-    connect();
-}
+let eventSocketPath = EVENT_SOCKET_PATH;
+let eventReconnectTimer = null;
+let eventReconnectScheduled = false;
 let commandSocket = null;
-const commandSocketPath = COMMAND_SOCKET_PATH;
-if (commandSocketPath) {
-    const connect = () => {
-        const socket = net.createConnection(commandSocketPath, () => {
-            commandSocket = socket;
-            sendCommandHello();
-            logger('info', 'Worker', 'Connected to Master command socket');
-        });
-        const frameChunks = [];
-        let frameBytes = 0;
-        const peekBytes = (count) => {
-            const first = frameChunks[0];
-            if (first && first.length >= count)
-                return first.subarray(0, count);
-            const out = Buffer.allocUnsafe(count);
-            let offset = 0;
-            for (const piece of frameChunks) {
-                const take = Math.min(piece.length, count - offset);
-                piece.copy(out, offset, 0, take);
-                offset += take;
-                if (offset >= count)
-                    break;
-            }
-            return out;
-        };
-        const readBytes = (count) => {
-            const out = Buffer.allocUnsafe(count);
-            let offset = 0;
-            while (offset < count) {
-                const piece = frameChunks[0];
-                if (!piece)
-                    break;
-                const take = Math.min(piece.length, count - offset);
-                piece.copy(out, offset, 0, take);
-                offset += take;
-                if (take === piece.length)
-                    frameChunks.shift();
-                else
-                    frameChunks[0] = piece.subarray(take);
-            }
-            frameBytes = Math.max(0, frameBytes - count);
-            return out;
-        };
-        socket.on('data', (chunk) => {
-            if (!chunk.length)
-                return;
-            frameChunks.push(chunk);
-            frameBytes += chunk.length;
-            while (frameBytes >= 6) {
-                const header = peekBytes(6);
-                const idSize = header.readUInt8(0);
-                const type = header.readUInt8(1);
-                const payloadSize = header.readUInt32BE(2);
-                const totalSize = 6 + idSize + payloadSize;
-                if (frameBytes < totalSize)
-                    break;
-                const frame = readBytes(totalSize);
-                const id = frame.toString('utf8', 6, 6 + idSize);
-                const payload = frame.subarray(6 + idSize);
-                if (type === 1) {
-                    try {
-                        const data = v8.deserialize(payload);
-                        enqueueCommand(data?.type, id, data?.payload);
-                    }
-                    catch (e) {
-                        logger('error', 'Worker', `Command socket parse error: ${getErrorMessage(e)}`);
-                    }
+let commandSocketPath = COMMAND_SOCKET_PATH;
+let commandReconnectTimer = null;
+let commandReconnectScheduled = false;
+let suppressSocketNotifyUntil = 0;
+const clearReconnectTimer = (kind) => {
+    if (kind === 'event') {
+        if (eventReconnectTimer)
+            clearTimeout(eventReconnectTimer);
+        eventReconnectTimer = null;
+        eventReconnectScheduled = false;
+        return;
+    }
+    if (commandReconnectTimer)
+        clearTimeout(commandReconnectTimer);
+    commandReconnectTimer = null;
+    commandReconnectScheduled = false;
+};
+const scheduleReconnect = (kind) => {
+    if (kind === 'event') {
+        if (eventReconnectScheduled || !eventSocketPath)
+            return;
+        eventReconnectScheduled = true;
+        eventReconnectTimer = setTimeout(() => {
+            clearReconnectTimer('event');
+            connectEventSocket();
+        }, 1000);
+        return;
+    }
+    if (commandReconnectScheduled || !commandSocketPath)
+        return;
+    commandReconnectScheduled = true;
+    commandReconnectTimer = setTimeout(() => {
+        clearReconnectTimer('command');
+        connectCommandSocket();
+    }, 1000);
+};
+const notifySocketDisconnected = (socketType) => {
+    if (!process.connected)
+        return;
+    if (Date.now() < suppressSocketNotifyUntil)
+        return;
+    sendProcessMessage({
+        type: 'workerSocketDisconnected',
+        socketType,
+        pid: process.pid
+    }, () => { });
+};
+const handleSocketDisconnect = (socketType, socket) => {
+    if (socketType === 'event') {
+        if (eventSocket === socket)
+            eventSocket = null;
+    }
+    else if (commandSocket === socket) {
+        commandSocket = null;
+    }
+    notifySocketDisconnected(socketType);
+    scheduleReconnect(socketType);
+};
+const connectEventSocket = () => {
+    if (!eventSocketPath)
+        return;
+    const socket = net.createConnection(eventSocketPath, () => {
+        eventSocket = socket;
+        clearReconnectTimer('event');
+        logger('info', 'Worker', 'Connected to Master event socket');
+    });
+    socket.on('error', () => {
+        handleSocketDisconnect('event', socket);
+    });
+    socket.on('close', () => {
+        handleSocketDisconnect('event', socket);
+    });
+};
+const connectCommandSocket = () => {
+    if (!commandSocketPath)
+        return;
+    const socket = net.createConnection(commandSocketPath, () => {
+        commandSocket = socket;
+        clearReconnectTimer('command');
+        sendCommandHello();
+        logger('info', 'Worker', 'Connected to Master command socket');
+    });
+    const frameChunks = [];
+    let frameBytes = 0;
+    const peekBytes = (count) => {
+        const first = frameChunks[0];
+        if (first && first.length >= count)
+            return first.subarray(0, count);
+        const out = Buffer.allocUnsafe(count);
+        let offset = 0;
+        for (const piece of frameChunks) {
+            const take = Math.min(piece.length, count - offset);
+            piece.copy(out, offset, 0, take);
+            offset += take;
+            if (offset >= count)
+                break;
+        }
+        return out;
+    };
+    const readBytes = (count) => {
+        const out = Buffer.allocUnsafe(count);
+        let offset = 0;
+        while (offset < count) {
+            const piece = frameChunks[0];
+            if (!piece)
+                break;
+            const take = Math.min(piece.length, count - offset);
+            piece.copy(out, offset, 0, take);
+            offset += take;
+            if (take === piece.length)
+                frameChunks.shift();
+            else
+                frameChunks[0] = piece.subarray(take);
+        }
+        frameBytes = Math.max(0, frameBytes - count);
+        return out;
+    };
+    socket.on('data', (chunk) => {
+        if (!chunk.length)
+            return;
+        frameChunks.push(chunk);
+        frameBytes += chunk.length;
+        while (frameBytes >= 6) {
+            const header = peekBytes(6);
+            const idSize = header.readUInt8(0);
+            const type = header.readUInt8(1);
+            const payloadSize = header.readUInt32BE(2);
+            const totalSize = 6 + idSize + payloadSize;
+            if (frameBytes < totalSize)
+                break;
+            const frame = readBytes(totalSize);
+            const id = frame.toString('utf8', 6, 6 + idSize);
+            const payload = frame.subarray(6 + idSize);
+            if (type === 1) {
+                try {
+                    const data = v8.deserialize(payload);
+                    enqueueCommand(data?.type, id, data?.payload);
+                }
+                catch (e) {
+                    logger('error', 'Worker', `Command socket parse error: ${getErrorMessage(e)}`);
                 }
             }
-        });
-        socket.on('error', () => {
-            commandSocket = null;
-            setTimeout(connect, 1000);
-        });
-        socket.on('close', () => {
-            commandSocket = null;
-            setTimeout(connect, 1000);
-        });
-    };
-    connect();
-}
+        }
+    });
+    socket.on('error', () => {
+        handleSocketDisconnect('command', socket);
+    });
+    socket.on('close', () => {
+        handleSocketDisconnect('command', socket);
+    });
+};
+if (eventSocketPath)
+    connectEventSocket();
+if (commandSocketPath)
+    connectCommandSocket();
 /**
  * Send a V8-serialized event frame to the master process.
  */
@@ -684,11 +743,16 @@ function sendEventFrame(type, data) {
     header.writeUInt8(0, 0); // No ID needed for these events
     header.writeUInt8(type, 1);
     header.writeUInt32BE(payloadBuf.length, 2);
-    eventSocket.cork();
-    const okHeader = eventSocket.write(header);
-    const okPayload = eventSocket.write(payloadBuf);
-    eventSocket.uncork();
-    return okHeader && okPayload;
+    try {
+        eventSocket.cork();
+        const okHeader = eventSocket.write(header);
+        const okPayload = eventSocket.write(payloadBuf);
+        eventSocket.uncork();
+        return okHeader && okPayload;
+    }
+    catch {
+        return false;
+    }
 }
 /**
  * Send a binary event frame to the master process.
@@ -700,11 +764,16 @@ function sendEventBinaryFrame(type, payloadBuf) {
     header.writeUInt8(0, 0);
     header.writeUInt8(type, 1);
     header.writeUInt32BE(payloadBuf.length, 2);
-    eventSocket.cork();
-    const okHeader = eventSocket.write(header);
-    const okPayload = eventSocket.write(payloadBuf);
-    eventSocket.uncork();
-    return okHeader && okPayload;
+    try {
+        eventSocket.cork();
+        const okHeader = eventSocket.write(header);
+        const okPayload = eventSocket.write(payloadBuf);
+        eventSocket.uncork();
+        return okHeader && okPayload;
+    }
+    catch {
+        return false;
+    }
 }
 /**
  * Send a stream-scoped frame to the master process.
@@ -717,12 +786,17 @@ function sendStreamFrame(streamId, type, payloadBuf) {
     header.writeUInt8(idBuf.length, 0);
     header.writeUInt8(type, 1);
     header.writeUInt32BE(payloadBuf.length, 2);
-    eventSocket.cork();
-    const okHeader = eventSocket.write(header);
-    const okId = eventSocket.write(idBuf);
-    const okPayload = eventSocket.write(payloadBuf);
-    eventSocket.uncork();
-    return okHeader && okId && okPayload;
+    try {
+        eventSocket.cork();
+        const okHeader = eventSocket.write(header);
+        const okId = eventSocket.write(idBuf);
+        const okPayload = eventSocket.write(payloadBuf);
+        eventSocket.uncork();
+        return okHeader && okId && okPayload;
+    }
+    catch {
+        return false;
+    }
 }
 /**
  * Send a PCM chunk over the stream socket.
@@ -749,12 +823,17 @@ function sendCommandFrame(type, requestId, payloadBuf) {
     header.writeUInt8(idBuf.length, 0);
     header.writeUInt8(type, 1);
     header.writeUInt32BE(payloadBuf.length, 2);
-    commandSocket.cork();
-    const okHeader = commandSocket.write(header);
-    const okId = commandSocket.write(idBuf);
-    const okPayload = commandSocket.write(payloadBuf);
-    commandSocket.uncork();
-    return okHeader && okId && okPayload;
+    try {
+        commandSocket.cork();
+        const okHeader = commandSocket.write(header);
+        const okId = commandSocket.write(idBuf);
+        const okPayload = commandSocket.write(payloadBuf);
+        commandSocket.uncork();
+        return okHeader && okId && okPayload;
+    }
+    catch {
+        return false;
+    }
 }
 function sendCommandHello() {
     if (!commandSocket || commandSocket.destroyed)
@@ -1481,6 +1560,39 @@ process.on('message', (msg) => {
             catch (e) {
                 logger('error', 'Worker-IPC', `Failed to send pong: ${getErrorMessage(e)}`);
             }
+        }
+        return;
+    }
+    if (message.type === 'rotateSocketPaths') {
+        suppressSocketNotifyUntil = Date.now() + 3000;
+        const nextEventPath = typeof message.eventSocketPath ===
+            'string'
+            ? (message.eventSocketPath ?? null)
+            : null;
+        const nextCommandPath = typeof message.commandSocketPath ===
+            'string'
+            ? (message.commandSocketPath ??
+                null)
+            : null;
+        if (nextEventPath) {
+            eventSocketPath = nextEventPath;
+            clearReconnectTimer('event');
+            try {
+                eventSocket?.destroy();
+            }
+            catch { }
+            eventSocket = null;
+            connectEventSocket();
+        }
+        if (nextCommandPath) {
+            commandSocketPath = nextCommandPath;
+            clearReconnectTimer('command');
+            try {
+                commandSocket?.destroy();
+            }
+            catch { }
+            commandSocket = null;
+            connectCommandSocket();
         }
         return;
     }

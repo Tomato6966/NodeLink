@@ -810,119 +810,180 @@ const { EVENT_SOCKET_PATH, COMMAND_SOCKET_PATH, NODE_UNIQUE_ID } =
   }
 
 let eventSocket: net.Socket | null = null
-const eventSocketPath = EVENT_SOCKET_PATH
-
-if (eventSocketPath) {
-  const connect = () => {
-    const socket = net.createConnection(eventSocketPath, () => {
-      eventSocket = socket
-      logger('info', 'Worker', 'Connected to Master event socket')
-    })
-    socket.on('error', () => {
-      eventSocket = null
-      setTimeout(connect, 1000)
-    })
-    socket.on('close', () => {
-      eventSocket = null
-      setTimeout(connect, 1000)
-    })
-  }
-  connect()
-}
+let eventSocketPath = EVENT_SOCKET_PATH
+let eventReconnectTimer: NodeJS.Timeout | null = null
+let eventReconnectScheduled = false
 
 let commandSocket: net.Socket | null = null
-const commandSocketPath = COMMAND_SOCKET_PATH
+let commandSocketPath = COMMAND_SOCKET_PATH
+let commandReconnectTimer: NodeJS.Timeout | null = null
+let commandReconnectScheduled = false
+let suppressSocketNotifyUntil = 0
 
-if (commandSocketPath) {
-  const connect = () => {
-    const socket = net.createConnection(commandSocketPath, () => {
-      commandSocket = socket
-      sendCommandHello()
-      logger('info', 'Worker', 'Connected to Master command socket')
-    })
+const clearReconnectTimer = (kind: 'event' | 'command'): void => {
+  if (kind === 'event') {
+    if (eventReconnectTimer) clearTimeout(eventReconnectTimer)
+    eventReconnectTimer = null
+    eventReconnectScheduled = false
+    return
+  }
+  if (commandReconnectTimer) clearTimeout(commandReconnectTimer)
+  commandReconnectTimer = null
+  commandReconnectScheduled = false
+}
 
-    const frameChunks: Buffer[] = []
-    let frameBytes = 0
+const scheduleReconnect = (kind: 'event' | 'command'): void => {
+  if (kind === 'event') {
+    if (eventReconnectScheduled || !eventSocketPath) return
+    eventReconnectScheduled = true
+    eventReconnectTimer = setTimeout(() => {
+      clearReconnectTimer('event')
+      connectEventSocket()
+    }, 1000)
+    return
+  }
 
-    const peekBytes = (count: number): Buffer => {
-      const first = frameChunks[0]
-      if (first && first.length >= count) return first.subarray(0, count)
+  if (commandReconnectScheduled || !commandSocketPath) return
+  commandReconnectScheduled = true
+  commandReconnectTimer = setTimeout(() => {
+    clearReconnectTimer('command')
+    connectCommandSocket()
+  }, 1000)
+}
 
-      const out = Buffer.allocUnsafe(count)
-      let offset = 0
-      for (const piece of frameChunks) {
-        const take = Math.min(piece.length, count - offset)
-        piece.copy(out, offset, 0, take)
-        offset += take
-        if (offset >= count) break
-      }
-      return out
+const notifySocketDisconnected = (socketType: 'event' | 'command'): void => {
+  if (!process.connected) return
+  if (Date.now() < suppressSocketNotifyUntil) return
+  sendProcessMessage(
+    {
+      type: 'workerSocketDisconnected',
+      socketType,
+      pid: process.pid
+    },
+    () => {}
+  )
+}
+
+const handleSocketDisconnect = (
+  socketType: 'event' | 'command',
+  socket: net.Socket
+): void => {
+  if (socketType === 'event') {
+    if (eventSocket === socket) eventSocket = null
+  } else if (commandSocket === socket) {
+    commandSocket = null
+  }
+  notifySocketDisconnected(socketType)
+  scheduleReconnect(socketType)
+}
+
+const connectEventSocket = (): void => {
+  if (!eventSocketPath) return
+
+  const socket = net.createConnection(eventSocketPath, () => {
+    eventSocket = socket
+    clearReconnectTimer('event')
+    logger('info', 'Worker', 'Connected to Master event socket')
+  })
+  socket.on('error', () => {
+    handleSocketDisconnect('event', socket)
+  })
+  socket.on('close', () => {
+    handleSocketDisconnect('event', socket)
+  })
+}
+
+const connectCommandSocket = (): void => {
+  if (!commandSocketPath) return
+
+  const socket = net.createConnection(commandSocketPath, () => {
+    commandSocket = socket
+    clearReconnectTimer('command')
+    sendCommandHello()
+    logger('info', 'Worker', 'Connected to Master command socket')
+  })
+
+  const frameChunks: Buffer[] = []
+  let frameBytes = 0
+
+  const peekBytes = (count: number): Buffer => {
+    const first = frameChunks[0]
+    if (first && first.length >= count) return first.subarray(0, count)
+
+    const out = Buffer.allocUnsafe(count)
+    let offset = 0
+    for (const piece of frameChunks) {
+      const take = Math.min(piece.length, count - offset)
+      piece.copy(out, offset, 0, take)
+      offset += take
+      if (offset >= count) break
+    }
+    return out
+  }
+
+  const readBytes = (count: number): Buffer => {
+    const out = Buffer.allocUnsafe(count)
+    let offset = 0
+
+    while (offset < count) {
+      const piece = frameChunks[0]
+      if (!piece) break
+
+      const take = Math.min(piece.length, count - offset)
+      piece.copy(out, offset, 0, take)
+      offset += take
+
+      if (take === piece.length) frameChunks.shift()
+      else frameChunks[0] = piece.subarray(take)
     }
 
-    const readBytes = (count: number): Buffer => {
-      const out = Buffer.allocUnsafe(count)
-      let offset = 0
+    frameBytes = Math.max(0, frameBytes - count)
+    return out
+  }
 
-      while (offset < count) {
-        const piece = frameChunks[0]
-        if (!piece) break
+  socket.on('data', (chunk: Buffer) => {
+    if (!chunk.length) return
+    frameChunks.push(chunk)
+    frameBytes += chunk.length
 
-        const take = Math.min(piece.length, count - offset)
-        piece.copy(out, offset, 0, take)
-        offset += take
+    while (frameBytes >= 6) {
+      const header = peekBytes(6)
+      const idSize = header.readUInt8(0)
+      const type = header.readUInt8(1)
+      const payloadSize = header.readUInt32BE(2)
+      const totalSize = 6 + idSize + payloadSize
 
-        if (take === piece.length) frameChunks.shift()
-        else frameChunks[0] = piece.subarray(take)
-      }
+      if (frameBytes < totalSize) break
 
-      frameBytes = Math.max(0, frameBytes - count)
-      return out
-    }
+      const frame = readBytes(totalSize)
+      const id = frame.toString('utf8', 6, 6 + idSize)
+      const payload = frame.subarray(6 + idSize)
 
-    socket.on('data', (chunk: Buffer) => {
-      if (!chunk.length) return
-      frameChunks.push(chunk)
-      frameBytes += chunk.length
-
-      while (frameBytes >= 6) {
-        const header = peekBytes(6)
-        const idSize = header.readUInt8(0)
-        const type = header.readUInt8(1)
-        const payloadSize = header.readUInt32BE(2)
-        const totalSize = 6 + idSize + payloadSize
-
-        if (frameBytes < totalSize) break
-
-        const frame = readBytes(totalSize)
-        const id = frame.toString('utf8', 6, 6 + idSize)
-        const payload = frame.subarray(6 + idSize)
-
-        if (type === 1) {
-          try {
-            const data = v8.deserialize(payload)
-            enqueueCommand(data?.type, id, data?.payload)
-          } catch (e: unknown) {
-            logger(
-              'error',
-              'Worker',
-              `Command socket parse error: ${getErrorMessage(e)}`
-            )
-          }
+      if (type === 1) {
+        try {
+          const data = v8.deserialize(payload)
+          enqueueCommand(data?.type, id, data?.payload)
+        } catch (e: unknown) {
+          logger(
+            'error',
+            'Worker',
+            `Command socket parse error: ${getErrorMessage(e)}`
+          )
         }
       }
-    })
+    }
+  })
 
-    socket.on('error', () => {
-      commandSocket = null
-      setTimeout(connect, 1000)
-    })
-    socket.on('close', () => {
-      commandSocket = null
-      setTimeout(connect, 1000)
-    })
-  }
-  connect()
+  socket.on('error', () => {
+    handleSocketDisconnect('command', socket)
+  })
+  socket.on('close', () => {
+    handleSocketDisconnect('command', socket)
+  })
 }
+
+if (eventSocketPath) connectEventSocket()
+if (commandSocketPath) connectCommandSocket()
 
 /**
  * Send a V8-serialized event frame to the master process.
@@ -937,11 +998,15 @@ function sendEventFrame(type: number, data: unknown): boolean {
   header.writeUInt8(type, 1)
   header.writeUInt32BE(payloadBuf.length, 2)
 
-  eventSocket.cork()
-  const okHeader = eventSocket.write(header)
-  const okPayload = eventSocket.write(payloadBuf)
-  eventSocket.uncork()
-  return okHeader && okPayload
+  try {
+    eventSocket.cork()
+    const okHeader = eventSocket.write(header)
+    const okPayload = eventSocket.write(payloadBuf)
+    eventSocket.uncork()
+    return okHeader && okPayload
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -955,11 +1020,15 @@ function sendEventBinaryFrame(type: number, payloadBuf: Buffer): boolean {
   header.writeUInt8(type, 1)
   header.writeUInt32BE(payloadBuf.length, 2)
 
-  eventSocket.cork()
-  const okHeader = eventSocket.write(header)
-  const okPayload = eventSocket.write(payloadBuf)
-  eventSocket.uncork()
-  return okHeader && okPayload
+  try {
+    eventSocket.cork()
+    const okHeader = eventSocket.write(header)
+    const okPayload = eventSocket.write(payloadBuf)
+    eventSocket.uncork()
+    return okHeader && okPayload
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -978,12 +1047,16 @@ function sendStreamFrame(
   header.writeUInt8(type, 1)
   header.writeUInt32BE(payloadBuf.length, 2)
 
-  eventSocket.cork()
-  const okHeader = eventSocket.write(header)
-  const okId = eventSocket.write(idBuf)
-  const okPayload = eventSocket.write(payloadBuf)
-  eventSocket.uncork()
-  return okHeader && okId && okPayload
+  try {
+    eventSocket.cork()
+    const okHeader = eventSocket.write(header)
+    const okId = eventSocket.write(idBuf)
+    const okPayload = eventSocket.write(payloadBuf)
+    eventSocket.uncork()
+    return okHeader && okId && okPayload
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -1019,12 +1092,16 @@ function sendCommandFrame(
   header.writeUInt8(type, 1)
   header.writeUInt32BE(payloadBuf.length, 2)
 
-  commandSocket.cork()
-  const okHeader = commandSocket.write(header)
-  const okId = commandSocket.write(idBuf)
-  const okPayload = commandSocket.write(payloadBuf)
-  commandSocket.uncork()
-  return okHeader && okId && okPayload
+  try {
+    commandSocket.cork()
+    const okHeader = commandSocket.write(header)
+    const okId = commandSocket.write(idBuf)
+    const okPayload = commandSocket.write(payloadBuf)
+    commandSocket.uncork()
+    return okHeader && okId && okPayload
+  } catch {
+    return false
+  }
 }
 
 function sendCommandHello(): boolean {
@@ -1989,6 +2066,44 @@ process.on('message', (msg: unknown) => {
           `Failed to send pong: ${getErrorMessage(e)}`
         )
       }
+    }
+    return
+  }
+
+  if (message.type === 'rotateSocketPaths') {
+    suppressSocketNotifyUntil = Date.now() + 3000
+    const nextEventPath =
+      typeof (message as { eventSocketPath?: unknown }).eventSocketPath ===
+      'string'
+        ? ((message as { eventSocketPath?: string }).eventSocketPath ?? null)
+        : null
+    const nextCommandPath =
+      typeof (message as { commandSocketPath?: unknown }).commandSocketPath ===
+      'string'
+        ? (
+            (message as { commandSocketPath?: string }).commandSocketPath ??
+            null
+          )
+        : null
+
+    if (nextEventPath) {
+      eventSocketPath = nextEventPath
+      clearReconnectTimer('event')
+      try {
+        eventSocket?.destroy()
+      } catch {}
+      eventSocket = null
+      connectEventSocket()
+    }
+
+    if (nextCommandPath) {
+      commandSocketPath = nextCommandPath
+      clearReconnectTimer('command')
+      try {
+        commandSocket?.destroy()
+      } catch {}
+      commandSocket = null
+      connectCommandSocket()
     }
     return
   }

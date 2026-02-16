@@ -1189,13 +1189,36 @@ class NodelinkServer extends EventEmitter {
         this.server.keepAliveTimeout = 65000;
         this.server.headersTimeout = 66000;
         this.server.on('upgrade', (request, socket, head) => {
+            // Guard upgrade sockets against EPIPE/ECONNRESET races when clients disconnect mid-upgrade.
+            socket.on('error', (err) => {
+                if (err?.code === 'EPIPE' || err?.code === 'ECONNRESET')
+                    return;
+                logger('debug', 'Server', `Upgrade socket error: ${err.message}`);
+            });
             const { remoteAddress, remotePort } = request.socket;
             const isInternal = /^(::1|localhost|127\.0\.0\.1)/.test(remoteAddress || '') ||
                 /^::ffff:127\.0\.0\.1/.test(remoteAddress || '');
             const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort})`;
             const rejectUpgrade = (status, statusText, body) => {
-                socket.write(`HTTP/1.1 ${status} ${statusText}\r\nNodelink-Api-Version: 4\r\nIamNodelink: true\r\nContent-Type: text/plain\r\nContent-Length: ${body.length}\r\n\r\n${body}`);
-                socket.destroy();
+                if (socket.destroyed || !socket.writable) {
+                    try {
+                        socket.destroy();
+                    }
+                    catch { }
+                    return;
+                }
+                const payload = `HTTP/1.1 ${status} ${statusText}\r\n` +
+                    'Nodelink-Api-Version: 4\r\n' +
+                    'IamNodelink: true\r\n' +
+                    'Content-Type: text/plain\r\n' +
+                    `Content-Length: ${Buffer.byteLength(body)}\r\n\r\n` +
+                    body;
+                socket.end(payload, () => {
+                    try {
+                        socket.destroy();
+                    }
+                    catch { }
+                });
             };
             const originalHeaders = request.headers;
             const headers = {};
@@ -1885,6 +1908,7 @@ if (clusterEnabled && cluster.isPrimary) {
             nserver._stopHeartbeat();
             await nserver.credentialManager?.forceSave();
             await nserver.trackCacheManager?.forceSave();
+            nserver.sourceWorkerManager?.destroy?.();
             workerManager.destroy();
             await nserver._cleanupWebSocketServer();
             if (nserver.server?.listening) {
@@ -1926,6 +1950,7 @@ else {
             nserver._stopHeartbeat();
             await nserver.credentialManager?.forceSave();
             await nserver.trackCacheManager?.forceSave();
+            nserver.sourceWorkerManager?.destroy?.();
             await nserver._cleanupWebSocketServer();
             if (nserver.server?.listening) {
                 await new Promise((resolve) => nserver.server.close(resolve));
