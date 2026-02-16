@@ -19,10 +19,19 @@ export default class CipherManager {
         this.explicitPlayerScriptUrl = null;
         this.userAgent = `nodelink/${VERSION} (https://github.com/PerformanC/NodeLink)`;
         this.stsCache = new Map();
-        setInterval(() => {
+        this.stsCacheInterval = null;
+        this.stsCacheInterval = setInterval(() => {
             this.stsCache.clear();
             logger('debug', 'YouTube-Cipher', 'Cleared STS cache (12h interval)');
-        }, 12 * 60 * 60 * 1000).unref();
+        }, 12 * 60 * 60 * 1000);
+        this.stsCacheInterval.unref();
+    }
+    cleanup() {
+        if (this.stsCacheInterval) {
+            clearInterval(this.stsCacheInterval);
+            this.stsCacheInterval = null;
+        }
+        this.stsCache.clear();
     }
     setPlayerScriptUrl(url) {
         this.explicitPlayerScriptUrl = new CachedPlayerScript(url);

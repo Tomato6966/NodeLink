@@ -1233,6 +1233,18 @@ class FMP4ToAACStream extends Transform {
         this.buffer = Buffer.alloc(0);
         this._streamState = null;
     }
+    _compactBuffer() {
+        if (this.buffer.length === 0) {
+            this.buffer = Buffer.alloc(0);
+            return;
+        }
+        // Avoid retaining a large backing store when only a small tail remains.
+        if (this.buffer.byteOffset > 0 &&
+            (this.buffer.byteOffset >= 256 * 1024 ||
+                this.buffer.buffer.byteLength > this.buffer.length * 4)) {
+            this.buffer = Buffer.from(this.buffer);
+        }
+    }
     _parseBoxes(buffer, offset = 0) {
         const boxes = [];
         while (offset < buffer.length) {
@@ -1391,15 +1403,19 @@ class FMP4ToAACStream extends Transform {
             }
             const state = this._streamState;
             if (state.mode === 'READ_HEADER') {
-                if (this.buffer.length < 8)
+                if (this.buffer.length < 8) {
+                    this._compactBuffer();
                     break;
+                }
                 const size32 = this.buffer.readUInt32BE(0);
                 const type = this.buffer.toString('ascii', 4, 8);
                 let size = size32;
                 let headerSize = 8;
                 if (size === 1) {
-                    if (this.buffer.length < 16)
+                    if (this.buffer.length < 16) {
+                        this._compactBuffer();
                         break;
+                    }
                     size = Number(this.buffer.readBigUInt64BE(8));
                     headerSize = 16;
                 }
@@ -1420,8 +1436,10 @@ class FMP4ToAACStream extends Transform {
                 }
             }
             else if (state.mode === 'READ_BODY') {
-                if (this.buffer.length < state.boxSize)
+                if (this.buffer.length < state.boxSize) {
+                    this._compactBuffer();
                     break;
+                }
                 const body = this.buffer.subarray(0, state.boxSize);
                 this.buffer = this.buffer.subarray(state.boxSize);
                 const type = state.boxType;
@@ -1486,9 +1504,11 @@ class FMP4ToAACStream extends Transform {
                 else if (samples.length > 0 &&
                     samples[0] !== undefined &&
                     this.buffer.length < samples[0]) {
+                    this._compactBuffer();
                     break;
                 }
             }
+            this._compactBuffer();
         }
     }
     _parseMoof(moofData) {
@@ -1563,7 +1583,10 @@ class FMP4ToAACStream extends Transform {
         try {
             if (this.bufferMode) {
                 // quando bufferMode for true, vai ser modo streaming, ou seja, vai processar o chunk imediatamente
-                this.buffer = Buffer.concat([this.buffer, chunk]);
+                if (this.buffer.length === 0)
+                    this.buffer = chunk;
+                else if (chunk.length > 0)
+                    this.buffer = Buffer.concat([this.buffer, chunk]);
                 this._processBuffer();
             }
             else {
@@ -1596,7 +1619,14 @@ class FMP4ToAACStream extends Transform {
             }
             catch (_err) { }
         }
+        this.buffer = Buffer.alloc(0);
+        this._streamState = null;
         callback();
+    }
+    _destroy(err, callback) {
+        this.buffer = Buffer.alloc(0);
+        this._streamState = null;
+        super._destroy(err, callback);
     }
 }
 class FLVToAACStream extends Transform {

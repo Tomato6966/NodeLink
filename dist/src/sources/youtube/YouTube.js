@@ -93,6 +93,7 @@ export default class YouTubeSource {
         }
         if (this.oauth)
             this.oauth.cleanup?.();
+        this.cipherManager?.cleanup?.();
     }
     async _fetchVisitorData() {
         const cachedVisitorData = this.nodelink.credentialManager.get('yt_visitor_data');

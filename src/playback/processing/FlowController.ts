@@ -11,6 +11,7 @@ import type {
 } from '../../typings/playback/processing.types.ts'
 
 const FRAME_SIZE = 3840
+const EMPTY_BUFFER = Buffer.alloc(0)
 
 /**
  * Controller that coordinates filters, volume, fading, and mixing in a single stream.
@@ -22,7 +23,8 @@ export class FlowController extends Transform {
   private readonly fade: IFadeTransformer
   private readonly tape: ITapeTransformer
   private readonly audioMixer: AudioMixer | null
-  private pending: Buffer
+  private pendingBuffer: Buffer
+  private pendingLength: number
 
   /**
    * Creates a new FlowController.
@@ -46,7 +48,32 @@ export class FlowController extends Transform {
     this.fade = fade
     this.tape = tape
     this.audioMixer = audioMixer
-    this.pending = Buffer.alloc(0)
+    this.pendingBuffer = Buffer.allocUnsafe(FRAME_SIZE)
+    this.pendingLength = 0
+  }
+
+  private _processFrame(frame: Buffer): void {
+    let output: Buffer = frame
+
+    output = this.filters.process(output)
+    output = this.tape.process(output)
+    output = this.volume.process(output)
+    output = this.fade.process(output)
+
+    if (
+      this.audioMixer &&
+      this.audioMixer.enabled !== false &&
+      this.audioMixer.hasActiveLayers()
+    ) {
+      try {
+        const layerChunks = this.audioMixer.readLayerChunks(output.length)
+        output = this.audioMixer.mixBuffers(output, layerChunks)
+      } catch (_error) {
+        // Ignore mixing errors in flow
+      }
+    }
+
+    this.push(output)
   }
 
   /**
@@ -106,44 +133,49 @@ export class FlowController extends Transform {
     _encoding: BufferEncoding,
     callback: TransformCallback
   ): void {
-    this.pending = Buffer.concat([this.pending, chunk])
+    let offset = 0
 
-    while (this.pending.length >= FRAME_SIZE) {
-      const processed = Buffer.allocUnsafe(FRAME_SIZE)
-      this.pending.copy(processed, 0, 0, FRAME_SIZE)
-      this.pending = Buffer.from(this.pending.subarray(FRAME_SIZE))
+    if (this.pendingLength > 0) {
+      const needed = FRAME_SIZE - this.pendingLength
+      const toCopy = Math.min(needed, chunk.length)
+      chunk.copy(this.pendingBuffer, this.pendingLength, 0, toCopy)
+      this.pendingLength += toCopy
+      offset += toCopy
 
-      let output: Buffer = processed
-
-      output = this.filters.process(output)
-      output = this.tape.process(output)
-      output = this.volume.process(output)
-      output = this.fade.process(output)
-
-      if (
-        this.audioMixer &&
-        this.audioMixer.enabled !== false &&
-        this.audioMixer.hasActiveLayers()
-      ) {
-        try {
-          const layerChunks = this.audioMixer.readLayerChunks(output.length)
-          output = this.audioMixer.mixBuffers(output, layerChunks)
-        } catch (_error) {
-          // Ignore mixing errors in flow
-        }
+      if (this.pendingLength === FRAME_SIZE) {
+        this._processFrame(this.pendingBuffer)
+        this.pendingLength = 0
       }
+    }
 
-      this.push(output)
+    const remaining = chunk.length - offset
+    const fullFrameBytes = remaining - (remaining % FRAME_SIZE)
+    const end = offset + fullFrameBytes
+
+    for (let i = offset; i < end; i += FRAME_SIZE) {
+      this._processFrame(chunk.subarray(i, i + FRAME_SIZE))
+    }
+
+    if (end < chunk.length) {
+      this.pendingLength = chunk.length - end
+      chunk.copy(this.pendingBuffer, 0, end)
     }
 
     callback()
   }
 
   public override _flush(callback: TransformCallback): void {
-    let remaining = this.pending
-    this.pending = Buffer.alloc(0)
+    let remaining =
+      this.pendingLength > 0
+        ? this.pendingBuffer.subarray(0, this.pendingLength)
+        : EMPTY_BUFFER
+    this.pendingLength = 0
 
-    remaining = Buffer.concat([remaining, this.filters.flush()])
+    const flushed = this.filters.flush()
+    if (flushed.length > 0) {
+      remaining =
+        remaining.length > 0 ? Buffer.concat([remaining, flushed]) : flushed
+    }
 
     if (remaining.length > 0) {
       remaining = this.tape.process(remaining)

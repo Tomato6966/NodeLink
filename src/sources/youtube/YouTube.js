@@ -122,6 +122,7 @@ export default class YouTubeSource {
     }
 
     if (this.oauth) this.oauth.cleanup?.()
+    this.cipherManager?.cleanup?.()
   }
 
   async _fetchVisitorData() {
