@@ -40,6 +40,10 @@ export type EndReason = (typeof EndReasons)[keyof typeof EndReasons]
 
 let createAudioResource: CreateAudioResource | null = null
 let createSeekeableAudioResource: CreateSeekeableAudioResource | null = null
+const trackFinishMemoryTraceEnabled =
+  process.env['NODELINK_TRACK_FINISH_MEMORY_TRACE']?.toLowerCase() === 'true'
+const trackFinishForceGcEnabled =
+  process.env['NODELINK_TRACK_FINISH_FORCE_GC']?.toLowerCase() === 'true'
 
 async function getStreamProcessor(): Promise<void> {
   if (createAudioResource && createSeekeableAudioResource) return
@@ -422,10 +426,13 @@ export class Player {
         'Player',
         `Track ended for guild ${this.guildId}. Reason: ${state.reason}. Current position: ${this.position}`
       )
-      this.connection?.audioStream?.destroy()
+      this._traceTrackFinishMemory('before-cleanup')
+      this._cleanupCurrentAudioStream('track-end')
 
       this._emitTrackEnd(endReason)
       this._resetTrack()
+      this._traceTrackFinishMemory('after-reset')
+      this._scheduleTrackFinishGcProbe()
     } else if (
       state.status === 'playing' &&
       this.track &&
@@ -559,6 +566,72 @@ export class Player {
       clearTimeout(this._lyricsMarkerTimer)
       this._lyricsMarkerTimer = null
     }
+  }
+
+  /**
+   * Logs memory snapshot for track-finish diagnostics when enabled.
+   */
+  private _traceTrackFinishMemory(stage: string): void {
+    if (!trackFinishMemoryTraceEnabled) return
+    const m = process.memoryUsage()
+    const toMB = (value: number): string => (value / 1024 / 1024).toFixed(2)
+    logger(
+      'debug',
+      'Player',
+      `[MEM][TrackFinish][${this.guildId}] ${stage} rss=${toMB(m.rss)}MB heapUsed=${toMB(
+        m.heapUsed
+      )}MB heapTotal=${toMB(m.heapTotal)}MB external=${toMB(m.external)}MB arrayBuffers=${toMB(
+        m.arrayBuffers
+      )}MB`
+    )
+  }
+
+  /**
+   * Destroys and dereferences current audio stream to avoid lingering references.
+   */
+  private _cleanupCurrentAudioStream(context: string): void {
+    const conn = this.connection as
+      | (VoiceConnection & { audioStream?: VoiceAudioStream | null })
+      | null
+      | undefined
+    const audioStream = conn?.audioStream as
+      | (AudioResource & { destroyed?: boolean })
+      | undefined
+      | null
+
+    if (!audioStream) return
+
+    try {
+      audioStream.destroy?.()
+    } catch (err) {
+      logger(
+        'debug',
+        'Player',
+        `Failed to destroy audio stream during ${context} for guild ${this.guildId}: ${
+          (err as Error)?.message ?? String(err)
+        }`
+      )
+    }
+
+    if (conn) conn.audioStream = null
+  }
+
+  /**
+   * Optionally runs forced GC after finish for leak diagnostics.
+   */
+  private _scheduleTrackFinishGcProbe(): void {
+    if (!trackFinishForceGcEnabled) return
+    const gcFn = global.gc
+    if (typeof gcFn !== 'function') return
+
+    const timer = setTimeout(() => {
+      try {
+        gcFn()
+        gcFn()
+      } catch {}
+      this._traceTrackFinishMemory('after-gc')
+    }, 0)
+    timer.unref?.()
   }
 
   /**
@@ -1336,9 +1409,7 @@ export class Player {
       return false
     }
 
-    if (this.connection.audioStream) {
-      this.connection.audioStream?.destroy()
-    }
+    this._cleanupCurrentAudioStream('start-playback')
 
     const resource = fetched.stream
     if (this.volumePercent !== 100) {
@@ -1693,9 +1764,7 @@ export class Player {
       return false
     }
 
-    if (this.connection.audioStream) {
-      this.connection.audioStream?.destroy()
-    }
+    this._cleanupCurrentAudioStream('source-seek')
 
     const resource = fetched.stream
     if (this.volumePercent !== 100) {
@@ -1910,9 +1979,7 @@ export class Player {
       return false
     }
 
-    if (this.connection.audioStream) {
-      this.connection.audioStream?.destroy()
-    }
+    this._cleanupCurrentAudioStream('legacy-seek')
 
     const resource = fetched.stream
     if (this.volumePercent !== 100) {
