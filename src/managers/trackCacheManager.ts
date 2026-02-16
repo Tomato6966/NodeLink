@@ -7,6 +7,8 @@ const TRACK_CACHE_SALT = 'nodelink-track-salt'
 const DEFAULT_CACHE_FILE = './.cache/tracks.bin'
 const DEFAULT_SAVE_DELAY_MS = 5000
 const DEFAULT_TTL_MS = 1000 * 60 * 60 * 6
+const DEFAULT_MAX_ENTRIES = 5000
+const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 1000
 
 type TrackCacheContext = {
   options: Record<string, unknown>
@@ -44,8 +46,11 @@ export default class TrackCacheManager {
   private key: Buffer
   private legacyKey: Buffer | null
   private readonly filePath: string
+  private readonly maxEntries: number
+  private readonly cleanupIntervalMs: number
   private cache: Map<string, TrackCacheEntry<unknown>>
   private saveTimeout: NodeJS.Timeout | null
+  private cleanupInterval: NodeJS.Timeout | null
 
   /**
    * Creates a new track cache manager instance.
@@ -56,9 +61,18 @@ export default class TrackCacheManager {
     this.password = this._resolvePassword(nodelink.options)
     this.key = this._deriveFastKey(this.password)
     this.legacyKey = null
+    const cacheOptions = this._resolveCacheOptions(nodelink.options)
     this.filePath = DEFAULT_CACHE_FILE
+    this.maxEntries = cacheOptions.maxEntries
+    this.cleanupIntervalMs = cacheOptions.cleanupIntervalMs
     this.cache = new Map()
     this.saveTimeout = null
+    this.cleanupInterval = setInterval(() => {
+      const expiredCount = this._purgeExpired()
+      const evictedCount = this._enforceMaxEntries()
+      if (expiredCount > 0 || evictedCount > 0) this.save()
+    }, this.cleanupIntervalMs)
+    this.cleanupInterval.unref?.()
   }
 
   /**
@@ -83,7 +97,8 @@ export default class TrackCacheManager {
       this.cache = new Map(Object.entries(store))
 
       const expiredCount = this._purgeExpired()
-      if (expiredCount > 0 || migratedFromLegacy) this.save()
+      const evictedCount = this._enforceMaxEntries()
+      if (expiredCount > 0 || evictedCount > 0 || migratedFromLegacy) this.save()
 
       logger(
         'debug',
@@ -155,6 +170,9 @@ export default class TrackCacheManager {
       this.save()
       return null
     }
+    // Refresh insertion order so hot keys are less likely to be evicted first.
+    this.cache.delete(key)
+    this.cache.set(key, entry)
     return entry.value as T
   }
 
@@ -172,11 +190,44 @@ export default class TrackCacheManager {
     ttlMs: number = DEFAULT_TTL_MS
   ): void {
     const key = `${source}:${identifier}`
+    if (this.cache.has(key)) {
+      this.cache.delete(key)
+    }
     this.cache.set(key, {
       value,
-      expiresAt: Date.now() + ttlMs
+      expiresAt: ttlMs > 0 ? Date.now() + ttlMs : null
     })
+    this._enforceMaxEntries()
     this.save()
+  }
+
+  private _resolveCacheOptions(options: Record<string, unknown>): {
+    maxEntries: number
+    cleanupIntervalMs: number
+  } {
+    const directCandidate = (options as { trackCache?: unknown }).trackCache
+    const rootCache = isRecord(directCandidate) ? directCandidate : null
+    const nestedCandidate = (options as { cache?: unknown }).cache
+    const nestedCache = isRecord(nestedCandidate)
+      ? (nestedCandidate as { track?: unknown }).track
+      : null
+    const nestedTrackCache = isRecord(nestedCache) ? nestedCache : null
+    const selected = rootCache ?? nestedTrackCache
+
+    const maxEntriesRaw = selected?.['maxEntries']
+    const cleanupIntervalRaw = selected?.['cleanupIntervalMs']
+
+    const maxEntries =
+      typeof maxEntriesRaw === 'number' && Number.isFinite(maxEntriesRaw)
+        ? Math.max(100, Math.floor(maxEntriesRaw))
+        : DEFAULT_MAX_ENTRIES
+    const cleanupIntervalMs =
+      typeof cleanupIntervalRaw === 'number' &&
+      Number.isFinite(cleanupIntervalRaw)
+        ? Math.max(1000, Math.floor(cleanupIntervalRaw))
+        : DEFAULT_CLEANUP_INTERVAL_MS
+
+    return { maxEntries, cleanupIntervalMs }
   }
 
   private _resolvePassword(options: Record<string, unknown>): string {
@@ -218,6 +269,19 @@ export default class TrackCacheManager {
       }
     }
     return expiredCount
+  }
+
+  private _enforceMaxEntries(): number {
+    if (this.cache.size <= this.maxEntries) return 0
+
+    let removed = 0
+    while (this.cache.size > this.maxEntries) {
+      const oldestKey = this.cache.keys().next().value
+      if (!oldestKey) break
+      this.cache.delete(oldestKey)
+      removed++
+    }
+    return removed
   }
 
   private _decodeStore(

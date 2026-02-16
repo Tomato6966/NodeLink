@@ -75,14 +75,32 @@ export default class SourcesManager {
         };
         try {
             await fs.access(sourcesDir);
-            const files = await fs.readdir(sourcesDir, { recursive: true });
-            const jsFiles = files.filter((f) => f.endsWith('.js') && !f.includes('clients/'));
-            await Promise.all(jsFiles.map(async (file) => {
-                const name = path.basename(file, '.js').toLowerCase();
-                const filePath = path.join(sourcesDir, file);
-                const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`);
-                const mod = await import(__rewriteRelativeImportExtension(fileUrl.href));
-                await processSource(name, mod);
+            const enabledSourceKeys = Object.entries(this.nodelink.options.sources || {})
+                .filter(([, cfg]) => !!cfg?.enabled)
+                .map(([key]) => key.toLowerCase());
+            const uniqueEnabled = Array.from(new Set(enabledSourceKeys));
+            const sourceEntries = uniqueEnabled.map((sourceKey) => {
+                const filePath = sourceKey === 'youtube'
+                    ? path.join(sourcesDir, 'youtube', 'YouTube.js')
+                    : path.join(sourcesDir, `${sourceKey}.js`);
+                return { sourceKey, filePath };
+            });
+            await Promise.all(sourceEntries.map(async ({ sourceKey, filePath }) => {
+                try {
+                    await fs.access(filePath);
+                }
+                catch {
+                    logger('warn', 'Sources', `Enabled source "${sourceKey}" has no entry file at ${filePath}`);
+                    return;
+                }
+                try {
+                    const fileUrl = new URL(`file://${filePath.replace(/\\/g, '/')}`);
+                    const mod = await import(__rewriteRelativeImportExtension(fileUrl.href));
+                    await processSource(sourceKey, mod);
+                }
+                catch (e) {
+                    logger('error', 'Sources', `Failed to load source "${sourceKey}": ${e.message}`);
+                }
             }));
         }
         catch (e) {

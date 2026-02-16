@@ -5,6 +5,8 @@ const TRACK_CACHE_SALT = 'nodelink-track-salt';
 const DEFAULT_CACHE_FILE = './.cache/tracks.bin';
 const DEFAULT_SAVE_DELAY_MS = 5000;
 const DEFAULT_TTL_MS = 1000 * 60 * 60 * 6;
+const DEFAULT_MAX_ENTRIES = 5000;
+const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 1000;
 const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const getErrorMessage = (error) => error instanceof Error ? error.message : String(error ?? 'Unknown error');
 const getErrorCode = (error) => {
@@ -32,8 +34,11 @@ export default class TrackCacheManager {
     key;
     legacyKey;
     filePath;
+    maxEntries;
+    cleanupIntervalMs;
     cache;
     saveTimeout;
+    cleanupInterval;
     /**
      * Creates a new track cache manager instance.
      * @param nodelink - NodeLink runtime context.
@@ -43,9 +48,19 @@ export default class TrackCacheManager {
         this.password = this._resolvePassword(nodelink.options);
         this.key = this._deriveFastKey(this.password);
         this.legacyKey = null;
+        const cacheOptions = this._resolveCacheOptions(nodelink.options);
         this.filePath = DEFAULT_CACHE_FILE;
+        this.maxEntries = cacheOptions.maxEntries;
+        this.cleanupIntervalMs = cacheOptions.cleanupIntervalMs;
         this.cache = new Map();
         this.saveTimeout = null;
+        this.cleanupInterval = setInterval(() => {
+            const expiredCount = this._purgeExpired();
+            const evictedCount = this._enforceMaxEntries();
+            if (expiredCount > 0 || evictedCount > 0)
+                this.save();
+        }, this.cleanupIntervalMs);
+        this.cleanupInterval.unref?.();
     }
     /**
      * Loads cached tracks from disk.
@@ -67,7 +82,8 @@ export default class TrackCacheManager {
             }
             this.cache = new Map(Object.entries(store));
             const expiredCount = this._purgeExpired();
-            if (expiredCount > 0 || migratedFromLegacy)
+            const evictedCount = this._enforceMaxEntries();
+            if (expiredCount > 0 || evictedCount > 0 || migratedFromLegacy)
                 this.save();
             logger('debug', 'TrackCache', `Loaded ${this.cache.size} cached tracks from disk.`);
         }
@@ -125,6 +141,9 @@ export default class TrackCacheManager {
             this.save();
             return null;
         }
+        // Refresh insertion order so hot keys are less likely to be evicted first.
+        this.cache.delete(key);
+        this.cache.set(key, entry);
         return entry.value;
     }
     /**
@@ -136,11 +155,35 @@ export default class TrackCacheManager {
      */
     set(source, identifier, value, ttlMs = DEFAULT_TTL_MS) {
         const key = `${source}:${identifier}`;
+        if (this.cache.has(key)) {
+            this.cache.delete(key);
+        }
         this.cache.set(key, {
             value,
-            expiresAt: Date.now() + ttlMs
+            expiresAt: ttlMs > 0 ? Date.now() + ttlMs : null
         });
+        this._enforceMaxEntries();
         this.save();
+    }
+    _resolveCacheOptions(options) {
+        const directCandidate = options.trackCache;
+        const rootCache = isRecord(directCandidate) ? directCandidate : null;
+        const nestedCandidate = options.cache;
+        const nestedCache = isRecord(nestedCandidate)
+            ? nestedCandidate.track
+            : null;
+        const nestedTrackCache = isRecord(nestedCache) ? nestedCache : null;
+        const selected = rootCache ?? nestedTrackCache;
+        const maxEntriesRaw = selected?.['maxEntries'];
+        const cleanupIntervalRaw = selected?.['cleanupIntervalMs'];
+        const maxEntries = typeof maxEntriesRaw === 'number' && Number.isFinite(maxEntriesRaw)
+            ? Math.max(100, Math.floor(maxEntriesRaw))
+            : DEFAULT_MAX_ENTRIES;
+        const cleanupIntervalMs = typeof cleanupIntervalRaw === 'number' &&
+            Number.isFinite(cleanupIntervalRaw)
+            ? Math.max(1000, Math.floor(cleanupIntervalRaw))
+            : DEFAULT_CLEANUP_INTERVAL_MS;
+        return { maxEntries, cleanupIntervalMs };
     }
     _resolvePassword(options) {
         const optionsCandidate = options;
@@ -176,6 +219,19 @@ export default class TrackCacheManager {
             }
         }
         return expiredCount;
+    }
+    _enforceMaxEntries() {
+        if (this.cache.size <= this.maxEntries)
+            return 0;
+        let removed = 0;
+        while (this.cache.size > this.maxEntries) {
+            const oldestKey = this.cache.keys().next().value;
+            if (!oldestKey)
+                break;
+            this.cache.delete(oldestKey);
+            removed++;
+        }
+        return removed;
     }
     _decodeStore(data, key) {
         const iv = data.subarray(0, 16);

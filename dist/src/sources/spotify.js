@@ -976,8 +976,9 @@ export default class SpotifySource {
                     else {
                         const canvasRes = await fetchCanvas(`spotify:track:${id}`, this.mobileToken);
                         if (canvasRes?.data?.canvasesList?.[0]) {
-                            track.pluginInfo.canvas = canvasRes.data;
-                            this.nodelink.trackCacheManager.set('spotify-canvas', id, canvasRes.data, 1000 * 60 * 60 * 12);
+                            const compactCanvas = { canvasesList: [canvasRes.data.canvasesList[0]] };
+                            track.pluginInfo.canvas = compactCanvas;
+                            this.nodelink.trackCacheManager.set('spotify-canvas', id, compactCanvas, 1000 * 60 * 60 * 12);
                         }
                     }
                 }
@@ -1020,8 +1021,9 @@ export default class SpotifySource {
                     else {
                         const canvasRes = await fetchCanvas(`spotify:track:${id}`, this.mobileToken);
                         if (canvasRes?.data?.canvasesList?.[0]) {
-                            track.pluginInfo.canvas = canvasRes.data;
-                            this.nodelink.trackCacheManager.set('spotify-canvas', id, canvasRes.data, 1000 * 60 * 60 * 12);
+                            const compactCanvas = { canvasesList: [canvasRes.data.canvasesList[0]] };
+                            track.pluginInfo.canvas = compactCanvas;
+                            this.nodelink.trackCacheManager.set('spotify-canvas', id, compactCanvas, 1000 * 60 * 60 * 12);
                         }
                     }
                 }

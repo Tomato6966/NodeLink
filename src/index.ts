@@ -2178,12 +2178,12 @@ class NodelinkServer extends EventEmitter {
     } else {
       memoryTrace('start:skip-persistence-load-primary')
     }
-    if (!startOptions.isClusterPrimary) {
-      await this.statsManager.initialize()
-      memoryTrace('start:after-stats-init')
-    } else {
-      memoryTrace('start:skip-stats-init-primary')
-    }
+    await this.statsManager.initialize()
+    memoryTrace(
+      startOptions.isClusterPrimary
+        ? 'start:after-stats-init-primary'
+        : 'start:after-stats-init'
+    )
 
     // Ensure sources are initialized before proceeding
     if (this._sourceInitPromise) await this._sourceInitPromise

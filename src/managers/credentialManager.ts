@@ -11,6 +11,7 @@ const CREDENTIALS_SALT = 'nodelink-salt'
 const CREDENTIALS_VERSION = 1
 const DEFAULT_SAVE_DELAY_MS = 1000
 const DEFAULT_CREDENTIALS_PATH = './.cache/credentials.bin'
+const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 1000
 
 type CredentialManagerContext = {
   options: Record<string, unknown>
@@ -53,6 +54,7 @@ export default class CredentialManager {
   private readonly saveDelayMs: number
   private credentials: Map<string, CredentialEntry<unknown>>
   private saveTimeout: NodeJS.Timeout | null
+  private cleanupInterval: NodeJS.Timeout | null
   private savePromise: Promise<void> | null
   private saveQueued: boolean
   private lastLoadedAt: number | null
@@ -72,6 +74,11 @@ export default class CredentialManager {
     this.saveDelayMs = DEFAULT_SAVE_DELAY_MS
     this.credentials = new Map()
     this.saveTimeout = null
+    this.cleanupInterval = setInterval(() => {
+      const expiredCount = this._purgeExpired()
+      if (expiredCount > 0) this.save()
+    }, DEFAULT_CLEANUP_INTERVAL_MS)
+    this.cleanupInterval.unref?.()
     this.savePromise = null
     this.saveQueued = false
     this.lastLoadedAt = null

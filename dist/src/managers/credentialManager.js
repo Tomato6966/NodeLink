@@ -5,6 +5,7 @@ const CREDENTIALS_SALT = 'nodelink-salt';
 const CREDENTIALS_VERSION = 1;
 const DEFAULT_SAVE_DELAY_MS = 1000;
 const DEFAULT_CREDENTIALS_PATH = './.cache/credentials.bin';
+const DEFAULT_CLEANUP_INTERVAL_MS = 60 * 1000;
 const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const getErrorMessage = (error) => error instanceof Error ? error.message : String(error ?? 'Unknown error');
 const getErrorCode = (error) => {
@@ -37,6 +38,7 @@ export default class CredentialManager {
     saveDelayMs;
     credentials;
     saveTimeout;
+    cleanupInterval;
     savePromise;
     saveQueued;
     lastLoadedAt;
@@ -55,6 +57,12 @@ export default class CredentialManager {
         this.saveDelayMs = DEFAULT_SAVE_DELAY_MS;
         this.credentials = new Map();
         this.saveTimeout = null;
+        this.cleanupInterval = setInterval(() => {
+            const expiredCount = this._purgeExpired();
+            if (expiredCount > 0)
+                this.save();
+        }, DEFAULT_CLEANUP_INTERVAL_MS);
+        this.cleanupInterval.unref?.();
         this.savePromise = null;
         this.saveQueued = false;
         this.lastLoadedAt = null;

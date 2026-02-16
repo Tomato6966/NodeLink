@@ -1007,6 +1007,21 @@ export default class WorkerManager {
                     }
                     else if (attempts > 50) {
                         clearInterval(checkReady);
+                        clearTimeout(timeout);
+                        this.pendingRequests.delete(requestId);
+                        if (retryCount < this.maxRetries) {
+                            logger('warn', 'Cluster', `Worker ${worker.id} did not become ready in time for '${type}', retrying... (${retryCount + 1}/${this.maxRetries})`);
+                            if (global.nodelink?.statsManager) {
+                                global.nodelink.statsManager.incrementCommandRetry(type);
+                            }
+                            setTimeout(() => {
+                                const newWorker = this.getBestWorker() || worker;
+                                this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast);
+                            }, 500);
+                        }
+                        else {
+                            reject(new Error(`Worker did not become ready for command '${type}' after ${this.maxRetries + 1} attempts`));
+                        }
                     }
                 }, 100);
                 return;
