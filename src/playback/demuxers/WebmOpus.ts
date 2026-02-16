@@ -12,7 +12,16 @@ import { RingBuffer } from '../structs/RingBuffer.ts'
 
 const TOO_SHORT: unique symbol = Symbol('TOO_SHORT')
 const INVALID_VINT: unique symbol = Symbol('INVALID_VINT')
-const BUFFER_SIZE = 2 * 1024 * 1024
+const parsePositiveIntEnv = (key: string, fallback: number): number => {
+  const raw = process.env[key]
+  if (!raw) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+const BUFFER_SIZE = parsePositiveIntEnv(
+  'NODELINK_WEBM_DEMUX_RING_BYTES',
+  2 * 1024 * 1024
+)
 
 const TAGS: Readonly<Record<string, boolean>> = Object.freeze({
   '1a45dfa3': true,

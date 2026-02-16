@@ -1,6 +1,24 @@
 import { logger } from '../../utils.ts'
 
-const MAX_POOL_SIZE_BYTES = 50 * 1024 * 1024
+const parsePositiveIntEnv = (key: string, fallback: number): number => {
+  const raw = process.env[key]
+  if (!raw) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+const MAX_POOL_SIZE_BYTES = parsePositiveIntEnv(
+  'NODELINK_BUFFER_POOL_MAX_BYTES',
+  50 * 1024 * 1024
+)
+const MAX_BUCKET_ENTRIES = parsePositiveIntEnv(
+  'NODELINK_BUFFER_POOL_MAX_BUCKET_ENTRIES',
+  8
+)
+const IDLE_CLEAR_MS = parsePositiveIntEnv(
+  'NODELINK_BUFFER_POOL_IDLE_CLEAR_MS',
+  180000
+)
 const CLEANUP_INTERVAL = 60000
 
 /**
@@ -18,6 +36,7 @@ class BufferPool {
   private rejectedReleases: number
   private clearCalls: number
   private highWaterBytes: number
+  private lastActivityAt: number
 
   constructor() {
     this.pools = new Map()
@@ -29,6 +48,7 @@ class BufferPool {
     this.rejectedReleases = 0
     this.clearCalls = 0
     this.highWaterBytes = 0
+    this.lastActivityAt = Date.now()
 
     this.cleanupInterval = setInterval(() => this._cleanup(), CLEANUP_INTERVAL)
     this.cleanupInterval.unref()
@@ -58,6 +78,7 @@ class BufferPool {
    * @returns A Buffer with length equal to the aligned size.
    */
   public acquire(size: number): Buffer {
+    this.lastActivityAt = Date.now()
     this.acquireCalls++
     const alignedSize = this._getAlignedSize(size)
     const pool = this.pools.get(alignedSize)
@@ -79,6 +100,7 @@ class BufferPool {
    * @param buffer The Buffer to release.
    */
   public release(buffer: Buffer): void {
+    this.lastActivityAt = Date.now()
     this.releaseCalls++
     if (!Buffer.isBuffer(buffer)) return
 
@@ -101,6 +123,11 @@ class BufferPool {
       this.pools.set(size, pool)
     }
 
+    if (pool.length >= MAX_BUCKET_ENTRIES) {
+      this.rejectedReleases++
+      return
+    }
+
     pool.push(buffer)
     this.totalBytes += size
     if (this.totalBytes > this.highWaterBytes) {
@@ -112,6 +139,7 @@ class BufferPool {
    * Clears all pooled buffers.
    */
   public clear(): void {
+    this.lastActivityAt = Date.now()
     this.clearCalls++
     this.pools.clear()
     this.totalBytes = 0
@@ -172,6 +200,16 @@ class BufferPool {
    * @private
    */
   private _cleanup(): void {
+    if (
+      this.totalBytes > 0 &&
+      Date.now() - this.lastActivityAt >= IDLE_CLEAR_MS
+    ) {
+      this.pools.clear()
+      this.totalBytes = 0
+      logger('debug', 'BufferPool', 'Pool cleared after idle period.')
+      return
+    }
+
     if (this.totalBytes > MAX_POOL_SIZE_BYTES) {
       this.pools.clear()
       this.totalBytes = 0

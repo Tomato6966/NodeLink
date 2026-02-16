@@ -8,7 +8,14 @@ const OPUS_CTL = {
     PLP: 4014,
     DTX: 4016
 };
-const RING_SIZE = 512 * 1024;
+const parsePositiveIntEnv = (key, fallback) => {
+    const raw = process.env[key];
+    if (!raw)
+        return fallback;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const RING_SIZE = parsePositiveIntEnv('NODELINK_OPUS_ENCODER_RING_BYTES', 512 * 1024);
 let ACTIVE_LIB = null;
 const _getLib = () => {
     if (ACTIVE_LIB)

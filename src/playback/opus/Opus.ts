@@ -19,7 +19,17 @@ const OPUS_CTL = {
   DTX: 4016
 }
 
-const RING_SIZE = 512 * 1024
+const parsePositiveIntEnv = (key: string, fallback: number): number => {
+  const raw = process.env[key]
+  if (!raw) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
+
+const RING_SIZE = parsePositiveIntEnv(
+  'NODELINK_OPUS_ENCODER_RING_BYTES',
+  512 * 1024
+)
 let ACTIVE_LIB: OpusLibrary | null = null
 
 const _getLib = (): OpusLibrary => {

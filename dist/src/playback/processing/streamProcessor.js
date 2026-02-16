@@ -39,7 +39,14 @@ const BUFFER_THRESHOLDS = Object.freeze({
     maxCompressed: 256 * 1024,
     minCompressed: 128 * 1024
 });
-const AAC_BUFFER_SIZE = 2 * 1024 * 1024;
+const parsePositiveIntEnv = (key, fallback) => {
+    const raw = process.env[key];
+    if (!raw)
+        return fallback;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
+const AAC_BUFFER_SIZE = parsePositiveIntEnv('NODELINK_AAC_RING_BYTES', 2 * 1024 * 1024);
 const AUDIO_CONSTANTS = Object.freeze({
     pcmFloatFactor: 32767,
     maxDecodesPerTick: 5,
