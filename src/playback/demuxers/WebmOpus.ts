@@ -33,6 +33,7 @@ const TAGS: Readonly<Record<string, boolean>> = Object.freeze({
 
 const OPUS_HEAD = Buffer.from([0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64])
 const MAX_TAG_SIZE = 10 * 1024 * 1024
+const toTightBuffer = (buf: Buffer): Buffer => Buffer.from(buf)
 
 type WebmOpusProfilerStats = {
   created: number
@@ -382,7 +383,8 @@ abstract class WebmBaseDemuxer extends Transform {
       try {
         this._checkHead(data)
         webmOpusProfiler.headPackets++
-        this.emit('head', data)
+        // Emit a tight copy so downstream listeners do not retain the ring backing store.
+        this.emit('head', toTightBuffer(data))
       } catch (_e) {}
     } else if (tag === 'a3') {
       const firstByte = data[0]
@@ -391,7 +393,8 @@ abstract class WebmBaseDemuxer extends Transform {
         firstByte !== undefined &&
         (firstByte & 0xf) === this.currentTrack.number
       ) {
-        const packet = data.subarray(4)
+        // Avoid retaining large backing stores through subarray views.
+        const packet = toTightBuffer(data.subarray(4))
         webmOpusProfiler.packetsOut++
         webmOpusProfiler.packetBytesOut += packet.length
         this.push(packet)

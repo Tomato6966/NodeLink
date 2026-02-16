@@ -394,6 +394,26 @@ function buildPage(code) {
 
       <div class="col">
         <div class="panel fill">
+          <h3>Memory Breakdown</h3>
+          <div id="memBreakdown" class="list list-scroll"></div>
+        </div>
+
+        <div class="panel fill">
+          <h3>Trace Analytics</h3>
+          <div id="traceAnalytics" class="list list-scroll"></div>
+        </div>
+
+        <div class="panel fill">
+          <h3>Socket Footprint</h3>
+          <div id="socketFootprint" class="list list-scroll"></div>
+        </div>
+
+        <div class="panel fill">
+          <h3>Leak Signals</h3>
+          <div id="leakSignals" class="list list-scroll"></div>
+        </div>
+
+        <div class="panel fill">
           <h3>Warnings & Heuristics</h3>
           <div id="warns" class="list list-scroll"></div>
         </div>
@@ -439,6 +459,10 @@ function buildPage(code) {
     const groups = document.getElementById('groups')
     const allReport = document.getElementById('allReport')
     const allocSites = document.getElementById('allocSites')
+    const memBreakdown = document.getElementById('memBreakdown')
+    const traceAnalytics = document.getElementById('traceAnalytics')
+    const socketFootprint = document.getElementById('socketFootprint')
+    const leakSignals = document.getElementById('leakSignals')
     const v8Spaces = document.getElementById('v8Spaces')
     const caches = document.getElementById('caches')
     const streamLife = document.getElementById('streamLife')
@@ -739,6 +763,243 @@ function buildPage(code) {
         ].join('')
         procTableBody.appendChild(tr)
       }
+    }
+
+    function renderMemoryBreakdown(snapshot) {
+      const rows = flattenProcesses(snapshot)
+      const list = []
+      const totals = {
+        rss: 0,
+        heapUsed: 0,
+        heapTotal: 0,
+        external: 0,
+        arrayBuffers: 0
+      }
+
+      for (const row of rows) {
+        const mem = row.memory || {}
+        const rss = Number(mem.rss || 0)
+        const heapUsed = Number(mem.heapUsed || 0)
+        const heapTotal = Number(mem.heapTotal || 0)
+        const external = Number(mem.external || 0)
+        const arrayBuffers = Number(mem.arrayBuffers || 0)
+        const extRatio = rss > 0 ? (external + arrayBuffers) / rss : 0
+        const heapRatio = heapTotal > 0 ? heapUsed / heapTotal : 0
+
+        totals.rss += rss
+        totals.heapUsed += heapUsed
+        totals.heapTotal += heapTotal
+        totals.external += external
+        totals.arrayBuffers += arrayBuffers
+
+        list.push({
+          text:
+            '<span class="tag">' + row.type + ' ' + (row.pid || '-') + '</span>' +
+            '<span class="tag">heap ' + mb(heapUsed) + '/' + mb(heapTotal) + 'MB</span>' +
+            '<span class="tag">rss ' + mb(rss) + 'MB</span>' +
+            '<span class="tag">ext/ab ' + mb(external) + '/' + mb(arrayBuffers) + 'MB</span>' +
+            '<span class="tag">heap ' + safePct(heapRatio) + '</span>' +
+            '<span class="tag">ext+rss ' + safePct(extRatio) + '</span>'
+        })
+      }
+
+      const totalExtRatio =
+        totals.rss > 0 ? (totals.external + totals.arrayBuffers) / totals.rss : 0
+      const totalHeapRatio =
+        totals.heapTotal > 0 ? totals.heapUsed / totals.heapTotal : 0
+
+      list.unshift({
+        text:
+          '<span class="tag">total</span>' +
+          '<span class="tag">heap ' + mb(totals.heapUsed) + '/' + mb(totals.heapTotal) + 'MB</span>' +
+          '<span class="tag">rss ' + mb(totals.rss) + 'MB</span>' +
+          '<span class="tag">ext/ab ' + mb(totals.external) + '/' + mb(totals.arrayBuffers) + 'MB</span>' +
+          '<span class="tag">heap ' + safePct(totalHeapRatio) + '</span>' +
+          '<span class="tag">ext+rss ' + safePct(totalExtRatio) + '</span>'
+      })
+
+      setList(memBreakdown, list, '', 0)
+    }
+
+    function renderTraceAnalytics(snapshot) {
+      const reqs = snapshot?.master?.runtime?.trace?.requests || []
+      const rows = []
+      const methods = new Map()
+      const statuses = new Map()
+      const reasons = new Map()
+      const paths = new Map()
+      const remotes = new Map()
+      let totalDuration = 0
+
+      for (const req of reqs) {
+        const method = String(req.method || 'UNKNOWN')
+        const status = String(req.status || '-')
+        const reason = String(req.reason || '-')
+        const path = String(req.path || '-')
+        const remote = String(req.remoteAddress || '-')
+        const dur = Number(req.durationMs || 0)
+
+        methods.set(method, (methods.get(method) || 0) + 1)
+        statuses.set(status, (statuses.get(status) || 0) + 1)
+        reasons.set(reason, (reasons.get(reason) || 0) + 1)
+        remotes.set(remote, (remotes.get(remote) || 0) + 1)
+        const prev = paths.get(path) || { count: 0, duration: 0 }
+        prev.count += 1
+        prev.duration += dur
+        paths.set(path, prev)
+        totalDuration += dur
+      }
+
+      const total = reqs.length
+      const avgDuration = total > 0 ? totalDuration / total : 0
+      const errorCount = Array.from(statuses.entries()).reduce(
+        (acc, [status, count]) => (Number(status) >= 400 ? acc + count : acc),
+        0
+      )
+      rows.push({
+        text:
+          '<span class="tag">requests ' + total + '</span>' +
+          '<span class="tag">errors ' + errorCount + '</span>' +
+          '<span class="tag">error rate ' + safePct(total > 0 ? errorCount / total : 0) + '</span>' +
+          '<span class="tag">avg ' + avgDuration.toFixed(1) + 'ms</span>'
+      })
+
+      const pushTop = (title, map, formatter) => {
+        const ordered = Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 6)
+        if (ordered.length === 0) return
+        rows.push({ text: '<b>' + title + '</b>' })
+        for (const [k, v] of ordered) {
+          rows.push({ text: formatter(k, v) })
+        }
+      }
+
+      pushTop('Methods', methods, (k, v) => '<span class="tag">' + k + '</span><span class="muted">count ' + v + '</span>')
+      pushTop('Status', statuses, (k, v) => '<span class="tag">' + k + '</span><span class="muted">count ' + v + '</span>')
+      pushTop(
+        'Top Paths',
+        new Map(
+          Array.from(paths.entries())
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 8)
+            .map(([path, data]) => [path, data.count])
+        ),
+        (k, v) => {
+          const info = paths.get(k) || { duration: 0, count: 1 }
+          const avg = info.duration / Math.max(1, info.count)
+          return (
+            '<div class="kv"><div class="k">path</div><div class="v"><b>' + k + '</b></div></div>' +
+            '<span class="tag">count ' + v + '</span>' +
+            '<span class="tag">avg ' + avg.toFixed(1) + 'ms</span>'
+          )
+        }
+      )
+      pushTop('Reasons', reasons, (k, v) => '<span class="tag">' + k + '</span><span class="muted">count ' + v + '</span>')
+      pushTop('Remote IP', remotes, (k, v) => '<span class="tag">' + k + '</span><span class="muted">count ' + v + '</span>')
+
+      setList(traceAnalytics, rows, '', 0)
+    }
+
+    function renderSocketFootprint(snapshot) {
+      const rows = flattenProcesses(snapshot)
+      const list = []
+      const totals = {
+        sockets: 0,
+        tlsSockets: 0,
+        tcpWrap: 0,
+        handles: 0,
+        resources: 0
+      }
+
+      for (const row of rows) {
+        const handles = row.activeHandles || {}
+        const resources = row.activeResources || {}
+        const sockets = Number(handles.Socket || 0)
+        const tlsSockets = Number(handles.TLSSocket || 0)
+        const tcpWrap = Number(resources.TCPSocketWrap || 0)
+        const handleCount = Object.values(handles).reduce((a, b) => a + Number(b || 0), 0)
+        const resourceCount = Object.values(resources).reduce((a, b) => a + Number(b || 0), 0)
+
+        totals.sockets += sockets
+        totals.tlsSockets += tlsSockets
+        totals.tcpWrap += tcpWrap
+        totals.handles += handleCount
+        totals.resources += resourceCount
+
+        list.push({
+          text:
+            '<span class="tag">' + row.type + ' ' + (row.pid || '-') + '</span>' +
+            '<span class="tag">socket ' + sockets + '</span>' +
+            '<span class="tag">tls ' + tlsSockets + '</span>' +
+            '<span class="tag">tcpWrap ' + tcpWrap + '</span>' +
+            '<span class="tag">handles ' + handleCount + '</span>' +
+            '<span class="tag">resources ' + resourceCount + '</span>'
+        })
+      }
+
+      list.unshift({
+        text:
+          '<span class="tag">total</span>' +
+          '<span class="tag">socket ' + totals.sockets + '</span>' +
+          '<span class="tag">tls ' + totals.tlsSockets + '</span>' +
+          '<span class="tag">tcpWrap ' + totals.tcpWrap + '</span>' +
+          '<span class="tag">handles ' + totals.handles + '</span>' +
+          '<span class="tag">resources ' + totals.resources + '</span>'
+      })
+
+      setList(socketFootprint, list, '', 0)
+    }
+
+    function renderLeakSignals(snapshot) {
+      const rows = flattenProcesses(snapshot)
+      const list = []
+      const threshold = {
+        extRatio: 0.45,
+        heapRatio: 0.9,
+        newSpaceRatio: 0.6
+      }
+
+      for (const row of rows) {
+        const mem = row.memory || {}
+        const rss = Number(mem.rss || 0)
+        const heapUsed = Number(mem.heapUsed || 0)
+        const heapTotal = Number(mem.heapTotal || 0)
+        const external = Number(mem.external || 0)
+        const arrayBuffers = Number(mem.arrayBuffers || 0)
+        const extRatio = rss > 0 ? (external + arrayBuffers) / rss : 0
+        const heapRatio = heapTotal > 0 ? heapUsed / heapTotal : 0
+
+        const spaces =
+          row.type === 'master'
+            ? snapshot?.master?.heapSpaces || snapshot?.master?.runtime?.heapSpaces || []
+            : row.type === 'worker'
+              ? (snapshot?.workers || []).find((w) => Number(w.pid) === Number(row.pid))?.response?.heapSpaces || []
+              : (snapshot?.sourceWorkers || []).find((s) => Number(s.pid) === Number(row.pid))?.response?.heapSpaces || []
+        const newSpace = (spaces || []).find((s) => String(s.spaceName || '') === 'new_space') || null
+        const newSpaceRatio =
+          Number(newSpace?.spaceSize || 0) > 0
+            ? Number(newSpace?.spaceUsedSize || 0) / Number(newSpace?.spaceSize || 0)
+            : 0
+
+        const flags = []
+        if (extRatio >= threshold.extRatio) flags.push('ext/rss high')
+        if (heapRatio >= threshold.heapRatio) flags.push('heap pressure')
+        if (newSpaceRatio >= threshold.newSpaceRatio && Number(newSpace?.spaceSize || 0) >= 8 * 1024 * 1024) flags.push('new_space churn')
+        if (flags.length === 0) continue
+
+        list.push({
+          level: 'warn',
+          text:
+            '<span class="tag">' + row.type + ' ' + (row.pid || '-') + '</span>' +
+            flags.map((flag) => '<span class="tag">' + flag + '</span>').join('') +
+            '<div class="muted">heap ' + safePct(heapRatio) + ' | ext/rss ' + safePct(extRatio) + ' | new_space ' + safePct(newSpaceRatio) + '</div>'
+        })
+      }
+
+      if (list.length === 0) {
+        setList(leakSignals, [{ level: 'ok', text: 'No high-risk retention signals in current snapshot.' }], '', 0)
+        return
+      }
+      setList(leakSignals, list, '', 0)
     }
 
     function renderV8Spaces(snapshot) {
@@ -1282,6 +1543,10 @@ function buildPage(code) {
             const lastWarnings = lastEntry?.warnings || []
             if (lastSnapshot) {
               renderProcessTable(lastSnapshot)
+              renderMemoryBreakdown(lastSnapshot)
+              renderTraceAnalytics(lastSnapshot)
+              renderSocketFootprint(lastSnapshot)
+              renderLeakSignals(lastSnapshot)
               renderV8Spaces(lastSnapshot)
               renderCaches(lastSnapshot)
               renderStreamLifecycle(lastSnapshot)
@@ -1301,6 +1566,10 @@ function buildPage(code) {
           const snapshot = payload.snapshot
           updateCards(snapshot)
           renderProcessTable(snapshot)
+          renderMemoryBreakdown(snapshot)
+          renderTraceAnalytics(snapshot)
+          renderSocketFootprint(snapshot)
+          renderLeakSignals(snapshot)
           renderV8Spaces(snapshot)
           renderCaches(snapshot)
           renderStreamLifecycle(snapshot)
@@ -1344,6 +1613,10 @@ function buildPage(code) {
       }
       if (local.lastSnapshot) {
         renderProcessTable(local.lastSnapshot)
+        renderMemoryBreakdown(local.lastSnapshot)
+        renderTraceAnalytics(local.lastSnapshot)
+        renderSocketFootprint(local.lastSnapshot)
+        renderLeakSignals(local.lastSnapshot)
         renderV8Spaces(local.lastSnapshot)
         renderCaches(local.lastSnapshot)
         renderStreamLifecycle(local.lastSnapshot)

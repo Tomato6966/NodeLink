@@ -145,7 +145,7 @@ export class FadeTransformer extends Transform implements IFadeTransformer {
     const view =
       chunk.byteOffset % 2 === 0
         ? new Int16Array(chunk.buffer, chunk.byteOffset, sampleCount)
-        : new Int16Array(Uint8Array.prototype.slice.call(chunk).buffer)
+        : new Int16Array(Buffer.from(chunk).buffer)
 
     const step = sampleCount > 1 ? (gainEnd - gainStart) / (sampleCount - 1) : 0
 

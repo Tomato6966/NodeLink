@@ -152,6 +152,16 @@ const _isMp4Format = (type) => type.indexOf('mp4') !== -1 ||
     type.indexOf('quicktime') !== -1;
 const _isWebmFormat = (type) => type.includes('webm') || type.includes('weba');
 const _isFlvFormat = (type) => type.indexOf('flv') !== -1;
+const _tightBuffer = (buf) => Buffer.from(buf);
+const _toTightArrayBuffer = (buf) => {
+    const backing = buf.buffer;
+    if (backing instanceof ArrayBuffer &&
+        buf.byteOffset === 0 &&
+        buf.byteLength === backing.byteLength) {
+        return backing;
+    }
+    return Uint8Array.from(buf).buffer;
+};
 const _extFromUrl = (url) => {
     try {
         const p = new URL(url).pathname;
@@ -163,7 +173,7 @@ const _extFromUrl = (url) => {
     }
 };
 const _toArrayBufferWithFileStart = (buf, fileStart) => {
-    const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+    const ab = _toTightArrayBuffer(buf);
     ab.fileStart = fileStart;
     return ab;
 };
@@ -778,7 +788,7 @@ class MPEGTSDemuxer extends Transform {
             const headerLength = buffer[8] || 0;
             const payloadOffset = 9 + headerLength;
             if (payloadOffset < buffer.length) {
-                this.push(buffer.subarray(payloadOffset));
+                this.push(_tightBuffer(buffer.subarray(payloadOffset)));
             }
         }
     }
@@ -1192,7 +1202,7 @@ class MP4ToAACStream extends Transform {
             this._appendPrefetchIfNeeded();
             const arrayBuffer = chunk instanceof ArrayBuffer
                 ? chunk
-                : chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
+                : _toTightArrayBuffer(chunk);
             arrayBuffer.fileStart =
                 this.offset;
             this.offset += arrayBuffer.byteLength;
@@ -1510,7 +1520,7 @@ class FMP4ToAACStream extends Transform {
                         if (this.audioConfig) {
                             const adts = this._createAdtsHeader(sampleSize, this.audioConfig);
                             this.push(adts);
-                            this.push(sampleData);
+                            this.push(_tightBuffer(sampleData));
                         }
                         this._streamState.boxSize -= sampleSize;
                         samples.shift();
@@ -1605,7 +1615,7 @@ class FMP4ToAACStream extends Transform {
                 if (this.buffer.length === 0)
                     this.buffer = chunk;
                 else if (chunk.length > 0)
-                    this.buffer = Buffer.concat([this.buffer, chunk]);
+                    this.buffer = Buffer.concat([this.buffer, chunk], this.buffer.length + chunk.length);
                 this._processBuffer();
             }
             else {
@@ -1682,11 +1692,11 @@ class FLVToAACStream extends Transform {
             else if (aacPacketType === 1 && this.audioConfig) {
                 const adtsHeader = _createAdtsHeader(tag.length - 2, this.audioConfig.profile || 2, this.audioConfig.samplingIndex || 4, this.audioConfig.channelCount || 2);
                 this.push(adtsHeader);
-                this.push(tag.subarray(2));
+                this.push(_tightBuffer(tag.subarray(2)));
             }
         }
         else if (format === 2) {
-            this.push(tag.subarray(1));
+            this.push(_tightBuffer(tag.subarray(1)));
         }
     }
     _parseAudioSpecificConfig(data) {

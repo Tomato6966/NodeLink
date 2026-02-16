@@ -892,13 +892,18 @@ if (isMainThread) {
     socketPath: string,
     chunk: Buffer
   ): void => {
-    const transferable = chunk.buffer as ArrayBuffer
+    // Ensure we transfer only the chunk payload, not a larger shared backing store.
+    const tightChunk =
+      chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength
+        ? chunk
+        : Buffer.from(chunk)
+    const transferable = tightChunk.buffer as ArrayBuffer
     ;(parentPort as MessagePort).postMessage(
       {
         type: 'stream',
         id,
         socketPath,
-        chunk
+        chunk: tightChunk
       },
       [transferable]
     )

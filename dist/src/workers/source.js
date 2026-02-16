@@ -655,12 +655,16 @@ else {
      * @internal
      */
     const sendStreamChunkFromWorker = (id, socketPath, chunk) => {
-        const transferable = chunk.buffer;
+        // Ensure we transfer only the chunk payload, not a larger shared backing store.
+        const tightChunk = chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength
+            ? chunk
+            : Buffer.from(chunk);
+        const transferable = tightChunk.buffer;
         parentPort.postMessage({
             type: 'stream',
             id,
             socketPath,
-            chunk
+            chunk: tightChunk
         }, [transferable]);
     };
     /**

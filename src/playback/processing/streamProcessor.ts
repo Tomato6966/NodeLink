@@ -249,6 +249,18 @@ const _isWebmFormat = (type: string): boolean =>
   type.includes('webm') || type.includes('weba')
 
 const _isFlvFormat = (type: string): boolean => type.indexOf('flv') !== -1
+const _tightBuffer = (buf: Buffer): Buffer => Buffer.from(buf)
+const _toTightArrayBuffer = (buf: Buffer): ArrayBuffer => {
+  const backing = buf.buffer
+  if (
+    backing instanceof ArrayBuffer &&
+    buf.byteOffset === 0 &&
+    buf.byteLength === backing.byteLength
+  ) {
+    return backing
+  }
+  return Uint8Array.from(buf).buffer
+}
 
 const _extFromUrl = (url: string): string => {
   try {
@@ -264,10 +276,7 @@ const _toArrayBufferWithFileStart = (
   buf: Buffer,
   fileStart: number
 ): ArrayBuffer & { fileStart?: number } => {
-  const ab = buf.buffer.slice(
-    buf.byteOffset,
-    buf.byteOffset + buf.byteLength
-  ) as ArrayBuffer & { fileStart?: number }
+  const ab = _toTightArrayBuffer(buf) as ArrayBuffer & { fileStart?: number }
   ab.fileStart = fileStart
   return ab
 }
@@ -1081,7 +1090,7 @@ class MPEGTSDemuxer extends Transform {
       const payloadOffset = 9 + headerLength
 
       if (payloadOffset < buffer.length) {
-        this.push(buffer.subarray(payloadOffset))
+        this.push(_tightBuffer(buffer.subarray(payloadOffset)))
       }
     }
   }
@@ -1604,10 +1613,7 @@ class MP4ToAACStream extends Transform {
       const arrayBuffer =
         chunk instanceof ArrayBuffer
           ? chunk
-          : (chunk.buffer.slice(
-              chunk.byteOffset,
-              chunk.byteOffset + chunk.byteLength
-            ) as ArrayBuffer & { fileStart?: number })
+          : (_toTightArrayBuffer(chunk) as ArrayBuffer & { fileStart?: number })
 
       ;(arrayBuffer as ArrayBuffer & { fileStart?: number }).fileStart =
         this.offset
@@ -1961,7 +1967,7 @@ class FMP4ToAACStream extends Transform {
             if (this.audioConfig) {
               const adts = this._createAdtsHeader(sampleSize, this.audioConfig)
               this.push(adts)
-              this.push(sampleData)
+              this.push(_tightBuffer(sampleData))
             }
 
             this._streamState.boxSize -= sampleSize
@@ -2067,7 +2073,10 @@ class FMP4ToAACStream extends Transform {
         // quando bufferMode for true, vai ser modo streaming, ou seja, vai processar o chunk imediatamente
         if (this.buffer.length === 0) this.buffer = chunk
         else if (chunk.length > 0)
-          this.buffer = Buffer.concat([this.buffer, chunk])
+          this.buffer = Buffer.concat(
+            [this.buffer, chunk],
+            this.buffer.length + chunk.length
+          )
         this._processBuffer()
       } else {
         // quando bufferMode for false, vai ser modo simples, ou seja, vai processar o chunk quando tiver todos os dados
@@ -2156,10 +2165,10 @@ class FLVToAACStream extends Transform {
           this.audioConfig.channelCount || 2
         )
         this.push(adtsHeader)
-        this.push(tag.subarray(2))
+        this.push(_tightBuffer(tag.subarray(2)))
       }
     } else if (format === 2) {
-      this.push(tag.subarray(1))
+      this.push(_tightBuffer(tag.subarray(1)))
     }
   }
 
