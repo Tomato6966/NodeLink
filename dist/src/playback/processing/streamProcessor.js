@@ -415,6 +415,7 @@ class SymphoniaDecoderStream extends Transform {
     _isDecoding;
     _timeoutId;
     _immediateId;
+    _onResume;
     constructor(options = {}) {
         super({
             ...options,
@@ -431,11 +432,12 @@ class SymphoniaDecoderStream extends Transform {
         this._isDecoding = false;
         this._timeoutId = null;
         this._immediateId = null;
-        this.on('resume', () => {
+        this._onResume = () => {
             if (!this.isFinished && !this._aborted && this.decoder) {
                 this._scheduleDecode();
             }
-        });
+        };
+        this.on('resume', this._onResume);
     }
     abort() {
         this._aborted = true;
@@ -629,6 +631,15 @@ class SymphoniaDecoderStream extends Transform {
     }
     _cleanup() {
         this._cancelTimers();
+        this.removeListener('resume', this._onResume);
+        if (this.resumeInput) {
+            const cb = this.resumeInput;
+            this.resumeInput = null;
+            try {
+                cb();
+            }
+            catch { }
+        }
         if (this.decoder) {
             try {
                 this.decoder.flush();
@@ -655,7 +666,8 @@ class MPEGTSDemuxer extends Transform {
     audioPid;
     audioPidFound;
     _aborted;
-    pesBuffer;
+    pesChunks;
+    pesSize;
     constructor(options) {
         super({
             ...options,
@@ -666,12 +678,14 @@ class MPEGTSDemuxer extends Transform {
         this.audioPid = null;
         this.audioPidFound = false;
         this._aborted = false;
-        this.pesBuffer = Buffer.alloc(0);
+        this.pesChunks = [];
+        this.pesSize = 0;
     }
     abort() {
         this._aborted = true;
         this.ringBuffer.clear();
-        this.pesBuffer = Buffer.alloc(0);
+        this.pesChunks = [];
+        this.pesSize = 0;
     }
     _transform(chunk, _encoding, callback) {
         if (this._aborted) {
@@ -745,14 +759,16 @@ class MPEGTSDemuxer extends Transform {
     }
     _processAudioPacket(packet, pusi, offset) {
         if (pusi) {
-            if (this.pesBuffer.length > 0) {
-                this._emitPES(this.pesBuffer);
-                this.pesBuffer = Buffer.alloc(0);
+            if (this.pesSize > 0) {
+                this._emitPES(Buffer.concat(this.pesChunks, this.pesSize));
+                this.pesChunks = [];
+                this.pesSize = 0;
             }
         }
         const payload = packet.subarray(offset);
         if (payload.length > 0) {
-            this.pesBuffer = Buffer.concat([this.pesBuffer, payload]);
+            this.pesChunks.push(payload);
+            this.pesSize += payload.length;
         }
     }
     _emitPES(buffer) {
@@ -767,17 +783,19 @@ class MPEGTSDemuxer extends Transform {
         }
     }
     _flush(callback) {
-        if (this.pesBuffer.length > 0) {
-            this._emitPES(this.pesBuffer);
+        if (this.pesSize > 0) {
+            this._emitPES(Buffer.concat(this.pesChunks, this.pesSize));
         }
-        this.pesBuffer = Buffer.alloc(0);
+        this.pesChunks = [];
+        this.pesSize = 0;
         this.ringBuffer.clear();
         callback();
     }
     _destroy(err, callback) {
         this._aborted = true;
         this.ringBuffer.dispose();
-        this.pesBuffer = Buffer.alloc(0);
+        this.pesChunks = [];
+        this.pesSize = 0;
         super._destroy(err, callback);
     }
 }
@@ -1491,7 +1509,8 @@ class FMP4ToAACStream extends Transform {
                         this.buffer = this.buffer.subarray(sampleSize);
                         if (this.audioConfig) {
                             const adts = this._createAdtsHeader(sampleSize, this.audioConfig);
-                            this.push(Buffer.concat([adts, sampleData]));
+                            this.push(adts);
+                            this.push(sampleData);
                         }
                         this._streamState.boxSize -= sampleSize;
                         samples.shift();
@@ -1662,7 +1681,8 @@ class FLVToAACStream extends Transform {
             }
             else if (aacPacketType === 1 && this.audioConfig) {
                 const adtsHeader = _createAdtsHeader(tag.length - 2, this.audioConfig.profile || 2, this.audioConfig.samplingIndex || 4, this.audioConfig.channelCount || 2);
-                this.push(Buffer.concat([adtsHeader, tag.subarray(2)]));
+                this.push(adtsHeader);
+                this.push(tag.subarray(2));
             }
         }
         else if (format === 2) {

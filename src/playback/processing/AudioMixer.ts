@@ -148,13 +148,16 @@ export class AudioMixer extends EventEmitter {
 
       let data = chunk
       if (layer.pending.length > 0) {
-        data = Buffer.concat([layer.pending, chunk])
+        const merged = Buffer.allocUnsafe(layer.pending.length + chunk.length)
+        layer.pending.copy(merged, 0)
+        chunk.copy(merged, layer.pending.length)
+        data = merged
         layer.pending = Buffer.alloc(0)
       }
 
       const remainder = data.length % 4
       if (remainder > 0) {
-        layer.pending = data.subarray(data.length - remainder)
+        layer.pending = Buffer.from(data.subarray(data.length - remainder))
         data = data.subarray(0, data.length - remainder)
       }
 

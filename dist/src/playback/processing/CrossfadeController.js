@@ -27,8 +27,8 @@ export class CrossfadeController extends Transform {
     minBufferBytes;
     ringBuffer = null;
     nextStream = null;
-    nextPending = Buffer.alloc(0);
-    mainPending = Buffer.alloc(0);
+    nextPendingByte = null;
+    mainPendingByte = null;
     crossfade = null;
     bufferReady = false;
     warnedCurve = null;
@@ -36,13 +36,18 @@ export class CrossfadeController extends Transform {
         if (!this.ringBuffer)
             return;
         let data = chunk;
-        if (this.nextPending.length > 0) {
-            data = Buffer.concat([this.nextPending, chunk]);
-            this.nextPending = Buffer.alloc(0);
+        if (this.nextPendingByte !== null) {
+            if (chunk.length === 0)
+                return;
+            const merged = Buffer.allocUnsafe(chunk.length + 1);
+            merged[0] = this.nextPendingByte;
+            chunk.copy(merged, 1);
+            data = merged;
+            this.nextPendingByte = null;
         }
         const remainder = data.length % 2;
         if (remainder > 0) {
-            this.nextPending = data.subarray(data.length - remainder);
+            this.nextPendingByte = data[data.length - 1] ?? 0;
             data = data.subarray(0, data.length - remainder);
         }
         if (!data.length || !this.ringBuffer)
@@ -180,8 +185,8 @@ export class CrossfadeController extends Transform {
         }
         this._pauseNextStream();
         this.nextStream = null;
-        this.nextPending = Buffer.alloc(0);
-        this.mainPending = Buffer.alloc(0);
+        this.nextPendingByte = null;
+        this.mainPendingByte = null;
         this.crossfade = null;
         this.bufferReady = false;
         this.targetBufferBytes = 0;
@@ -258,13 +263,20 @@ export class CrossfadeController extends Transform {
     }
     _transform(chunk, _encoding, callback) {
         let data = chunk;
-        if (this.mainPending.length > 0) {
-            data = Buffer.concat([this.mainPending, chunk]);
-            this.mainPending = Buffer.alloc(0);
+        if (this.mainPendingByte !== null) {
+            if (chunk.length === 0) {
+                callback();
+                return;
+            }
+            const merged = Buffer.allocUnsafe(chunk.length + 1);
+            merged[0] = this.mainPendingByte;
+            chunk.copy(merged, 1);
+            data = merged;
+            this.mainPendingByte = null;
         }
         const remainder = data.length % 2;
         if (remainder > 0) {
-            this.mainPending = data.subarray(data.length - remainder);
+            this.mainPendingByte = data[data.length - 1] ?? 0;
             data = data.subarray(0, data.length - remainder);
         }
         if (!data.length || !this.crossfade || !this.ringBuffer) {
@@ -279,18 +291,17 @@ export class CrossfadeController extends Transform {
             callback();
             return;
         }
-        const paddedNext = nextChunk.length === data.length
-            ? nextChunk
-            : Buffer.concat([
-                nextChunk,
-                Buffer.alloc(data.length - nextChunk.length)
-            ]);
+        let paddedNext = nextChunk;
+        if (nextChunk.length !== data.length) {
+            paddedNext = Buffer.allocUnsafe(data.length);
+            paddedNext.fill(0);
+            nextChunk.copy(paddedNext, 0, 0, nextChunk.length);
+        }
         this.push(this._mixBuffers(data, paddedNext, this.crossfade));
         callback();
     }
     _final(callback) {
-        this.mainPending = Buffer.alloc(0);
-        this.crossfade = null;
+        this.clear();
         callback();
     }
 }

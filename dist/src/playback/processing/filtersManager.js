@@ -109,16 +109,22 @@ export class FiltersManager extends Transform {
      * Flushes any buffered filter data.
      */
     flush() {
-        let remaining = Buffer.alloc(0);
+        const flushedChunks = [];
+        let totalLength = 0;
         for (const filter of this.activeFilters) {
             if (typeof filter.flush === 'function') {
                 const flushed = filter.flush();
                 if (flushed && flushed.length > 0) {
-                    remaining = Buffer.concat([remaining, flushed]);
+                    flushedChunks.push(flushed);
+                    totalLength += flushed.length;
                 }
             }
         }
-        return remaining;
+        if (flushedChunks.length === 0)
+            return Buffer.alloc(0);
+        if (flushedChunks.length === 1)
+            return flushedChunks[0];
+        return Buffer.concat(flushedChunks, totalLength);
     }
     _transform(chunk, _encoding, callback) {
         this.push(this.process(chunk));

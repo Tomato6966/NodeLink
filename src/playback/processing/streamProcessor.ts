@@ -627,6 +627,7 @@ class SymphoniaDecoderStream extends Transform {
   private _isDecoding: boolean
   private _timeoutId: ReturnType<typeof setTimeout> | null
   private _immediateId: ReturnType<typeof setImmediate> | null
+  private readonly _onResume: () => void
 
   constructor(
     options: {
@@ -652,11 +653,13 @@ class SymphoniaDecoderStream extends Transform {
     this._timeoutId = null
     this._immediateId = null
 
-    this.on('resume', () => {
+    this._onResume = () => {
       if (!this.isFinished && !this._aborted && this.decoder) {
         this._scheduleDecode()
       }
-    })
+    }
+
+    this.on('resume', this._onResume)
   }
 
   abort(): void {
@@ -904,6 +907,15 @@ class SymphoniaDecoderStream extends Transform {
 
   _cleanup(): void {
     this._cancelTimers()
+    this.removeListener('resume', this._onResume)
+
+    if (this.resumeInput) {
+      const cb = this.resumeInput
+      this.resumeInput = null
+      try {
+        cb()
+      } catch {}
+    }
 
     if (this.decoder) {
       try {
@@ -930,7 +942,8 @@ class MPEGTSDemuxer extends Transform {
   private audioPid: number | null
   private audioPidFound: boolean
   private _aborted: boolean
-  private pesBuffer: Buffer
+  private pesChunks: Buffer[]
+  private pesSize: number
 
   constructor(options?: { highWaterMark?: number }) {
     super({
@@ -945,13 +958,15 @@ class MPEGTSDemuxer extends Transform {
     this.audioPid = null
     this.audioPidFound = false
     this._aborted = false
-    this.pesBuffer = Buffer.alloc(0)
+    this.pesChunks = []
+    this.pesSize = 0
   }
 
   abort(): void {
     this._aborted = true
     this.ringBuffer.clear()
-    this.pesBuffer = Buffer.alloc(0)
+    this.pesChunks = []
+    this.pesSize = 0
   }
 
   override _transform(
@@ -1044,15 +1059,17 @@ class MPEGTSDemuxer extends Transform {
 
   _processAudioPacket(packet: Buffer, pusi: boolean, offset: number): void {
     if (pusi) {
-      if (this.pesBuffer.length > 0) {
-        this._emitPES(this.pesBuffer)
-        this.pesBuffer = Buffer.alloc(0)
+      if (this.pesSize > 0) {
+        this._emitPES(Buffer.concat(this.pesChunks, this.pesSize))
+        this.pesChunks = []
+        this.pesSize = 0
       }
     }
 
     const payload = packet.subarray(offset)
     if (payload.length > 0) {
-      this.pesBuffer = Buffer.concat([this.pesBuffer, payload])
+      this.pesChunks.push(payload)
+      this.pesSize += payload.length
     }
   }
 
@@ -1070,10 +1087,11 @@ class MPEGTSDemuxer extends Transform {
   }
 
   override _flush(callback: TransformCallback): void {
-    if (this.pesBuffer.length > 0) {
-      this._emitPES(this.pesBuffer)
+    if (this.pesSize > 0) {
+      this._emitPES(Buffer.concat(this.pesChunks, this.pesSize))
     }
-    this.pesBuffer = Buffer.alloc(0)
+    this.pesChunks = []
+    this.pesSize = 0
     this.ringBuffer.clear()
     callback()
   }
@@ -1084,7 +1102,8 @@ class MPEGTSDemuxer extends Transform {
   ): void {
     this._aborted = true
     this.ringBuffer.dispose()
-    this.pesBuffer = Buffer.alloc(0)
+    this.pesChunks = []
+    this.pesSize = 0
     super._destroy(err, callback)
   }
 }
@@ -1941,7 +1960,8 @@ class FMP4ToAACStream extends Transform {
 
             if (this.audioConfig) {
               const adts = this._createAdtsHeader(sampleSize, this.audioConfig)
-              this.push(Buffer.concat([adts, sampleData]))
+              this.push(adts)
+              this.push(sampleData)
             }
 
             this._streamState.boxSize -= sampleSize
@@ -2135,7 +2155,8 @@ class FLVToAACStream extends Transform {
           this.audioConfig.samplingIndex || 4,
           this.audioConfig.channelCount || 2
         )
-        this.push(Buffer.concat([adtsHeader, tag.subarray(2)]))
+        this.push(adtsHeader)
+        this.push(tag.subarray(2))
       }
     } else if (format === 2) {
       this.push(tag.subarray(1))
