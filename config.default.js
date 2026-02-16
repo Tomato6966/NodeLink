@@ -415,7 +415,8 @@ export default {
       allowExplicit: true
     },
     lastfm: {
-      enabled: true
+      enabled: true,
+      apiKey: '', // You can get the api key from: https://www.last.fm/api/account/create
     },
     letrasmus: {
       enabled: true
