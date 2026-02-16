@@ -15,26 +15,55 @@ const resolveExecPath = () => {
         return distIndex;
     return path.resolve(process.cwd(), 'src/index.ts');
 };
-const parseBool = (value) => typeof value === 'string' &&
-    ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
-const buildWorkerExecArgv = () => {
+const parseBool = (value) => {
+    if (value === true)
+        return true;
+    if (value === false)
+        return false;
+    return (typeof value === 'string' &&
+        ['1', 'true', 'yes', 'on'].includes(value.toLowerCase()));
+};
+const parsePositiveInt = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+};
+const parseExecArgv = (value) => {
+    if (Array.isArray(value)) {
+        return value.map((v) => String(v).trim()).filter(Boolean);
+    }
+    if (typeof value === 'string' && value.trim().length > 0) {
+        return value
+            .split(',')
+            .map((v) => v.trim())
+            .filter(Boolean);
+    }
+    return [];
+};
+const buildWorkerExecArgv = (config = null) => {
     const args = new Set(process.execArgv || []);
+    const runtime = config?.cluster?.runtime || {};
     for (const arg of Array.from(args)) {
         if (arg.startsWith('--max-old-space-size='))
             args.delete(arg);
     }
-    const maxOldSpaceMb = Number(process.env.NODELINK_WORKER_MAX_OLD_SPACE_MB || 0);
-    if (Number.isFinite(maxOldSpaceMb) && maxOldSpaceMb > 0) {
-        args.add(`--max-old-space-size=${Math.floor(maxOldSpaceMb)}`);
+    const maxOldSpaceMb = parsePositiveInt(process.env.NODELINK_WORKER_MAX_OLD_SPACE_MB ??
+        runtime.workerMaxOldSpaceMb ??
+        0);
+    if (maxOldSpaceMb > 0) {
+        args.add(`--max-old-space-size=${maxOldSpaceMb}`);
     }
-    if (parseBool(process.env.NODELINK_WORKER_EXPOSE_GC)) {
+    const exposeGc = parseBool(process.env.NODELINK_WORKER_EXPOSE_GC) ||
+        parseBool(runtime.workerExposeGc);
+    if (exposeGc) {
         args.add('--expose-gc');
     }
-    const extra = process.env.NODELINK_WORKER_EXEC_ARGV;
-    if (typeof extra === 'string' && extra.trim().length > 0) {
-        for (const arg of extra.split(',').map((v) => v.trim()).filter(Boolean)) {
-            args.add(arg);
-        }
+    const configExtraArgs = parseExecArgv(runtime.workerExecArgv);
+    for (const arg of configExtraArgs) {
+        args.add(arg);
+    }
+    const envExtraArgs = parseExecArgv(process.env.NODELINK_WORKER_EXEC_ARGV);
+    for (const arg of envExtraArgs) {
+        args.add(arg);
     }
     return Array.from(args);
 };
@@ -663,7 +692,7 @@ export default class WorkerManager {
             logger('warn', 'Cluster', `Cannot fork new worker: maximum worker limit (${this.maxWorkers}) reached.`);
             return null;
         }
-        const execArgv = buildWorkerExecArgv();
+        const execArgv = buildWorkerExecArgv(this.config);
         cluster.setupPrimary({
             exec: resolveExecPath(),
             ...(execArgv.length > 0 ? { execArgv } : {})

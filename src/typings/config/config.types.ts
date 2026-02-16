@@ -52,6 +52,36 @@ export interface ClusterConfig {
   workers: number
 
   /**
+   * Runtime node flags for playback/source worker processes
+   */
+  runtime?: {
+    /**
+     * Max old space size (MB) for playback workers (0 disables override)
+     */
+    workerMaxOldSpaceMb?: number
+    /**
+     * Enables --expose-gc for playback workers
+     */
+    workerExposeGc?: boolean
+    /**
+     * Extra Node.js argv for playback workers
+     */
+    workerExecArgv?: string[] | string
+    /**
+     * Max old space size (MB) for source workers (0 disables override)
+     */
+    sourceWorkerMaxOldSpaceMb?: number
+    /**
+     * Enables --expose-gc for source workers
+     */
+    sourceWorkerExposeGc?: boolean
+    /**
+     * Extra Node.js argv for source workers
+     */
+    sourceWorkerExecArgv?: string[] | string
+  }
+
+  /**
    * Specialized worker configuration for audio sources
    */
   specializedSourceWorker?: {

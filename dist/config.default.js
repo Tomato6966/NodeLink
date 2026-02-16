@@ -9,6 +9,14 @@ export default {
         enabled: true, // active cluster (or use env CLUSTER_ENABLED)
         workers: 0, // 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
         minWorkers: 1, // Minimum workers to keep alive (improves availability during bursts)
+        runtime: {
+            workerMaxOldSpaceMb: 0, // 0 disables override; set >0 to pass --max-old-space-size to playback workers
+            workerExposeGc: false, // If true, adds --expose-gc to playback workers
+            workerExecArgv: [], // Extra Node.js args for playback workers (e.g. ['--trace-gc'])
+            sourceWorkerMaxOldSpaceMb: 0, // 0 disables override; set >0 to pass --max-old-space-size to source workers
+            sourceWorkerExposeGc: false, // If true, adds --expose-gc to source workers
+            sourceWorkerExecArgv: [] // Extra Node.js args for source workers
+        },
         specializedSourceWorker: {
             enabled: true, // If true, source loading (search, lyrics, etc.) is delegated to dedicated workers to prevent voice worker lag
             count: 1, // Number of separate process clusters for source operations
