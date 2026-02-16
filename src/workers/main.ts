@@ -925,13 +925,12 @@ if (commandSocketPath) {
 }
 
 /**
- * Send a JSON-encoded event frame to the master process.
+ * Send a V8-serialized event frame to the master process.
  */
 function sendEventFrame(type: number, data: unknown): boolean {
   if (!eventSocket || eventSocket.destroyed) return false
 
-  const payload = JSON.stringify(data)
-  const payloadBuf = Buffer.from(payload, 'utf8')
+  const payloadBuf = v8.serialize(data)
 
   const header = Buffer.alloc(6)
   header.writeUInt8(0, 0) // No ID needed for these events
@@ -1030,7 +1029,7 @@ function sendCommandFrame(
 
 function sendCommandHello(): boolean {
   if (!commandSocket || commandSocket.destroyed) return false
-  const payload = Buffer.from(JSON.stringify({ pid: process.pid }), 'utf8')
+  const payload = v8.serialize({ pid: process.pid })
   return sendCommandFrame(0, '', payload)
 }
 

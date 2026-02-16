@@ -506,7 +506,7 @@ export default class WorkerManager {
           }
 
           try {
-            const data = JSON.parse(payload.toString('utf8'))
+            const data = v8.deserialize(payload)
             if (type === 3) {
               // playerEvent
               if (global.nodelink)
@@ -612,7 +612,7 @@ export default class WorkerManager {
 
           if (type === 0) {
             try {
-              const data = JSON.parse(payload.toString('utf8'))
+              const data = v8.deserialize(payload)
               const pid = data?.pid
               if (pid) this._registerCommandSocket(pid, socket)
             } catch (e) {

@@ -655,13 +655,13 @@ else {
      * @internal
      */
     const sendStreamChunkFromWorker = (id, socketPath, chunk) => {
-        ;
+        const transferable = chunk.buffer;
         parentPort.postMessage({
             type: 'stream',
             id,
             socketPath,
             chunk
-        });
+        }, [transferable]);
     };
     /**
      * Sends stream end signal to parent thread

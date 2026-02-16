@@ -892,12 +892,16 @@ if (isMainThread) {
     socketPath: string,
     chunk: Buffer
   ): void => {
-    ;(parentPort as MessagePort).postMessage({
-      type: 'stream',
-      id,
-      socketPath,
-      chunk
-    })
+    const transferable = chunk.buffer as ArrayBuffer
+    ;(parentPort as MessagePort).postMessage(
+      {
+        type: 'stream',
+        id,
+        socketPath,
+        chunk
+      },
+      [transferable]
+    )
   }
 
   /**
@@ -1198,7 +1202,7 @@ if (isMainThread) {
             info: (payload as { decodedTrackInfo: TrackInfo }).decodedTrackInfo
           })
           break
-        case 'profilerCommand':
+       case 'profilerCommand':
           result = await handleProfilerCommand(
             (payload as Record<string, unknown>) || {}
           )
