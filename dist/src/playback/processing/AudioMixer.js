@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { RingBuffer } from "../structs/RingBuffer.js";
 const LAYER_BUFFER_SIZE = 1024 * 1024; // 1MB per layer (~5 seconds of PCM)
+const EMPTY_BUFFER = Buffer.alloc(0);
 /**
  * Mixer that allows layering multiple audio streams over a main PCM stream.
  */
@@ -95,7 +96,7 @@ export class AudioMixer extends EventEmitter {
             finishedFeeding: false,
             ringBuffer: new RingBuffer(LAYER_BUFFER_SIZE),
             receivedBytes: 0,
-            pending: Buffer.alloc(0),
+            pending: EMPTY_BUFFER,
             paused: false
         };
         this.mixLayers.set(id, layer);
@@ -112,7 +113,7 @@ export class AudioMixer extends EventEmitter {
                 layer.pending.copy(merged, 0);
                 chunk.copy(merged, layer.pending.length);
                 data = merged;
-                layer.pending = Buffer.alloc(0);
+                layer.pending = EMPTY_BUFFER;
             }
             const remainder = data.length % 4;
             if (remainder > 0) {

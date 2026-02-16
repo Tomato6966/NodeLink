@@ -108,6 +108,7 @@ export class Player {
   private _lyricsBasePosition = 0
   private _lyricsBasePackets = 0
   private _lyricsMarkerTimer: NodeJS.Timeout | null = null
+  private _audioMixerInitPromise: Promise<void> | null = null
 
   public isLyricsSubscribed = false
   public currentLyrics: LyricsPayload | null = null
@@ -151,8 +152,6 @@ export class Player {
     this.crossfade = this.nodelink.options?.audio?.crossfade
     this.loudnessNormalizer =
       this.nodelink.options?.audio?.loudnessNormalizer ?? false
-
-    this._initAudioMixer().catch((err) => logger('error', 'Player', err))
 
     logger(
       'debug',
@@ -218,13 +217,15 @@ export class Player {
         this.connection?.on(event, handler)
       })
 
-    this._initConnection()
+    // Voice connection and mixer are initialized lazily to reduce per-player baseline memory.
   }
 
   /**
    * Initializes the audio mixer instance used for mix layers and fading.
    */
   private async _initAudioMixer(): Promise<void> {
+    if (this.audioMixer) return
+
     const { AudioMixer: Mixer } = await import('./processing/AudioMixer.ts')
     this.audioMixer = new Mixer(
       this.nodelink.options?.mix ?? {
@@ -254,6 +255,24 @@ export class Player {
       const errorMessage = data.error ? data.error.message : 'Unknown mix error'
       logger('error', 'Player', `Mix error for ${data.id}: ${errorMessage}`)
     })
+  }
+
+  /**
+   * Ensures the audio mixer is initialized only once on demand.
+   */
+  private async _ensureAudioMixer(): Promise<void> {
+    if (this.audioMixer) return
+    if (!this._audioMixerInitPromise) {
+      this._audioMixerInitPromise = this._initAudioMixer()
+        .catch((err) => {
+          this._audioMixerInitPromise = null
+          throw err
+        })
+        .then(() => {
+          this._audioMixerInitPromise = null
+        })
+    }
+    await this._audioMixerInitPromise
   }
 
   /**
@@ -1091,6 +1110,10 @@ export class Player {
     urlData: TrackUrlResult & { protocol?: string; format?: TrackFormat },
     startTime?: number
   ): Promise<{ stream: AudioResource } | { exception: { message: string } }> {
+    if (this.nodelink.options?.mix?.enabled !== false) {
+      await this._ensureAudioMixer()
+    }
+
     await getStreamProcessor()
     const audioResourceFactory = createAudioResource
     if (!audioResourceFactory) {
@@ -1158,6 +1181,10 @@ export class Player {
     urlData: TrackUrlResult & { protocol?: string; format?: TrackFormat },
     startTime = 0
   ): Promise<{ stream: AudioResource } | { exception: { message: string } }> {
+    if (this.nodelink.options?.mix?.enabled !== false) {
+      await this._ensureAudioMixer()
+    }
+
     await getStreamProcessor()
     const audioResourceFactory = createAudioResource
     if (!audioResourceFactory) {
@@ -1798,6 +1825,10 @@ export class Player {
     position: number,
     endTime?: number
   ): Promise<boolean> {
+    if (this.nodelink.options?.mix?.enabled !== false) {
+      await this._ensureAudioMixer()
+    }
+
     await getStreamProcessor()
     const seekResourceFactory = createSeekeableAudioResource
     if (!seekResourceFactory) {
@@ -2452,9 +2483,8 @@ export class Player {
       throw new Error('Cannot add mix without an active stream')
     }
 
-    if (!this.audioMixer) {
-      throw new Error('AudioMixer not initialized')
-    }
+    await this._ensureAudioMixer()
+    if (!this.audioMixer) throw new Error('AudioMixer not initialized')
 
     const mixConfig = this.nodelink?.options?.mix ?? {
       enabled: true,

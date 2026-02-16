@@ -67,6 +67,7 @@ export class Player {
     _lyricsBasePosition = 0;
     _lyricsBasePackets = 0;
     _lyricsMarkerTimer = null;
+    _audioMixerInitPromise = null;
     isLyricsSubscribed = false;
     currentLyrics = null;
     lyricsLineIndex = -1;
@@ -96,7 +97,6 @@ export class Player {
         this.crossfade = this.nodelink.options?.audio?.crossfade;
         this.loudnessNormalizer =
             this.nodelink.options?.audio?.loudnessNormalizer ?? false;
-        this._initAudioMixer().catch((err) => logger('error', 'Player', err));
         logger('debug', 'Player', `New player created for guild ${this.guildId} in session ${this.session.id}`);
         this.emitEvent = (type, payload = {}) => {
             this.nodelink.statsManager.incrementPlaybackEvent(type);
@@ -137,12 +137,14 @@ export class Player {
             }, timeout);
             this.connection?.on(event, handler);
         });
-        this._initConnection();
+        // Voice connection and mixer are initialized lazily to reduce per-player baseline memory.
     }
     /**
      * Initializes the audio mixer instance used for mix layers and fading.
      */
     async _initAudioMixer() {
+        if (this.audioMixer)
+            return;
         const { AudioMixer: Mixer } = await import("./processing/AudioMixer.js");
         this.audioMixer = new Mixer(this.nodelink.options?.mix ?? {
             enabled: true,
@@ -167,6 +169,24 @@ export class Player {
             const errorMessage = data.error ? data.error.message : 'Unknown mix error';
             logger('error', 'Player', `Mix error for ${data.id}: ${errorMessage}`);
         });
+    }
+    /**
+     * Ensures the audio mixer is initialized only once on demand.
+     */
+    async _ensureAudioMixer() {
+        if (this.audioMixer)
+            return;
+        if (!this._audioMixerInitPromise) {
+            this._audioMixerInitPromise = this._initAudioMixer()
+                .catch((err) => {
+                this._audioMixerInitPromise = null;
+                throw err;
+            })
+                .then(() => {
+                this._audioMixerInitPromise = null;
+            });
+        }
+        await this._audioMixerInitPromise;
     }
     /**
      * Establishes the voice connection and attaches event listeners.
@@ -772,6 +792,9 @@ export class Player {
      * Fetches an audio resource for playback.
      */
     async _fetchResource(info, urlData, startTime) {
+        if (this.nodelink.options?.mix?.enabled !== false) {
+            await this._ensureAudioMixer();
+        }
         await getStreamProcessor();
         const audioResourceFactory = createAudioResource;
         if (!audioResourceFactory) {
@@ -819,6 +842,9 @@ export class Player {
      * pipeline can apply processing uniformly after mixing.
      */
     async _fetchPcmResource(info, urlData, startTime = 0) {
+        if (this.nodelink.options?.mix?.enabled !== false) {
+            await this._ensureAudioMixer();
+        }
         await getStreamProcessor();
         const audioResourceFactory = createAudioResource;
         if (!audioResourceFactory) {
@@ -1238,6 +1264,9 @@ export class Player {
      * Seeks using seekable-stream helper for compatible sources.
      */
     async _seekeableSeek(position, endTime) {
+        if (this.nodelink.options?.mix?.enabled !== false) {
+            await this._ensureAudioMixer();
+        }
         await getStreamProcessor();
         const seekResourceFactory = createSeekeableAudioResource;
         if (!seekResourceFactory) {
@@ -1708,9 +1737,9 @@ export class Player {
         if (!this.track || this.isPaused) {
             throw new Error('Cannot add mix without an active stream');
         }
-        if (!this.audioMixer) {
+        await this._ensureAudioMixer();
+        if (!this.audioMixer)
             throw new Error('AudioMixer not initialized');
-        }
         const mixConfig = this.nodelink?.options?.mix ?? {
             enabled: true,
             defaultVolume: 0.8,
