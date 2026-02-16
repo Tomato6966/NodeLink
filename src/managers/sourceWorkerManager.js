@@ -22,6 +22,38 @@ const resolveSourceExecPath = () => {
   return path.resolve(process.cwd(), 'src/workers/source.ts')
 }
 
+const parseBool = (value) =>
+  typeof value === 'string' &&
+  ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
+
+const buildSourceWorkerExecArgv = () => {
+  const args = new Set(process.execArgv || [])
+
+  for (const arg of Array.from(args)) {
+    if (arg.startsWith('--max-old-space-size=')) args.delete(arg)
+  }
+
+  const maxOldSpaceMb = Number(
+    process.env.NODELINK_SOURCE_WORKER_MAX_OLD_SPACE_MB || 0
+  )
+  if (Number.isFinite(maxOldSpaceMb) && maxOldSpaceMb > 0) {
+    args.add(`--max-old-space-size=${Math.floor(maxOldSpaceMb)}`)
+  }
+
+  if (parseBool(process.env.NODELINK_SOURCE_WORKER_EXPOSE_GC)) {
+    args.add('--expose-gc')
+  }
+
+  const extra = process.env.NODELINK_SOURCE_WORKER_EXEC_ARGV
+  if (typeof extra === 'string' && extra.trim().length > 0) {
+    for (const arg of extra.split(',').map((v) => v.trim()).filter(Boolean)) {
+      args.add(arg)
+    }
+  }
+
+  return Array.from(args)
+}
+
 class SourceWorkerManager {
   constructor(nodelink) {
     this.nodelink = nodelink
@@ -178,7 +210,11 @@ class SourceWorkerManager {
       })
     })
 
-    cluster.setupPrimary({ exec: resolveSourceExecPath() })
+    const sourceExecArgv = buildSourceWorkerExecArgv()
+    cluster.setupPrimary({
+      exec: resolveSourceExecPath(),
+      ...(sourceExecArgv.length > 0 ? { execArgv: sourceExecArgv } : {})
+    })
     // Start with one source worker and scale up based on demand.
     this._forkWorker()
 
@@ -198,7 +234,10 @@ class SourceWorkerManager {
 
       // Keep at least one source worker alive.
       if (this.workers.length === 0) {
-        cluster.setupPrimary({ exec: resolveSourceExecPath() })
+        cluster.setupPrimary({
+          exec: resolveSourceExecPath(),
+          ...(sourceExecArgv.length > 0 ? { execArgv: sourceExecArgv } : {})
+        })
         this._forkWorker()
         cluster.setupPrimary({ exec: resolvePlaybackExecPath() })
       } else {
@@ -256,7 +295,11 @@ class SourceWorkerManager {
 
     if (!force && totalLoad <= threshold) return false
 
-    cluster.setupPrimary({ exec: resolveSourceExecPath() })
+    const sourceExecArgv = buildSourceWorkerExecArgv()
+    cluster.setupPrimary({
+      exec: resolveSourceExecPath(),
+      ...(sourceExecArgv.length > 0 ? { execArgv: sourceExecArgv } : {})
+    })
     this._forkWorker()
     cluster.setupPrimary({ exec: resolvePlaybackExecPath() })
     this.lastScaleUpAt = now

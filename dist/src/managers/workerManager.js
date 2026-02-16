@@ -15,6 +15,29 @@ const resolveExecPath = () => {
         return distIndex;
     return path.resolve(process.cwd(), 'src/index.ts');
 };
+const parseBool = (value) => typeof value === 'string' &&
+    ['1', 'true', 'yes', 'on'].includes(value.toLowerCase());
+const buildWorkerExecArgv = () => {
+    const args = new Set(process.execArgv || []);
+    for (const arg of Array.from(args)) {
+        if (arg.startsWith('--max-old-space-size='))
+            args.delete(arg);
+    }
+    const maxOldSpaceMb = Number(process.env.NODELINK_WORKER_MAX_OLD_SPACE_MB || 0);
+    if (Number.isFinite(maxOldSpaceMb) && maxOldSpaceMb > 0) {
+        args.add(`--max-old-space-size=${Math.floor(maxOldSpaceMb)}`);
+    }
+    if (parseBool(process.env.NODELINK_WORKER_EXPOSE_GC)) {
+        args.add('--expose-gc');
+    }
+    const extra = process.env.NODELINK_WORKER_EXEC_ARGV;
+    if (typeof extra === 'string' && extra.trim().length > 0) {
+        for (const arg of extra.split(',').map((v) => v.trim()).filter(Boolean)) {
+            args.add(arg);
+        }
+    }
+    return Array.from(args);
+};
 export default class WorkerManager {
     constructor(config) {
         this.config = config;
@@ -640,7 +663,11 @@ export default class WorkerManager {
             logger('warn', 'Cluster', `Cannot fork new worker: maximum worker limit (${this.maxWorkers}) reached.`);
             return null;
         }
-        cluster.setupPrimary({ exec: resolveExecPath() });
+        const execArgv = buildWorkerExecArgv();
+        cluster.setupPrimary({
+            exec: resolveExecPath(),
+            ...(execArgv.length > 0 ? { execArgv } : {})
+        });
         const worker = cluster.fork({
             EVENT_SOCKET_PATH: this.socketPath,
             COMMAND_SOCKET_PATH: this.commandSocketPath,
