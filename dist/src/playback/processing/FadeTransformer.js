@@ -108,9 +108,17 @@ export class FadeTransformer extends Transform {
         }
         if (gainStart === 1 && gainEnd === 1)
             return chunk;
-        const view = chunk.byteOffset % 2 === 0
-            ? new Int16Array(chunk.buffer, chunk.byteOffset, sampleCount)
-            : new Int16Array(Buffer.from(chunk).buffer);
+        let outputBuffer = chunk;
+        let view;
+        if (chunk.byteOffset % 2 === 0) {
+            view = new Int16Array(chunk.buffer, chunk.byteOffset, sampleCount);
+        }
+        else {
+            // Align once and mutate in place; avoid creating another copy on return.
+            outputBuffer = Buffer.allocUnsafe(chunk.length);
+            chunk.copy(outputBuffer);
+            view = new Int16Array(outputBuffer.buffer, outputBuffer.byteOffset, sampleCount);
+        }
         const step = sampleCount > 1 ? (gainEnd - gainStart) / (sampleCount - 1) : 0;
         for (let i = 0; i < view.length; i++) {
             const gain = gainStart + step * i;
@@ -118,7 +126,7 @@ export class FadeTransformer extends Transform {
             const value = sample * gain;
             view[i] = value < -32768 ? -32768 : value > 32767 ? 32767 : value | 0;
         }
-        return chunk.byteOffset % 2 === 0 ? chunk : Buffer.from(view.buffer);
+        return outputBuffer;
     }
     /**
      * Flushes any buffered data (returns empty as it's real-time).

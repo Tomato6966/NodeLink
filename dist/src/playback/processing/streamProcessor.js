@@ -1265,12 +1265,12 @@ class FMP4ToAACStream extends Transform {
         // Quando for true, buffers dados e processa boxes completos (SoundCloud por exemplo)
         // Quando for false (padrão), espera segmentos completos por chunk (NicoVideo por exemplo)
         this.bufferMode = options.bufferMode || false;
-        this.buffer = Buffer.alloc(0);
+        this.buffer = EMPTY_BUFFER;
         this._streamState = null;
     }
     _compactBuffer() {
         if (this.buffer.length === 0) {
-            this.buffer = Buffer.alloc(0);
+            this.buffer = EMPTY_BUFFER;
             return;
         }
         // Avoid retaining a large backing store when only a small tail remains.
@@ -1379,7 +1379,7 @@ class FMP4ToAACStream extends Transform {
         const trafBox = moofBoxes.find((b) => b.type === 'traf');
         if (!trafBox)
             return aacData;
-        const trafBoxes = this._parseBoxes(trafBox?.data || Buffer.alloc(0));
+        const trafBoxes = this._parseBoxes(trafBox?.data || EMPTY_BUFFER);
         const trunBox = trafBoxes.find((b) => b.type === 'trun');
         if (!trunBox)
             return aacData;
@@ -1408,17 +1408,30 @@ class FMP4ToAACStream extends Transform {
                 offset += 4;
         }
         if (sampleSizes.length > 0) {
-            const frames = [];
+            const validSampleSizes = [];
+            let totalBytes = 0;
             let dataOffset = 0;
             for (const sampleSize of sampleSizes) {
                 if (dataOffset + sampleSize <= aacData.length) {
-                    const adtsHeader = this._createAdtsHeader(sampleSize, this.audioConfig);
-                    const aacSample = aacData.subarray(dataOffset, dataOffset + sampleSize);
-                    frames.push(Buffer.concat([adtsHeader, aacSample]));
+                    validSampleSizes.push(sampleSize);
+                    totalBytes += 7 + sampleSize;
                     dataOffset += sampleSize;
                 }
             }
-            return frames.length > 0 ? Buffer.concat(frames) : null;
+            if (validSampleSizes.length === 0)
+                return null;
+            const out = Buffer.allocUnsafe(totalBytes);
+            let inOffset = 0;
+            let outOffset = 0;
+            for (const sampleSize of validSampleSizes) {
+                const adtsHeader = this._createAdtsHeader(sampleSize, this.audioConfig);
+                adtsHeader.copy(out, outOffset);
+                outOffset += adtsHeader.length;
+                aacData.copy(out, outOffset, inOffset, inOffset + sampleSize);
+                outOffset += sampleSize;
+                inOffset += sampleSize;
+            }
+            return out;
         }
         return null;
     }
@@ -1432,7 +1445,7 @@ class FMP4ToAACStream extends Transform {
                     boxSize: 0,
                     boxType: '',
                     headerSize: 8,
-                    moofBuffer: Buffer.alloc(0),
+                    moofBuffer: EMPTY_BUFFER,
                     samples: []
                 };
             }
@@ -1655,12 +1668,12 @@ class FMP4ToAACStream extends Transform {
             }
             catch (_err) { }
         }
-        this.buffer = Buffer.alloc(0);
+        this.buffer = EMPTY_BUFFER;
         this._streamState = null;
         callback();
     }
     _destroy(err, callback) {
-        this.buffer = Buffer.alloc(0);
+        this.buffer = EMPTY_BUFFER;
         this._streamState = null;
         super._destroy(err, callback);
     }
