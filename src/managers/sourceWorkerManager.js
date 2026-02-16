@@ -1,8 +1,26 @@
 import cluster from 'node:cluster'
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { logger } from '../utils.ts'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+const resolvePlaybackExecPath = () => {
+  const distIndex = path.resolve(__dirname, '../index.js')
+  if (fs.existsSync(distIndex)) return distIndex
+  return path.resolve(process.cwd(), 'src/index.ts')
+}
+
+const resolveSourceExecPath = () => {
+  const distSourceWorker = path.resolve(__dirname, '../workers/source.js')
+  if (fs.existsSync(distSourceWorker)) return distSourceWorker
+  return path.resolve(process.cwd(), 'src/workers/source.ts')
+}
 
 class SourceWorkerManager {
   constructor(nodelink) {
@@ -160,11 +178,11 @@ class SourceWorkerManager {
       })
     })
 
-    cluster.setupPrimary({ exec: './src/workers/source.ts' })
+    cluster.setupPrimary({ exec: resolveSourceExecPath() })
     // Start with one source worker and scale up based on demand.
     this._forkWorker()
 
-    cluster.setupPrimary({ exec: './src/index.ts' })
+    cluster.setupPrimary({ exec: resolvePlaybackExecPath() })
 
     cluster.on('exit', (worker, _code, _signal) => {
       if (worker.workerType !== 'source') return
@@ -180,9 +198,9 @@ class SourceWorkerManager {
 
       // Keep at least one source worker alive.
       if (this.workers.length === 0) {
-        cluster.setupPrimary({ exec: './src/workers/source.ts' })
+        cluster.setupPrimary({ exec: resolveSourceExecPath() })
         this._forkWorker()
-        cluster.setupPrimary({ exec: './src/index.ts' })
+        cluster.setupPrimary({ exec: resolvePlaybackExecPath() })
       } else {
         this._tryScaleUp(true)
       }
@@ -238,9 +256,9 @@ class SourceWorkerManager {
 
     if (!force && totalLoad <= threshold) return false
 
-    cluster.setupPrimary({ exec: './src/workers/source.ts' })
+    cluster.setupPrimary({ exec: resolveSourceExecPath() })
     this._forkWorker()
-    cluster.setupPrimary({ exec: './src/index.ts' })
+    cluster.setupPrimary({ exec: resolvePlaybackExecPath() })
     this.lastScaleUpAt = now
 
     logger(
@@ -330,6 +348,116 @@ class SourceWorkerManager {
     })
 
     return true
+  }
+
+  _createInternalResponse(resolve, reject, parseJson) {
+    let statusCode = 200
+    const chunks = []
+
+    return {
+      headersSent: false,
+      setHeader() {},
+      writeHead(code) {
+        statusCode = code
+        this.headersSent = true
+      },
+      write(chunk) {
+        if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      },
+      end(chunk) {
+        if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+        const raw = Buffer.concat(chunks).toString('utf8')
+        if (statusCode >= 400) {
+          reject(new Error(raw || `Source worker returned status ${statusCode}`))
+          return
+        }
+
+        if (!parseJson) {
+          resolve(raw)
+          return
+        }
+
+        if (!raw) {
+          resolve(null)
+          return
+        }
+
+        try {
+          resolve(JSON.parse(raw))
+        } catch {
+          resolve(raw)
+        }
+      },
+      on() {}
+    }
+  }
+
+  _executeOnWorker(worker, task, payload, options = {}) {
+    const id = crypto.randomBytes(16).toString('hex')
+    const timeoutMs =
+      Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+        ? options.timeoutMs
+        : 60000
+    const parseJson = options.parseJson !== false
+
+    return new Promise((resolve, reject) => {
+      const res = this._createInternalResponse(resolve, reject, parseJson)
+      const req = { url: '/internal/source-worker-task' }
+      const request = {
+        req,
+        res,
+        task,
+        timeout: null,
+        workerId: worker.id,
+        options,
+        cleaned: false
+      }
+
+      request.timeout = setTimeout(() => {
+        const activeRequest = this.requests.get(id)
+        if (!activeRequest) return
+        this._cleanupRequest(id, activeRequest)
+        reject(new Error(`Source worker task '${task}' timed out`))
+      }, timeoutMs)
+
+      this.requests.set(id, request)
+      const currentLoad = this.workerLoads.get(worker.id) || 0
+      this.workerLoads.set(worker.id, currentLoad + 1)
+      this._tryScaleUp(false)
+
+      worker.send({
+        type: 'sourceTask',
+        payload: {
+          id,
+          task,
+          payload,
+          socketPath: this.socketPath
+        }
+      })
+    })
+  }
+
+  async executeAll(task, payload, options = {}) {
+    const targets = this.workers.filter((worker) => worker?.isConnected?.())
+    const settled = await Promise.allSettled(
+      targets.map((worker) =>
+        this._executeOnWorker(worker, task, payload, options).then((response) => ({
+          clusterId: worker.id,
+          pid: worker.process?.pid || null,
+          response
+        }))
+      )
+    )
+
+    return settled.map((entry, index) => {
+      const worker = targets[index]
+      if (entry.status === 'fulfilled') return entry.value
+      return {
+        clusterId: worker.id,
+        pid: worker.process?.pid || null,
+        error: entry.reason instanceof Error ? entry.reason.message : String(entry.reason)
+      }
+    })
   }
 }
 

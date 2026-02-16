@@ -6,13 +6,46 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     }
     return path;
 };
+import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
+import inspector from 'node:inspector';
 import net from 'node:net';
 import os from 'node:os';
 import { resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import v8 from 'node:v8';
 import { isMainThread, parentPort, workerData as rawWorkerData, Worker } from 'node:worker_threads';
 import * as utils from "../utils.js";
 const __filename = fileURLToPath(import.meta.url);
+const getActiveResourcesBreakdown = () => {
+    const list = typeof process.getActiveResourcesInfo === 'function'
+        ? process.getActiveResourcesInfo()
+        : [];
+    const counters = {};
+    for (const item of list) {
+        counters[item] = (counters[item] || 0) + 1;
+    }
+    return counters;
+};
+const getActiveHandlesBreakdown = () => {
+    const getter = process;
+    if (typeof getter._getActiveHandles !== 'function')
+        return {};
+    const handles = getter._getActiveHandles();
+    const counters = {};
+    for (const handle of handles) {
+        const name = handle?.constructor?.name || 'UnknownHandle';
+        counters[name] = (counters[name] || 0) + 1;
+    }
+    return counters;
+};
+const getHeapSpaces = () => v8.getHeapSpaceStatistics().map((space) => ({
+    spaceName: space.space_name,
+    spaceSize: space.space_size,
+    spaceUsedSize: space.space_used_size,
+    spaceAvailableSize: space.space_available_size,
+    physicalSpaceSize: space.physical_space_size
+}));
 /**
  * Main thread - Source Worker Manager
  * Spawns and manages a pool of micro-workers for handling source API tasks
@@ -355,6 +388,264 @@ else {
      * @internal
      */
     const activeChats = new Map();
+    const profilerBaseDir = process.env['NODELINK_PROFILER_DIR'] || '.profiles';
+    let activeCpuSession = null;
+    let activeHeapSampling = null;
+    const sanitizeProfileName = (value) => {
+        if (!value)
+            return '';
+        return value
+            .trim()
+            .replace(/[^a-zA-Z0-9._-]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 80);
+    };
+    const buildProfilerFilePath = async (kind, extension, label) => {
+        await fsPromises.mkdir(profilerBaseDir, { recursive: true });
+        const safeLabel = sanitizeProfileName(label);
+        const stamp = new Date()
+            .toISOString()
+            .replace(/[:.]/g, '-')
+            .replace('T', '_')
+            .replace('Z', '');
+        const suffix = safeLabel ? `-${safeLabel}` : '';
+        return `${profilerBaseDir}/source-micro-${process.pid}-${kind}-${stamp}${suffix}.${extension}`;
+    };
+    const inspectorPost = (session, method, params) => new Promise((resolve, reject) => {
+        session.post(method, params ?? {}, (error, result) => {
+            if (error)
+                reject(error);
+            else
+                resolve((result ?? {}));
+        });
+    });
+    const summarizeHeapSamplingProfile = (profile, limit = null) => {
+        const head = profile['head'];
+        if (!head)
+            return [];
+        const aggregates = new Map();
+        const visit = (node) => {
+            const frame = node.callFrame || {};
+            const functionName = frame.functionName || '(anonymous)';
+            const url = frame.url || '(internal)';
+            const line = Number(frame.lineNumber || 0) + 1;
+            const column = Number(frame.columnNumber || 0) + 1;
+            const selfSize = Number(node.selfSize || 0);
+            if (selfSize > 0) {
+                const key = `${functionName}|${url}|${line}|${column}`;
+                const current = aggregates.get(key);
+                if (current) {
+                    current.bytes += selfSize;
+                    current.hits++;
+                }
+                else {
+                    aggregates.set(key, {
+                        functionName,
+                        url,
+                        line,
+                        column,
+                        bytes: selfSize,
+                        hits: 1
+                    });
+                }
+            }
+            const children = Array.isArray(node.children) ? node.children : [];
+            for (const child of children) {
+                visit(child);
+            }
+        };
+        visit(head);
+        const entries = Array.from(aggregates.values()).sort((a, b) => b.bytes - a.bytes);
+        if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0) {
+            return entries.slice(0, limit);
+        }
+        return entries;
+    };
+    const handleProfilerCommand = async (payload) => {
+        const action = payload?.['action'];
+        if (typeof action !== 'string' || action.length === 0) {
+            return { success: false, error: 'Missing profiler action' };
+        }
+        if (action === 'status') {
+            return {
+                success: true,
+                pid: process.pid,
+                inspectorUrl: inspector.url() || null,
+                cpuProfiling: !!activeCpuSession,
+                cpuStartedAt: activeCpuSession?.startedAt || null,
+                heapSamplingActive: !!activeHeapSampling,
+                heapSamplingStartedAt: activeHeapSampling?.startedAt || null,
+                profileDir: profilerBaseDir,
+                memory: process.memoryUsage(),
+                heapSpaces: getHeapSpaces(),
+                uptimeSec: Math.floor(process.uptime()),
+                activeResources: getActiveResourcesBreakdown(),
+                activeHandles: getActiveHandlesBreakdown(),
+                sourceContext: {
+                    activeChats: activeChats.size,
+                    mapSizes: {
+                        activeChats: activeChats.size
+                    }
+                }
+            };
+        }
+        if (action === 'openInspector') {
+            const host = typeof payload['host'] === 'string' ? payload['host'] : '127.0.0.1';
+            const port = typeof payload['port'] === 'number' &&
+                Number.isInteger(payload['port'])
+                ? payload['port']
+                : 0;
+            inspector.open(port, host, payload['exposeWait'] === true);
+            return { success: true, pid: process.pid, inspectorUrl: inspector.url() || null };
+        }
+        if (action === 'closeInspector') {
+            inspector.close();
+            return { success: true, pid: process.pid, inspectorUrl: null };
+        }
+        if (action === 'forceGc') {
+            const gcFn = global.gc;
+            if (typeof gcFn !== 'function') {
+                return {
+                    success: false,
+                    error: 'GC not exposed. Start NodeLink with --expose-gc to enable forceGc.'
+                };
+            }
+            gcFn();
+            gcFn();
+            return { success: true, pid: process.pid, memory: process.memoryUsage() };
+        }
+        if (action === 'cpuStart') {
+            if (activeCpuSession) {
+                return {
+                    success: true,
+                    alreadyActive: true,
+                    pid: process.pid,
+                    startedAt: activeCpuSession.startedAt
+                };
+            }
+            const session = new inspector.Session();
+            session.connect();
+            await inspectorPost(session, 'Profiler.enable');
+            await inspectorPost(session, 'Profiler.start');
+            activeCpuSession = {
+                session,
+                startedAt: Date.now(),
+                name: sanitizeProfileName(typeof payload['name'] === 'string' ? payload['name'] : undefined) || null
+            };
+            return { success: true, pid: process.pid, startedAt: activeCpuSession.startedAt };
+        }
+        if (action === 'cpuStop') {
+            if (!activeCpuSession) {
+                return { success: false, error: 'CPU profiler is not active' };
+            }
+            const { session, startedAt, name } = activeCpuSession;
+            const result = await inspectorPost(session, 'Profiler.stop');
+            const outputPath = await buildProfilerFilePath('cpu', 'cpuprofile', (typeof payload['name'] === 'string'
+                ? sanitizeProfileName(payload['name'])
+                : '') ||
+                name || undefined);
+            await fsPromises.writeFile(outputPath, JSON.stringify(result['profile']));
+            try {
+                session.disconnect();
+            }
+            catch { }
+            activeCpuSession = null;
+            return { success: true, pid: process.pid, startedAt, endedAt: Date.now(), outputPath };
+        }
+        if (action === 'heapSnapshot') {
+            const outputPath = await buildProfilerFilePath('heap', 'heapsnapshot', typeof payload['name'] === 'string' ? payload['name'] : undefined);
+            const session = new inspector.Session();
+            let fd = null;
+            try {
+                fd = fs.openSync(outputPath, 'w');
+                session.connect();
+                session.on('HeapProfiler.addHeapSnapshotChunk', (message) => {
+                    const chunk = message?.params?.chunk;
+                    if (typeof chunk === 'string' && fd !== null)
+                        fs.writeSync(fd, chunk);
+                });
+                await inspectorPost(session, 'HeapProfiler.enable');
+                await inspectorPost(session, 'HeapProfiler.takeHeapSnapshot', {
+                    reportProgress: false
+                });
+                return { success: true, pid: process.pid, outputPath };
+            }
+            finally {
+                try {
+                    session.disconnect();
+                }
+                catch { }
+                if (fd !== null) {
+                    try {
+                        fs.closeSync(fd);
+                    }
+                    catch { }
+                }
+            }
+        }
+        if (action === 'heapSamplingStart') {
+            if (activeHeapSampling) {
+                return {
+                    success: true,
+                    alreadyActive: true,
+                    pid: process.pid,
+                    startedAt: activeHeapSampling.startedAt
+                };
+            }
+            const samplingInterval = typeof payload['samplingInterval'] === 'number' &&
+                Number.isFinite(payload['samplingInterval']) &&
+                payload['samplingInterval'] > 0
+                ? Math.floor(payload['samplingInterval'])
+                : 32768;
+            const session = new inspector.Session();
+            session.connect();
+            await inspectorPost(session, 'HeapProfiler.enable');
+            await inspectorPost(session, 'HeapProfiler.startSampling', {
+                samplingInterval
+            });
+            activeHeapSampling = {
+                session,
+                startedAt: Date.now(),
+                name: sanitizeProfileName(typeof payload['name'] === 'string' ? payload['name'] : undefined) || null,
+                samplingInterval
+            };
+            return {
+                success: true,
+                pid: process.pid,
+                startedAt: activeHeapSampling.startedAt,
+                samplingInterval
+            };
+        }
+        if (action === 'heapSamplingStop') {
+            if (!activeHeapSampling) {
+                return { success: false, error: 'Heap sampling is not active' };
+            }
+            const { session, startedAt, name } = activeHeapSampling;
+            const result = await inspectorPost(session, 'HeapProfiler.stopSampling');
+            const outputPath = await buildProfilerFilePath('heap-sampling', 'heapsampling.json', (typeof payload['name'] === 'string'
+                ? sanitizeProfileName(payload['name'])
+                : '') ||
+                name ||
+                undefined);
+            await fsPromises.writeFile(outputPath, JSON.stringify(result));
+            try {
+                session.disconnect();
+            }
+            catch { }
+            activeHeapSampling = null;
+            const profile = result['profile'] || {};
+            const topSites = summarizeHeapSamplingProfile(profile);
+            return {
+                success: true,
+                pid: process.pid,
+                startedAt,
+                endedAt: Date.now(),
+                outputPath,
+                topSites
+            };
+        }
+        return { success: false, error: `Unsupported profiler action: ${action}` };
+    };
     parentPort.postMessage({ type: 'ready' });
     /**
      * Sends stream data chunk to parent thread
@@ -594,6 +885,9 @@ else {
                     result = await nodelink.sources?.getChapters({
                         info: payload.decodedTrackInfo
                     });
+                    break;
+                case 'profilerCommand':
+                    result = await handleProfilerCommand(payload || {});
                     break;
             }
             ;

@@ -9,9 +9,23 @@ class BufferPool {
     pools;
     totalBytes;
     cleanupInterval;
+    acquireCalls;
+    reuseHits;
+    newAllocs;
+    releaseCalls;
+    rejectedReleases;
+    clearCalls;
+    highWaterBytes;
     constructor() {
         this.pools = new Map();
         this.totalBytes = 0;
+        this.acquireCalls = 0;
+        this.reuseHits = 0;
+        this.newAllocs = 0;
+        this.releaseCalls = 0;
+        this.rejectedReleases = 0;
+        this.clearCalls = 0;
+        this.highWaterBytes = 0;
         this.cleanupInterval = setInterval(() => this._cleanup(), CLEANUP_INTERVAL);
         this.cleanupInterval.unref();
     }
@@ -39,15 +53,18 @@ class BufferPool {
      * @returns A Buffer with length equal to the aligned size.
      */
     acquire(size) {
+        this.acquireCalls++;
         const alignedSize = this._getAlignedSize(size);
         const pool = this.pools.get(alignedSize);
         if (pool?.length) {
             const buffer = pool.pop();
             if (buffer) {
+                this.reuseHits++;
                 this.totalBytes -= alignedSize;
                 return buffer;
             }
         }
+        this.newAllocs++;
         return Buffer.allocUnsafe(alignedSize);
     }
     /**
@@ -56,13 +73,17 @@ class BufferPool {
      * @param buffer The Buffer to release.
      */
     release(buffer) {
+        this.releaseCalls++;
         if (!Buffer.isBuffer(buffer))
             return;
         const size = buffer.length;
         // Only pool buffers between 1KB and 10MB
-        if (size < 1024 || size > 10 * 1024 * 1024)
+        if (size < 1024 || size > 10 * 1024 * 1024) {
+            this.rejectedReleases++;
             return;
+        }
         if (this.totalBytes + size > MAX_POOL_SIZE_BYTES) {
+            this.rejectedReleases++;
             return;
         }
         let pool = this.pools.get(size);
@@ -72,13 +93,50 @@ class BufferPool {
         }
         pool.push(buffer);
         this.totalBytes += size;
+        if (this.totalBytes > this.highWaterBytes) {
+            this.highWaterBytes = this.totalBytes;
+        }
     }
     /**
      * Clears all pooled buffers.
      */
     clear() {
+        this.clearCalls++;
         this.pools.clear();
         this.totalBytes = 0;
+    }
+    /**
+     * Returns internal metrics for profiler/UI diagnostics.
+     */
+    getStats() {
+        let entries = 0;
+        const topBuckets = Array.from(this.pools.entries())
+            .map(([size, list]) => {
+            const count = list.length;
+            entries += count;
+            return {
+                size,
+                count,
+                bytes: size * count
+            };
+        })
+            .sort((a, b) => b.bytes - a.bytes)
+            .slice(0, 20);
+        const reuseRatio = this.acquireCalls > 0 ? this.reuseHits / this.acquireCalls : 0;
+        return {
+            totalBytes: this.totalBytes,
+            highWaterBytes: this.highWaterBytes,
+            buckets: this.pools.size,
+            entries,
+            acquireCalls: this.acquireCalls,
+            reuseHits: this.reuseHits,
+            newAllocs: this.newAllocs,
+            releaseCalls: this.releaseCalls,
+            rejectedReleases: this.rejectedReleases,
+            clearCalls: this.clearCalls,
+            reuseRatio,
+            topBuckets
+        };
     }
     /**
      * Periodic cleanup to ensure the pool doesn't exceed its total byte limit.

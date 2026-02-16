@@ -1,9 +1,20 @@
 import cluster from 'node:cluster';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import v8 from 'node:v8';
 import { logger } from "../utils.js";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const resolveExecPath = () => {
+    const distIndex = path.resolve(__dirname, '../index.js');
+    if (fs.existsSync(distIndex))
+        return distIndex;
+    return path.resolve(process.cwd(), 'src/index.ts');
+};
 export default class WorkerManager {
     constructor(config) {
         this.config = config;
@@ -629,7 +640,7 @@ export default class WorkerManager {
             logger('warn', 'Cluster', `Cannot fork new worker: maximum worker limit (${this.maxWorkers}) reached.`);
             return null;
         }
-        cluster.setupPrimary({ exec: './src/index.ts' });
+        cluster.setupPrimary({ exec: resolveExecPath() });
         const worker = cluster.fork({
             EVENT_SOCKET_PATH: this.socketPath,
             COMMAND_SOCKET_PATH: this.commandSocketPath,
@@ -1006,12 +1017,16 @@ export default class WorkerManager {
     }
     execute(worker, type, payload, options = {}) {
         return new Promise((resolve, reject) => {
-            this._executeCommand(worker, type, payload, resolve, reject, 0, options.fast || false);
+            this._executeCommand(worker, type, payload, resolve, reject, 0, options.fast || false, options.timeoutMs);
         });
     }
-    _executeCommand(worker, type, payload, resolve, reject, retryCount, isFast) {
+    _executeCommand(worker, type, payload, resolve, reject, retryCount, isFast, timeoutOverride) {
         const requestId = crypto.randomBytes(16).toString('hex');
-        const timeoutMs = isFast ? this.fastCommandTimeout : this.commandTimeout;
+        const timeoutMs = Number.isFinite(timeoutOverride) && timeoutOverride > 0
+            ? timeoutOverride
+            : isFast
+                ? this.fastCommandTimeout
+                : this.commandTimeout;
         const startTime = Date.now();
         const timeout = setTimeout(() => {
             this.pendingRequests.delete(requestId);
@@ -1026,7 +1041,7 @@ export default class WorkerManager {
                 }
                 setTimeout(() => {
                     const newWorker = this.getBestWorker() || worker;
-                    this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast);
+                    this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast, timeoutOverride);
                 }, 500);
             }
             else {
@@ -1057,7 +1072,7 @@ export default class WorkerManager {
                 if (retryCount < this.maxRetries) {
                     const newWorker = this.getBestWorker();
                     if (newWorker) {
-                        this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast);
+                        this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast, timeoutOverride);
                     }
                     else {
                         reject(new Error('No workers available for retry'));
@@ -1096,7 +1111,7 @@ export default class WorkerManager {
                             }
                             setTimeout(() => {
                                 const newWorker = this.getBestWorker() || worker;
-                                this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast);
+                                this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast, timeoutOverride);
                             }, 500);
                         }
                         else {
@@ -1121,7 +1136,7 @@ export default class WorkerManager {
                 setTimeout(() => {
                     const newWorker = this.getBestWorker();
                     if (newWorker) {
-                        this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast);
+                        this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast, timeoutOverride);
                     }
                     else {
                         reject(error);

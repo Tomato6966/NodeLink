@@ -34,6 +34,42 @@ const TAGS: Readonly<Record<string, boolean>> = Object.freeze({
 const OPUS_HEAD = Buffer.from([0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64])
 const MAX_TAG_SIZE = 10 * 1024 * 1024
 
+type WebmOpusProfilerStats = {
+  created: number
+  destroyed: number
+  active: number
+  chunksIn: number
+  bytesIn: number
+  packetsOut: number
+  packetBytesOut: number
+  headPackets: number
+  tooShortReads: number
+  invalidVint: number
+  skippedBytes: number
+  ringPeakBytes: number
+  maxTagBytesSeen: number
+}
+
+const webmOpusProfiler: WebmOpusProfilerStats = {
+  created: 0,
+  destroyed: 0,
+  active: 0,
+  chunksIn: 0,
+  bytesIn: 0,
+  packetsOut: 0,
+  packetBytesOut: 0,
+  headPackets: 0,
+  tooShortReads: 0,
+  invalidVint: 0,
+  skippedBytes: 0,
+  ringPeakBytes: 0,
+  maxTagBytesSeen: 0
+}
+
+export const getWebmOpusProfilerStats = (): WebmOpusProfilerStats => ({
+  ...webmOpusProfiler
+})
+
 type VintLengthResult = number | typeof TOO_SHORT | typeof INVALID_VINT
 type VintResult = bigint | typeof TOO_SHORT
 type EbmlIdResult =
@@ -135,6 +171,8 @@ abstract class WebmBaseDemuxer extends Transform {
     this.currentTrack = null
     this.pendingTrack = {}
     this.ebmlFound = false
+    webmOpusProfiler.created++
+    webmOpusProfiler.active++
   }
 
   /**
@@ -153,7 +191,12 @@ abstract class WebmBaseDemuxer extends Transform {
       return
     }
 
+    webmOpusProfiler.chunksIn++
+    webmOpusProfiler.bytesIn += chunk.length
     this.ringBuffer.write(chunk)
+    if (this.ringBuffer.length > webmOpusProfiler.ringPeakBytes) {
+      webmOpusProfiler.ringPeakBytes = this.ringBuffer.length
+    }
     this.total += BigInt(chunk.length)
 
     if (this.skipUntil !== null) {
@@ -190,9 +233,14 @@ abstract class WebmBaseDemuxer extends Transform {
         return
       }
 
-      if (res === TOO_SHORT) break
+      if (res === TOO_SHORT) {
+        webmOpusProfiler.tooShortReads++
+        break
+      }
 
       if (res._skipUntil) {
+        const skipped = this.ringBuffer.length
+        if (skipped > 0) webmOpusProfiler.skippedBytes += skipped
         this.skipUntil = res._skipUntil
         this.ringBuffer.skip(this.ringBuffer.length)
         this.processed += BigInt(this.ringBuffer.length)
@@ -200,6 +248,7 @@ abstract class WebmBaseDemuxer extends Transform {
       }
 
       if (res.offset) {
+        if (res.offset > 0) webmOpusProfiler.skippedBytes += res.offset
         const offset = BigInt(res.offset)
         const skipNum =
           offset > BigInt(Number.MAX_SAFE_INTEGER)
@@ -255,6 +304,7 @@ abstract class WebmBaseDemuxer extends Transform {
     const idData = this._readEBMLId(chunk, offset)
     if (idData === TOO_SHORT) return TOO_SHORT
     if (idData === INVALID_VINT) {
+      webmOpusProfiler.invalidVint++
       return { offset: 1 }
     }
 
@@ -272,10 +322,18 @@ abstract class WebmBaseDemuxer extends Transform {
     const sizeData = this._readTagSize(chunk, currentOffset)
     if (sizeData === TOO_SHORT) return TOO_SHORT
     if (sizeData === INVALID_VINT) {
+      webmOpusProfiler.invalidVint++
       return { offset: 1 }
     }
 
     const { dataLen, vintLen } = sizeData
+    const numericTagSize = Number(dataLen)
+    if (
+      Number.isFinite(numericTagSize) &&
+      numericTagSize > webmOpusProfiler.maxTagBytesSeen
+    ) {
+      webmOpusProfiler.maxTagBytesSeen = numericTagSize
+    }
 
     if (tag !== '18538067' && dataLen > BigInt(MAX_TAG_SIZE)) {
       const isUnknownSize = dataLen === 2n ** BigInt(7 * vintLen) - 1n
@@ -323,6 +381,7 @@ abstract class WebmBaseDemuxer extends Transform {
     if (tag === '63a2') {
       try {
         this._checkHead(data)
+        webmOpusProfiler.headPackets++
         this.emit('head', data)
       } catch (_e) {}
     } else if (tag === 'a3') {
@@ -332,7 +391,10 @@ abstract class WebmBaseDemuxer extends Transform {
         firstByte !== undefined &&
         (firstByte & 0xf) === this.currentTrack.number
       ) {
-        this.push(data.subarray(4))
+        const packet = data.subarray(4)
+        webmOpusProfiler.packetsOut++
+        webmOpusProfiler.packetBytesOut += packet.length
+        this.push(packet)
       }
     }
 
@@ -369,6 +431,8 @@ abstract class WebmBaseDemuxer extends Transform {
    * Resets internal state and releases pooled buffers.
    */
   protected _cleanup(): void {
+    webmOpusProfiler.destroyed++
+    webmOpusProfiler.active = Math.max(0, webmOpusProfiler.active - 1)
     this.ringBuffer.dispose()
     this.pendingTrack = {}
     this.currentTrack = null

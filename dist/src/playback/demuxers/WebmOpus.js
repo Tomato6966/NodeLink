@@ -22,6 +22,24 @@ const TAGS = Object.freeze({
 });
 const OPUS_HEAD = Buffer.from([0x4f, 0x70, 0x75, 0x73, 0x48, 0x65, 0x61, 0x64]);
 const MAX_TAG_SIZE = 10 * 1024 * 1024;
+const webmOpusProfiler = {
+    created: 0,
+    destroyed: 0,
+    active: 0,
+    chunksIn: 0,
+    bytesIn: 0,
+    packetsOut: 0,
+    packetBytesOut: 0,
+    headPackets: 0,
+    tooShortReads: 0,
+    invalidVint: 0,
+    skippedBytes: 0,
+    ringPeakBytes: 0,
+    maxTagBytesSeen: 0
+};
+export const getWebmOpusProfilerStats = () => ({
+    ...webmOpusProfiler
+});
 /**
  * Reads the VINT length prefix from an EBML buffer.
  * @param buf - Source buffer to read from.
@@ -110,6 +128,8 @@ class WebmBaseDemuxer extends Transform {
         this.currentTrack = null;
         this.pendingTrack = {};
         this.ebmlFound = false;
+        webmOpusProfiler.created++;
+        webmOpusProfiler.active++;
     }
     /**
      * Consumes incoming chunks and emits decoded Opus packets.
@@ -122,7 +142,12 @@ class WebmBaseDemuxer extends Transform {
             done();
             return;
         }
+        webmOpusProfiler.chunksIn++;
+        webmOpusProfiler.bytesIn += chunk.length;
         this.ringBuffer.write(chunk);
+        if (this.ringBuffer.length > webmOpusProfiler.ringPeakBytes) {
+            webmOpusProfiler.ringPeakBytes = this.ringBuffer.length;
+        }
         this.total += BigInt(chunk.length);
         if (this.skipUntil !== null) {
             const remainingToSkip = this.skipUntil - this.processed;
@@ -155,15 +180,22 @@ class WebmBaseDemuxer extends Transform {
                 done(error);
                 return;
             }
-            if (res === TOO_SHORT)
+            if (res === TOO_SHORT) {
+                webmOpusProfiler.tooShortReads++;
                 break;
+            }
             if (res._skipUntil) {
+                const skipped = this.ringBuffer.length;
+                if (skipped > 0)
+                    webmOpusProfiler.skippedBytes += skipped;
                 this.skipUntil = res._skipUntil;
                 this.ringBuffer.skip(this.ringBuffer.length);
                 this.processed += BigInt(this.ringBuffer.length);
                 break;
             }
             if (res.offset) {
+                if (res.offset > 0)
+                    webmOpusProfiler.skippedBytes += res.offset;
                 const offset = BigInt(res.offset);
                 const skipNum = offset > BigInt(Number.MAX_SAFE_INTEGER)
                     ? Number.MAX_SAFE_INTEGER
@@ -218,6 +250,7 @@ class WebmBaseDemuxer extends Transform {
         if (idData === TOO_SHORT)
             return TOO_SHORT;
         if (idData === INVALID_VINT) {
+            webmOpusProfiler.invalidVint++;
             return { offset: 1 };
         }
         const tag = idData.id.toString('hex');
@@ -235,9 +268,15 @@ class WebmBaseDemuxer extends Transform {
         if (sizeData === TOO_SHORT)
             return TOO_SHORT;
         if (sizeData === INVALID_VINT) {
+            webmOpusProfiler.invalidVint++;
             return { offset: 1 };
         }
         const { dataLen, vintLen } = sizeData;
+        const numericTagSize = Number(dataLen);
+        if (Number.isFinite(numericTagSize) &&
+            numericTagSize > webmOpusProfiler.maxTagBytesSeen) {
+            webmOpusProfiler.maxTagBytesSeen = numericTagSize;
+        }
         if (tag !== '18538067' && dataLen > BigInt(MAX_TAG_SIZE)) {
             const isUnknownSize = dataLen === 2n ** BigInt(7 * vintLen) - 1n;
             if (!isUnknownSize) {
@@ -279,6 +318,7 @@ class WebmBaseDemuxer extends Transform {
         if (tag === '63a2') {
             try {
                 this._checkHead(data);
+                webmOpusProfiler.headPackets++;
                 this.emit('head', data);
             }
             catch (_e) { }
@@ -288,7 +328,10 @@ class WebmBaseDemuxer extends Transform {
             if (this.currentTrack &&
                 firstByte !== undefined &&
                 (firstByte & 0xf) === this.currentTrack.number) {
-                this.push(data.subarray(4));
+                const packet = data.subarray(4);
+                webmOpusProfiler.packetsOut++;
+                webmOpusProfiler.packetBytesOut += packet.length;
+                this.push(packet);
             }
         }
         return { offset: currentOffset + numDataLen };
@@ -314,6 +357,8 @@ class WebmBaseDemuxer extends Transform {
      * Resets internal state and releases pooled buffers.
      */
     _cleanup() {
+        webmOpusProfiler.destroyed++;
+        webmOpusProfiler.active = Math.max(0, webmOpusProfiler.active - 1);
         this.ringBuffer.dispose();
         this.pendingTrack = {};
         this.currentTrack = null;

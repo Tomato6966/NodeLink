@@ -8,6 +8,9 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
 };
 import net from 'node:net';
 import os from 'node:os';
+import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
+import inspector from 'node:inspector';
 import { resolve as resolvePath } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
@@ -22,6 +25,7 @@ import RoutePlannerManager from '../managers/routePlannerManager.js';
 import SourceManager from "../managers/sourceManager.js";
 import StatsManager from "../managers/statsManager.js";
 import TrackCacheManager from "../managers/trackCacheManager.js";
+import { getWebmOpusProfilerStats } from "../playback/demuxers/WebmOpus.js";
 import { bufferPool } from "../playback/structs/BufferPool.js";
 import { cleanupHttpAgents, initLogger, logger } from "../utils.js";
 import { createVoiceRelay } from "../voice/voiceRelay.js";
@@ -70,6 +74,13 @@ initLogger(config);
 const players = new Map();
 const guildQueues = new Map(); // guildId -> { queue: [], processing: false }
 const activeStreams = new Map();
+const streamLifecycle = {
+    created: 0,
+    ended: 0,
+    errored: 0,
+    cancelled: 0,
+    cleaned: 0
+};
 const PARALLEL_COMMANDS = new Set([
     'loadTracks',
     'loadLyrics',
@@ -79,8 +90,476 @@ const PARALLEL_COMMANDS = new Set([
     'getTrackUrl',
     'loadStream',
     'cancelStream',
-    'updateYoutubeConfig'
+    'updateYoutubeConfig',
+    'profilerCommand'
 ]);
+const getActiveResourcesBreakdown = () => {
+    const list = typeof process.getActiveResourcesInfo === 'function'
+        ? process.getActiveResourcesInfo()
+        : [];
+    const counters = {};
+    for (const item of list) {
+        counters[item] = (counters[item] || 0) + 1;
+    }
+    return counters;
+};
+const getActiveHandlesBreakdown = () => {
+    const getter = process;
+    if (typeof getter._getActiveHandles !== 'function')
+        return {};
+    const handles = getter._getActiveHandles();
+    const counters = {};
+    for (const handle of handles) {
+        const name = handle?.constructor?.name || 'UnknownHandle';
+        counters[name] = (counters[name] || 0) + 1;
+    }
+    return counters;
+};
+const getHeapSpaces = () => v8.getHeapSpaceStatistics().map((space) => ({
+    spaceName: space.space_name,
+    spaceSize: space.space_size,
+    spaceUsedSize: space.space_used_size,
+    spaceAvailableSize: space.space_available_size,
+    physicalSpaceSize: space.physical_space_size
+}));
+const getHostFromUrl = (value) => {
+    if (!value || typeof value !== 'string')
+        return null;
+    try {
+        return new URL(value).host || null;
+    }
+    catch {
+        return null;
+    }
+};
+const inferSourceName = (sourceName, uri) => {
+    if (sourceName && sourceName.length > 0)
+        return sourceName;
+    const host = getHostFromUrl(uri);
+    if (!host)
+        return sourceName;
+    const h = host.toLowerCase();
+    if (h.includes('youtube') || h.includes('youtu.be'))
+        return 'youtube';
+    if (h.includes('spotify'))
+        return 'spotify';
+    if (h.includes('soundcloud'))
+        return 'soundcloud';
+    if (h.includes('googlevideo'))
+        return 'youtube-cdn';
+    if (h.includes('discord'))
+        return 'discord';
+    return `http:${h}`;
+};
+const getCodecAndContainer = (format) => {
+    if (!format)
+        return { codec: null, container: null, formatLabel: null };
+    if (typeof format === 'string') {
+        const raw = format.trim();
+        if (!raw)
+            return { codec: null, container: null, formatLabel: null };
+        const parts = raw.split('/');
+        if (parts.length >= 2) {
+            return {
+                codec: parts[1] || null,
+                container: parts[0] || null,
+                formatLabel: raw
+            };
+        }
+        return { codec: null, container: raw, formatLabel: raw };
+    }
+    if (typeof format !== 'object') {
+        return { codec: null, container: null, formatLabel: null };
+    }
+    const info = format;
+    const mimeType = typeof info['mimeType'] === 'string'
+        ? info['mimeType']
+        : typeof info['type'] === 'string'
+            ? info['type']
+            : null;
+    let codec = typeof info['codecs'] === 'string'
+        ? info['codecs']
+        : typeof info['codec'] === 'string'
+            ? info['codec']
+            : null;
+    let container = typeof info['container'] === 'string'
+        ? info['container']
+        : typeof info['ext'] === 'string'
+            ? info['ext']
+            : null;
+    if (mimeType) {
+        const [kind, rest] = mimeType.split(';', 2);
+        if (!container && kind?.includes('/')) {
+            container = kind.split('/')[1] || null;
+        }
+        if (!codec && rest) {
+            const m = /codecs?="?([^";]+)"?/i.exec(rest);
+            if (m?.[1])
+                codec = m[1];
+        }
+    }
+    const formatLabel = mimeType ||
+        (typeof info['format'] === 'string' ? info['format'] : null) ||
+        (typeof info['label'] === 'string' ? info['label'] : null) ||
+        container;
+    return { codec: codec || null, container: container || null, formatLabel: formatLabel || null };
+};
+const profilerBaseDir = process.env['NODELINK_PROFILER_DIR'] || '.profiles';
+let activeCpuProfiler = null;
+let activeHeapSampling = null;
+const sanitizeProfileName = (value) => {
+    if (!value)
+        return '';
+    return value
+        .trim()
+        .replace(/[^a-zA-Z0-9._-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+};
+const buildProfilerFilePath = async (kind, extension, label) => {
+    await fsPromises.mkdir(profilerBaseDir, { recursive: true });
+    const safeLabel = sanitizeProfileName(label);
+    const stamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, '-')
+        .replace('T', '_')
+        .replace('Z', '');
+    const suffix = safeLabel ? `-${safeLabel}` : '';
+    return `${profilerBaseDir}/worker-${process.pid}-${kind}-${stamp}${suffix}.${extension}`;
+};
+const inspectorPost = (session, method, params) => new Promise((resolve, reject) => {
+    session.post(method, params ?? {}, (error, result) => {
+        if (error)
+            reject(error);
+        else
+            resolve((result ?? {}));
+    });
+});
+const summarizeHeapSamplingProfile = (profile, limit = null) => {
+    const head = profile['head'];
+    if (!head)
+        return [];
+    const aggregates = new Map();
+    const visit = (node) => {
+        const frame = node.callFrame || {};
+        const functionName = frame.functionName || '(anonymous)';
+        const url = frame.url || '(internal)';
+        const line = Number(frame.lineNumber || 0) + 1;
+        const column = Number(frame.columnNumber || 0) + 1;
+        const selfSize = Number(node.selfSize || 0);
+        if (selfSize > 0) {
+            const key = `${functionName}|${url}|${line}|${column}`;
+            const current = aggregates.get(key);
+            if (current) {
+                current.bytes += selfSize;
+                current.hits++;
+            }
+            else {
+                aggregates.set(key, {
+                    functionName,
+                    url,
+                    line,
+                    column,
+                    bytes: selfSize,
+                    hits: 1
+                });
+            }
+        }
+        const children = Array.isArray(node.children) ? node.children : [];
+        for (const child of children) {
+            visit(child);
+        }
+    };
+    visit(head);
+    const entries = Array.from(aggregates.values()).sort((a, b) => b.bytes - a.bytes);
+    if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0) {
+        return entries.slice(0, limit);
+    }
+    return entries;
+};
+const handleProfilerCommand = async (payload) => {
+    const action = payload?.action;
+    if (!action) {
+        return { success: false, error: 'Missing profiler action' };
+    }
+    if (action === 'status') {
+        const playersSummary = Array.from(players.values())
+            .map((player) => {
+            const track = player.track;
+            const internal = player;
+            const uri = track?.info?.uri || null;
+            const inferredSource = inferSourceName(track?.info?.sourceName || null, uri);
+            const streamProtocol = internal.streamInfo?.protocol || null;
+            const formatInfo = getCodecAndContainer(internal.streamInfo?.format);
+            const durationMsRaw = typeof track?.endTime === 'number' && Number.isFinite(track.endTime) && track.endTime > 0
+                ? track.endTime
+                : typeof track?.info?.length === 'number' && Number.isFinite(track.info.length)
+                    ? track.info.length
+                    : 0;
+            const positionMsRaw = typeof internal._realPosition === 'function'
+                ? internal._realPosition()
+                : internal.position || 0;
+            const durationMs = Math.max(0, Number(durationMsRaw) || 0);
+            const positionMs = Math.max(0, Number(positionMsRaw) || 0);
+            const clampedPosition = durationMs > 0 ? Math.min(positionMs, durationMs) : positionMs;
+            const remainingMs = durationMs > 0 ? Math.max(0, durationMs - clampedPosition) : null;
+            const progressPercent = durationMs > 0 ? Number(((clampedPosition / durationMs) * 100).toFixed(2)) : null;
+            const hasTrack = !!track?.info;
+            const status = !hasTrack
+                ? 'idle'
+                : player.isPaused
+                    ? 'paused'
+                    : internal.connStatus === 'connected'
+                        ? 'working'
+                        : internal.connStatus || 'connecting';
+            return {
+                guildId: player.guildId,
+                isPaused: !!player.isPaused,
+                status,
+                sourceName: inferredSource,
+                title: track?.info?.title || null,
+                author: track?.info?.author || null,
+                artworkUrl: track?.info?.artworkUrl || null,
+                uri,
+                uriHost: getHostFromUrl(uri),
+                protocol: streamProtocol || (uri?.startsWith('https://') ? 'https' : uri?.startsWith('http://') ? 'http' : null),
+                format: internal.streamInfo?.format || null,
+                formatLabel: formatInfo.formatLabel,
+                codec: formatInfo.codec,
+                container: formatInfo.container,
+                isStream: !!track?.info?.isStream,
+                isSeekable: track?.info?.isSeekable !== false,
+                streamUrlHost: getHostFromUrl(internal.streamInfo?.url ||
+                    internal.streamInfo?.hlsUrl ||
+                    null),
+                position: clampedPosition,
+                duration: durationMs,
+                remaining: remainingMs,
+                progressPercent,
+                ping: Number(internal.connection?.ping || 0)
+            };
+        });
+        let queuedCommands = 0;
+        for (const entry of guildQueues.values()) {
+            queuedCommands += entry.queue.length;
+        }
+        return {
+            success: true,
+            pid: process.pid,
+            inspectorUrl: inspector.url() || null,
+            cpuProfiling: !!activeCpuProfiler,
+            cpuStartedAt: activeCpuProfiler?.startedAt || null,
+            heapSamplingActive: !!activeHeapSampling,
+            heapSamplingStartedAt: activeHeapSampling?.startedAt || null,
+            profileDir: profilerBaseDir,
+            memory: process.memoryUsage(),
+            heapSpaces: getHeapSpaces(),
+            uptimeSec: Math.floor(process.uptime()),
+            eventLoop: {
+                minMs: Number((hndl.min / 1e6).toFixed(3)),
+                maxMs: Number((hndl.max / 1e6).toFixed(3)),
+                meanMs: Number((hndl.mean / 1e6).toFixed(3)),
+                stddevMs: Number((hndl.stddev / 1e6).toFixed(3))
+            },
+            activeResources: getActiveResourcesBreakdown(),
+            activeHandles: getActiveHandlesBreakdown(),
+            workersContext: {
+                playersCount: players.size,
+                playersSummary,
+                queuesCount: guildQueues.size,
+                queuedCommands,
+                activeStreams: activeStreams.size,
+                isHibernating,
+                streamLifecycle,
+                mapSizes: {
+                    players: players.size,
+                    guildQueues: guildQueues.size,
+                    activeStreams: activeStreams.size
+                },
+                bufferPool: typeof bufferPool.getStats === 'function'
+                    ? bufferPool.getStats()
+                    : null,
+                demuxers: {
+                    webmOpus: getWebmOpusProfilerStats()
+                }
+            }
+        };
+    }
+    if (action === 'openInspector') {
+        const host = typeof payload.host === 'string' ? payload.host : '127.0.0.1';
+        const port = typeof payload.port === 'number' && Number.isInteger(payload.port)
+            ? payload.port
+            : 0;
+        const wait = payload.exposeWait === true;
+        inspector.open(port, host, wait);
+        return {
+            success: true,
+            pid: process.pid,
+            inspectorUrl: inspector.url() || null
+        };
+    }
+    if (action === 'closeInspector') {
+        inspector.close();
+        return { success: true, pid: process.pid, inspectorUrl: null };
+    }
+    if (action === 'forceGc') {
+        const gcFn = global.gc;
+        if (typeof gcFn !== 'function') {
+            return {
+                success: false,
+                error: 'GC not exposed. Start NodeLink with --expose-gc to enable forceGc.'
+            };
+        }
+        gcFn();
+        gcFn();
+        const memory = process.memoryUsage();
+        return {
+            success: true,
+            pid: process.pid,
+            memory
+        };
+    }
+    if (action === 'cpuStart') {
+        if (activeCpuProfiler) {
+            return {
+                success: true,
+                alreadyActive: true,
+                pid: process.pid,
+                startedAt: activeCpuProfiler.startedAt
+            };
+        }
+        const session = new inspector.Session();
+        session.connect();
+        await inspectorPost(session, 'Profiler.enable');
+        await inspectorPost(session, 'Profiler.start');
+        activeCpuProfiler = {
+            session,
+            startedAt: Date.now(),
+            name: sanitizeProfileName(payload.name) || null
+        };
+        return {
+            success: true,
+            pid: process.pid,
+            startedAt: activeCpuProfiler.startedAt
+        };
+    }
+    if (action === 'cpuStop') {
+        if (!activeCpuProfiler) {
+            return { success: false, error: 'CPU profiler is not active' };
+        }
+        const { session, startedAt, name } = activeCpuProfiler;
+        const result = await inspectorPost(session, 'Profiler.stop');
+        const outputPath = await buildProfilerFilePath('cpu', 'cpuprofile', sanitizeProfileName(payload.name) || name || undefined);
+        const profile = result['profile'];
+        await fsPromises.writeFile(outputPath, JSON.stringify(profile));
+        try {
+            session.disconnect();
+        }
+        catch { }
+        activeCpuProfiler = null;
+        return {
+            success: true,
+            pid: process.pid,
+            startedAt,
+            endedAt: Date.now(),
+            outputPath
+        };
+    }
+    if (action === 'heapSamplingStart') {
+        if (activeHeapSampling) {
+            return {
+                success: true,
+                alreadyActive: true,
+                pid: process.pid,
+                startedAt: activeHeapSampling.startedAt
+            };
+        }
+        const samplingInterval = typeof payload.samplingInterval === 'number' &&
+            Number.isFinite(payload.samplingInterval) &&
+            payload.samplingInterval > 0
+            ? Math.floor(payload.samplingInterval)
+            : 32768;
+        const session = new inspector.Session();
+        session.connect();
+        await inspectorPost(session, 'HeapProfiler.enable');
+        await inspectorPost(session, 'HeapProfiler.startSampling', {
+            samplingInterval
+        });
+        activeHeapSampling = {
+            session,
+            startedAt: Date.now(),
+            name: sanitizeProfileName(payload.name) || null,
+            samplingInterval
+        };
+        return {
+            success: true,
+            pid: process.pid,
+            startedAt: activeHeapSampling.startedAt,
+            samplingInterval
+        };
+    }
+    if (action === 'heapSamplingStop') {
+        if (!activeHeapSampling) {
+            return { success: false, error: 'Heap sampling is not active' };
+        }
+        const { session, startedAt, name } = activeHeapSampling;
+        const result = await inspectorPost(session, 'HeapProfiler.stopSampling');
+        const outputPath = await buildProfilerFilePath('heap-sampling', 'heapsampling.json', sanitizeProfileName(payload.name) || name || undefined);
+        await fsPromises.writeFile(outputPath, JSON.stringify(result));
+        try {
+            session.disconnect();
+        }
+        catch { }
+        activeHeapSampling = null;
+        const profile = result['profile'] || {};
+        const topSites = summarizeHeapSamplingProfile(profile);
+        return {
+            success: true,
+            pid: process.pid,
+            startedAt,
+            endedAt: Date.now(),
+            outputPath,
+            topSites
+        };
+    }
+    if (action === 'heapSnapshot') {
+        const outputPath = await buildProfilerFilePath('heap', 'heapsnapshot', payload.name);
+        const session = new inspector.Session();
+        let fd = null;
+        try {
+            fd = fs.openSync(outputPath, 'w');
+            session.connect();
+            session.on('HeapProfiler.addHeapSnapshotChunk', (message) => {
+                const chunk = message?.params?.chunk;
+                if (typeof chunk === 'string' && fd !== null) {
+                    fs.writeSync(fd, chunk);
+                }
+            });
+            await inspectorPost(session, 'HeapProfiler.enable');
+            await inspectorPost(session, 'HeapProfiler.takeHeapSnapshot', {
+                reportProgress: false
+            });
+            return {
+                success: true,
+                pid: process.pid,
+                outputPath
+            };
+        }
+        finally {
+            try {
+                session.disconnect();
+            }
+            catch { }
+            if (fd !== null) {
+                try {
+                    fs.closeSync(fd);
+                }
+                catch { }
+            }
+        }
+    }
+    return { success: false, error: `Unsupported profiler action: ${action}` };
+};
 const sendProcessMessage = (payload, onError) => {
     if (typeof process.send !== 'function')
         return false;
@@ -566,6 +1045,7 @@ function cleanupActiveStream(streamId, entry) {
         current.fetched.stream.destroy();
     }
     activeStreams.delete(streamId);
+    streamLifecycle.cleaned++;
 }
 /**
  * Resolve and fetch a PCM stream, forwarding chunks through the event socket.
@@ -594,15 +1074,21 @@ async function startLoadStream(streamId, payload) {
     const pcmStream = createPCMStream(fetched.stream, fetched.type || urlResult.format || 'unknown', nodelink, (payload?.volume ?? 100) / 100, payload?.filters || {});
     const entry = { pcmStream, fetched, cancelled: false };
     activeStreams.set(streamId, entry);
+    streamLifecycle.created++;
     const finish = (err) => {
         if (entry.cancelled) {
+            streamLifecycle.cancelled++;
             cleanupActiveStream(streamId, entry);
             return;
         }
-        if (err)
+        if (err) {
+            streamLifecycle.errored++;
             sendStreamError(streamId, getErrorMessage(err));
-        else
+        }
+        else {
+            streamLifecycle.ended++;
             sendStreamEnd(streamId);
+        }
         cleanupActiveStream(streamId, entry);
     };
     pcmStream.on('data', (chunk) => {
@@ -931,6 +1417,10 @@ async function processQueue(queueKey) {
                     logger('error', 'Worker', `Error updating YouTube config: ${getErrorMessage(err)}`);
                     result = { success: false, error: getErrorMessage(err) };
                 }
+                break;
+            }
+            case 'profilerCommand': {
+                result = await handleProfilerCommand((payload ?? {}));
                 break;
             }
             default:

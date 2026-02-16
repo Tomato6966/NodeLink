@@ -209,6 +209,7 @@ export type TaskType =
   | 'loadStream'
   | 'loadLiveChat'
   | 'cancelLiveChat'
+  | 'profilerCommand'
 
 /**
  * Base task payload structure
@@ -293,6 +294,18 @@ export interface CancelChatPayload extends BaseTaskPayload {
 }
 
 /**
+ * Payload for profiler commands executed by source micro-workers.
+ * @public
+ */
+export interface ProfilerPayload extends BaseTaskPayload {
+  action: string
+  name?: string
+  host?: string
+  port?: number
+  exposeWait?: boolean
+}
+
+/**
  * Union type of all task payloads
  * @public
  */
@@ -304,6 +317,7 @@ export type TaskPayload =
   | LoadStreamPayload
   | LiveChatPayload
   | CancelChatPayload
+  | ProfilerPayload
   | BaseTaskPayload
 
 /**

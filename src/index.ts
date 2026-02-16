@@ -70,6 +70,8 @@ import { createVoiceRelay } from './voice/voiceRelay.ts'
 
 type RequestHandlerType = typeof import('./api/index.ts').default
 let requestHandlerPromise: Promise<RequestHandlerType> | null = null
+type ProfilerApiModule = typeof import('./api/profiler.js')
+let profilerApiPromise: Promise<ProfilerApiModule> | null = null
 
 const getRequestHandler = async (): Promise<RequestHandlerType> => {
   if (!requestHandlerPromise) {
@@ -80,8 +82,36 @@ const getRequestHandler = async (): Promise<RequestHandlerType> => {
   return requestHandlerPromise
 }
 
+const getProfilerApi = async (): Promise<ProfilerApiModule> => {
+  if (!profilerApiPromise) {
+    profilerApiPromise = import('./api/profiler.js')
+  }
+  return profilerApiPromise
+}
+
 const memoryTraceEnabled =
   process.env['NODELINK_MEMORY_TRACE']?.toLowerCase() === 'true'
+
+type ProfilerRealtimeStore = {
+  snapshots: Array<Record<string, unknown>>
+  lastAllocTop: Record<string, unknown> | null
+  updatedAt: number
+}
+
+const PROFILER_HISTORY_MAX = 240
+const getProfilerRealtimeStore = (): ProfilerRealtimeStore => {
+  const g = globalThis as unknown as {
+    __nodelinkProfilerRealtimeStore?: ProfilerRealtimeStore
+  }
+  if (!g.__nodelinkProfilerRealtimeStore) {
+    g.__nodelinkProfilerRealtimeStore = {
+      snapshots: [],
+      lastAllocTop: null,
+      updatedAt: Date.now()
+    }
+  }
+  return g.__nodelinkProfilerRealtimeStore
+}
 
 const memoryTrace = (stage: string): void => {
   if (!memoryTraceEnabled) return
@@ -1189,6 +1219,179 @@ class NodelinkServer extends EventEmitter {
         }
       }
     )
+
+    this.socket.on(
+      '/v4/profiler/socket',
+      async (socket: SessionSocket, request: RequestShim) => {
+        let streamTimer: NodeJS.Timeout | null = null
+        let allocTimer: NodeJS.Timeout | null = null
+        let stopped = false
+        let tickInFlight = false
+        let allocInFlight = false
+        let lastAllocAt = 0
+        let lastAllocReport: Record<string, unknown> | null = null
+        const realtimeStore = getProfilerRealtimeStore()
+        if (realtimeStore.lastAllocTop && !lastAllocReport) {
+          lastAllocReport = realtimeStore.lastAllocTop
+        }
+        const prevById = new Map<
+          string,
+          {
+            time: number
+            heapUsed: number
+            rss: number
+            oldUsed?: number
+            playersCount?: number
+          }
+        >()
+
+        const url = new URL(
+          request.url || '/v4/profiler/socket',
+          `http://${request.headers?.['host'] || 'localhost'}`
+        )
+        const intervalMs = Math.min(
+          15000,
+          Math.max(700, Number(url.searchParams.get('intervalMs') || 2000))
+        )
+        const allocDurationMs = Math.min(
+          15000,
+          Math.max(1000, Number(url.searchParams.get('allocDurationMs') || 3000))
+        )
+        const allocEveryRaw = Number(url.searchParams.get('allocEveryMs') || 0)
+        const allocEveryMs =
+          Number.isFinite(allocEveryRaw) && allocEveryRaw > 0
+            ? Math.min(120000, Math.max(5000, Math.floor(allocEveryRaw)))
+            : 0
+        const payload: Record<string, unknown> = {
+          scope: url.searchParams.get('scope') || 'all'
+        }
+
+        const cleanup = () => {
+          stopped = true
+          if (streamTimer) clearInterval(streamTimer)
+          if (allocTimer) clearInterval(allocTimer)
+          streamTimer = null
+          allocTimer = null
+        }
+
+        const send = (obj: Record<string, unknown>) => {
+          try {
+            socket.send(JSON.stringify(obj))
+          } catch {
+            cleanup()
+          }
+        }
+
+        const refreshAllocTop = async () => {
+          if (stopped || allocInFlight) return
+          const now = Date.now()
+          if (lastAllocReport && now - lastAllocAt < allocEveryMs) return
+
+          allocInFlight = true
+          try {
+            const profilerApi = await getProfilerApi()
+            lastAllocReport = await profilerApi.collectAllocationTopSites(
+              this as unknown as Parameters<
+                ProfilerApiModule['collectAllocationTopSites']
+              >[0],
+              {
+                ...payload,
+                durationMs: allocDurationMs,
+                name: 'ws-alloc'
+              }
+            )
+            lastAllocAt = Date.now()
+            realtimeStore.lastAllocTop = lastAllocReport
+            realtimeStore.updatedAt = lastAllocAt
+          } catch (error) {
+            lastAllocReport = {
+              action: 'allocTop',
+              failed: true,
+              error: error instanceof Error ? error.message : String(error),
+              timestamp: Date.now()
+            }
+            lastAllocAt = Date.now()
+            realtimeStore.lastAllocTop = lastAllocReport
+            realtimeStore.updatedAt = lastAllocAt
+          } finally {
+            allocInFlight = false
+          }
+        }
+
+        const tick = async () => {
+          if (stopped || tickInFlight) return
+          tickInFlight = true
+          try {
+            const profilerApi = await getProfilerApi()
+            const snapshot = await profilerApi.collectActionSnapshot(
+              this as unknown as Parameters<
+                ProfilerApiModule['collectActionSnapshot']
+              >[0],
+              'status',
+              payload
+            )
+            const warnings = profilerApi.detectAnomalies(snapshot, prevById)
+            send({
+              op: 'profilerSnapshot',
+              timestamp: Date.now(),
+              snapshot,
+              warnings,
+              allocTop: lastAllocReport
+            })
+            realtimeStore.snapshots.push({
+              timestamp: Date.now(),
+              snapshot,
+              warnings,
+              allocTop: lastAllocReport
+            })
+            if (realtimeStore.snapshots.length > PROFILER_HISTORY_MAX) {
+              realtimeStore.snapshots.splice(
+                0,
+                realtimeStore.snapshots.length - PROFILER_HISTORY_MAX
+              )
+            }
+            realtimeStore.updatedAt = Date.now()
+          } catch (error) {
+            send({
+              op: 'profilerError',
+              timestamp: Date.now(),
+              error: error instanceof Error ? error.message : String(error)
+            })
+          } finally {
+            tickInFlight = false
+          }
+        }
+
+        socket.on('close', cleanup)
+        socket.on('error', cleanup)
+
+        send({
+          op: 'profilerReady',
+          timestamp: Date.now(),
+          intervalMs,
+          allocEveryMs,
+          allocDurationMs
+        })
+        send({
+          op: 'profilerBootstrap',
+          timestamp: Date.now(),
+          history: realtimeStore.snapshots,
+          lastAllocTop: realtimeStore.lastAllocTop,
+          updatedAt: realtimeStore.updatedAt
+        })
+
+        if (allocEveryMs > 0) void refreshAllocTop()
+        await tick()
+        streamTimer = setInterval(() => {
+          void tick()
+        }, intervalMs)
+        if (allocEveryMs > 0) {
+          allocTimer = setInterval(() => {
+            void refreshAllocTop()
+          }, allocEveryMs)
+        }
+      }
+    )
   }
 
   /**
@@ -1217,6 +1420,54 @@ class NodelinkServer extends EventEmitter {
         const pathname = url.pathname.endsWith('/')
           ? url.pathname.slice(0, -1)
           : url.pathname
+
+        if (pathname === '/v4/profiler/socket') {
+          const remoteAddress = server.requestIP(req)?.address || 'unknown'
+          const isInternal = /^(::1|localhost|127\.0\.0\.1)/.test(remoteAddress)
+          const endpoint = self.options.cluster?.endpoint || {}
+          const patchEnabled = endpoint.patchEnabled === true
+          const allowExternalPatch = endpoint.allowExternalPatch === true
+          const expectedCode =
+            typeof endpoint.code === 'string' && endpoint.code.length > 0
+              ? endpoint.code
+              : 'CAPYBARA'
+          const providedCode =
+            url.searchParams.get('code') ||
+            req.headers.get('x-nodelink-code') ||
+            req.headers.get('x-worker-code')
+
+          if (!patchEnabled) {
+            return new Response('Profiler socket endpoint is disabled.', {
+              status: 403,
+              statusText: 'Forbidden'
+            })
+          }
+          if (!allowExternalPatch && !isInternal) {
+            return new Response('External profiler socket access is blocked.', {
+              status: 403,
+              statusText: 'Forbidden'
+            })
+          }
+          if (!providedCode || providedCode !== expectedCode) {
+            return new Response('Invalid or missing profiler code.', {
+              status: 403,
+              statusText: 'Forbidden'
+            })
+          }
+
+          const success = server.upgrade(req, {
+            data: {
+              clientInfo: { name: 'ProfilerUI', version: '1' },
+              sessionId: null,
+              reqHeaders: Object.fromEntries(req.headers),
+              remoteAddress,
+              url: req.url
+            }
+          })
+
+          if (success) return undefined
+          return new Response('WebSocket upgrade failed', { status: 400 })
+        }
 
         if (pathname === '/v4/websocket') {
           const remoteAddress = server.requestIP(req)?.address || 'unknown'
@@ -1417,6 +1668,21 @@ class NodelinkServer extends EventEmitter {
             socket: { remoteAddress: ws.data.remoteAddress }
           }
 
+          let pathname = '/v4/websocket'
+          try {
+            pathname = new URL(ws.data.url).pathname
+          } catch {}
+
+          if (pathname === '/v4/profiler/socket') {
+            logger(
+              'info',
+              'ProfilerSocket',
+              `Profiler socket connected from [External] (${ws.data.remoteAddress})`
+            )
+            self.socket?.emit('/v4/profiler/socket', wrapper, reqShim, null, null)
+            return
+          }
+
           logger(
             'info',
             'Server',
@@ -1559,6 +1825,82 @@ class NodelinkServer extends EventEmitter {
           `Received headers (lowercased): ${JSON.stringify(headers)}`
         )
 
+        const parsedUpgradeUrl = new URL(
+          request.url || '/',
+          `http://${request.headers.host || 'localhost'}`
+        )
+        const { pathname } = parsedUpgradeUrl
+
+        if (pathname === '/v4/profiler/socket') {
+          const endpoint = this.options.cluster?.endpoint || {}
+          const patchEnabled = endpoint.patchEnabled === true
+          const allowExternalPatch = endpoint.allowExternalPatch === true
+          const expectedCode =
+            typeof endpoint.code === 'string' && endpoint.code.length > 0
+              ? endpoint.code
+              : 'CAPYBARA'
+
+          const queryCode = parsedUpgradeUrl.searchParams.get('code')
+          const headerCode = headers['x-nodelink-code'] || headers['x-worker-code']
+          const providedCode =
+            queryCode ||
+            (Array.isArray(headerCode) ? headerCode[0] : headerCode)
+
+          if (!patchEnabled) {
+            return rejectUpgrade(
+              403,
+              'Forbidden',
+              'Profiler socket endpoint is disabled.'
+            )
+          }
+
+          if (!allowExternalPatch && !isInternal) {
+            return rejectUpgrade(
+              403,
+              'Forbidden',
+              'External profiler socket access is blocked.'
+            )
+          }
+
+          if (!providedCode || providedCode !== expectedCode) {
+            return rejectUpgrade(
+              403,
+              'Forbidden',
+              'Invalid or missing profiler code.'
+            )
+          }
+
+          for (const key in headers) {
+            const value = headers[key]
+            if (typeof value === 'string') {
+              request.headers[key] = value
+            }
+          }
+
+          logger(
+            'info',
+            'ProfilerSocket',
+            `Profiler socket connected from ${clientAddress} | \x1b[33mURL:\x1b[0m ${request.url}`
+          )
+
+          ;(this.socket as WebSocketServer | undefined)?.handleUpgrade(
+            request,
+            socket,
+            head,
+            null,
+            (ws) =>
+              this.socket?.emit(
+                '/v4/profiler/socket',
+                ws as SessionSocket,
+                request,
+                { name: 'ProfilerUI', version: '1' },
+                null,
+                null
+              )
+          )
+          return
+        }
+
         // biome-ignore lint/complexity/useLiteralKeys: TypeScript requires index signature access
         const authorization = headers['authorization']
         const authValue = Array.isArray(authorization)
@@ -1611,10 +1953,6 @@ class NodelinkServer extends EventEmitter {
           sessionId = undefined
         }
 
-        const { pathname } = new URL(
-          request.url || '/',
-          `http://${request.headers.host || 'localhost'}`
-        )
         const voiceMatch = pathname.match(
           /^\/v4\/websocket\/voice\/([A-Za-z0-9]+)\/?$/
         )

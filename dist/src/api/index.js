@@ -14,6 +14,25 @@ import { logger, sendErrorResponse, sendResponse, verifyMethod } from "../utils.
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const defaultMethods = ['GET'];
+const TRACE_BUFFER_MAX = 600;
+const getTraceStore = () => {
+    const g = globalThis;
+    if (!g.__nodelinkTraceStore) {
+        g.__nodelinkTraceStore = {
+            requests: [],
+            events: []
+        };
+    }
+    return g.__nodelinkTraceStore;
+};
+const pushTrace = (key, entry) => {
+    const store = getTraceStore();
+    const target = store[key];
+    target.push(entry);
+    if (target.length > TRACE_BUFFER_MAX) {
+        target.splice(0, target.length - TRACE_BUFFER_MAX);
+    }
+};
 const getHeaderValue = (value) => (Array.isArray(value) ? value[0] : value);
 const resolveRouteModule = (module) => {
     if ('default' in module && module.default) {
@@ -127,13 +146,30 @@ async function requestHandler(nodelink, req, res) {
     const remotePort = req.socket?.remotePort;
     const isInternal = ['127.0.0.1', '::1', 'localhost'].includes(remoteAddress);
     const clientAddress = `${isInternal ? '[Internal]' : '[External]'} (${remoteAddress}:${remotePort ?? 'unknown'})`;
+    const requestId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
     const originalEnd = res.end.bind(res);
     res.end = (...args) => {
         const duration = Date.now() - startTime;
         nodelink.statsManager.recordHttpRequestDuration(parsedUrl.pathname, req.method, res.statusCode, duration);
+        const meta = res;
+        pushTrace('requests', {
+            id: requestId,
+            ts: Date.now(),
+            method: req.method ?? 'GET',
+            path: parsedUrl.pathname,
+            status: res.statusCode,
+            durationMs: duration,
+            remoteAddress,
+            remotePort: remotePort ?? null,
+            userAgent: getHeaderValue(headerAccess['user-agent']) || null,
+            reason: meta.__traceReason || null
+        });
         originalEnd(...args);
     };
     const isMetricsEndpoint = parsedUrl.pathname === `/${PATH_VERSION}/metrics`;
+    const isProfilerEndpoint = parsedUrl.pathname === `/${PATH_VERSION}/profiler` ||
+        parsedUrl.pathname === `/${PATH_VERSION}/profiler/ui` ||
+        parsedUrl.pathname === `/${PATH_VERSION}/profiler/file`;
     if (isMetricsEndpoint) {
         const metricsConfig = nodelink.options.metrics || {};
         if (!metricsConfig.enabled) {
@@ -174,6 +210,8 @@ async function requestHandler(nodelink, req, res) {
                 })());
         if (!isValidAuth) {
             logger('warn', 'Metrics', `Unauthorized metrics access attempt from ${clientAddress} - Invalid password provided: ${authHeader || 'None'}`);
+            res.__traceReason =
+                'metrics_unauthorized';
             res.writeHead(401, { 'Content-Type': 'text/plain' });
             res.end('Unauthorized');
             return;
@@ -182,6 +220,8 @@ async function requestHandler(nodelink, req, res) {
     const dosCheck = nodelink.dosProtectionManager.check(req);
     if (!dosCheck.allowed) {
         logger('warn', 'DosProtection', `DoS protection triggered for ${clientAddress} on ${parsedUrl.pathname}`);
+        res.__traceReason =
+            'dos_protection';
         nodelink.statsManager.incrementDosProtectionBlock(remoteAddress, dosCheck.message);
         sendErrorResponse(req, res, dosCheck.status ?? 403, dosCheck.message ?? 'Forbidden', dosCheck.message ?? 'Forbidden', parsedUrl.pathname, trace);
         return;
@@ -199,6 +239,8 @@ async function requestHandler(nodelink, req, res) {
     }
     if (!rateLimitCheck.allowed) {
         logger('warn', 'RateLimit', `Rate limit exceeded for ${clientAddress} on ${parsedUrl.pathname}`);
+        res.__traceReason =
+            'rate_limited';
         nodelink.statsManager.incrementRateLimitHit(parsedUrl.pathname, remoteAddress);
         const resetTime = rateLimitCheck.reset ?? Date.now();
         const retryAfter = Math.ceil((resetTime - Date.now()) / 1000);
@@ -206,12 +248,14 @@ async function requestHandler(nodelink, req, res) {
         sendErrorResponse(req, res, 429, 'Too Many Requests', 'You are sending too many requests. Please try again later.', parsedUrl.pathname, trace);
         return;
     }
-    if (!isMetricsEndpoint) {
+    if (!isMetricsEndpoint && !isProfilerEndpoint) {
         const authHeader = getHeaderValue(headerAccess.authorization);
         if (!authHeader ||
             (authHeader !== nodelink.options.server.password &&
                 authHeader !== `Bearer ${nodelink.options.server.password}`)) {
             logger('warn', 'Server', `Unauthorized connection attempt from ${clientAddress} - Invalid password provided: ${authHeader || 'None'}`);
+            res.__traceReason =
+                'api_unauthorized';
             res.writeHead(401, { 'Content-Type': 'text/plain' });
             res.end('Unauthorized');
             return;
@@ -224,6 +268,8 @@ async function requestHandler(nodelink, req, res) {
         const contentLength = parseContentLength(headerAccess['content-length']);
         if (!Number.isNaN(contentLength) && contentLength > MAX_BODY_SIZE) {
             logger('warn', 'Server', `Request rejected: Content-Length ${contentLength} exceeds limit of ${MAX_BODY_SIZE}`);
+            res.__traceReason =
+                'payload_too_large';
             sendErrorResponse(req, res, 413, 'Payload Too Large', 'Request body is too large.', parsedUrl.pathname, trace);
             req.destroy?.();
             return;
@@ -238,6 +284,8 @@ async function requestHandler(nodelink, req, res) {
                 receivedSize += chunk.length;
                 if (receivedSize > MAX_BODY_SIZE) {
                     logger('warn', 'Server', `Request rejected: Body size exceeded limit of ${MAX_BODY_SIZE}`);
+                    res.__traceReason =
+                        'payload_too_large';
                     req.removeListener?.('data', onData);
                     req.removeListener?.('end', onEnd);
                     sendErrorResponse(req, res, 413, 'Payload Too Large', 'Request body is too large.', parsedUrl.pathname, trace);
@@ -256,6 +304,15 @@ async function requestHandler(nodelink, req, res) {
                 catch (error) {
                     const errorMessage = error instanceof Error ? error.message : String(error);
                     logger('error', 'Server', `Failed to parse JSON body: ${errorMessage}. Path: ${parsedUrl.pathname}, Content-Type: ${getHeaderValue(headerAccess['content-type']) || 'N/A'}, Raw Body: '${body}', Headers: ${JSON.stringify(req.headers)}`);
+                    pushTrace('events', {
+                        ts: Date.now(),
+                        type: 'json_parse_error',
+                        path: parsedUrl.pathname,
+                        method: req.method ?? 'UNKNOWN',
+                        message: errorMessage
+                    });
+                    res.__traceReason =
+                        'invalid_json';
                     sendErrorResponse(req, res, 400, 'Invalid JSON', errorMessage || 'Failed to parse JSON body', parsedUrl.pathname, trace);
                     return;
                 }
@@ -298,6 +355,7 @@ async function requestHandler(nodelink, req, res) {
         }
     }
     logger('warn', 'Request', `${req.method} | ${clientAddress} - ${parsedUrl.pathname} not found (response 404)`);
+    res.__traceReason = 'not_found';
     sendErrorResponse(req, res, 404, 'Not Found', 'The requested route was not found.', parsedUrl.pathname, trace);
 }
 export default requestHandler;
