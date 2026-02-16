@@ -548,9 +548,14 @@ export default class DeezerSource {
                 const blowfish = new BlowfishCBC(trackKey);
                 blowfish.setIv(IV);
                 res.stream.on('data', (chunk) => {
-                    buf = Buffer.concat([buf, chunk]);
-                    while (buf.length >= bufferSize) {
-                        const bufferSized = buf.subarray(0, bufferSize);
+                    let data = chunk;
+                    if (buf.length > 0) {
+                        data = Buffer.concat([buf, chunk]);
+                        buf = Buffer.alloc(0);
+                    }
+                    let offset = 0;
+                    while (offset + bufferSize <= data.length) {
+                        const bufferSized = data.subarray(offset, offset + bufferSize);
                         if (i % 3 === 0) {
                             blowfish.setIv(IV);
                             outputStream.push(Buffer.from(blowfish.decode(bufferSized)));
@@ -559,7 +564,10 @@ export default class DeezerSource {
                             outputStream.push(bufferSized);
                         }
                         i++;
-                        buf = buf.subarray(bufferSize);
+                        offset += bufferSize;
+                    }
+                    if (offset < data.length) {
+                        buf = data.subarray(offset);
                     }
                 });
                 res.stream.on('end', () => {

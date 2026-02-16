@@ -58,6 +58,7 @@ const runtime = globalThis as typeof globalThis & { nodelink?: NodelinkRuntime }
  * @internal
  */
 const hasZstd = Boolean(zlib.createZstdDecompress)
+const DEFAULT_MAX_RESPONSE_BODY_BYTES = 32 * 1024 * 1024
 
 type ProxyAgentConstructor = new (options: {
   getProxyForUrl: () => string
@@ -1246,6 +1247,7 @@ async function _internalHttp1Request(
     streamOnly = false,
     disableBodyCompression = false,
     maxRedirects = DEFAULT_MAX_REDIRECTS,
+    maxResponseBodyBytes = DEFAULT_MAX_RESPONSE_BODY_BYTES,
     localAddress,
     agent: customAgent,
     _redirectsFollowed = 0
@@ -1392,7 +1394,21 @@ async function _internalHttp1Request(
       }
 
       const chunks: Buffer[] = []
-      finalStream.on('data', (chunk) => chunks.push(chunk))
+      let bufferedBytes = 0
+      finalStream.on('data', (chunk) => {
+        bufferedBytes += chunk.length
+        if (bufferedBytes > maxResponseBodyBytes) {
+          ;(finalStream as NodeJS.ReadableStream & {
+            destroy?: (error?: Error) => void
+          }).destroy?.(
+            new Error(
+              `Response body too large for ${urlString} (${bufferedBytes} bytes > ${maxResponseBodyBytes} bytes)`
+            )
+          )
+          return
+        }
+        chunks.push(chunk)
+      })
       finalStream.on('end', () => {
         try {
           const responseBuffer = Buffer.concat(chunks)
@@ -1552,6 +1568,7 @@ async function makeRequest(
     streamOnly = false,
     disableBodyCompression = false,
     maxRedirects = DEFAULT_MAX_REDIRECTS,
+    maxResponseBodyBytes = DEFAULT_MAX_RESPONSE_BODY_BYTES,
     _redirectsFollowed = 0
   } = options
 
@@ -1776,7 +1793,17 @@ async function makeRequest(
 
         try {
           const chunks: Buffer[] = []
-          for await (const chunk of responseStream) chunks.push(chunk as Buffer)
+          let bufferedBytes = 0
+          for await (const chunk of responseStream) {
+            const bufferChunk = chunk as Buffer
+            bufferedBytes += bufferChunk.length
+            if (bufferedBytes > maxResponseBodyBytes) {
+              throw new Error(
+                `Response body too large for ${urlString} (${bufferedBytes} bytes > ${maxResponseBodyBytes} bytes)`
+              )
+            }
+            chunks.push(bufferChunk)
+          }
           const text = Buffer.concat(chunks).toString()
           const contentTypeHeader = headers['content-type']
           const contentType = Array.isArray(contentTypeHeader)

@@ -121,19 +121,57 @@ if (commandSocketPath) {
             sendCommandHello();
             logger('info', 'Worker', 'Connected to Master command socket');
         });
-        let buffer = Buffer.alloc(0);
-        socket.on('data', (chunk) => {
-            buffer = Buffer.concat([buffer, chunk]);
-            while (buffer.length >= 6) {
-                const idSize = buffer.readUInt8(0);
-                const type = buffer.readUInt8(1);
-                const payloadSize = buffer.readUInt32BE(2);
-                const totalSize = 6 + idSize + payloadSize;
-                if (buffer.length < totalSize)
+        const frameChunks = [];
+        let frameBytes = 0;
+        const peekBytes = (count) => {
+            const first = frameChunks[0];
+            if (first && first.length >= count)
+                return first.subarray(0, count);
+            const out = Buffer.allocUnsafe(count);
+            let offset = 0;
+            for (const piece of frameChunks) {
+                const take = Math.min(piece.length, count - offset);
+                piece.copy(out, offset, 0, take);
+                offset += take;
+                if (offset >= count)
                     break;
-                const id = buffer.toString('utf8', 6, 6 + idSize);
-                const payload = buffer.subarray(6 + idSize, totalSize);
-                buffer = buffer.subarray(totalSize);
+            }
+            return out;
+        };
+        const readBytes = (count) => {
+            const out = Buffer.allocUnsafe(count);
+            let offset = 0;
+            while (offset < count) {
+                const piece = frameChunks[0];
+                if (!piece)
+                    break;
+                const take = Math.min(piece.length, count - offset);
+                piece.copy(out, offset, 0, take);
+                offset += take;
+                if (take === piece.length)
+                    frameChunks.shift();
+                else
+                    frameChunks[0] = piece.subarray(take);
+            }
+            frameBytes = Math.max(0, frameBytes - count);
+            return out;
+        };
+        socket.on('data', (chunk) => {
+            if (!chunk.length)
+                return;
+            frameChunks.push(chunk);
+            frameBytes += chunk.length;
+            while (frameBytes >= 6) {
+                const header = peekBytes(6);
+                const idSize = header.readUInt8(0);
+                const type = header.readUInt8(1);
+                const payloadSize = header.readUInt32BE(2);
+                const totalSize = 6 + idSize + payloadSize;
+                if (frameBytes < totalSize)
+                    break;
+                const frame = readBytes(totalSize);
+                const id = frame.toString('utf8', 6, 6 + idSize);
+                const payload = frame.subarray(6 + idSize);
                 if (type === 1) {
                     try {
                         const data = v8.deserialize(payload);
@@ -168,7 +206,11 @@ function sendEventFrame(type, data) {
     header.writeUInt8(0, 0); // No ID needed for these events
     header.writeUInt8(type, 1);
     header.writeUInt32BE(payloadBuf.length, 2);
-    return eventSocket.write(Buffer.concat([header, payloadBuf]));
+    eventSocket.cork();
+    const okHeader = eventSocket.write(header);
+    const okPayload = eventSocket.write(payloadBuf);
+    eventSocket.uncork();
+    return okHeader && okPayload;
 }
 /**
  * Send a binary event frame to the master process.
@@ -180,7 +222,11 @@ function sendEventBinaryFrame(type, payloadBuf) {
     header.writeUInt8(0, 0);
     header.writeUInt8(type, 1);
     header.writeUInt32BE(payloadBuf.length, 2);
-    return eventSocket.write(Buffer.concat([header, payloadBuf]));
+    eventSocket.cork();
+    const okHeader = eventSocket.write(header);
+    const okPayload = eventSocket.write(payloadBuf);
+    eventSocket.uncork();
+    return okHeader && okPayload;
 }
 /**
  * Send a stream-scoped frame to the master process.
@@ -193,7 +239,12 @@ function sendStreamFrame(streamId, type, payloadBuf) {
     header.writeUInt8(idBuf.length, 0);
     header.writeUInt8(type, 1);
     header.writeUInt32BE(payloadBuf.length, 2);
-    return eventSocket.write(Buffer.concat([header, idBuf, payloadBuf]));
+    eventSocket.cork();
+    const okHeader = eventSocket.write(header);
+    const okId = eventSocket.write(idBuf);
+    const okPayload = eventSocket.write(payloadBuf);
+    eventSocket.uncork();
+    return okHeader && okId && okPayload;
 }
 /**
  * Send a PCM chunk over the stream socket.
@@ -220,7 +271,12 @@ function sendCommandFrame(type, requestId, payloadBuf) {
     header.writeUInt8(idBuf.length, 0);
     header.writeUInt8(type, 1);
     header.writeUInt32BE(payloadBuf.length, 2);
-    return commandSocket.write(Buffer.concat([header, idBuf, payloadBuf]));
+    commandSocket.cork();
+    const okHeader = commandSocket.write(header);
+    const okId = commandSocket.write(idBuf);
+    const okPayload = commandSocket.write(payloadBuf);
+    commandSocket.uncork();
+    return okHeader && okId && okPayload;
 }
 function sendCommandHello() {
     if (!commandSocket || commandSocket.destroyed)

@@ -27,6 +27,7 @@ const runtime = globalThis;
  * @internal
  */
 const hasZstd = Boolean(zlib.createZstdDecompress);
+const DEFAULT_MAX_RESPONSE_BODY_BYTES = 32 * 1024 * 1024;
 let ProxyAgent = null;
 let proxyAgentInitAttempted = false;
 const getProxyAgent = async () => {
@@ -1035,7 +1036,7 @@ setInterval(() => {
  * @internal
  */
 async function _internalHttp1Request(urlString, options = {}) {
-    const { method = 'GET', headers: customHeaders = {}, body, timeout = Math.max(1, options.timeout ?? 30000), streamOnly = false, disableBodyCompression = false, maxRedirects = DEFAULT_MAX_REDIRECTS, localAddress, agent: customAgent, _redirectsFollowed = 0 } = options;
+    const { method = 'GET', headers: customHeaders = {}, body, timeout = Math.max(1, options.timeout ?? 30000), streamOnly = false, disableBodyCompression = false, maxRedirects = DEFAULT_MAX_REDIRECTS, maxResponseBodyBytes = DEFAULT_MAX_RESPONSE_BODY_BYTES, localAddress, agent: customAgent, _redirectsFollowed = 0 } = options;
     const actualLocalAddress = localAddress ?? runtime.nodelink?.routePlanner?.getIP?.() ?? undefined;
     if (_redirectsFollowed >= maxRedirects) {
         throw new Error(`Too many redirects (${maxRedirects}) for ${urlString}`);
@@ -1156,7 +1157,16 @@ async function _internalHttp1Request(urlString, options = {}) {
                 return;
             }
             const chunks = [];
-            finalStream.on('data', (chunk) => chunks.push(chunk));
+            let bufferedBytes = 0;
+            finalStream.on('data', (chunk) => {
+                bufferedBytes += chunk.length;
+                if (bufferedBytes > maxResponseBodyBytes) {
+                    ;
+                    finalStream.destroy?.(new Error(`Response body too large for ${urlString} (${bufferedBytes} bytes > ${maxResponseBodyBytes} bytes)`));
+                    return;
+                }
+                chunks.push(chunk);
+            });
             finalStream.on('end', () => {
                 try {
                     const responseBuffer = Buffer.concat(chunks);
@@ -1276,7 +1286,7 @@ async function http1makeRequest(urlString, options = {}) {
  * @public
  */
 async function makeRequest(urlString, options, nodelink) {
-    const { method = 'GET', headers: customHeaders = {}, body, timeout = Math.max(1, options.timeout ?? 30000), streamOnly = false, disableBodyCompression = false, maxRedirects = DEFAULT_MAX_REDIRECTS, _redirectsFollowed = 0 } = options;
+    const { method = 'GET', headers: customHeaders = {}, body, timeout = Math.max(1, options.timeout ?? 30000), streamOnly = false, disableBodyCompression = false, maxRedirects = DEFAULT_MAX_REDIRECTS, maxResponseBodyBytes = DEFAULT_MAX_RESPONSE_BODY_BYTES, _redirectsFollowed = 0 } = options;
     const finalNodeLink = nodelink || runtime.nodelink;
     const logId = crypto.randomBytes(4).toString('hex');
     if (loggingConfig.debug?.network) {
@@ -1451,8 +1461,15 @@ async function makeRequest(urlString, options, nodelink) {
                 }
                 try {
                     const chunks = [];
-                    for await (const chunk of responseStream)
-                        chunks.push(chunk);
+                    let bufferedBytes = 0;
+                    for await (const chunk of responseStream) {
+                        const bufferChunk = chunk;
+                        bufferedBytes += bufferChunk.length;
+                        if (bufferedBytes > maxResponseBodyBytes) {
+                            throw new Error(`Response body too large for ${urlString} (${bufferedBytes} bytes > ${maxResponseBodyBytes} bytes)`);
+                        }
+                        chunks.push(bufferChunk);
+                    }
                     const text = Buffer.concat(chunks).toString();
                     const contentTypeHeader = headers['content-type'];
                     const contentType = Array.isArray(contentTypeHeader)

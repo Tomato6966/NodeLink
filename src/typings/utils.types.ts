@@ -97,6 +97,8 @@ export interface HttpRequestOptions {
   _redirectsFollowed?: number
   /** Forces response body to be returned as a Buffer. */
   responseType?: 'buffer'
+  /** Maximum buffered response body size in bytes for non-stream requests. */
+  maxResponseBodyBytes?: number
   /** Maximum number of retry attempts for transient failures. */
   maxRetries?: number
   /** Proxy settings for the request. */

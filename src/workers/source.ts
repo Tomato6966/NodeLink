@@ -338,7 +338,11 @@ if (isMainThread) {
     header.writeUInt8(type, 1)
     header.writeUInt32BE(payloadBuf.length, 2)
 
-    socket.write(Buffer.concat([header, idBuf, payloadBuf]))
+    socket.cork()
+    socket.write(header)
+    socket.write(idBuf)
+    socket.write(payloadBuf)
+    socket.uncork()
   }
 
   /**

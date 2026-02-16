@@ -170,22 +170,61 @@ if (commandSocketPath) {
       logger('info', 'Worker', 'Connected to Master command socket')
     })
 
-    let buffer = Buffer.alloc(0)
+    const frameChunks: Buffer[] = []
+    let frameBytes = 0
+
+    const peekBytes = (count: number): Buffer => {
+      const first = frameChunks[0]
+      if (first && first.length >= count) return first.subarray(0, count)
+
+      const out = Buffer.allocUnsafe(count)
+      let offset = 0
+      for (const piece of frameChunks) {
+        const take = Math.min(piece.length, count - offset)
+        piece.copy(out, offset, 0, take)
+        offset += take
+        if (offset >= count) break
+      }
+      return out
+    }
+
+    const readBytes = (count: number): Buffer => {
+      const out = Buffer.allocUnsafe(count)
+      let offset = 0
+
+      while (offset < count) {
+        const piece = frameChunks[0]
+        if (!piece) break
+
+        const take = Math.min(piece.length, count - offset)
+        piece.copy(out, offset, 0, take)
+        offset += take
+
+        if (take === piece.length) frameChunks.shift()
+        else frameChunks[0] = piece.subarray(take)
+      }
+
+      frameBytes = Math.max(0, frameBytes - count)
+      return out
+    }
 
     socket.on('data', (chunk: Buffer) => {
-      buffer = Buffer.concat([buffer, chunk])
+      if (!chunk.length) return
+      frameChunks.push(chunk)
+      frameBytes += chunk.length
 
-      while (buffer.length >= 6) {
-        const idSize = buffer.readUInt8(0)
-        const type = buffer.readUInt8(1)
-        const payloadSize = buffer.readUInt32BE(2)
+      while (frameBytes >= 6) {
+        const header = peekBytes(6)
+        const idSize = header.readUInt8(0)
+        const type = header.readUInt8(1)
+        const payloadSize = header.readUInt32BE(2)
         const totalSize = 6 + idSize + payloadSize
 
-        if (buffer.length < totalSize) break
+        if (frameBytes < totalSize) break
 
-        const id = buffer.toString('utf8', 6, 6 + idSize)
-        const payload = buffer.subarray(6 + idSize, totalSize)
-        buffer = buffer.subarray(totalSize)
+        const frame = readBytes(totalSize)
+        const id = frame.toString('utf8', 6, 6 + idSize)
+        const payload = frame.subarray(6 + idSize)
 
         if (type === 1) {
           try {
@@ -228,7 +267,11 @@ function sendEventFrame(type: number, data: unknown): boolean {
   header.writeUInt8(type, 1)
   header.writeUInt32BE(payloadBuf.length, 2)
 
-  return eventSocket.write(Buffer.concat([header, payloadBuf]))
+  eventSocket.cork()
+  const okHeader = eventSocket.write(header)
+  const okPayload = eventSocket.write(payloadBuf)
+  eventSocket.uncork()
+  return okHeader && okPayload
 }
 
 /**
@@ -242,7 +285,11 @@ function sendEventBinaryFrame(type: number, payloadBuf: Buffer): boolean {
   header.writeUInt8(type, 1)
   header.writeUInt32BE(payloadBuf.length, 2)
 
-  return eventSocket.write(Buffer.concat([header, payloadBuf]))
+  eventSocket.cork()
+  const okHeader = eventSocket.write(header)
+  const okPayload = eventSocket.write(payloadBuf)
+  eventSocket.uncork()
+  return okHeader && okPayload
 }
 
 /**
@@ -261,7 +308,12 @@ function sendStreamFrame(
   header.writeUInt8(type, 1)
   header.writeUInt32BE(payloadBuf.length, 2)
 
-  return eventSocket.write(Buffer.concat([header, idBuf, payloadBuf]))
+  eventSocket.cork()
+  const okHeader = eventSocket.write(header)
+  const okId = eventSocket.write(idBuf)
+  const okPayload = eventSocket.write(payloadBuf)
+  eventSocket.uncork()
+  return okHeader && okId && okPayload
 }
 
 /**
@@ -297,7 +349,12 @@ function sendCommandFrame(
   header.writeUInt8(type, 1)
   header.writeUInt32BE(payloadBuf.length, 2)
 
-  return commandSocket.write(Buffer.concat([header, idBuf, payloadBuf]))
+  commandSocket.cork()
+  const okHeader = commandSocket.write(header)
+  const okId = commandSocket.write(idBuf)
+  const okPayload = commandSocket.write(payloadBuf)
+  commandSocket.uncork()
+  return okHeader && okId && okPayload
 }
 
 function sendCommandHello(): boolean {
