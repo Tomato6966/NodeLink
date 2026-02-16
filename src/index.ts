@@ -67,6 +67,7 @@ import type {
 import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types.ts'
 import { parseVoiceFrameHeader } from './voice/voiceFrames.ts'
 import { createVoiceRelay } from './voice/voiceRelay.ts'
+import ConfigValidationManager from './managers/configValidationManager.ts'
 
 type RequestHandlerType = typeof import('./api/index.ts').default
 let requestHandlerPromise: Promise<RequestHandlerType> | null = null
@@ -664,13 +665,8 @@ class NodelinkServer extends EventEmitter {
    * @internal
    */
   _validateConfig(): void {
-    const validateNonNegativeInt = (value: number, path: string): void =>
-      validateProperty(
-        value,
-        path,
-        'integer >= 0',
-        (v: number) => Number.isInteger(v) && v >= 0
-      )
+    const manager = new ConfigValidationManager(this.options)
+    manager.validate()
 
     const validatePositiveInt = (value: number, path: string): void =>
       validateProperty(
@@ -679,141 +675,6 @@ class NodelinkServer extends EventEmitter {
         'integer > 0',
         (v: number) => Number.isInteger(v) && v > 0
       )
-
-    validateProperty(
-      this.options.server.port,
-      'server.port',
-      'integer between 1 and 65535',
-      (value: number) => Number.isInteger(value) && value >= 1 && value <= 65535
-    )
-
-    validateProperty(
-      this.options.server.host,
-      'server.host',
-      'string',
-      (value: string) => typeof value === 'string'
-    )
-
-    validateProperty(
-      this.options.playerUpdateInterval,
-      'playerUpdateInterval',
-      'integer between 250 and 60000 (milliseconds)',
-      (value: number) =>
-        Number.isInteger(value) && value >= 250 && value <= 60000
-    )
-
-    validateProperty(
-      this.options.maxSearchResults,
-      'maxSearchResults',
-      'integer between 1 and 100',
-      (value: number) => Number.isInteger(value) && value >= 1 && value <= 100
-    )
-
-    validateProperty(
-      this.options.maxAlbumPlaylistLength,
-      'maxAlbumPlaylistLength',
-      'integer between 1 and 500',
-      (value: number) => Number.isInteger(value) && value >= 1 && value <= 500
-    )
-
-    validateProperty(
-      this.options.trackStuckThresholdMs,
-      'trackStuckThresholdMs',
-      'integer >= 1000 (milliseconds)',
-      (value: number) => Number.isInteger(value) && value >= 1000
-    )
-
-    validateProperty(
-      this.options.zombieThresholdMs,
-      'zombieThresholdMs',
-      `integer > trackStuckThresholdMs (${this.options.trackStuckThresholdMs})`,
-      (value: number) =>
-        Number.isInteger(value) && value > this.options.trackStuckThresholdMs
-    )
-
-    validateNonNegativeInt(this.options.cluster.workers, 'cluster.workers')
-
-    validateProperty(
-      this.options.cluster.minWorkers,
-      'cluster.minWorkers',
-      this.options.cluster.workers === 0
-        ? 'integer >= 0 (workers auto-scaled)'
-        : `integer between 0 and ${this.options.cluster.workers}`,
-      (value: number) =>
-        Number.isInteger(value) &&
-        value >= 0 &&
-        (this.options.cluster.workers === 0 ||
-          value <= this.options.cluster.workers)
-    )
-
-    validateProperty(
-      this.options.defaultSearchSource,
-      'defaultSearchSource',
-      'key or array of keys of enabled sources in config.sources',
-      (v: string | string[]) => {
-        const sources = Array.isArray(v) ? v : [v]
-        return sources.every(
-          (s) =>
-            typeof s === 'string' &&
-            this.options.sources &&
-            Boolean(
-              this.options.sources[s as keyof typeof this.options.sources]
-                ?.enabled
-            )
-        )
-      }
-    )
-
-    validateProperty(
-      this.options.audio.quality,
-      'audio.quality',
-      "one of ['high', 'medium', 'low', 'lowest']",
-      (v: string) => ['high', 'medium', 'low', 'lowest'].includes(v)
-    )
-
-    validateProperty(
-      this.options.audio.resamplingQuality,
-      'audio.resamplingQuality',
-      "one of ['best', 'medium', 'fastest', 'zero', 'linear']",
-      (v: string) => ['best', 'medium', 'fastest', 'zero', 'linear'].includes(v)
-    )
-
-    validateProperty(
-      this.options.audio.loudnessNormalizer,
-      'audio.loudnessNormalizer',
-      'boolean',
-      (v: boolean) => typeof v === 'boolean'
-    )
-
-    validateProperty(
-      this.options.audio.lookaheadMs,
-      'audio.lookaheadMs',
-      'number >= 0',
-      (v: number) => typeof v === 'number' && v >= 0
-    )
-
-    validateProperty(
-      this.options.audio.gateThresholdLUFS,
-      'audio.gateThresholdLUFS',
-      'number <= 0',
-      (v: number) => typeof v === 'number' && v <= 0
-    )
-
-    validateProperty(
-      this.options.routePlanner?.strategy,
-      'routePlanner.strategy',
-      "one of ['RotateOnBan', 'RoundRobin', 'LoadBalance']",
-      (v: string) =>
-        typeof v === 'string' &&
-        ['RotateOnBan', 'RoundRobin', 'LoadBalance'].includes(v)
-    )
-
-    if (this.options.routePlanner?.bannedIpCooldown !== undefined) {
-      validatePositiveInt(
-        this.options.routePlanner.bannedIpCooldown,
-        'routePlanner.bannedIpCooldown'
-      )
-    }
 
     const rateLimitSections = [
       'global',
@@ -860,140 +721,6 @@ class NodelinkServer extends EventEmitter {
             value <= parentConfig.maxRequests
         )
       }
-    }
-
-    const spotify = this.options.sources?.spotify
-    const applemusic = this.options.sources?.applemusic
-    const tidal = this.options.sources?.tidal
-    const jiosaavn = this.options.sources?.jiosaavn
-    const audius = this.options.sources?.audius
-
-    if (spotify?.enabled) {
-      validateNonNegativeInt(
-        spotify.playlistLoadLimit,
-        'sources.spotify.playlistLoadLimit'
-      )
-
-      validateNonNegativeInt(
-        spotify.albumLoadLimit,
-        'sources.spotify.albumLoadLimit'
-      )
-
-      validatePositiveInt(
-        spotify.playlistPageLoadConcurrency,
-        'sources.spotify.playlistPageLoadConcurrency'
-      )
-
-      validatePositiveInt(
-        spotify.albumPageLoadConcurrency,
-        'sources.spotify.albumPageLoadConcurrency'
-      )
-
-      const credsComplete =
-        Boolean(spotify.clientId) === Boolean(spotify.clientSecret)
-
-      validateProperty(
-        credsComplete,
-        'sources.spotify.credentials',
-        'clientId and clientSecret must be set together',
-        (v: boolean) => v === true
-      )
-    }
-
-    if (applemusic?.enabled) {
-      validateNonNegativeInt(
-        applemusic.playlistLoadLimit,
-        'sources.applemusic.playlistLoadLimit'
-      )
-
-      validateNonNegativeInt(
-        applemusic.albumLoadLimit,
-        'sources.applemusic.albumLoadLimit'
-      )
-
-      validatePositiveInt(
-        applemusic.playlistPageLoadConcurrency,
-        'sources.applemusic.playlistPageLoadConcurrency'
-      )
-
-      validatePositiveInt(
-        applemusic.albumPageLoadConcurrency,
-        'sources.applemusic.albumPageLoadConcurrency'
-      )
-    }
-
-    if (tidal?.enabled) {
-      validateNonNegativeInt(
-        tidal.playlistLoadLimit,
-        'sources.tidal.playlistLoadLimit'
-      )
-
-      validatePositiveInt(
-        tidal.playlistPageLoadConcurrency,
-        'sources.tidal.playlistPageLoadConcurrency'
-      )
-
-      if (tidal.token !== undefined) {
-        validateProperty(
-          tidal.token,
-          'sources.tidal.token',
-          'string (non-whitespace if provided)',
-          (v: string) =>
-            typeof v === 'string' && (v === '' || v.trim().length > 0)
-        )
-      }
-
-      if (audius?.enabled) {
-        if (
-          audius?.appName !== undefined &&
-          typeof audius?.appName !== 'string'
-        ) {
-          throw new Error('sources.audius.appName must be a string')
-        }
-
-        if (
-          audius?.apiKey !== undefined &&
-          typeof audius?.apiKey !== 'string'
-        ) {
-          throw new Error('sources.audius.apiKey must be a string')
-        }
-
-        if (
-          audius?.apiSecret !== undefined &&
-          typeof audius?.apiSecret !== 'string'
-        ) {
-          throw new Error('sources.audius.apiSecret must be a string')
-        }
-
-        validateNonNegativeInt(
-          audius?.playlistLoadLimit,
-          'sources.audius.playlistLoadLimit'
-        )
-
-        validateNonNegativeInt(
-          audius?.albumLoadLimit,
-          'sources.audius.albumLoadLimit'
-        )
-      }
-    }
-
-    if (jiosaavn?.enabled) {
-      validateNonNegativeInt(
-        jiosaavn.playlistLoadLimit,
-        'sources.jiosaavn.playlistLoadLimit'
-      )
-
-      validateNonNegativeInt(
-        jiosaavn.artistLoadLimit,
-        'sources.jiosaavn.artistLoadLimit'
-      )
-
-      validateProperty(
-        jiosaavn.playlistLoadLimit,
-        'sources.jiosaavn.playlistLoadLimit',
-        `integer >= artistLoadLimit (${jiosaavn.artistLoadLimit})`,
-        (v: number) => v >= jiosaavn.artistLoadLimit
-      )
     }
   }
 
