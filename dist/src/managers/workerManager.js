@@ -972,13 +972,21 @@ export default class WorkerManager {
             }
         }
         const threshold = this.scalingConfig.maxPlayersPerWorker;
-        if (minCost >= threshold && this.workers.length < this.maxWorkers) {
+        const hasConnectedWorker = !!bestWorker;
+        if (hasConnectedWorker &&
+            minCost >= threshold &&
+            this.workers.length < this.maxWorkers) {
             logger('debug', 'Cluster', `Best worker is saturated (Cost: ${minCost.toFixed(2)}). Forking new worker.`);
             const newWorker = this.forkWorker();
             if (newWorker) {
                 this.assignGuildToWorker(playerKey, newWorker);
                 return newWorker;
             }
+        }
+        if (!hasConnectedWorker && this.workers.length > 0) {
+            const bootstrappingWorker = this.workers[0];
+            this.assignGuildToWorker(playerKey, bootstrappingWorker);
+            return bootstrappingWorker;
         }
         if (!bestWorker) {
             bestWorker = this.forkWorker();
@@ -1019,7 +1027,13 @@ export default class WorkerManager {
                 }
             }
         }
-        return bestWorker || this.forkWorker();
+        if (bestWorker)
+            return bestWorker;
+        if (this.workers.length > 0) {
+            // Reuse already spawned workers during startup to avoid over-forking.
+            return this.workers[0];
+        }
+        return this.forkWorker();
     }
     assignGuildToWorker(playerKey, worker) {
         this.guildToWorker.set(playerKey, worker.id);

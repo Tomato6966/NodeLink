@@ -1193,8 +1193,13 @@ export default class WorkerManager {
     }
 
     const threshold = this.scalingConfig.maxPlayersPerWorker
+    const hasConnectedWorker = !!bestWorker
 
-    if (minCost >= threshold && this.workers.length < this.maxWorkers) {
+    if (
+      hasConnectedWorker &&
+      minCost >= threshold &&
+      this.workers.length < this.maxWorkers
+    ) {
       logger(
         'debug',
         'Cluster',
@@ -1205,6 +1210,12 @@ export default class WorkerManager {
         this.assignGuildToWorker(playerKey, newWorker)
         return newWorker
       }
+    }
+
+    if (!hasConnectedWorker && this.workers.length > 0) {
+      const bootstrappingWorker = this.workers[0]
+      this.assignGuildToWorker(playerKey, bootstrappingWorker)
+      return bootstrappingWorker
     }
 
     if (!bestWorker) {
@@ -1267,7 +1278,14 @@ export default class WorkerManager {
       }
     }
 
-    return bestWorker || this.forkWorker()
+    if (bestWorker) return bestWorker
+
+    if (this.workers.length > 0) {
+      // Reuse already spawned workers during startup to avoid over-forking.
+      return this.workers[0]
+    }
+
+    return this.forkWorker()
   }
 
   assignGuildToWorker(playerKey, worker) {

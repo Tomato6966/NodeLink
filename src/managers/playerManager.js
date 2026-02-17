@@ -6,6 +6,7 @@ export default class PlayerManager {
     this.sessionId = sessionId
     this.players = new Map()
     this.isCluster = !!nodelink.workerManager
+    this.pendingCreates = new Map()
   }
 
   async _runInterceptors(action, guildId, ...args) {
@@ -42,37 +43,71 @@ export default class PlayerManager {
       return this.players.get(playerKey)
     }
 
+    if (this.pendingCreates.has(playerKey)) {
+      return this.pendingCreates.get(playerKey)
+    }
+
+    const createPromise = this._createInternal(
+      session,
+      guildId,
+      voice,
+      playerKey
+    ).finally(() => {
+      this.pendingCreates.delete(playerKey)
+    })
+
+    this.pendingCreates.set(playerKey, createPromise)
+    return createPromise
+  }
+
+  async _createInternal(session, guildId, voice, playerKey) {
     if (this.isCluster) {
       const worker = this.nodelink.workerManager.getWorkerForGuild(playerKey)
       if (!worker) {
         throw new Error('No workers available to create a player.')
       }
 
-      let created = false
+      let createSucceeded = false
       try {
         logger(
           'debug',
           'PlayerManager',
           `Creating player for guild ${guildId} (session: ${this.sessionId}) on worker ${worker.id}`
         )
-        await this.nodelink.workerManager.execute(worker, 'createPlayer', {
-          sessionId: this.sessionId,
-          guildId,
-          userId: session.userId,
-          voice
-        })
+        const createResult = await this.nodelink.workerManager.execute(
+          worker,
+          'createPlayer',
+          {
+            sessionId: this.sessionId,
+            guildId,
+            userId: session.userId,
+            voice
+          }
+        )
+
+        if (
+          createResult?.created === false &&
+          createResult?.reason !== 'Player already exists'
+        ) {
+          throw new Error(
+            createResult?.reason || 'The player could not be created.'
+          )
+        }
+
+        createSucceeded = true
+
+        if (!this.players.has(playerKey)) {
+          this.players.set(playerKey, {
+            guildId,
+            userId: session.userId,
+            sessionId: this.sessionId
+          })
+        }
 
         this.nodelink.workerManager.assignGuildToWorker(playerKey, worker)
-        created = true
-
-        this.players.set(playerKey, {
-          guildId,
-          userId: session.userId,
-          sessionId: this.sessionId
-        })
         return this.players.get(playerKey)
       } catch (e) {
-        if (!created) {
+        if (!createSucceeded) {
           this.nodelink.workerManager.unassignGuild(playerKey)
           throw new Error('The player could not be created.', e)
         }
