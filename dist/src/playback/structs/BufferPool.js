@@ -100,7 +100,6 @@ class BufferPool {
         }
         // Always accept if under 75% capacity
         if (this.totalBytes + size > MAX_POOL_SIZE_BYTES * 0.75) {
-            // Try to make room by clearing oldest bucket
             const sizes = Array.from(this.pools.keys()).sort((a, b) => b - a);
             for (const s of sizes) {
                 if (this.totalBytes + size <= MAX_POOL_SIZE_BYTES)
@@ -158,7 +157,6 @@ class BufferPool {
             .sort((a, b) => b.bytes - a.bytes)
             .slice(0, 20);
         const reuseRatio = this.acquireCalls > 0 ? this.reuseHits / this.acquireCalls : 0;
-        // Log warning if high rejection rate
         const rejectionRate = this.releaseCalls > 0
             ? this.rejectedReleases / this.releaseCalls
             : 0;
@@ -188,14 +186,12 @@ class BufferPool {
      */
     _cleanup() {
         const now = Date.now();
-        // Clear if idle
         if (this.totalBytes > 0 && now - this.lastActivityAt >= IDLE_CLEAR_MS) {
             this.pools.clear();
             this.totalBytes = 0;
             logger('debug', 'BufferPool', 'Pool cleared after idle period.');
             return;
         }
-        // If over limit, remove largest buffers first
         if (this.totalBytes > MAX_POOL_SIZE_BYTES) {
             const sizes = Array.from(this.pools.keys()).sort((a, b) => b - a);
             for (const size of sizes) {

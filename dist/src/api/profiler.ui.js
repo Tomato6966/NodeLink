@@ -129,6 +129,12 @@ function buildPage(code) {
       </div>
       <div id="netPulseSpeed" class="net-pulse-speed">0 B/s</div>
       <div id="netPulseMeta" class="net-pulse-meta">Δ 0 B/s · 0.0 req/s · avg 0ms</div>
+      <div class="net-pulse-info">
+        <span id="netPulseEndpoint" class="net-pulse-chip">endpoint -</span>
+        <span id="netPulsePing" class="net-pulse-chip">ping -</span>
+        <span id="netPulseDns" class="net-pulse-chip">dns -</span>
+        <span id="netPulseNetwork" class="net-pulse-chip">network -</span>
+      </div>
     </div>
 
     <div class="layout">
@@ -326,6 +332,10 @@ function buildPage(code) {
     const netPulseQuality = document.getElementById('netPulseQuality')
     const netPulseSpeed = document.getElementById('netPulseSpeed')
     const netPulseMeta = document.getElementById('netPulseMeta')
+    const netPulseEndpoint = document.getElementById('netPulseEndpoint')
+    const netPulsePing = document.getElementById('netPulsePing')
+    const netPulseDns = document.getElementById('netPulseDns')
+    const netPulseNetwork = document.getElementById('netPulseNetwork')
 
     const history = []
     const maxPoints = 180
@@ -703,6 +713,16 @@ function buildPage(code) {
         Number(connectionMetrics?.latencyMs || 0) ||
         Number(connectionMetrics?.ping?.avgMs || 0) ||
         avgDuration
+      const mbps = smoothSpeed > 0 ? (smoothSpeed * 8) / 1000 / 1000 : 0
+      const endpointName = String(connectionMetrics?.endpoint?.name || '-')
+      const pingAvgMs = Number(connectionMetrics?.ping?.avgMs || 0)
+      const pingLoss = Number(connectionMetrics?.ping?.packetLoss || 0)
+      const dnsOnline = connectionMetrics?.dns?.isOnline === true
+      const dnsHost = String(connectionMetrics?.dns?.host || '-')
+      const dnsLatency = Number(connectionMetrics?.dns?.latencyMs || 0)
+      const networkType = String(connectionMetrics?.network?.connectionType || 'unknown')
+      const networkIface = String(connectionMetrics?.network?.interfaceName || '-')
+      const networkIp = String(connectionMetrics?.network?.ipAddress || '-')
 
       let tone = 'meh'
       let quality = 'MEH'
@@ -738,11 +758,27 @@ function buildPage(code) {
 
       netPulse.classList.remove('tone-super', 'tone-good', 'tone-meh', 'tone-bad')
       netPulse.classList.add('tone-' + tone)
-      netPulseSpeed.textContent = fmtRate(smoothSpeed)
+      netPulseSpeed.textContent = fmtRate(smoothSpeed) + ' · ' + mbps.toFixed(2) + ' Mbps'
       netPulseQuality.textContent = quality
       netPulseMeta.textContent =
         'Δ ' + (speedDelta >= 0 ? '+' : '-') + fmtRate(Math.abs(speedDelta)) +
         ' · ' + currentRps.toFixed(1) + ' req/s · latency ' + latencyMs.toFixed(0) + 'ms'
+      if (netPulseEndpoint) {
+        netPulseEndpoint.textContent = 'endpoint ' + endpointName
+      }
+      if (netPulsePing) {
+        netPulsePing.textContent =
+          'ping ' + (pingAvgMs > 0 ? pingAvgMs.toFixed(0) + 'ms' : '-') + ' · loss ' + pingLoss.toFixed(0) + '%'
+      }
+      if (netPulseDns) {
+        netPulseDns.textContent =
+          'dns ' + (dnsOnline ? 'online' : 'offline') +
+          ' · ' + dnsHost +
+          (dnsLatency > 0 ? ' ' + dnsLatency.toFixed(0) + 'ms' : '')
+      }
+      if (netPulseNetwork) {
+        netPulseNetwork.textContent = networkType + ' · ' + networkIface + ' · ' + networkIp
+      }
     }
 
     function renderTrafficMix(snapshot) {
