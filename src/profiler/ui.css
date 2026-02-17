@@ -467,6 +467,26 @@
       color: #9ab4c9;
       letter-spacing: .2px;
     }
+    .net-pulse-info {
+      margin-top: 2px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 6px;
+    }
+    .net-pulse-chip {
+      min-width: 0;
+      border: 1px solid #2b4d68;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 10px;
+      letter-spacing: .2px;
+      color: #c8deef;
+      background: rgba(10, 23, 34, .75);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
     .net-pulse.tone-super {
       border-color: rgba(34,197,94,.56);
       box-shadow: 0 0 0 1px rgba(34,197,94,.18), 0 0 22px rgba(34,197,94,.16);
