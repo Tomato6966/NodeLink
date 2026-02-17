@@ -1787,6 +1787,33 @@ class NodelinkServer extends EventEmitter {
     ;(this.server as http.Server).headersTimeout = 66000
 
     ;(this.server as http.Server).on(
+      'connection',
+      (socket: import('net').Socket) => {
+        // Guard all HTTP sockets (including plain GET /v4/profiler/ui) against
+        // abrupt client disconnect races that can surface as EPIPE/ECONNRESET.
+        socket.on('error', (err: NodeJS.ErrnoException) => {
+          if (err?.code === 'EPIPE' || err?.code === 'ECONNRESET') return
+          logger('debug', 'Server', `HTTP socket error: ${err.message}`)
+        })
+      }
+    )
+
+    ;(this.server as http.Server).on(
+      'clientError',
+      (
+        err: NodeJS.ErrnoException,
+        socket: import('net').Socket
+      ): void => {
+        if (err?.code !== 'EPIPE' && err?.code !== 'ECONNRESET') {
+          logger('debug', 'Server', `HTTP client error: ${err.message}`)
+        }
+        try {
+          if (!socket.destroyed) socket.destroy()
+        } catch {}
+      }
+    )
+
+    ;(this.server as http.Server).on(
       'upgrade',
       (
         request: http.IncomingMessage,
