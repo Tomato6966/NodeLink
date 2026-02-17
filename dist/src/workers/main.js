@@ -18,8 +18,6 @@ import v8 from 'node:v8';
 import { GatewayEvents } from "../constants.js";
 import ConnectionManager from "../managers/connectionManager.js";
 import CredentialManager from "../managers/credentialManager.js";
-import LyricsManager from '../managers/lyricsManager.js';
-import MeaningManager from '../managers/meaningManager.js';
 import PluginManager from '../managers/pluginManager.js';
 import RoutePlannerManager from '../managers/routePlannerManager.js';
 import SourceManager from "../managers/sourceManager.js";
@@ -1036,11 +1034,33 @@ nodelink.credentialManager = new CredentialManager(nodelink);
 nodelink.trackCacheManager = new TrackCacheManager(nodelink);
 await nodelink.trackCacheManager.load();
 nodelink.sources = new SourceManager(nodelink);
-nodelink.lyrics = new LyricsManager(nodelink);
-nodelink.meanings = new MeaningManager(nodelink);
 nodelink.routePlanner = new RoutePlannerManager(nodelink);
 nodelink.connectionManager = new ConnectionManager(nodelink);
 nodelink.pluginManager = new PluginManager(nodelink);
+let lyricsManagerPromise = null;
+let meaningManagerPromise = null;
+const getLyricsManager = async () => {
+    if (!lyricsManagerPromise) {
+        lyricsManagerPromise = import('../managers/lyricsManager.js').then(async (module) => {
+            const manager = new module.default(nodelink);
+            await manager.loadFolder();
+            nodelink.lyrics = manager;
+            return manager;
+        });
+    }
+    return lyricsManagerPromise;
+};
+const getMeaningManager = async () => {
+    if (!meaningManagerPromise) {
+        meaningManagerPromise = import('../managers/meaningManager.js').then(async (module) => {
+            const manager = new module.default(nodelink);
+            await manager.loadFolder();
+            nodelink.meanings = manager;
+            return manager;
+        });
+    }
+    return meaningManagerPromise;
+};
 function setEfficiencyMode(enabled) {
     try {
         os.setPriority(process.pid, enabled
@@ -1198,8 +1218,6 @@ function startTimers(hibernating = false) {
 async function initialize() {
     await nodelink.credentialManager.load();
     await nodelink.sources.loadFolder();
-    await nodelink.lyrics.loadFolder();
-    await nodelink.meanings.loadFolder();
     await nodelink.statsManager.initialize();
     await nodelink.pluginManager.load('worker');
     lastActivityTime = Date.now();
@@ -1525,7 +1543,8 @@ async function processQueue(queueKey) {
                     isrc: decodedTrackInfo.isrc ?? null,
                     uri: decodedTrackInfo.uri
                 };
-                result = await nodelink.lyrics.loadLyrics({ info: trackInfo }, language);
+                const lyrics = await getLyricsManager();
+                result = await lyrics.loadLyrics({ info: trackInfo }, language);
                 break;
             }
             case 'loadMeaning': {
@@ -1536,7 +1555,8 @@ async function processQueue(queueKey) {
                     isrc: decodedTrackInfo.isrc ?? null,
                     uri: decodedTrackInfo.uri
                 };
-                result = await nodelink.meanings.loadMeaning({ info: trackInfo }, language);
+                const meanings = await getMeaningManager();
+                result = await meanings.loadMeaning({ info: trackInfo }, language);
                 break;
             }
             case 'loadChapters': {

@@ -11,13 +11,13 @@ import v8 from 'node:v8'
 import { GatewayEvents } from '../constants.ts'
 import ConnectionManager from '../managers/connectionManager.ts'
 import CredentialManager from '../managers/credentialManager.ts'
-import LyricsManager from '../managers/lyricsManager.js'
-import MeaningManager from '../managers/meaningManager.js'
 import PluginManager from '../managers/pluginManager.js'
 import RoutePlannerManager from '../managers/routePlannerManager.js'
 import SourceManager from '../managers/sourceManager.ts'
 import StatsManager from '../managers/statsManager.ts'
 import TrackCacheManager from '../managers/trackCacheManager.ts'
+import type LyricsManager from '../managers/lyricsManager.js'
+import type MeaningManager from '../managers/meaningManager.js'
 import { getWebmOpusProfilerStats } from '../playback/demuxers/WebmOpus.ts'
 import { bufferPool } from '../playback/structs/BufferPool.ts'
 import type { TrackInfoExtended } from '../typings/playback/player.types.ts'
@@ -1336,13 +1336,42 @@ nodelink.credentialManager = new CredentialManager(nodelink)
 nodelink.trackCacheManager = new TrackCacheManager(nodelink)
 await nodelink.trackCacheManager.load()
 nodelink.sources = new SourceManager(nodelink)
-nodelink.lyrics = new LyricsManager(nodelink)
-nodelink.meanings = new MeaningManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(
   nodelink
 ) as RoutePlannerManagerLike
 nodelink.connectionManager = new ConnectionManager(nodelink as any)
 nodelink.pluginManager = new PluginManager(nodelink)
+
+let lyricsManagerPromise: Promise<LyricsManager> | null = null
+let meaningManagerPromise: Promise<MeaningManager> | null = null
+
+const getLyricsManager = async (): Promise<LyricsManager> => {
+  if (!lyricsManagerPromise) {
+    lyricsManagerPromise = import('../managers/lyricsManager.js').then(
+      async (module) => {
+        const manager = new module.default(nodelink)
+        await manager.loadFolder()
+        nodelink.lyrics = manager as unknown as WorkerNodeLink['lyrics']
+        return manager
+      }
+    )
+  }
+  return lyricsManagerPromise
+}
+
+const getMeaningManager = async (): Promise<MeaningManager> => {
+  if (!meaningManagerPromise) {
+    meaningManagerPromise = import('../managers/meaningManager.js').then(
+      async (module) => {
+        const manager = new module.default(nodelink)
+        await manager.loadFolder()
+        nodelink.meanings = manager as unknown as WorkerNodeLink['meanings']
+        return manager
+      }
+    )
+  }
+  return meaningManagerPromise
+}
 
 function setEfficiencyMode(enabled: boolean): void {
   try {
@@ -1541,8 +1570,6 @@ function startTimers(hibernating = false): void {
 async function initialize() {
   await nodelink.credentialManager.load()
   await nodelink.sources.loadFolder()
-  await nodelink.lyrics.loadFolder()
-  await nodelink.meanings.loadFolder()
   await nodelink.statsManager.initialize()
   await nodelink.pluginManager.load('worker')
 
@@ -1985,7 +2012,8 @@ async function processQueue(queueKey: string): Promise<void> {
           isrc: decodedTrackInfo.isrc ?? null,
           uri: decodedTrackInfo.uri
         }
-        result = await nodelink.lyrics.loadLyrics({ info: trackInfo }, language)
+        const lyrics = await getLyricsManager()
+        result = await lyrics.loadLyrics({ info: trackInfo }, language)
         break
       }
       case 'loadMeaning': {
@@ -1999,7 +2027,8 @@ async function processQueue(queueKey: string): Promise<void> {
           isrc: decodedTrackInfo.isrc ?? null,
           uri: decodedTrackInfo.uri
         }
-        result = await nodelink.meanings.loadMeaning(
+        const meanings = await getMeaningManager()
+        result = await meanings.loadMeaning(
           { info: trackInfo },
           language
         )

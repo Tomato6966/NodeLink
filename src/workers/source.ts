@@ -176,10 +176,35 @@ if (isMainThread) {
     worker.on('exit', (code) => {
       const idx = workerPool.indexOf(worker)
       if (idx !== -1) workerPool.splice(idx, 1)
+      
+      const loadInfo = worker.load > 0 ? ` (had ${worker.load} pending tasks)` : ''
       nodelink.logger(
         'warn',
         'SourceWorker',
-        `Micro-worker ${threadNumber} exited with code ${code}`
+        `Micro-worker ${threadNumber} exited with code ${code}${loadInfo}`
+      )
+      
+      // Respawn worker if below minimum
+      if (workerPool.length < initialThreadCount && !process.exitCode) {
+        setTimeout(() => {
+          if (workerPool.length < maxThreadCount) {
+            const newThreadNumber = Math.max(...workerPool.map(w => (w as unknown as { threadNumber?: number }).threadNumber || 0)) + 1
+            nodelink.logger(
+              'info',
+              'SourceWorker',
+              `Respawning micro-worker ${newThreadNumber}...`
+            )
+            createMicroWorker(newThreadNumber)
+          }
+        }, 100)
+      }
+    })
+
+    worker.on('error', (err: Error) => {
+      nodelink.logger(
+        'error',
+        'SourceWorker',
+        `Micro-worker ${threadNumber} error: ${err.message}`
       )
     })
 
@@ -227,7 +252,10 @@ if (isMainThread) {
    */
   async function getSocket(path: string): Promise<Socket> {
     const existing = sockets.get(path)
-    if (existing) return existing
+    if (existing) {
+      socketLastUsed.set(path, Date.now())
+      return existing
+    }
 
     return new Promise((resolve, reject) => {
       let settled = false
@@ -236,8 +264,10 @@ if (isMainThread) {
         socket.off('error', onConnectError)
         socket.on('error', () => {
           sockets.delete(path)
+          socketLastUsed.delete(path)
         })
         sockets.set(path, socket)
+        socketLastUsed.set(path, Date.now())
         resolve(socket)
       })
       const onConnectError = (err: Error): void => {
@@ -246,7 +276,10 @@ if (isMainThread) {
         reject(err)
       }
       socket.on('error', onConnectError)
-      socket.on('close', () => sockets.delete(path))
+      socket.on('close', () => {
+        sockets.delete(path)
+        socketLastUsed.delete(path)
+      })
     })
   }
 
@@ -259,11 +292,15 @@ if (isMainThread) {
   function withSocket(path: string, handler: (socket: Socket) => void): void {
     const socket = sockets.get(path)
     if (socket) {
+      socketLastUsed.set(path, Date.now())
       handler(socket)
       return
     }
     getSocket(path)
-      .then(handler)
+      .then((s) => {
+        socketLastUsed.set(path, Date.now())
+        handler(s)
+      })
       .catch((e: Error) => {
         utils.logger(
           'error',
@@ -289,6 +326,7 @@ if (isMainThread) {
   ): void {
     getSocket(socketPath)
       .then((socket) => {
+        socketLastUsed.set(socketPath, Date.now())
         if (error) {
           sendFrame(socket, id, 2, Buffer.from(error, 'utf8'))
         } else if (result) {
@@ -463,6 +501,38 @@ if (isMainThread) {
   } catch {
     // Ignore send failures (e.g., when not forked)
   }
+
+  // Periodic cleanup of stale sockets and memory
+  const CLEANUP_INTERVAL = 60000
+  const SOCKET_IDLE_MS = 120000
+  const socketLastUsed: Map<string, number> = new Map()
+
+  setInterval(() => {
+    const now = Date.now()
+    
+    // Clean up idle sockets
+    for (const [path, lastUsed] of socketLastUsed) {
+      if (now - lastUsed > SOCKET_IDLE_MS) {
+        const socket = sockets.get(path)
+        if (socket) {
+          try {
+            socket.destroy()
+          } catch {}
+        }
+        sockets.delete(path)
+        socketLastUsed.delete(path)
+      }
+    }
+    
+    // Force GC if available and memory is high
+    if (global.gc) {
+      const mem = process.memoryUsage()
+      const heapPressure = mem.heapUsed / mem.heapTotal
+      if (heapPressure > 0.85) {
+        global.gc()
+      }
+    }
+  }, CLEANUP_INTERVAL).unref()
 } else {
   /**
    * Worker thread - Micro-worker for executing source API tasks
@@ -494,8 +564,6 @@ if (isMainThread) {
   const [
     { createPCMStream, createSeekeableAudioResource },
     { default: SourceManager },
-    { default: LyricsManager },
-    { default: MeaningManager },
     { default: CredentialManager },
     { default: TrackCacheManager },
     { default: RoutePlannerManager },
@@ -503,8 +571,6 @@ if (isMainThread) {
   ] = await Promise.all([
     import('../playback/processing/streamProcessor.ts'),
     import('../managers/sourceManager.ts'),
-    import('../managers/lyricsManager.js'),
-    import('../managers/meaningManager.js'),
     import('../managers/credentialManager.ts'),
     import('../managers/trackCacheManager.ts'),
     import('../managers/routePlannerManager.js'),
@@ -522,14 +588,44 @@ if (isMainThread) {
   nodelink.sources = new SourceManager(
     nodelink as unknown as import('../managers/sourceManager.ts').SourcesManagerContext
   )
-  nodelink.lyrics = new LyricsManager(nodelink)
-  nodelink.meanings = new MeaningManager(nodelink)
 
   await nodelink.credentialManager.load()
   await nodelink.trackCacheManager.load()
   await nodelink.sources.loadFolder()
-  await nodelink.lyrics.loadFolder()
-  await nodelink.meanings.loadFolder()
+
+  type LyricsManagerType = InstanceType<typeof import('../managers/lyricsManager.js').default>
+  type MeaningManagerType = InstanceType<typeof import('../managers/meaningManager.js').default>
+
+  let lyricsManagerPromise: Promise<LyricsManagerType> | null = null
+  let meaningManagerPromise: Promise<MeaningManagerType> | null = null
+
+  const getLyricsManager = async (): Promise<LyricsManagerType> => {
+    if (!lyricsManagerPromise) {
+      lyricsManagerPromise = import('../managers/lyricsManager.js').then(
+        async (module) => {
+          const manager = new module.default(nodelink)
+          await manager.loadFolder()
+          nodelink.lyrics = manager as unknown as WorkerNodeLink['lyrics']
+          return manager
+        }
+      )
+    }
+    return lyricsManagerPromise
+  }
+
+  const getMeaningManager = async (): Promise<MeaningManagerType> => {
+    if (!meaningManagerPromise) {
+      meaningManagerPromise = import('../managers/meaningManager.js').then(
+        async (module) => {
+          const manager = new module.default(nodelink)
+          await manager.loadFolder()
+          nodelink.meanings = manager as unknown as WorkerNodeLink['meanings']
+          return manager
+        }
+      )
+    }
+    return meaningManagerPromise
+  }
 
   /**
    * Active live chat sessions (session ID -> active flag)
@@ -1248,8 +1344,9 @@ if (isMainThread) {
             (payload as { query: string }).query
           )
           break
-        case 'loadLyrics':
-          result = await nodelink.lyrics?.loadLyrics(
+        case 'loadLyrics': {
+          const lyrics = await getLyricsManager()
+          result = await lyrics.loadLyrics(
             {
               info: (payload as { decodedTrackInfo: TrackInfo })
                 .decodedTrackInfo
@@ -1257,8 +1354,10 @@ if (isMainThread) {
             (payload as { language?: string }).language
           )
           break
-        case 'loadMeaning':
-          result = await nodelink.meanings?.loadMeaning(
+        }
+        case 'loadMeaning': {
+          const meanings = await getMeaningManager()
+          result = await meanings.loadMeaning(
             {
               info: (payload as { decodedTrackInfo: TrackInfo })
                 .decodedTrackInfo
@@ -1266,6 +1365,7 @@ if (isMainThread) {
             (payload as { language?: string }).language
           )
           break
+        }
         case 'loadChapters':
           result = await nodelink.sources?.getChapters({
             info: (payload as { decodedTrackInfo: TrackInfo }).decodedTrackInfo
