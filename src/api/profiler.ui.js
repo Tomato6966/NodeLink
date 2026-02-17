@@ -130,6 +130,15 @@ function buildPage(code) {
       </div>
     </div>
 
+    <div id="netPulse" class="net-pulse tone-meh">
+      <div class="net-pulse-top">
+        <span class="net-pulse-badge">NET PULSE</span>
+        <span id="netPulseQuality" class="net-pulse-quality">MEH</span>
+      </div>
+      <div id="netPulseSpeed" class="net-pulse-speed">0 B/s</div>
+      <div id="netPulseMeta" class="net-pulse-meta">Δ 0 B/s · 0.0 req/s · avg 0ms</div>
+    </div>
+
     <div class="layout">
       <div class="col">
         <div class="panel tab-panel" data-tab="overview,memory">
@@ -321,11 +330,16 @@ function buildPage(code) {
     const memHeroSourceShare = document.getElementById('memHeroSourceShare')
     const memHeroUsedText = document.getElementById('memHeroUsedText')
     const memHeroAllocText = document.getElementById('memHeroAllocText')
+    const netPulse = document.getElementById('netPulse')
+    const netPulseQuality = document.getElementById('netPulseQuality')
+    const netPulseSpeed = document.getElementById('netPulseSpeed')
+    const netPulseMeta = document.getElementById('netPulseMeta')
 
     const history = []
     const maxPoints = 180
     const reqTs = []
     let latestAllocTop = null
+    let netPulseLast = { ts: 0, downloaded: 0, speed: 0 }
     let captureInFlight = false
     let pageClosing = false
     const warningState = new Map()
@@ -377,6 +391,7 @@ function buildPage(code) {
       const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2
       return value.toFixed(digits) + ' ' + units[idx]
     }
+    const fmtRate = (v) => fmtBytes(Math.max(0, Number(v) || 0)) + '/s'
     const setSeg = (el, pct, bytes, label, minVisible = 18) => {
       if (!el) return
       const safePct = Math.max(0, Math.min(100, Number(pct) || 0))
@@ -632,6 +647,110 @@ function buildPage(code) {
           ? 'Total ' + mb(machineTotal) + ' MB | Free ' + mb(machineFree) + ' MB | NodeLink ' + machineRssPct.toFixed(1) + '%'
           : 'Machine memory unavailable'
       }
+    }
+
+    function renderNetPulse(snapshot) {
+      if (!netPulse || !netPulseSpeed || !netPulseMeta || !netPulseQuality) return
+
+      const reqs = snapshot?.master?.runtime?.trace?.requests || []
+      const connection = snapshot?.master?.runtime?.connection || null
+      const connectionMetrics = connection?.metrics || null
+      const connectionStatus = String(connection?.status || 'unknown').toLowerCase()
+      const now = Date.now()
+      let avgDuration = 0
+      let errorRate = 0
+      if (reqs.length > 0) {
+        let dur = 0
+        let err = 0
+        for (const r of reqs) {
+          dur += Number(r?.durationMs || 0)
+          if (Number(r?.status || 0) >= 400) err += 1
+        }
+        avgDuration = dur / reqs.length
+        errorRate = err / reqs.length
+      }
+
+      let reqRecent = 0
+      for (const r of reqs) {
+        const ts = Number(r?.ts || 0)
+        if (ts > 0 && now - ts <= 10000) reqRecent += 1
+      }
+      const currentRps = reqRecent / 10
+
+      let metricSpeed = Number(connectionMetrics?.speed?.bps || 0)
+      if (!(metricSpeed > 0)) {
+        const kbps = Number(connectionMetrics?.speed?.kbps || 0)
+        const mbps = Number(connectionMetrics?.speed?.mbps || 0)
+        if (kbps > 0) metricSpeed = (kbps * 1000) / 8
+        else if (mbps > 0) metricSpeed = (mbps * 1000 * 1000) / 8
+      }
+
+      let smoothSpeed = 0
+      let speedDelta = 0
+      if (metricSpeed > 0) {
+        smoothSpeed = netPulseLast.ts > 0 ? (netPulseLast.speed * 0.58 + metricSpeed * 0.42) : metricSpeed
+        speedDelta = smoothSpeed - Number(netPulseLast.speed || 0)
+        netPulseLast = { ts: now, downloaded: 0, speed: smoothSpeed }
+      } else {
+        let downloadedTotal = 0
+        for (const w of (snapshot?.workers || [])) {
+          const list = w?.response?.workersContext?.playersSummary || []
+          for (const p of list) {
+            downloadedTotal += Math.max(0, Number(p?.streamBytesDownloaded || 0))
+          }
+        }
+        const dt = Math.max(1, now - Number(netPulseLast.ts || 0))
+        const deltaBytes = Math.max(0, downloadedTotal - Number(netPulseLast.downloaded || 0))
+        const rawSpeed = netPulseLast.ts > 0 ? (deltaBytes * 1000) / dt : 0
+        smoothSpeed = netPulseLast.ts > 0 ? (netPulseLast.speed * 0.68 + rawSpeed * 0.32) : rawSpeed
+        speedDelta = smoothSpeed - Number(netPulseLast.speed || 0)
+        netPulseLast = { ts: now, downloaded: downloadedTotal, speed: smoothSpeed }
+      }
+
+      const latencyMs =
+        Number(connectionMetrics?.latencyMs || 0) ||
+        Number(connectionMetrics?.ping?.avgMs || 0) ||
+        avgDuration
+
+      let tone = 'meh'
+      let quality = 'MEH'
+      if (connectionStatus === 'good') {
+        if (smoothSpeed >= 5 * 1024 * 1024 && latencyMs <= 120) {
+          tone = 'super'
+          quality = 'SUPER GOOD'
+        } else {
+          tone = 'good'
+          quality = 'GOOD'
+        }
+      } else if (connectionStatus === 'average') {
+        tone = 'meh'
+        quality = 'MEH'
+      } else if (connectionStatus === 'bad' || connectionStatus === 'disconnected') {
+        tone = 'bad'
+        quality = 'BAD'
+      } else {
+        if (smoothSpeed >= 4 * 1024 * 1024 && avgDuration <= 220 && errorRate < 0.03) {
+          tone = 'super'
+          quality = 'SUPER GOOD'
+        } else if (smoothSpeed >= 900 * 1024 && avgDuration <= 450 && errorRate < 0.06) {
+          tone = 'good'
+          quality = 'GOOD'
+        } else if (smoothSpeed >= 180 * 1024 && avgDuration <= 900 && errorRate < 0.10) {
+          tone = 'meh'
+          quality = 'MEH'
+        } else {
+          tone = 'bad'
+          quality = 'BAD'
+        }
+      }
+
+      netPulse.classList.remove('tone-super', 'tone-good', 'tone-meh', 'tone-bad')
+      netPulse.classList.add('tone-' + tone)
+      netPulseSpeed.textContent = fmtRate(smoothSpeed)
+      netPulseQuality.textContent = quality
+      netPulseMeta.textContent =
+        'Δ ' + (speedDelta >= 0 ? '+' : '-') + fmtRate(Math.abs(speedDelta)) +
+        ' · ' + currentRps.toFixed(1) + ' req/s · latency ' + latencyMs.toFixed(0) + 'ms'
     }
 
     function renderTrafficMix(snapshot) {
@@ -1508,6 +1627,7 @@ function buildPage(code) {
                     '<div class="stack">' +
                       '<div class="track-idle-title">Player Sleeping</div>' +
                       '<div class="track-idle-sub">No active track on worker ' + (w.pid || '-') + '</div>' +
+                      '<div class="track-idle-meta"><span class="tag">guild ' + (p.guildId || '-') + '</span><span class="tag">worker ' + (w.pid || '-') + '</span></div>' +
                     '</div>' +
                     '<span class="status status-idle">idle</span>' +
                   '</div>' +
@@ -1735,6 +1855,7 @@ function buildPage(code) {
       renderRuntimePressure(snapshot)
       renderTrafficMix(snapshot)
       renderMemoryHero(snapshot)
+      renderNetPulse(snapshot)
     }
 
     function classifyCallsite(site) {

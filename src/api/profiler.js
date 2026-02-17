@@ -213,6 +213,19 @@ function getMasterRuntimeContext(nodelink) {
       : null
   const sourceManager = nodelink?.sourceWorkerManager
   const workerManager = nodelink?.workerManager
+  const connectionManager = nodelink?.connectionManager
+  const connectionContext = connectionManager
+    ? {
+        status:
+          typeof connectionManager.status === 'string'
+            ? connectionManager.status
+            : 'unknown',
+        metrics:
+          connectionManager.metrics && typeof connectionManager.metrics === 'object'
+            ? connectionManager.metrics
+            : null
+      }
+    : null
   const sourceContext = sourceManager
     ? {
         workers: Array.isArray(sourceManager.workers)
@@ -270,6 +283,7 @@ function getMasterRuntimeContext(nodelink) {
     },
     statsSnapshot,
     workerMetrics,
+    connection: connectionContext,
     sourceContext,
     mapSizes: masterMapSizes
   }
