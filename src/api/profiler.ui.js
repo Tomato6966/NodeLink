@@ -1,6 +1,33 @@
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { sendErrorResponse } from '../utils.ts'
 
 const LOOPBACKS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+function loadUiCss() {
+  const candidates = [
+    path.resolve(process.cwd(), 'src/profiler/ui.css'),
+    path.resolve(process.cwd(), 'dist/src/profiler/ui.css'),
+    path.resolve(__dirname, '../profiler/ui.css')
+  ]
+
+  for (const filePath of candidates) {
+    try {
+      if (fs.existsSync(filePath)) {
+        return fs.readFileSync(filePath, 'utf8')
+      }
+    } catch {}
+  }
+
+  return `
+  body { margin: 0; background: #000; color: #fff; font-family: sans-serif; }
+  `
+}
+
+const uiCss = loadUiCss()
 
 function getEndpointConfig(nodelink) {
   const endpoint = nodelink.options?.cluster?.endpoint || {}
@@ -24,302 +51,9 @@ function buildPage(code) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NodeLink Live DevTools</title>
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
-    :root {
-      --bg: #0b1118;
-      --bg2: #0f1723;
-      --card: #101b2a;
-      --line: #23384e;
-      --text: #d9e7f6;
-      --muted: #88a2bc;
-      --ok: #22c55e;
-      --warn: #f59e0b;
-      --err: #ef4444;
-      --cyan: #22d3ee;
-      --blue: #38bdf8;
-      --yellow: #facc15;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      color: var(--text);
-      font-family: "Space Grotesk", sans-serif;
-      background:
-        radial-gradient(1200px 480px at -15% -20%, #143046 0%, transparent 55%),
-        radial-gradient(900px 480px at 110% 0%, #162f3f 0%, transparent 55%),
-        linear-gradient(180deg, var(--bg), #070c12);
-      min-height: 100vh;
-    }
-    .wrap { max-width: 1380px; margin: 20px auto; padding: 0 14px 24px; }
-    .top {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
-    }
-    .title { font-size: 26px; font-weight: 700; letter-spacing: .2px; }
-    .title small { color: var(--muted); font-weight: 500; font-size: 14px; margin-left: 8px; }
-    .ctrl { display: flex; gap: 8px; align-items: center; }
-    .pill {
-      border: 1px solid var(--line);
-      background: #0f1a27;
-      color: var(--muted);
-      border-radius: 999px;
-      padding: 7px 11px;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 12px;
-    }
-    .pill.live { color: var(--ok); box-shadow: 0 0 0 1px #0f1a27 inset, 0 0 18px rgba(34,197,94,.2); }
-    .btn {
-      border: 1px solid var(--line);
-      background: linear-gradient(180deg, #17314a, #12263a);
-      color: var(--text);
-      border-radius: 10px;
-      padding: 7px 11px;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 12px;
-      cursor: pointer;
-    }
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 10px;
-      margin-bottom: 10px;
-    }
-    .card {
-      background: linear-gradient(180deg, #122235, var(--card));
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px;
-      animation: rise .35s ease;
-    }
-    @keyframes rise { from { transform: translateY(8px); opacity: .5; } to { transform: translateY(0); opacity: 1; } }
-    .label { color: var(--muted); text-transform: uppercase; font-size: 11px; letter-spacing: .7px; }
-    .big { font-family: "JetBrains Mono", monospace; font-size: 21px; margin-top: 8px; }
-    .sub { color: var(--muted); font-size: 11px; margin-top: 4px; }
-
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr);
-      gap: 10px;
-    }
-    .col {
-      display: grid;
-      gap: 10px;
-      min-width: 0;
-      align-content: start;
-    }
-    .panel {
-      background: #0d1724;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      padding: 10px;
-      overflow: hidden;
-      min-width: 0;
-    }
-    .panel.fill {
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-    }
-    .panel h3 {
-      margin: 0 0 8px;
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: .7px;
-      color: var(--muted);
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-    }
-
-    .trace {
-      height: 260px;
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      background:
-        repeating-linear-gradient(0deg, transparent, transparent 25px, rgba(255,255,255,.03) 26px),
-        linear-gradient(180deg, rgba(255,255,255,.02), rgba(0,0,0,.1)),
-        #0f1825;
-    }
-    .trace svg { width: 100%; height: 100%; display: block; }
-    .legend { margin-top: 7px; display: flex; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--muted); flex-wrap: wrap; }
-    .dot { width: 9px; height: 9px; border-radius: 999px; display: inline-block; margin-right: 6px; }
-
-    .table-wrap { max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
-    table { width: 100%; border-collapse: collapse; font-family: "JetBrains Mono", monospace; font-size: 11px; }
-    th, td { border-bottom: 1px solid rgba(35,56,78,.6); padding: 6px 7px; text-align: left; }
-    th { color: var(--muted); position: sticky; top: 0; background: #112032; z-index: 2; }
-
-    .list {
-      max-height: none;
-      overflow: visible;
-      display: grid;
-      gap: 8px;
-      min-width: 0;
-      align-content: start;
-      grid-auto-rows: max-content;
-    }
-    .list-scroll {
-      max-height: 320px;
-      overflow-y: auto;
-      overflow-x: hidden;
-      scrollbar-gutter: stable both-edges;
-      min-width: 0;
-    }
-    .panel.fill .list {
-      max-height: none;
-      height: auto;
-      min-height: 0;
-      flex: unset;
-    }
-    .panel.fill .list.list-scroll {
-      max-height: 320px;
-      overflow: auto;
-    }
-    .item {
-      border: 1px solid #28435e;
-      border-radius: 8px;
-      background: #101f30;
-      padding: 9px;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 11px;
-      line-height: 1.5;
-      word-break: break-word;
-      overflow-wrap: anywhere;
-      min-width: 0;
-      overflow: visible;
-      max-width: 100%;
-    }
-    .item b, .item .muted, .item div { overflow-wrap: anywhere; word-break: break-word; }
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .stack { display: grid; gap: 5px; min-width: 0; }
-    .kv {
-      display: grid;
-      grid-template-columns: 84px minmax(0, 1fr);
-      gap: 6px;
-      align-items: start;
-      min-width: 0;
-    }
-    .k { color: var(--muted); text-transform: lowercase; }
-    .v { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
-    .item.warn { border-color: rgba(245,158,11,.6); background: rgba(120,53,15,.22); }
-    .item.err { border-color: rgba(239,68,68,.6); background: rgba(127,29,29,.22); }
-    .item.ok { border-color: rgba(34,197,94,.6); background: rgba(20,83,45,.24); }
-    .track-card {
-      display: grid;
-      gap: 8px;
-      min-width: 0;
-    }
-    .track-head {
-      display: grid;
-      grid-template-columns: 54px minmax(0, 1fr);
-      gap: 8px;
-      align-items: start;
-      min-width: 0;
-    }
-    .track-art {
-      width: 54px;
-      height: 54px;
-      border-radius: 8px;
-      border: 1px solid #28435e;
-      object-fit: cover;
-      background: #0d1724;
-      display: block;
-    }
-    .track-meta { min-width: 0; display: grid; gap: 4px; }
-    .status {
-      border-radius: 999px;
-      padding: 1px 8px;
-      border: 1px solid #315478;
-      font-size: 10px;
-      text-transform: uppercase;
-      letter-spacing: .5px;
-    }
-    .status-idle { border-color: #64748b; color: #94a3b8; }
-    .status-working { border-color: #22c55e; color: #86efac; }
-    .status-paused { border-color: #f59e0b; color: #fcd34d; }
-    .status-connecting, .status-reconnecting { border-color: #38bdf8; color: #7dd3fc; }
-    .status-disconnected, .status-destroyed { border-color: #ef4444; color: #fca5a5; }
-    .progress {
-      height: 7px;
-      border-radius: 999px;
-      border: 1px solid #28435e;
-      background: #0f1b2a;
-      overflow: hidden;
-    }
-    .progress > i {
-      display: block;
-      height: 100%;
-      background: linear-gradient(90deg, #22d3ee, #38bdf8);
-    }
-    .item.net {
-      padding: 6px 8px;
-      line-height: 1.25;
-      overflow: visible;
-    }
-    .item.net .path-line {
-      margin-top: 2px;
-      font-weight: 600;
-      white-space: normal;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
-    .item.net .meta-line {
-      margin-top: 2px;
-      color: var(--muted);
-      font-size: 10px;
-      white-space: normal;
-      overflow-wrap: anywhere;
-      word-break: break-word;
-    }
-    #requests.list-scroll { height: 420px; max-height: 420px; }
-    #events.list-scroll { max-height: 320px; }
-    #allocSites.list-scroll { max-height: 420px; }
-    .muted { color: var(--muted); }
-    .tag {
-      display: inline-flex;
-      align-items: center;
-      border: 1px solid #315478;
-      border-radius: 999px;
-      padding: 1px 7px;
-      margin-right: 6px;
-      margin-bottom: 6px;
-      color: #b4d4ef;
-      vertical-align: middle;
-      max-width: 100%;
-      overflow-wrap: anywhere;
-    }
-    .callsite {
-      color: #67e8f9;
-      text-decoration: underline;
-      cursor: pointer;
-    }
-    .snippet {
-      max-height: 260px;
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #09111b;
-      padding: 8px;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 11px;
-      line-height: 1.45;
-      white-space: pre;
-    }
-    .snippet-line-hit { background: rgba(56,189,248,.18); border-radius: 4px; }
-
-    @media (max-width: 1100px) {
-      .layout { grid-template-columns: 1fr; }
-      .table-wrap { overflow-x: auto; }
-      table { min-width: 780px; }
-    }
-  </style>
+  <style>${uiCss}</style>
 </head>
-<body>
+<body class="grain">
   <div class="wrap">
     <div class="top">
       <div class="title">NodeLink Live DevTools <small>cluster observability + trace</small></div>
@@ -330,6 +64,12 @@ function buildPage(code) {
       </div>
     </div>
 
+    <div id="tabs" class="tabs">
+      <button class="tab active" data-tab="overview">overview (all)</button>
+      <button class="tab" data-tab="memory">memory</button>
+      <button class="tab" data-tab="traffic">traffic</button>
+    </div>
+
     <div class="cards">
       <div class="card"><div class="label">Master RSS</div><div id="mRss" class="big">-</div><div class="sub">resident set</div></div>
       <div class="card"><div class="label">Workers Heap</div><div id="wHeap" class="big">-</div><div class="sub">sum heapUsed</div></div>
@@ -337,21 +77,47 @@ function buildPage(code) {
       <div class="card"><div class="label">Warnings</div><div id="warnCount" class="big">0</div><div class="sub">anomaly detector</div></div>
       <div class="card"><div class="label">Req/s (window)</div><div id="rps" class="big">0.0</div><div class="sub">from request trace</div></div>
       <div class="card"><div class="label">Trace Buffer</div><div id="traceCount" class="big">0</div><div class="sub">network + events</div></div>
+      <div class="card"><div class="label">Players Active</div><div id="playersActive" class="big">0</div><div class="sub">across workers</div></div>
+      <div class="card"><div class="label">Heap Pressure</div><div id="heapPressure" class="big">0.0%</div><div class="sub">heapUsed/heapTotal</div></div>
+    </div>
+
+    <div class="mem-ribbon-wrap">
+      <div class="mem-ribbon-top">
+        <small id="memHeroUsedText" class="kid-edge left">← NodeLink active heap usage</small>
+        <small id="memHeroAllocText" class="kid-edge right">Process RSS total (heap + native/runtime)</small>
+      </div>
+      <div class="mem-ribbon-bar">
+        <i id="memHeroUsed"></i>
+        <i id="memHeroGap"></i>
+        <i id="memHeroOverhead"></i>
+        <i id="memHeroMachineFree"></i>
+      </div>
+      <div class="mem-ribbon-legend">
+        <span class="legend-chip"><i class="swatch used"></i>NodeLink used (heapUsed)</span>
+        <span class="legend-chip"><i class="swatch free"></i>Heap reserved and still free</span>
+        <span class="legend-chip"><i class="swatch over"></i>Tracked native (external + arrayBuffers)</span>
+        <span class="legend-chip"><i class="swatch hostfree"></i>Host RAM free (machine)</span>
+      </div>
+      <div class="mem-ribbon-foot">
+        <span id="memHeroLeftPct" class="kid-foot left">- actively used inside RSS</span>
+        <span id="memHeroNoteRight" class="kid-center">High allocation does not always mean active usage. Node/panel/container setups (for example Pterodactyl) can keep large overhead allocated.</span>
+        <span id="memHeroRightPct" class="kid-foot right">- tracked native inside RSS</span>
+      </div>
     </div>
 
     <div class="layout">
       <div class="col">
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="overview,memory">
           <h3>Timeline Trace</h3>
           <div class="trace"><svg id="trace" viewBox="0 0 1000 260" preserveAspectRatio="none"></svg></div>
           <div class="legend">
             <span><i class="dot" style="background:#22d3ee"></i>Master RSS</span>
-            <span><i class="dot" style="background:#38bdf8"></i>Workers Heap</span>
-            <span><i class="dot" style="background:#facc15"></i>Source Heap</span>
+            <span><i class="dot" style="background:#f59e0b"></i>Workers Heap</span>
+            <span><i class="dot" style="background:#a3e635"></i>Source Heap</span>
           </div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="overview,memory">
           <h3>Process Explorer <span class="muted">master/workers/source with handles/resources</span></h3>
           <div class="table-wrap">
             <table id="procTable">
@@ -361,89 +127,99 @@ function buildPage(code) {
           </div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="memory">
           <h3>V8 Spaces</h3>
           <div id="v8Spaces" class="list list-scroll"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="memory">
           <h3>Caches / Maps</h3>
           <div id="caches" class="list list-scroll"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="memory">
           <h3>Stream Lifecycle</h3>
           <div id="streamLife" class="list list-scroll"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="memory">
           <h3>Buffer Pool</h3>
           <div id="bufferPool" class="list list-scroll"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="memory">
           <h3>Demux / WebmOpus</h3>
           <div id="demux" class="list list-scroll"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="overview,traffic">
           <h3>Origins / Tracks (Where it comes from)</h3>
           <div id="origins" class="list list-scroll"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="overview,traffic">
           <h3>Source / Protocol Groups</h3>
           <div id="groups" class="list list-scroll"></div>
         </div>
       </div>
 
       <div class="col">
-        <div class="panel fill">
+        <div class="panel fill tab-panel" data-tab="memory">
           <h3>Memory Breakdown</h3>
           <div id="memBreakdown" class="list list-scroll"></div>
         </div>
 
-        <div class="panel fill">
+        <div class="panel fill tab-panel" data-tab="traffic,overview">
           <h3>Trace Analytics</h3>
           <div id="traceAnalytics" class="list list-scroll"></div>
         </div>
 
-        <div class="panel fill">
+        <div class="panel fill tab-panel" data-tab="traffic,memory,overview">
+          <h3>Runtime Pressure (Live)</h3>
+          <div id="runtimePressure" class="bars"></div>
+        </div>
+
+        <div class="panel fill tab-panel" data-tab="traffic,overview">
+          <h3>Traffic Mix (Live)</h3>
+          <div id="trafficMix" class="bars"></div>
+        </div>
+
+        <div class="panel fill tab-panel" data-tab="traffic">
           <h3>Socket Footprint</h3>
           <div id="socketFootprint" class="list list-scroll"></div>
         </div>
 
-        <div class="panel fill">
+        <div class="panel fill tab-panel" data-tab="memory">
           <h3>Leak Signals</h3>
           <div id="leakSignals" class="list list-scroll"></div>
         </div>
 
-        <div class="panel fill">
+        <div class="panel fill tab-panel" data-tab="overview,traffic,memory">
           <h3>Warnings & Heuristics</h3>
           <div id="warns" class="list list-scroll"></div>
         </div>
 
-        <div class="panel fill">
+        <div class="panel fill tab-panel" data-tab="overview,traffic">
           <h3>Network Trace</h3>
           <div id="requests" class="list list-scroll" style="max-height:420px"></div>
         </div>
 
-        <div class="panel fill">
+        <div class="panel fill tab-panel" data-tab="traffic,overview">
           <h3>Error Console / Events</h3>
           <div id="events" class="list list-scroll"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="memory">
           <h3>Heap Artifacts (Auto)</h3>
           <div id="allReport" class="list list-scroll"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="memory">
           <h3>Allocation Sites (ALL callsites)</h3>
           <div id="allocSites" class="list list-scroll"></div>
         </div>
 
-        <div class="panel">
+        <div class="panel tab-panel" data-tab="memory">
           <h3>Callsite Inspector</h3>
           <div id="snippetMeta" class="muted" style="margin-bottom:6px">Click a callsite to open source snippet.</div>
           <div id="snippet" class="snippet">No snippet loaded.</div>
@@ -456,6 +232,7 @@ function buildPage(code) {
     const code = ${safeCode}
     const conn = document.getElementById('conn')
     const captureMem = document.getElementById('captureMem')
+    const tabs = document.getElementById('tabs')
     const traceSvg = document.getElementById('trace')
     const warns = document.getElementById('warns')
     const requests = document.getElementById('requests')
@@ -483,6 +260,19 @@ function buildPage(code) {
     const warnCount = document.getElementById('warnCount')
     const rps = document.getElementById('rps')
     const traceCount = document.getElementById('traceCount')
+    const playersActive = document.getElementById('playersActive')
+    const heapPressure = document.getElementById('heapPressure')
+    const runtimePressure = document.getElementById('runtimePressure')
+    const trafficMix = document.getElementById('trafficMix')
+    const memHeroLeftPct = document.getElementById('memHeroLeftPct')
+    const memHeroRightPct = document.getElementById('memHeroRightPct')
+    const memHeroUsed = document.getElementById('memHeroUsed')
+    const memHeroGap = document.getElementById('memHeroGap')
+    const memHeroOverhead = document.getElementById('memHeroOverhead')
+    const memHeroMachineFree = document.getElementById('memHeroMachineFree')
+    const memHeroUsedText = document.getElementById('memHeroUsedText')
+    const memHeroAllocText = document.getElementById('memHeroAllocText')
+    const memHeroNoteRight = document.getElementById('memHeroNoteRight')
 
     const history = []
     const maxPoints = 180
@@ -493,8 +283,33 @@ function buildPage(code) {
     const warningState = new Map()
     const warningHistoryMax = 240
     const LOCAL_STATE_KEY = 'nodelink_profiler_ui_state_v2_' + location.host + '_' + code
+    const TAB_STATE_KEY = 'nodelink_profiler_ui_tab_v1_' + location.host + '_' + code
+    let currentTab = 'overview'
 
     const safePct = (v) => Number.isFinite(v) ? (v * 100).toFixed(1) + '%' : '-'
+    const uiFatal = (message) => {
+      try {
+        if (conn) {
+          conn.textContent = 'ui error'
+          conn.classList.remove('live')
+        }
+        const host = document.querySelector('.wrap')
+        if (!host) return
+        let box = document.getElementById('uiFatal')
+        if (!box) {
+          box = document.createElement('div')
+          box.id = 'uiFatal'
+          box.className = 'panel'
+          box.style.marginBottom = '10px'
+          host.insertBefore(box, host.firstChild)
+        }
+        box.innerHTML =
+          '<h3>UI Runtime Error</h3>' +
+          '<div class="item err"><b>Profiler UI failed to initialize</b><div class="muted">' +
+          String(message || 'unknown error').replace(/</g, '&lt;') +
+          '</div></div>'
+      } catch {}
+    }
 
     const mb = (v) => {
       const n = Number(v)
@@ -526,16 +341,60 @@ function buildPage(code) {
       return '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="2.3" stroke-linecap="round"/>'
     }
 
+    function drawArea(points, gradientId, maxY) {
+      if (points.length < 2) return ''
+      const w = 1000, h = 260
+      const step = w / Math.max(points.length - 1, 1)
+      let d = ''
+      for (let i = 0; i < points.length; i++) {
+        const x = i * step
+        const y = h - Math.min(h, (points[i] / Math.max(maxY, 1)) * h)
+        d += (i === 0 ? 'M' : 'L') + x.toFixed(2) + ',' + y.toFixed(2)
+      }
+      d += ' L 1000,260 L 0,260 Z'
+      return '<path d="' + d + '" fill="url(#' + gradientId + ')" opacity=".52"></path>'
+    }
+
     function renderTrace() {
       const a = history.map(x => x.masterRss)
       const b = history.map(x => x.workersHeap)
       const c = history.map(x => x.sourceHeap)
       const maxY = Math.max(1, ...a, ...b, ...c)
+      const defs =
+        '<defs>' +
+        '<linearGradient id="ga" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#22d3ee" stop-opacity=".38"/><stop offset="100%" stop-color="#22d3ee" stop-opacity="0"/></linearGradient>' +
+        '<linearGradient id="gb" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#f59e0b" stop-opacity=".30"/><stop offset="100%" stop-color="#f59e0b" stop-opacity="0"/></linearGradient>' +
+        '<linearGradient id="gc" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#a3e635" stop-opacity=".28"/><stop offset="100%" stop-color="#a3e635" stop-opacity="0"/></linearGradient>' +
+        '</defs>'
       traceSvg.innerHTML = [
+        defs,
+        drawArea(a, 'ga', maxY),
+        drawArea(b, 'gb', maxY),
+        drawArea(c, 'gc', maxY),
         drawLine(a, '#22d3ee', maxY),
-        drawLine(b, '#38bdf8', maxY),
-        drawLine(c, '#facc15', maxY)
+        drawLine(b, '#f59e0b', maxY),
+        drawLine(c, '#a3e635', maxY)
       ].join('')
+    }
+
+    function applyTab(tabName) {
+      currentTab = tabName || 'overview'
+      try { localStorage.setItem(TAB_STATE_KEY, currentTab) } catch {}
+
+      const buttons = tabs ? tabs.querySelectorAll('.tab') : []
+      for (const btn of buttons) {
+        const isActive = btn.getAttribute('data-tab') === currentTab
+        btn.classList.toggle('active', isActive)
+      }
+
+      const panels = document.querySelectorAll('.tab-panel')
+      for (const panel of panels) {
+        const tabAttr = String(panel.getAttribute('data-tab') || '')
+        const visible =
+          currentTab === 'overview' ||
+          tabAttr.split(',').map(x => x.trim()).includes(currentTab)
+        panel.classList.toggle('hidden', !visible)
+      }
     }
 
     function buildChartPoint(snapshot) {
@@ -551,6 +410,157 @@ function buildPage(code) {
       mRss.textContent = mb(point?.masterRss || 0) + ' MB'
       wHeap.textContent = mb(point?.workersHeap || 0) + ' MB'
       sHeap.textContent = mb(point?.sourceHeap || 0) + ' MB'
+    }
+
+    function createBarRow(label, value, pct, tone = 'neutral') {
+      const width = Math.max(0, Math.min(100, Number(pct) || 0))
+      return (
+        '<div class="bar-row">' +
+          '<div class="bar-head"><span>' + label + '</span><span>' + value + '</span></div>' +
+          '<div class="bar-track"><i class="bar-fill tone-' + tone + '" style="width:' + width.toFixed(2) + '%"></i></div>' +
+        '</div>'
+      )
+    }
+
+    function makeMemoryPie(rss, heapUsed, external, arrayBuffers) {
+      const total = Math.max(Number(rss || 0), 1)
+      const heap = Math.max(0, Number(heapUsed || 0))
+      const extAb = Math.max(0, Number(external || 0) + Number(arrayBuffers || 0))
+      const heapPct = Math.max(0, Math.min(100, (heap / total) * 100))
+      const extPct = Math.max(0, Math.min(100 - heapPct, (extAb / total) * 100))
+      const otherPct = Math.max(0, 100 - heapPct - extPct)
+      return (
+        '<div class="mem-pie" style="--heap:' + heapPct.toFixed(2) + ';--ext:' + extPct.toFixed(2) + ';--other:' + otherPct.toFixed(2) + ';">' +
+          '<div class="mem-pie-center">' +
+            '<b>' + mb(rss) + '</b>' +
+            '<span>rss mb</span>' +
+          '</div>' +
+        '</div>'
+      )
+    }
+
+    function renderRuntimePressure(snapshot) {
+      if (!runtimePressure) return
+      const procs = flattenProcesses(snapshot)
+      let heapUsed = 0
+      let heapTotal = 0
+      let rss = 0
+      let external = 0
+      let arrayBuffers = 0
+      let players = 0
+
+      for (const p of procs) {
+        heapUsed += Number(p?.memory?.heapUsed || 0)
+        heapTotal += Number(p?.memory?.heapTotal || 0)
+        rss += Number(p?.memory?.rss || 0)
+        external += Number(p?.memory?.external || 0)
+        arrayBuffers += Number(p?.memory?.arrayBuffers || 0)
+      }
+      for (const w of (snapshot?.workers || [])) {
+        players += Number(w?.response?.workersContext?.playersCount || 0)
+      }
+
+      const heapRatio = heapTotal > 0 ? (heapUsed / heapTotal) * 100 : 0
+      const extRssRatio = rss > 0 ? ((external + arrayBuffers) / rss) * 100 : 0
+      const sourcePressure = (() => {
+        let used = 0
+        let total = 0
+        for (const s of (snapshot?.sourceWorkers || [])) {
+          used += Number(s?.response?.memory?.heapUsed || 0)
+          total += Number(s?.response?.memory?.heapTotal || 0)
+        }
+        return total > 0 ? (used / total) * 100 : 0
+      })()
+
+      if (playersActive) playersActive.textContent = String(players)
+      if (heapPressure) heapPressure.textContent = heapRatio.toFixed(1) + '%'
+
+      const html = [
+        createBarRow('Heap Used', mb(heapUsed) + ' MB', heapRatio, heapRatio > 85 ? 'bad' : heapRatio > 70 ? 'warn' : 'good'),
+        createBarRow('Ext+AB vs RSS', extRssRatio.toFixed(1) + '%', extRssRatio, extRssRatio > 55 ? 'bad' : extRssRatio > 35 ? 'warn' : 'good'),
+        createBarRow('Source Heap Pressure', sourcePressure.toFixed(1) + '%', sourcePressure, sourcePressure > 90 ? 'bad' : sourcePressure > 75 ? 'warn' : 'good'),
+        createBarRow('Players Active', String(players), Math.min(100, players * 4), 'neutral')
+      ].join('')
+      runtimePressure.innerHTML = html
+    }
+
+    function renderMemoryHero(snapshot) {
+      const procs = flattenProcesses(snapshot)
+      let used = 0
+      let allocated = 0
+      let rss = 0
+      let external = 0
+      let arrayBuffers = 0
+
+      for (const p of procs) {
+        used += Number(p?.memory?.heapUsed || 0)
+        allocated += Number(p?.memory?.heapTotal || 0)
+        rss += Number(p?.memory?.rss || 0)
+        external += Number(p?.memory?.external || 0)
+        arrayBuffers += Number(p?.memory?.arrayBuffers || 0)
+      }
+
+      const safeRss = Math.max(rss, 1)
+      const usedPct = Math.max(0, Math.min(100, (used / safeRss) * 100))
+      const heapFreePct = Math.max(0, Math.min(100, ((allocated - used) / safeRss) * 100))
+      const trackedNativePct = Math.max(0, Math.min(100, ((external + arrayBuffers) / safeRss) * 100))
+      const unattributedPct = Math.max(0, Math.min(100, ((rss - allocated - external - arrayBuffers) / safeRss) * 100))
+      const norm = usedPct + heapFreePct + trackedNativePct
+      const scale = norm > 100 ? 100 / norm : 1
+      const usedScaled = usedPct * scale
+      const heapFreeScaled = heapFreePct * scale
+      const trackedNativeScaled = trackedNativePct * scale
+
+      if (memHeroLeftPct) memHeroLeftPct.textContent = usedPct.toFixed(1) + '% active heap inside RSS'
+      if (memHeroRightPct) memHeroRightPct.textContent = trackedNativePct.toFixed(1) + '% tracked native (Ext/AB)'
+      if (memHeroUsed) memHeroUsed.style.width = usedScaled.toFixed(2) + '%'
+      if (memHeroGap) memHeroGap.style.width = heapFreeScaled.toFixed(2) + '%'
+      if (memHeroOverhead) memHeroOverhead.style.width = trackedNativeScaled.toFixed(2) + '%'
+      if (memHeroUsedText) memHeroUsedText.textContent = 'NodeLink active usage: ' + mb(used) + ' MB'
+      if (memHeroAllocText) memHeroAllocText.textContent = 'Process RSS total: ' + mb(rss) + ' MB (heap reserved ' + mb(allocated) + ' MB)'
+
+      const hostMem = snapshot?.master?.runtime?.hostMemory || {}
+      const machineTotal = Number(hostMem.total || 0)
+      const machineFree = Number(hostMem.free || 0)
+      const machineTotalSafe = Math.max(machineTotal, 1)
+      const machineFreePct = machineTotal > 0 ? Math.max(0, Math.min(100, (machineFree / machineTotalSafe) * 100)) : 0
+      if (memHeroMachineFree) memHeroMachineFree.style.width = machineFreePct.toFixed(2) + '%'
+
+      if (memHeroNoteRight) {
+        const heapFree = Math.max(0, allocated - used)
+        const heapFreePct = (heapFree / safeRss) * 100
+        const note =
+          'Blue=' + usedPct.toFixed(1) +
+          '% active heap, Gray=' + heapFreePct.toFixed(1) +
+          '% reserved heap free, Red=' + trackedNativePct.toFixed(1) +
+          '% tracked native (Ext/AB), Unattributed RSS=' + Math.max(0, unattributedPct).toFixed(1) +
+          (machineTotal > 0 ? '%, Host free=' + machineFreePct.toFixed(1) + '%.' : '%. Host free unavailable in this snapshot.') +
+          ' High allocation does not always mean active use (Pterodactyl/container overhead can be high).'
+        memHeroNoteRight.textContent = note
+      }
+    }
+
+    function renderTrafficMix(snapshot) {
+      if (!trafficMix) return
+      const reqs = snapshot?.master?.runtime?.trace?.requests || []
+      const methods = new Map()
+      for (const r of reqs) {
+        const method = String(r?.method || 'OTHER')
+        methods.set(method, (methods.get(method) || 0) + 1)
+      }
+      const total = Math.max(1, reqs.length)
+      const ordered = Array.from(methods.entries()).sort((a, b) => b[1] - a[1]).slice(0, 6)
+      if (ordered.length === 0) {
+        trafficMix.innerHTML = '<div class="item">No traffic data yet.</div>'
+        return
+      }
+      trafficMix.innerHTML = ordered
+        .map(([method, count], idx) => {
+          const pct = (count / total) * 100
+          const tone = idx === 0 ? 'good' : idx === 1 ? 'warn' : 'neutral'
+          return createBarRow(method, count + ' req', pct, tone)
+        })
+        .join('')
     }
 
     function loadLocalState() {
@@ -798,13 +808,19 @@ function buildPage(code) {
         totals.arrayBuffers += arrayBuffers
 
         list.push({
-          text:
-            '<span class="tag">' + row.type + ' ' + (row.pid || '-') + '</span>' +
-            '<span class="tag">heap ' + mb(heapUsed) + '/' + mb(heapTotal) + 'MB</span>' +
-            '<span class="tag">rss ' + mb(rss) + 'MB</span>' +
-            '<span class="tag">ext/ab ' + mb(external) + '/' + mb(arrayBuffers) + 'MB</span>' +
-            '<span class="tag">heap ' + safePct(heapRatio) + '</span>' +
-            '<span class="tag">ext+rss ' + safePct(extRatio) + '</span>'
+          html:
+            '<div class="mem-card">' +
+              '<div class="mem-card-top">' +
+                '<div class="mem-id"><span class="tag">' + row.type + ' ' + (row.pid || '-') + '</span></div>' +
+                makeMemoryPie(rss, heapUsed, external, arrayBuffers) +
+              '</div>' +
+              '<div class="mem-metrics">' +
+                '<div class="mem-kv"><span>heap</span><b>' + mb(heapUsed) + ' / ' + mb(heapTotal) + ' MB</b></div>' +
+                '<div class="mem-kv"><span>ext/ab</span><b>' + mb(external) + ' / ' + mb(arrayBuffers) + ' MB</b></div>' +
+                '<div class="mem-kv"><span>heap pressure</span><b>' + safePct(heapRatio) + '</b></div>' +
+                '<div class="mem-kv"><span>ext+ab vs rss</span><b>' + safePct(extRatio) + '</b></div>' +
+              '</div>' +
+            '</div>'
         })
       }
 
@@ -814,16 +830,22 @@ function buildPage(code) {
         totals.heapTotal > 0 ? totals.heapUsed / totals.heapTotal : 0
 
       list.unshift({
-        text:
-          '<span class="tag">total</span>' +
-          '<span class="tag">heap ' + mb(totals.heapUsed) + '/' + mb(totals.heapTotal) + 'MB</span>' +
-          '<span class="tag">rss ' + mb(totals.rss) + 'MB</span>' +
-          '<span class="tag">ext/ab ' + mb(totals.external) + '/' + mb(totals.arrayBuffers) + 'MB</span>' +
-          '<span class="tag">heap ' + safePct(totalHeapRatio) + '</span>' +
-          '<span class="tag">ext+rss ' + safePct(totalExtRatio) + '</span>'
+        html:
+          '<div class="mem-card mem-total">' +
+            '<div class="mem-card-top">' +
+              '<div class="mem-id"><span class="tag">total footprint</span></div>' +
+              makeMemoryPie(totals.rss, totals.heapUsed, totals.external, totals.arrayBuffers) +
+            '</div>' +
+            '<div class="mem-metrics">' +
+              '<div class="mem-kv"><span>heap</span><b>' + mb(totals.heapUsed) + ' / ' + mb(totals.heapTotal) + ' MB</b></div>' +
+              '<div class="mem-kv"><span>ext/ab</span><b>' + mb(totals.external) + ' / ' + mb(totals.arrayBuffers) + ' MB</b></div>' +
+              '<div class="mem-kv"><span>heap pressure</span><b>' + safePct(totalHeapRatio) + '</b></div>' +
+              '<div class="mem-kv"><span>ext+ab vs rss</span><b>' + safePct(totalExtRatio) + '</b></div>' +
+            '</div>' +
+          '</div>'
       })
 
-      setList(memBreakdown, list, '', 0)
+      setList(memBreakdown, list, 'mem', 0)
     }
 
     function renderTraceAnalytics(snapshot) {
@@ -931,27 +953,36 @@ function buildPage(code) {
         totals.resources += resourceCount
 
         list.push({
-          text:
-            '<span class="tag">' + row.type + ' ' + (row.pid || '-') + '</span>' +
-            '<span class="tag">socket ' + sockets + '</span>' +
-            '<span class="tag">tls ' + tlsSockets + '</span>' +
-            '<span class="tag">tcpWrap ' + tcpWrap + '</span>' +
-            '<span class="tag">handles ' + handleCount + '</span>' +
-            '<span class="tag">resources ' + resourceCount + '</span>'
+          html:
+            '<div class="socket-card">' +
+              '<div class="socket-head"><span>' + row.type + ' ' + (row.pid || '-') + '</span><span>' + (sockets + tlsSockets) + ' sockets</span></div>' +
+              '<div class="chips">' +
+                '<span class="tag">socket ' + sockets + '</span>' +
+                '<span class="tag">tls ' + tlsSockets + '</span>' +
+                '<span class="tag">tcpWrap ' + tcpWrap + '</span>' +
+                '<span class="tag">handles ' + handleCount + '</span>' +
+                '<span class="tag">resources ' + resourceCount + '</span>' +
+              '</div>' +
+              '<div class="socket-meter"><i style="width:' + (Math.min(100, (sockets + tlsSockets) * 10)).toFixed(2) + '%"></i></div>' +
+            '</div>'
         })
       }
 
       list.unshift({
-        text:
-          '<span class="tag">total</span>' +
-          '<span class="tag">socket ' + totals.sockets + '</span>' +
-          '<span class="tag">tls ' + totals.tlsSockets + '</span>' +
-          '<span class="tag">tcpWrap ' + totals.tcpWrap + '</span>' +
-          '<span class="tag">handles ' + totals.handles + '</span>' +
-          '<span class="tag">resources ' + totals.resources + '</span>'
+        html:
+          '<div class="socket-total">' +
+            '<div class="socket-head"><span>total footprint</span><span>' + (totals.sockets + totals.tlsSockets) + ' sockets</span></div>' +
+            '<div class="chips">' +
+              '<span class="tag">socket ' + totals.sockets + '</span>' +
+              '<span class="tag">tls ' + totals.tlsSockets + '</span>' +
+              '<span class="tag">tcpWrap ' + totals.tcpWrap + '</span>' +
+              '<span class="tag">handles ' + totals.handles + '</span>' +
+              '<span class="tag">resources ' + totals.resources + '</span>' +
+            '</div>' +
+          '</div>'
       })
 
-      setList(socketFootprint, list, '', 0)
+      setList(socketFootprint, list, 'socket', 0)
     }
 
     function renderLeakSignals(snapshot) {
@@ -1136,34 +1167,67 @@ function buildPage(code) {
           const artwork = p.artworkUrl
             ? '<img class="track-art" src="' + p.artworkUrl + '" alt="artwork" loading="lazy" referrerpolicy="no-referrer" />'
             : '<div class="track-art"></div>'
+          const redirectPayload = JSON.stringify({
+            guildId: p.guildId || null,
+            uri: p.uri || null,
+            title: p.title || null,
+            author: p.author || null,
+            source: p.sourceName || null,
+            protocol: p.protocol || null,
+            position: Number(p.position || 0),
+            duration: Number(p.duration || 0),
+            seekable: Boolean(p.isSeekable)
+          }).replace(/"/g, '&quot;')
+          const streamHostUrl =
+            p.streamUrlHost && p.streamUrlHost !== '-'
+              ? 'https://' +
+                String(p.streamUrlHost)
+                  .replace('https://', '')
+                  .replace('http://', '')
+              : ''
+          const progressLabel =
+            fmtMs(p.position) + ' / ' + fmtMs(p.duration) +
+            (hasDuration ? (' (' + fmtMs(p.remaining) + ' left)') : '')
+          const quality =
+            (p.codec || '-') + ' · ' + (p.container || '-') + ' · ' + (p.formatLabel || p.format || '-')
           rows.push({
             text:
-              '<div class="track-card">' +
-                '<div class="track-head">' +
+              '<div class="track-card track-card-v2">' +
+                '<div class="track-top">' +
                   artwork +
-                  '<div class="track-meta">' +
-                    '<div class="chips">' +
-                      '<span class="tag">guild '+ (p.guildId || '-') +'</span>' +
-                      '<span class="tag">'+ (p.sourceName || 'unknown') +'</span>' +
-                      '<span class="tag">'+ (p.protocol || '-') +'</span>' +
+                  '<div class="track-main">' +
+                    '<div class="track-main-top">' +
+                      '<div class="chips">' +
+                        '<span class="tag">worker ' + (w.pid || '-') + '</span>' +
+                        '<span class="tag">guild '+ (p.guildId || '-') +'</span>' +
+                        '<span class="tag">'+ (p.sourceName || 'unknown') +'</span>' +
+                        '<span class="tag">'+ (p.protocol || '-') +'</span>' +
+                      '</div>' +
                       '<span class="status status-' + safeStatus + '">' + status + '</span>' +
                     '</div>' +
-                    '<div><b>'+ (p.title || '(no title)') +'</b></div>' +
-                    '<div class="muted">' + (p.author || '-') + '</div>' +
+                    '<div class="track-title">' + (p.title || '(no title)') + '</div>' +
+                    '<div class="track-subtitle">' + (p.author || '-') + '</div>' +
+                    '<div class="track-time"><span>position</span><span>' + progressLabel + '</span></div>' +
+                    '<div class="progress"><i style="width:' + progressPct.toFixed(2) + '%"></i></div>' +
+                    '<div class="track-controls">' +
+                      (p.uri ? ('<a class="mini-btn" href="' + String(p.uri).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener noreferrer">open</a>') : '') +
+                      (p.artworkUrl ? ('<a class="mini-btn" href="' + String(p.artworkUrl).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener noreferrer">artwork</a>') : '') +
+                      (streamHostUrl ? ('<a class="mini-btn" href="' + streamHostUrl.replace(/"/g, '&quot;') + '" target="_blank" rel="noopener noreferrer">stream host</a>') : '') +
+                      '<button class="mini-btn" data-copy-kind="url" data-copy="' + String(p.uri || '').replace(/"/g, '&quot;') + '">copy url</button>' +
+                      '<button class="mini-btn" data-copy-kind="title" data-copy="' + String(p.title || '').replace(/"/g, '&quot;') + '">copy title</button>' +
+                      '<button class="mini-btn" data-copy-kind="author" data-copy="' + String(p.author || '').replace(/"/g, '&quot;') + '">copy author</button>' +
+                      '<button class="mini-btn" data-copy-kind="guild" data-copy="' + String(p.guildId || '').replace(/"/g, '&quot;') + '">copy guild</button>' +
+                      '<button class="mini-btn" data-copy-kind="payload" data-copy="' + redirectPayload + '">copy payload</button>' +
+                    '</div>' +
                   '</div>' +
                 '</div>' +
-                '<div class="kv"><div class="k">position</div><div class="v">' +
-                  fmtMs(p.position) + ' / ' + fmtMs(p.duration) +
-                  (hasDuration ? (' <span class="muted">(' + fmtMs(p.remaining) + ' left)</span>') : '') +
-                '</div></div>' +
-                '<div class="progress"><i style="width:' + progressPct.toFixed(2) + '%"></i></div>' +
-                '<div class="kv"><div class="k">uri</div><div class="v">'+ (p.uri || '(no uri)') +'</div></div>' +
-                '<div class="kv"><div class="k">uri host</div><div class="v">'+ (p.uriHost || '-') +'</div></div>' +
-                '<div class="kv"><div class="k">stream host</div><div class="v">'+ (p.streamUrlHost || '-') +'</div></div>' +
-                '<div class="kv"><div class="k">codec</div><div class="v">' + (p.codec || '-') + '</div></div>' +
-                '<div class="kv"><div class="k">container</div><div class="v">' + (p.container || '-') + '</div></div>' +
-                '<div class="kv"><div class="k">format</div><div class="v">' + (p.formatLabel || p.format || '-') + '</div></div>' +
-                '<div class="chips">' +
+                '<div class="track-grid">' +
+                  '<div class="track-kv"><span>uri</span><b>' + (p.uri || '(no uri)') + '</b></div>' +
+                  '<div class="track-kv"><span>uri host</span><b>' + (p.uriHost || '-') + '</b></div>' +
+                  '<div class="track-kv"><span>stream host</span><b>' + (p.streamUrlHost || '-') + '</b></div>' +
+                  '<div class="track-kv"><span>quality</span><b>' + quality + '</b></div>' +
+                '</div>' +
+                '<div class="chips track-tech">' +
                   '<span class="tag">stream ' + (p.isStream ? 'yes' : 'no') + '</span>' +
                   '<span class="tag">seekable ' + (p.isSeekable ? 'yes' : 'no') + '</span>' +
                   '<span class="tag">ping ' + (Number.isFinite(Number(p.ping)) ? Number(p.ping).toFixed(0) : '-') + 'ms</span>' +
@@ -1179,33 +1243,68 @@ function buildPage(code) {
       const bySource = new Map()
       const byProtocol = new Map()
       const byPair = new Map()
+      const byStatus = new Map()
+      let totalPlayers = 0
 
       for (const w of (snapshot?.workers || [])) {
         const list = w?.response?.workersContext?.playersSummary || []
         for (const p of list) {
           const source = p.sourceName || 'unknown'
           const protocol = p.protocol || 'unknown'
+          const status = String(p.status || (p.isPaused ? 'paused' : 'working'))
           bySource.set(source, (bySource.get(source) || 0) + 1)
           byProtocol.set(protocol, (byProtocol.get(protocol) || 0) + 1)
+          byStatus.set(status, (byStatus.get(status) || 0) + 1)
           const pair = source + '|' + protocol
           byPair.set(pair, (byPair.get(pair) || 0) + 1)
+          totalPlayers += 1
         }
       }
 
-      const rows = []
-      for (const [k,v] of Array.from(bySource.entries()).sort((a,b)=>b[1]-a[1]).slice(0,12)) {
-        rows.push({ text: '<span class=\"tag\">source</span><b>'+k+'</b> <span class=\"muted\">players='+v+'</span>' })
+      const renderDist = (title, map, formatter) => {
+        const ordered = Array.from(map.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8)
+        const lines = ordered.map(([k, v], idx) => {
+          const pct = totalPlayers > 0 ? (v / totalPlayers) * 100 : 0
+          const tone = idx === 0 ? 'tone-good' : idx === 1 ? 'tone-warn' : 'tone-neutral'
+          return (
+            '<div class="group-line">' +
+              '<div class="group-head"><span>' + formatter(k) + '</span><span>' + v + ' · ' + pct.toFixed(1) + '%</span></div>' +
+              '<div class="group-meter"><i class="' + tone + '" style="width:' + pct.toFixed(2) + '%"></i></div>' +
+            '</div>'
+          )
+        }).join('')
+
+        return (
+          '<div class="group-card">' +
+            '<div class="group-title">' + title + '</div>' +
+            (lines || '<div class="muted">No data</div>') +
+          '</div>'
+        )
       }
-      for (const [k,v] of Array.from(byProtocol.entries()).sort((a,b)=>b[1]-a[1]).slice(0,12)) {
-        rows.push({ text: '<span class=\"tag\">protocol</span><b>'+k+'</b> <span class=\"muted\">players='+v+'</span>' })
-      }
-      for (const [k,v] of Array.from(byPair.entries()).sort((a,b)=>b[1]-a[1]).slice(0,12)) {
-        const [source, protocol] = k.split('|')
-        rows.push({
-          text:
-            '<span class=\"tag\">pair</span><b>'+source+'</b> / <b>'+protocol+'</b> <span class=\"muted\">players='+v+'</span>'
-        })
-      }
+
+      const topPairs = new Map(Array.from(byPair.entries()).sort((a, b) => b[1] - a[1]).slice(0, 8))
+      const rows = [{
+        html:
+          '<div class="chips group-summary">' +
+            '<span class="tag">players ' + totalPlayers + '</span>' +
+            '<span class="tag">sources ' + bySource.size + '</span>' +
+            '<span class="tag">protocols ' + byProtocol.size + '</span>' +
+            '<span class="tag">pairs ' + byPair.size + '</span>' +
+          '</div>'
+      }]
+
+      rows.push({
+        html:
+          '<div class="groups-grid groups-grid-v2">' +
+            renderDist('Sources', bySource, (k) => k) +
+            renderDist('Protocols', byProtocol, (k) => k) +
+            renderDist('Player Status', byStatus, (k) => k) +
+            renderDist('Top Source/Protocol Pairs', topPairs, (k) => {
+              const [source, protocol] = k.split('|')
+              return source + ' / ' + protocol
+            }) +
+          '</div>'
+      })
       setList(groups, rows)
     }
 
@@ -1307,6 +1406,9 @@ function buildPage(code) {
       if (history.length > maxPoints) history.shift()
       setCardsFromPoint(point)
       renderTrace()
+      renderRuntimePressure(snapshot)
+      renderTrafficMix(snapshot)
+      renderMemoryHero(snapshot)
     }
 
     function classifyCallsite(site) {
@@ -1562,6 +1664,9 @@ function buildPage(code) {
               renderWarnings(lastWarnings)
               renderRequests(lastSnapshot)
               renderEvents(lastSnapshot)
+              renderRuntimePressure(lastSnapshot)
+              renderTrafficMix(lastSnapshot)
+              renderMemoryHero(lastSnapshot)
             }
             if (payload.lastAllocTop) renderAllocTopAuto(payload.lastAllocTop)
             return
@@ -1585,6 +1690,9 @@ function buildPage(code) {
           renderWarnings(payload.warnings || [])
           renderRequests(snapshot)
           renderEvents(snapshot)
+          renderRuntimePressure(snapshot)
+          renderTrafficMix(snapshot)
+          renderMemoryHero(snapshot)
           if (payload.allocTop) renderAllocTopAuto(payload.allocTop)
           saveLocalState(snapshot, payload.warnings || [], payload.allocTop || latestAllocTop)
         } catch {}
@@ -1632,8 +1740,30 @@ function buildPage(code) {
         renderWarnings(local.lastWarnings || [])
         renderRequests(local.lastSnapshot)
         renderEvents(local.lastSnapshot)
+        renderRuntimePressure(local.lastSnapshot)
+        renderTrafficMix(local.lastSnapshot)
+        renderMemoryHero(local.lastSnapshot)
       }
       if (local.lastAllocTop) renderAllocTopAuto(local.lastAllocTop)
+    })()
+
+    ;(() => {
+      let saved = 'overview'
+      try {
+        const raw = localStorage.getItem(TAB_STATE_KEY)
+        if (raw) saved = raw
+      } catch {}
+      applyTab(saved)
+
+      if (tabs) {
+        tabs.addEventListener('click', (ev) => {
+          const target = ev.target
+          if (!(target instanceof HTMLElement)) return
+          if (!target.classList.contains('tab')) return
+          const next = target.getAttribute('data-tab') || 'overview'
+          applyTab(next)
+        })
+      }
     })()
 
     allocSites.addEventListener('click', (ev) => {
@@ -1645,15 +1775,51 @@ function buildPage(code) {
       if (!path || path === '-' || path === '(internal)') return
       openCallsite(path, line)
     })
+    origins.addEventListener('click', async (ev) => {
+      const target = ev.target
+      if (!(target instanceof HTMLElement)) return
+      const value = target.getAttribute('data-copy')
+      if (value == null) return
+      ev.preventDefault()
+      try {
+        await navigator.clipboard.writeText(value)
+        const kind = target.getAttribute('data-copy-kind')
+        const fallbackMap = {
+          title: 'copy title',
+          url: 'copy url',
+          author: 'copy author',
+          guild: 'copy guild',
+          payload: 'copy payload'
+        }
+        const fallback = fallbackMap[kind] || 'copy'
+        target.textContent = 'copied'
+        setTimeout(() => {
+          target.textContent = fallback
+        }, 900)
+      } catch {}
+    })
     window.addEventListener('beforeunload', () => {
       pageClosing = true
     }, { once: true })
 
-    connect()
+    window.addEventListener('error', (ev) => {
+      uiFatal(ev?.error?.message || ev?.message || 'window error')
+    })
+    window.addEventListener('unhandledrejection', (ev) => {
+      const reason = ev?.reason
+      const msg = reason && reason.message ? reason.message : String(reason || 'unhandled rejection')
+      uiFatal(msg)
+    })
+
+    try {
+      connect()
+    } catch (err) {
+      uiFatal(err?.message || err)
+    }
 
     if (captureMem) {
       captureMem.addEventListener('click', () => {
-        triggerAllocCapture().catch(() => {})
+        triggerAllocCapture().catch((err) => uiFatal(err?.message || err))
       })
     }
   </script>

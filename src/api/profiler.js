@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import fsPromises from 'node:fs/promises'
 import inspector from 'node:inspector'
+import os from 'node:os'
 import v8 from 'node:v8'
 import { sendErrorResponse, sendResponse } from '../utils.ts'
 
@@ -259,6 +260,10 @@ function getMasterRuntimeContext(nodelink) {
     activeResources: getMasterActiveResources(),
     activeHandles: getMasterActiveHandles(),
     heapSpaces: getMasterHeapSpaces(),
+    hostMemory: {
+      free: os.freemem(),
+      total: os.totalmem()
+    },
     trace: {
       requests: traceRequests,
       events: traceEvents
