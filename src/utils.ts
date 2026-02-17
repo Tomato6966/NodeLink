@@ -362,10 +362,18 @@ function validateProperty<T>(
   expected: string,
   validator: (value: T) => boolean
 ): void {
+  const received =
+    value === undefined
+      ? 'undefined'
+      : value === null
+        ? 'null'
+        : `${JSON.stringify(value)} (${typeof value})`
+
   if (value === undefined || value === null) {
     throw new Error(
       `Configuration error:\n` +
         `- Property: ${path}\n` +
+        `- Received: ${received}\n` +
         `- Problem: missing required value\n` +
         `- Expected: ${expected}\n\n` +
         `Please define ${path} in your config.js file.`
@@ -376,7 +384,7 @@ function validateProperty<T>(
     throw new Error(
       `Configuration error:\n` +
         `- Property: ${path}\n` +
-        `- Received: ${JSON.stringify(value)} (${typeof value})\n` +
+        `- Received: ${received}\n` +
         `- Expected: ${expected}`
     )
   }
