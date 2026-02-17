@@ -82,26 +82,51 @@ function buildPage(code) {
     </div>
 
     <div class="mem-ribbon-wrap">
-      <div class="mem-ribbon-top">
-        <small id="memHeroUsedText" class="kid-edge left">← NodeLink active heap usage</small>
-        <small id="memHeroAllocText" class="kid-edge right">Process RSS total (heap + native/runtime)</small>
+      <div class="mem-ribbon-group">
+        <div class="mem-ribbon-head">
+          <span class="mem-badge badge-nodelink">
+            <img class="mem-badge-icon" src="https://media.discordapp.net/attachments/1421591432283685078/1452346356084641864/66_Sem_Titulo_20251221140541.png?ex=6995f172&is=69949ff2&hm=63ee5c8ec3a9ce17ab9a52f74bc02442ce62cd2e3c5ddd4ed9beabeb0e5849dc&=&format=webp&quality=lossless&width=1001&height=976" alt="NodeLink" />
+            <span>NodeLink Runtime</span>
+          </span>
+          <small id="memHeroUsedText" class="mem-summary">RSS composition</small>
+        </div>
+        <small class="kid-sub">Composition inside NodeLink RSS</small>
+        <div class="mem-ribbon-bar">
+          <i id="memHeroUsed"></i>
+          <i id="memHeroGap"></i>
+          <i id="memHeroOverhead"></i>
+          <i id="memHeroUnattributed"></i>
+        </div>
+        <div class="mem-ribbon-legend">
+          <span class="legend-chip detail"><i class="swatch machine-rss"></i><span><b>Total RSS</b><small id="memHeroTotalMetric">-</small></span></span>
+          <span class="legend-chip detail"><i class="swatch used"></i><span><b>Active</b><small id="memHeroUsedMetric">Heap used</small></span></span>
+          <span class="legend-chip detail"><i class="swatch free"></i><span><b>Reserved free</b><small id="memHeroGapMetric">Heap not used yet</small></span></span>
+          <span class="legend-chip detail"><i class="swatch over"></i><span><b>Native</b><small id="memHeroNativeMetric">External + AB</small></span></span>
+          <span class="legend-chip detail"><i class="swatch unattr"></i><span><b>Other RSS</b><small id="memHeroOtherMetric">Unattributed</small></span></span>
+        </div>
+        <div class="mem-ribbon-caps">
+          <span class="cap cap-master">Master <b id="memHeroMasterShare">-</b></span>
+          <span class="cap cap-workers">Workers <b id="memHeroWorkersShare">-</b></span>
+          <span class="cap cap-source">SourceWorkers <b id="memHeroSourceShare">-</b></span>
+        </div>
       </div>
-      <div class="mem-ribbon-bar">
-        <i id="memHeroUsed"></i>
-        <i id="memHeroGap"></i>
-        <i id="memHeroOverhead"></i>
-        <i id="memHeroMachineFree"></i>
-      </div>
-      <div class="mem-ribbon-legend">
-        <span class="legend-chip"><i class="swatch used"></i>NodeLink used (heapUsed)</span>
-        <span class="legend-chip"><i class="swatch free"></i>Heap reserved and still free</span>
-        <span class="legend-chip"><i class="swatch over"></i>Tracked native (external + arrayBuffers)</span>
-        <span class="legend-chip"><i class="swatch hostfree"></i>Host RAM free (machine)</span>
-      </div>
-      <div class="mem-ribbon-foot">
-        <span id="memHeroLeftPct" class="kid-foot left">- actively used inside RSS</span>
-        <span id="memHeroNoteRight" class="kid-center">High allocation does not always mean active usage. Node/panel/container setups (for example Pterodactyl) can keep large overhead allocated.</span>
-        <span id="memHeroRightPct" class="kid-foot right">- tracked native inside RSS</span>
+
+      <div class="mem-ribbon-group mem-ribbon-mini-wrap">
+        <div class="mem-ribbon-head">
+          <span class="mem-badge badge-machine"><span>Host Machine</span></span>
+          <small id="memHeroAllocText" class="mem-summary">Machine memory snapshot</small>
+        </div>
+        <small class="kid-sub">Total host memory distribution</small>
+        <div class="mem-ribbon-bar mem-ribbon-mini">
+          <i id="memHeroMachineRss"></i>
+          <i id="memHeroMachineOther"></i>
+          <i id="memHeroMachineFree"></i>
+        </div>
+        <div class="mem-ribbon-legend">
+          <span class="legend-chip detail"><i class="swatch machine-rss"></i><span><b>NodeLink RSS</b><small id="memHeroMachineRssMetric">NodeLink share</small></span></span>
+          <span class="legend-chip detail"><i class="swatch other"></i><span><b>Other</b><small id="memHeroMachineOtherMetric">Other processes</small></span></span>
+          <span class="legend-chip detail"><i class="swatch hostfree"></i><span><b>Free</b><small id="memHeroMachineFreeMetric">Available RAM</small></span></span>
+        </div>
       </div>
     </div>
 
@@ -276,15 +301,26 @@ function buildPage(code) {
     const heapPressure = document.getElementById('heapPressure')
     const runtimePressure = document.getElementById('runtimePressure')
     const trafficMix = document.getElementById('trafficMix')
-    const memHeroLeftPct = document.getElementById('memHeroLeftPct')
-    const memHeroRightPct = document.getElementById('memHeroRightPct')
     const memHeroUsed = document.getElementById('memHeroUsed')
     const memHeroGap = document.getElementById('memHeroGap')
     const memHeroOverhead = document.getElementById('memHeroOverhead')
+    const memHeroUnattributed = document.getElementById('memHeroUnattributed')
+    const memHeroMachineRss = document.getElementById('memHeroMachineRss')
+    const memHeroMachineOther = document.getElementById('memHeroMachineOther')
     const memHeroMachineFree = document.getElementById('memHeroMachineFree')
+    const memHeroUsedMetric = document.getElementById('memHeroUsedMetric')
+    const memHeroGapMetric = document.getElementById('memHeroGapMetric')
+    const memHeroNativeMetric = document.getElementById('memHeroNativeMetric')
+    const memHeroOtherMetric = document.getElementById('memHeroOtherMetric')
+    const memHeroMachineRssMetric = document.getElementById('memHeroMachineRssMetric')
+    const memHeroMachineOtherMetric = document.getElementById('memHeroMachineOtherMetric')
+    const memHeroMachineFreeMetric = document.getElementById('memHeroMachineFreeMetric')
+    const memHeroTotalMetric = document.getElementById('memHeroTotalMetric')
+    const memHeroMasterShare = document.getElementById('memHeroMasterShare')
+    const memHeroWorkersShare = document.getElementById('memHeroWorkersShare')
+    const memHeroSourceShare = document.getElementById('memHeroSourceShare')
     const memHeroUsedText = document.getElementById('memHeroUsedText')
     const memHeroAllocText = document.getElementById('memHeroAllocText')
-    const memHeroNoteRight = document.getElementById('memHeroNoteRight')
 
     const history = []
     const maxPoints = 180
@@ -327,6 +363,27 @@ function buildPage(code) {
       const n = Number(v)
       if (!Number.isFinite(n) || n < 0) return '-'
       return (n / 1024 / 1024).toFixed(1)
+    }
+    const fmtBytes = (v) => {
+      const n = Number(v)
+      if (!Number.isFinite(n) || n < 0) return '-'
+      const units = ['B', 'KB', 'MB', 'GB', 'TB']
+      let value = n
+      let idx = 0
+      while (value >= 1024 && idx < units.length - 1) {
+        value /= 1024
+        idx += 1
+      }
+      const digits = value >= 100 ? 0 : value >= 10 ? 1 : 2
+      return value.toFixed(digits) + ' ' + units[idx]
+    }
+    const setSeg = (el, pct, bytes, label, minVisible = 18) => {
+      if (!el) return
+      const safePct = Math.max(0, Math.min(100, Number(pct) || 0))
+      el.style.width = safePct.toFixed(2) + '%'
+      const text = label + ' ' + fmtBytes(bytes) + ' · ' + safePct.toFixed(1) + '%'
+      el.setAttribute('data-label', text)
+      el.classList.toggle('label-hidden', safePct < minVisible)
     }
 
     const fmtMs = (value) => {
@@ -513,42 +570,67 @@ function buildPage(code) {
       }
 
       const safeRss = Math.max(rss, 1)
-      const usedPct = Math.max(0, Math.min(100, (used / safeRss) * 100))
-      const heapFreePct = Math.max(0, Math.min(100, ((allocated - used) / safeRss) * 100))
-      const trackedNativePct = Math.max(0, Math.min(100, ((external + arrayBuffers) / safeRss) * 100))
-      const unattributedPct = Math.max(0, Math.min(100, ((rss - allocated - external - arrayBuffers) / safeRss) * 100))
-      const norm = usedPct + heapFreePct + trackedNativePct
-      const scale = norm > 100 ? 100 / norm : 1
-      const usedScaled = usedPct * scale
-      const heapFreeScaled = heapFreePct * scale
-      const trackedNativeScaled = trackedNativePct * scale
+      const heapReservedFree = Math.max(0, allocated - used)
+      const trackedNative = Math.max(0, Math.max(external, arrayBuffers))
+      const unattributed = Math.max(0, rss - used - heapReservedFree - trackedNative)
 
-      if (memHeroLeftPct) memHeroLeftPct.textContent = usedPct.toFixed(1) + '% active heap inside RSS'
-      if (memHeroRightPct) memHeroRightPct.textContent = trackedNativePct.toFixed(1) + '% tracked native (Ext/AB)'
-      if (memHeroUsed) memHeroUsed.style.width = usedScaled.toFixed(2) + '%'
-      if (memHeroGap) memHeroGap.style.width = heapFreeScaled.toFixed(2) + '%'
-      if (memHeroOverhead) memHeroOverhead.style.width = trackedNativeScaled.toFixed(2) + '%'
-      if (memHeroUsedText) memHeroUsedText.textContent = 'NodeLink active usage: ' + mb(used) + ' MB'
-      if (memHeroAllocText) memHeroAllocText.textContent = 'Process RSS total: ' + mb(rss) + ' MB (heap reserved ' + mb(allocated) + ' MB)'
+      const usedPct = Math.max(0, Math.min(100, (used / safeRss) * 100))
+      const heapFreePct = Math.max(0, Math.min(100, (heapReservedFree / safeRss) * 100))
+      const trackedNativePct = Math.max(0, Math.min(100, (trackedNative / safeRss) * 100))
+      const unattributedPct = Math.max(0, Math.min(100, (unattributed / safeRss) * 100))
+
+      const rssNorm = usedPct + heapFreePct + trackedNativePct + unattributedPct
+      const rssScale = rssNorm > 100 ? 100 / rssNorm : 1
+      const usedScaled = usedPct * rssScale
+      const heapFreeScaled = heapFreePct * rssScale
+      const trackedNativeScaled = trackedNativePct * rssScale
+      const unattributedScaled = unattributedPct * rssScale
+
+      if (memHeroUsedText) {
+        memHeroUsedText.textContent =
+          'RSS ' + mb(rss) + ' MB | Active ' + mb(used) + ' MB'
+      }
 
       const hostMem = snapshot?.master?.runtime?.hostMemory || {}
       const machineTotal = Number(hostMem.total || 0)
       const machineFree = Number(hostMem.free || 0)
       const machineTotalSafe = Math.max(machineTotal, 1)
       const machineFreePct = machineTotal > 0 ? Math.max(0, Math.min(100, (machineFree / machineTotalSafe) * 100)) : 0
-      if (memHeroMachineFree) memHeroMachineFree.style.width = machineFreePct.toFixed(2) + '%'
+      const machineRssPct = machineTotal > 0 ? Math.max(0, Math.min(100, (rss / machineTotalSafe) * 100)) : 0
+      const machineOtherPct = machineTotal > 0 ? Math.max(0, 100 - machineFreePct - machineRssPct) : 0
+      const machineOtherAbs = Math.max(0, machineTotal - machineFree - rss)
 
-      if (memHeroNoteRight) {
-        const heapFree = Math.max(0, allocated - used)
-        const heapFreePct = (heapFree / safeRss) * 100
-        const note =
-          'Blue=' + usedPct.toFixed(1) +
-          '% active heap, Gray=' + heapFreePct.toFixed(1) +
-          '% reserved heap free, Red=' + trackedNativePct.toFixed(1) +
-          '% tracked native (Ext/AB), Unattributed RSS=' + Math.max(0, unattributedPct).toFixed(1) +
-          (machineTotal > 0 ? '%, Host free=' + machineFreePct.toFixed(1) + '%.' : '%. Host free unavailable in this snapshot.') +
-          ' High allocation does not always mean active use (Pterodactyl/container overhead can be high).'
-        memHeroNoteRight.textContent = note
+      setSeg(memHeroUsed, usedScaled, used, 'Active')
+      setSeg(memHeroGap, heapFreeScaled, heapReservedFree, 'Reserved')
+      setSeg(memHeroOverhead, trackedNativeScaled, trackedNative, 'Native')
+      setSeg(memHeroUnattributed, unattributedScaled, unattributed, 'Other RSS')
+      setSeg(memHeroMachineRss, machineRssPct, rss, 'NodeLink', 22)
+      setSeg(memHeroMachineOther, machineOtherPct, machineOtherAbs, 'Other', 22)
+      setSeg(memHeroMachineFree, machineFreePct, machineFree, 'Free', 22)
+
+      if (memHeroUsedMetric) memHeroUsedMetric.textContent = fmtBytes(used) + ' · ' + usedPct.toFixed(1) + '%'
+      if (memHeroGapMetric) memHeroGapMetric.textContent = fmtBytes(heapReservedFree) + ' · ' + heapFreePct.toFixed(1) + '%'
+      if (memHeroNativeMetric) memHeroNativeMetric.textContent = fmtBytes(trackedNative) + ' · ' + trackedNativePct.toFixed(1) + '%'
+      if (memHeroOtherMetric) memHeroOtherMetric.textContent = fmtBytes(unattributed) + ' · ' + unattributedPct.toFixed(1) + '%'
+      if (memHeroMachineRssMetric) memHeroMachineRssMetric.textContent = fmtBytes(rss) + ' · ' + machineRssPct.toFixed(1) + '%'
+      if (memHeroMachineOtherMetric) memHeroMachineOtherMetric.textContent = fmtBytes(machineOtherAbs) + ' · ' + machineOtherPct.toFixed(1) + '%'
+      if (memHeroMachineFreeMetric) memHeroMachineFreeMetric.textContent = fmtBytes(machineFree) + ' · ' + machineFreePct.toFixed(1) + '%'
+
+      const masterRss = Number(snapshot?.master?.memory?.rss || 0)
+      let workersRss = 0
+      for (const w of (snapshot?.workers || [])) workersRss += Number(w?.response?.memory?.rss || 0)
+      let sourceRss = 0
+      for (const s of (snapshot?.sourceWorkers || [])) sourceRss += Number(s?.response?.memory?.rss || 0)
+      const safeTotalRss = Math.max(rss, 1)
+      if (memHeroTotalMetric) memHeroTotalMetric.textContent = fmtBytes(rss) + ' · 100.0%'
+      if (memHeroMasterShare) memHeroMasterShare.textContent = fmtBytes(masterRss) + ' · ' + ((masterRss / safeTotalRss) * 100).toFixed(1) + '%'
+      if (memHeroWorkersShare) memHeroWorkersShare.textContent = fmtBytes(workersRss) + ' · ' + ((workersRss / safeTotalRss) * 100).toFixed(1) + '%'
+      if (memHeroSourceShare) memHeroSourceShare.textContent = fmtBytes(sourceRss) + ' · ' + ((sourceRss / safeTotalRss) * 100).toFixed(1) + '%'
+
+      if (memHeroAllocText) {
+        memHeroAllocText.textContent = machineTotal > 0
+          ? 'Total ' + mb(machineTotal) + ' MB | Free ' + mb(machineFree) + ' MB | NodeLink ' + machineRssPct.toFixed(1) + '%'
+          : 'Machine memory unavailable'
       }
     }
 
@@ -1343,6 +1425,7 @@ function buildPage(code) {
         for (const p of list) {
           const status = String(p.status || (p.isPaused ? 'paused' : 'working'))
           const safeStatus = status.toLowerCase().replace(/[^a-z0-9_-]+/g, '')
+          const hasTrack = !!p?.title || !!p?.uri
           const progressPct =
             Number.isFinite(Number(p.progressPercent)) && Number(p.progressPercent) >= 0
               ? Math.max(0, Math.min(100, Number(p.progressPercent)))
@@ -1374,6 +1457,49 @@ function buildPage(code) {
             (hasDuration ? (' (' + fmtMs(p.remaining) + ' left)') : '')
           const quality =
             (p.codec || '-') + ' · ' + (p.container || '-') + ' · ' + (p.formatLabel || p.format || '-')
+          const totalBytes = Math.max(0, Number(p.streamBytesTotal || 0))
+          const downloadedBytes = Math.max(0, Math.min(totalBytes || Infinity, Number(p.streamBytesDownloaded || 0)))
+          const decodedBytes = Math.max(0, Math.min(downloadedBytes, Number(p.streamBytesDecoded || 0)))
+          const missingBytes = totalBytes > 0 ? Math.max(0, totalBytes - downloadedBytes) : 0
+          const decodedPct = totalBytes > 0 ? (decodedBytes / totalBytes) * 100 : 0
+          const downloadedOnlyPct = totalBytes > 0 ? Math.max(0, ((downloadedBytes - decodedBytes) / totalBytes) * 100) : 0
+          const missingPct = totalBytes > 0 ? Math.max(0, (missingBytes / totalBytes) * 100) : 0
+          const bufferWidget = totalBytes > 0
+            ? (
+              '<div class="stream-buffer">' +
+                '<div class="stream-buffer-head">' +
+                  '<span>stream buffer</span>' +
+                  '<span>' + fmtBytes(downloadedBytes) + ' / ' + fmtBytes(totalBytes) + '</span>' +
+                '</div>' +
+                '<div class="stream-buffer-bar">' +
+                  '<i class="seg-decoded" style="width:' + decodedPct.toFixed(2) + '%"></i>' +
+                  '<i class="seg-downloaded" style="width:' + downloadedOnlyPct.toFixed(2) + '%"></i>' +
+                  '<i class="seg-missing" style="width:' + missingPct.toFixed(2) + '%"></i>' +
+                '</div>' +
+                '<div class="stream-buffer-legend">' +
+                  '<span><i class="dot decoded"></i>decoded ' + fmtBytes(decodedBytes) + '</span>' +
+                  '<span><i class="dot downloaded"></i>downloaded ' + fmtBytes(Math.max(0, downloadedBytes - decodedBytes)) + '</span>' +
+                  '<span><i class="dot missing"></i>missing ' + fmtBytes(missingBytes) + '</span>' +
+                '</div>' +
+              '</div>'
+            )
+            : ''
+          if (!hasTrack || safeStatus === 'idle') {
+            rows.push({
+              text:
+                '<div class="track-card track-card-idle">' +
+                  '<div class="track-idle-top">' +
+                    '<div class="track-idle-icon">zzz</div>' +
+                    '<div class="stack">' +
+                      '<div class="track-idle-title">Player Sleeping</div>' +
+                      '<div class="track-idle-sub">No active track on worker ' + (w.pid || '-') + '</div>' +
+                    '</div>' +
+                    '<span class="status status-idle">idle</span>' +
+                  '</div>' +
+                '</div>'
+            })
+            continue
+          }
           rows.push({
             text:
               '<div class="track-card track-card-v2">' +
@@ -1393,6 +1519,7 @@ function buildPage(code) {
                     '<div class="track-subtitle">' + (p.author || '-') + '</div>' +
                     '<div class="track-time"><span>position</span><span>' + progressLabel + '</span></div>' +
                     '<div class="progress"><i style="width:' + progressPct.toFixed(2) + '%"></i></div>' +
+                    bufferWidget +
                     '<div class="track-controls">' +
                       (p.uri ? ('<a class="mini-btn" href="' + String(p.uri).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener noreferrer">open</a>') : '') +
                       (p.artworkUrl ? ('<a class="mini-btn" href="' + String(p.artworkUrl).replace(/"/g, '&quot;') + '" target="_blank" rel="noopener noreferrer">artwork</a>') : '') +

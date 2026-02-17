@@ -51,6 +51,11 @@ export class Player {
         channelId: null
     };
     streamInfo = null;
+    profilerStreamStats = {
+        downloadedBytes: 0,
+        totalBytes: null,
+        lastChunkAt: null
+    };
     lastManualReconnect = 0;
     audioMixer = null;
     fading;
@@ -816,8 +821,24 @@ export class Player {
         if (fetched.exception)
             return fetched;
         const fetchedStream = fetched.stream;
+        const totalBytesRaw = urlData.additionalData
+            ?.contentLength ?? null;
+        const totalBytesNum = Number(totalBytesRaw);
+        this.profilerStreamStats = {
+            downloadedBytes: 0,
+            totalBytes: Number.isFinite(totalBytesNum) && totalBytesNum > 0 ? totalBytesNum : null,
+            lastChunkAt: null
+        };
         if (typeof fetchedStream.on === 'function') {
             const eventStream = fetchedStream;
+            eventStream.on?.('data', (chunk) => {
+                const size = typeof chunk === 'string'
+                    ? Buffer.byteLength(chunk)
+                    : Number(chunk?.length || 0);
+                if (size > 0)
+                    this.profilerStreamStats.downloadedBytes += size;
+                this.profilerStreamStats.lastChunkAt = Date.now();
+            });
             eventStream.on?.('eternalboxJump', (data) => {
                 this.emitEvent(GatewayEvents.ETERNALBOX_JUMP, {
                     track: this.holoTrack || this.track,

@@ -480,6 +480,50 @@ const handleProfilerCommand = async (
         const remainingMs = durationMs > 0 ? Math.max(0, durationMs - clampedPosition) : null
         const progressPercent =
           durationMs > 0 ? Number(((clampedPosition / durationMs) * 100).toFixed(2)) : null
+        const contentLengthRaw = (
+          internal.streamInfo as
+            | { additionalData?: { contentLength?: number | string } | null }
+            | null
+            | undefined
+        )?.additionalData?.contentLength
+        const contentLength = Number(contentLengthRaw)
+        const totalBytes =
+          Number.isFinite(contentLength) && contentLength > 0 ? contentLength : null
+        const downloadedRaw = Number(
+          (
+            player as unknown as {
+              profilerStreamStats?: { downloadedBytes?: number }
+            }
+          )?.profilerStreamStats?.downloadedBytes || 0
+        )
+        const seekOffsetBytes =
+          totalBytes && durationMs > 0
+            ? Math.max(
+                0,
+                Math.min(
+                  totalBytes,
+                  (totalBytes * Number((internal.streamInfo as { additionalData?: { startTime?: number } | null } | null | undefined)?.additionalData?.startTime || 0)) /
+                    durationMs
+                )
+              )
+            : 0
+        const decodedBytes =
+          totalBytes && durationMs > 0
+            ? Math.max(
+                0,
+                Math.min(totalBytes, (totalBytes * clampedPosition) / durationMs)
+              )
+            : null
+        const downloadedBytes = totalBytes
+          ? Math.max(
+              decodedBytes || 0,
+              Math.min(totalBytes, downloadedRaw + seekOffsetBytes)
+            )
+          : null
+        const missingBytes =
+          totalBytes && downloadedBytes !== null
+            ? Math.max(0, totalBytes - downloadedBytes)
+            : null
         const hasTrack = !!track?.info
         const status = !hasTrack
           ? 'idle'
@@ -524,6 +568,10 @@ const handleProfilerCommand = async (
           duration: durationMs,
           remaining: remainingMs,
           progressPercent,
+          streamBytesTotal: totalBytes,
+          streamBytesDownloaded: downloadedBytes,
+          streamBytesDecoded: decodedBytes,
+          streamBytesMissing: missingBytes,
           ping: Number(internal.connection?.ping || 0)
         }
       })

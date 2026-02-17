@@ -92,6 +92,15 @@ export class Player {
     channelId: null
   }
   public streamInfo: StreamInfo = null
+  public profilerStreamStats: {
+    downloadedBytes: number
+    totalBytes: number | null
+    lastChunkAt: number | null
+  } = {
+    downloadedBytes: 0,
+    totalBytes: null,
+    lastChunkAt: null
+  }
   public lastManualReconnect = 0
   public audioMixer: AudioMixer | null = null
   public fading?: FadingConfig
@@ -1141,8 +1150,26 @@ export class Player {
     )
     if (fetched.exception) return fetched as { exception: { message: string } }
     const fetchedStream = fetched.stream
+    const totalBytesRaw =
+      (urlData.additionalData as { contentLength?: number | string } | null | undefined)
+        ?.contentLength ?? null
+    const totalBytesNum = Number(totalBytesRaw)
+    this.profilerStreamStats = {
+      downloadedBytes: 0,
+      totalBytes:
+        Number.isFinite(totalBytesNum) && totalBytesNum > 0 ? totalBytesNum : null,
+      lastChunkAt: null
+    }
     if (typeof (fetchedStream as { on?: unknown }).on === 'function') {
       const eventStream = fetchedStream as unknown as VoiceAudioStream
+      eventStream.on?.('data', (chunk: Buffer | Uint8Array | string) => {
+        const size =
+          typeof chunk === 'string'
+            ? Buffer.byteLength(chunk)
+            : Number((chunk as { length?: number })?.length || 0)
+        if (size > 0) this.profilerStreamStats.downloadedBytes += size
+        this.profilerStreamStats.lastChunkAt = Date.now()
+      })
       eventStream.on?.('eternalboxJump', (data: unknown) => {
         this.emitEvent(GatewayEvents.ETERNALBOX_JUMP, {
           track: this.holoTrack || this.track,
