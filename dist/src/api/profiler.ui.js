@@ -90,6 +90,7 @@ function buildPage(code) {
           <i id="memHeroUnattributed"></i>
         </div>
         <div class="mem-ribbon-legend">
+          <span class="legend-chip detail"><i class="swatch machine-rss"></i><span><b>Total RSS</b><small id="memHeroTotalMetric">-</small></span></span>
           <span class="legend-chip detail"><i class="swatch used"></i><span><b>Active</b><small id="memHeroUsedMetric">Heap used</small></span></span>
           <span class="legend-chip detail"><i class="swatch free"></i><span><b>Reserved free</b><small id="memHeroGapMetric">Heap not used yet</small></span></span>
           <span class="legend-chip detail"><i class="swatch over"></i><span><b>Native</b><small id="memHeroNativeMetric">External + AB</small></span></span>
@@ -306,6 +307,7 @@ function buildPage(code) {
     const memHeroMachineRssMetric = document.getElementById('memHeroMachineRssMetric')
     const memHeroMachineOtherMetric = document.getElementById('memHeroMachineOtherMetric')
     const memHeroMachineFreeMetric = document.getElementById('memHeroMachineFreeMetric')
+    const memHeroTotalMetric = document.getElementById('memHeroTotalMetric')
     const memHeroMasterShare = document.getElementById('memHeroMasterShare')
     const memHeroWorkersShare = document.getElementById('memHeroWorkersShare')
     const memHeroSourceShare = document.getElementById('memHeroSourceShare')
@@ -612,6 +614,7 @@ function buildPage(code) {
       let sourceRss = 0
       for (const s of (snapshot?.sourceWorkers || [])) sourceRss += Number(s?.response?.memory?.rss || 0)
       const safeTotalRss = Math.max(rss, 1)
+      if (memHeroTotalMetric) memHeroTotalMetric.textContent = fmtBytes(rss) + ' · 100.0%'
       if (memHeroMasterShare) memHeroMasterShare.textContent = fmtBytes(masterRss) + ' · ' + ((masterRss / safeTotalRss) * 100).toFixed(1) + '%'
       if (memHeroWorkersShare) memHeroWorkersShare.textContent = fmtBytes(workersRss) + ' · ' + ((workersRss / safeTotalRss) * 100).toFixed(1) + '%'
       if (memHeroSourceShare) memHeroSourceShare.textContent = fmtBytes(sourceRss) + ' · ' + ((sourceRss / safeTotalRss) * 100).toFixed(1) + '%'
@@ -1195,6 +1198,13 @@ function buildPage(code) {
       for (const w of (snapshot?.workers || [])) {
         const bp = w?.response?.workersContext?.bufferPool
         if (!bp) continue
+        
+        const rejectionRate = (bp.releaseCalls || 0) > 0 
+          ? ((bp.rejectedReleases || 0) / bp.releaseCalls * 100).toFixed(1)
+          : '0.0'
+        const rejectionLevel = parseFloat(rejectionRate) > 30 ? 'warn' : 
+                               parseFloat(rejectionRate) > 10 ? 'neutral' : 'ok'
+        
         rows.push({
           text:
             '<span class="tag">worker ' + (w.pid || '-') + '</span>' +
@@ -1202,6 +1212,14 @@ function buildPage(code) {
             '<span class="tag">high ' + mb(bp.highWaterBytes) + 'MB</span>' +
             '<span class="tag">buckets ' + (bp.buckets || 0) + '</span>' +
             '<span class="tag">reuse ' + safePct(bp.reuseRatio || 0) + '</span>'
+        })
+        rows.push({
+          text:
+            '<span class="tag">acquire ' + (bp.acquireCalls || 0) + '</span>' +
+            '<span class="tag">new ' + (bp.newAllocs || 0) + '</span>' +
+            '<span class="tag">hits ' + (bp.reuseHits || 0) + '</span>' +
+            '<span class="tag">release ' + (bp.releaseCalls || 0) + '</span>' +
+            '<span class="tag ' + rejectionLevel + '">reject ' + (bp.rejectedReleases || 0) + ' (' + rejectionRate + '%)</span>'
         })
         for (const bucket of (bp.topBuckets || []).slice(0, 10)) {
           rows.push({

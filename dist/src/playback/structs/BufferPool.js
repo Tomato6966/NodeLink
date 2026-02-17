@@ -6,9 +6,12 @@ const parsePositiveIntEnv = (key, fallback) => {
     const parsed = Number.parseInt(raw, 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
-const MAX_POOL_SIZE_BYTES = parsePositiveIntEnv('NODELINK_BUFFER_POOL_MAX_BYTES', 50 * 1024 * 1024);
-const MAX_BUCKET_ENTRIES = parsePositiveIntEnv('NODELINK_BUFFER_POOL_MAX_BUCKET_ENTRIES', 8);
-const IDLE_CLEAR_MS = parsePositiveIntEnv('NODELINK_BUFFER_POOL_IDLE_CLEAR_MS', 180000);
+const MAX_POOL_SIZE_BYTES = parsePositiveIntEnv('NODELINK_BUFFER_POOL_MAX_BYTES', 20 * 1024 * 1024 // 20 MB - reduced from 50MB
+);
+const MAX_BUCKET_ENTRIES = parsePositiveIntEnv('NODELINK_BUFFER_POOL_MAX_BUCKET_ENTRIES', 4 // reduced from 8
+);
+const IDLE_CLEAR_MS = parsePositiveIntEnv('NODELINK_BUFFER_POOL_IDLE_CLEAR_MS', 60000 // 1 min - reduced from 3 min
+);
 const CLEANUP_INTERVAL = 60000;
 /**
  * A pool for reusing Buffers to reduce allocations and GC pressure.
@@ -95,6 +98,20 @@ class BufferPool {
             this.rejectedReleases++;
             return;
         }
+        // Always accept if under 75% capacity
+        if (this.totalBytes + size > MAX_POOL_SIZE_BYTES * 0.75) {
+            // Try to make room by clearing oldest bucket
+            const sizes = Array.from(this.pools.keys()).sort((a, b) => b - a);
+            for (const s of sizes) {
+                if (this.totalBytes + size <= MAX_POOL_SIZE_BYTES)
+                    break;
+                const bucket = this.pools.get(s);
+                if (bucket?.length) {
+                    this.totalBytes -= s * bucket.length;
+                    this.pools.delete(s);
+                }
+            }
+        }
         if (this.totalBytes + size > MAX_POOL_SIZE_BYTES) {
             this.rejectedReleases++;
             return;
@@ -141,6 +158,15 @@ class BufferPool {
             .sort((a, b) => b.bytes - a.bytes)
             .slice(0, 20);
         const reuseRatio = this.acquireCalls > 0 ? this.reuseHits / this.acquireCalls : 0;
+        // Log warning if high rejection rate
+        const rejectionRate = this.releaseCalls > 0
+            ? this.rejectedReleases / this.releaseCalls
+            : 0;
+        if (rejectionRate > 0.5 && this.rejectedReleases > 10) {
+            logger('warn', 'BufferPool', `High rejection rate: ${(rejectionRate * 100).toFixed(1)}% (${this.rejectedReleases}/${this.releaseCalls}). ` +
+                `Pool: ${this.totalBytes} / ${MAX_POOL_SIZE_BYTES} bytes. ` +
+                `Consider increasing NODELINK_BUFFER_POOL_MAX_BYTES.`);
+        }
         return {
             totalBytes: this.totalBytes,
             highWaterBytes: this.highWaterBytes,
@@ -161,17 +187,33 @@ class BufferPool {
      * @private
      */
     _cleanup() {
-        if (this.totalBytes > 0 &&
-            Date.now() - this.lastActivityAt >= IDLE_CLEAR_MS) {
+        const now = Date.now();
+        // Clear if idle
+        if (this.totalBytes > 0 && now - this.lastActivityAt >= IDLE_CLEAR_MS) {
             this.pools.clear();
             this.totalBytes = 0;
             logger('debug', 'BufferPool', 'Pool cleared after idle period.');
             return;
         }
+        // If over limit, remove largest buffers first
         if (this.totalBytes > MAX_POOL_SIZE_BYTES) {
-            this.pools.clear();
-            this.totalBytes = 0;
-            logger('debug', 'BufferPool', 'Pool cleared due to size limit.');
+            const sizes = Array.from(this.pools.keys()).sort((a, b) => b - a);
+            for (const size of sizes) {
+                if (this.totalBytes <= MAX_POOL_SIZE_BYTES)
+                    break;
+                const bucket = this.pools.get(size);
+                if (bucket?.length) {
+                    const count = bucket.length;
+                    this.totalBytes -= size * count;
+                    this.pools.delete(size);
+                    logger('debug', 'BufferPool', `Cleared bucket ${size} (${count} entries, ${size * count} bytes)`);
+                }
+            }
+            if (this.totalBytes > MAX_POOL_SIZE_BYTES) {
+                this.pools.clear();
+                this.totalBytes = 0;
+                logger('debug', 'BufferPool', 'Pool cleared due to size limit.');
+            }
         }
     }
 }

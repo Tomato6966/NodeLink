@@ -1206,6 +1206,13 @@ function buildPage(code) {
       for (const w of (snapshot?.workers || [])) {
         const bp = w?.response?.workersContext?.bufferPool
         if (!bp) continue
+        
+        const rejectionRate = (bp.releaseCalls || 0) > 0 
+          ? ((bp.rejectedReleases || 0) / bp.releaseCalls * 100).toFixed(1)
+          : '0.0'
+        const rejectionLevel = parseFloat(rejectionRate) > 30 ? 'warn' : 
+                               parseFloat(rejectionRate) > 10 ? 'neutral' : 'ok'
+        
         rows.push({
           text:
             '<span class="tag">worker ' + (w.pid || '-') + '</span>' +
@@ -1213,6 +1220,14 @@ function buildPage(code) {
             '<span class="tag">high ' + mb(bp.highWaterBytes) + 'MB</span>' +
             '<span class="tag">buckets ' + (bp.buckets || 0) + '</span>' +
             '<span class="tag">reuse ' + safePct(bp.reuseRatio || 0) + '</span>'
+        })
+        rows.push({
+          text:
+            '<span class="tag">acquire ' + (bp.acquireCalls || 0) + '</span>' +
+            '<span class="tag">new ' + (bp.newAllocs || 0) + '</span>' +
+            '<span class="tag">hits ' + (bp.reuseHits || 0) + '</span>' +
+            '<span class="tag">release ' + (bp.releaseCalls || 0) + '</span>' +
+            '<span class="tag ' + rejectionLevel + '">reject ' + (bp.rejectedReleases || 0) + ' (' + rejectionRate + '%)</span>'
         })
         for (const bucket of (bp.topBuckets || []).slice(0, 10)) {
           rows.push({

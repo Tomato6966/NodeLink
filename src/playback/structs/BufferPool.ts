@@ -9,15 +9,15 @@ const parsePositiveIntEnv = (key: string, fallback: number): number => {
 
 const MAX_POOL_SIZE_BYTES = parsePositiveIntEnv(
   'NODELINK_BUFFER_POOL_MAX_BYTES',
-  50 * 1024 * 1024
+  20 * 1024 * 1024  // 20 MB - reduced from 50MB
 )
 const MAX_BUCKET_ENTRIES = parsePositiveIntEnv(
   'NODELINK_BUFFER_POOL_MAX_BUCKET_ENTRIES',
-  8
+  4  // reduced from 8
 )
 const IDLE_CLEAR_MS = parsePositiveIntEnv(
   'NODELINK_BUFFER_POOL_IDLE_CLEAR_MS',
-  180000
+  60000  // 1 min - reduced from 3 min
 )
 const CLEANUP_INTERVAL = 60000
 
@@ -112,6 +112,19 @@ class BufferPool {
       return
     }
 
+    // Always accept if under 75% capacity
+    if (this.totalBytes + size > MAX_POOL_SIZE_BYTES * 0.75) {
+      const sizes = Array.from(this.pools.keys()).sort((a, b) => b - a)
+      for (const s of sizes) {
+        if (this.totalBytes + size <= MAX_POOL_SIZE_BYTES) break
+        const bucket = this.pools.get(s)
+        if (bucket?.length) {
+          this.totalBytes -= s * bucket.length
+          this.pools.delete(s)
+        }
+      }
+    }
+
     if (this.totalBytes + size > MAX_POOL_SIZE_BYTES) {
       this.rejectedReleases++
       return
@@ -179,6 +192,19 @@ class BufferPool {
     const reuseRatio =
       this.acquireCalls > 0 ? this.reuseHits / this.acquireCalls : 0
 
+    const rejectionRate = this.releaseCalls > 0
+      ? this.rejectedReleases / this.releaseCalls
+      : 0
+    if (rejectionRate > 0.5 && this.rejectedReleases > 10) {
+      logger(
+        'warn',
+        'BufferPool',
+        `High rejection rate: ${(rejectionRate * 100).toFixed(1)}% (${this.rejectedReleases}/${this.releaseCalls}). ` +
+        `Pool: ${this.totalBytes} / ${MAX_POOL_SIZE_BYTES} bytes. ` +
+        `Consider increasing NODELINK_BUFFER_POOL_MAX_BYTES.`
+      )
+    }
+
     return {
       totalBytes: this.totalBytes,
       highWaterBytes: this.highWaterBytes,
@@ -200,10 +226,9 @@ class BufferPool {
    * @private
    */
   private _cleanup(): void {
-    if (
-      this.totalBytes > 0 &&
-      Date.now() - this.lastActivityAt >= IDLE_CLEAR_MS
-    ) {
+    const now = Date.now()
+
+    if (this.totalBytes > 0 && now - this.lastActivityAt >= IDLE_CLEAR_MS) {
       this.pools.clear()
       this.totalBytes = 0
       logger('debug', 'BufferPool', 'Pool cleared after idle period.')
@@ -211,9 +236,22 @@ class BufferPool {
     }
 
     if (this.totalBytes > MAX_POOL_SIZE_BYTES) {
-      this.pools.clear()
-      this.totalBytes = 0
-      logger('debug', 'BufferPool', 'Pool cleared due to size limit.')
+      const sizes = Array.from(this.pools.keys()).sort((a, b) => b - a)
+      for (const size of sizes) {
+        if (this.totalBytes <= MAX_POOL_SIZE_BYTES) break
+        const bucket = this.pools.get(size)
+        if (bucket?.length) {
+          const count = bucket.length
+          this.totalBytes -= size * count
+          this.pools.delete(size)
+          logger('debug', 'BufferPool', `Cleared bucket ${size} (${count} entries, ${size * count} bytes)`)
+        }
+      }
+      if (this.totalBytes > MAX_POOL_SIZE_BYTES) {
+        this.pools.clear()
+        this.totalBytes = 0
+        logger('debug', 'BufferPool', 'Pool cleared due to size limit.')
+      }
     }
   }
 }
