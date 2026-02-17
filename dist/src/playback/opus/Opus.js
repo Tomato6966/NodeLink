@@ -1,6 +1,6 @@
-import { Buffer } from 'node:buffer';
 import { createRequire } from 'node:module';
 import { Transform } from 'node:stream';
+import { bufferPool } from "../structs/BufferPool.js";
 const require = createRequire(import.meta.url);
 const OPUS_CTL = {
     BITRATE: 4002,
@@ -87,8 +87,8 @@ export class Encoder extends Transform {
         this.lib = lib;
         this.frameSize = frameSize;
         this.frameBytes = frameSize * channels * 2;
-        this.ring = Buffer.allocUnsafe(RING_SIZE);
-        this.swap = Buffer.allocUnsafe(this.frameBytes);
+        this.ring = bufferPool.acquire(RING_SIZE);
+        this.swap = bufferPool.acquire(this.frameBytes);
         this.writePos = 0;
         this.readPos = 0;
     }
@@ -127,7 +127,7 @@ export class Encoder extends Transform {
                 const first = RING_SIZE - rp;
                 this.ring.copy(this.swap, 0, rp, RING_SIZE);
                 this.ring.copy(this.swap, first, 0, this.frameBytes - first);
-                frame = this.swap;
+                frame = this.swap.subarray(0, this.frameBytes);
             }
             try {
                 if (!this.enc)
@@ -163,8 +163,14 @@ export class Encoder extends Transform {
             this.enc.delete();
         }
         this.enc = null;
-        this.ring = null;
-        this.swap = null;
+        if (this.ring) {
+            bufferPool.release(this.ring);
+            this.ring = null;
+        }
+        if (this.swap) {
+            bufferPool.release(this.swap);
+            this.swap = null;
+        }
         cb(err);
     }
     setBitrate(v) {

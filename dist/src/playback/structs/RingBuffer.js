@@ -74,7 +74,8 @@ export class RingBuffer {
         const bytesToRead = Math.min(Math.max(0, n), this._length);
         if (bytesToRead === 0)
             return null;
-        const out = Buffer.allocUnsafe(bytesToRead);
+        const acquired = bufferPool.acquire(bytesToRead);
+        const out = acquired.subarray(0, bytesToRead);
         const availableAtEnd = this.size - this.readOffset;
         if (bytesToRead <= availableAtEnd) {
             this.buffer.copy(out, 0, this.readOffset, this.readOffset + bytesToRead);
@@ -109,7 +110,8 @@ export class RingBuffer {
         const bytesToPeek = Math.min(Math.max(0, n), this._length);
         if (bytesToPeek === 0)
             return null;
-        const out = Buffer.allocUnsafe(bytesToPeek);
+        const acquired = bufferPool.acquire(bytesToPeek);
+        const out = acquired.subarray(0, bytesToPeek);
         const availableAtEnd = this.size - this.readOffset;
         if (bytesToPeek <= availableAtEnd) {
             this.buffer.copy(out, 0, this.readOffset, this.readOffset + bytesToPeek);
@@ -135,7 +137,8 @@ export class RingBuffer {
         if (bytesToGet <= availableAtEnd) {
             return this.buffer.subarray(this.readOffset, this.readOffset + bytesToGet);
         }
-        const out = Buffer.allocUnsafe(bytesToGet);
+        const acquired = bufferPool.acquire(bytesToGet);
+        const out = acquired.subarray(0, bytesToGet);
         this.buffer.copy(out, 0, this.readOffset, this.size);
         this.buffer.copy(out, availableAtEnd, 0, bytesToGet - availableAtEnd);
         return out;
