@@ -343,6 +343,59 @@ const handleProfilerCommand = async (payload) => {
         for (const entry of guildQueues.values()) {
             queuedCommands += entry.queue.length;
         }
+        const sourceManagerDebug = nodelink.sources ? {
+            enabledSources: Array.from(nodelink.sources.sources.keys()),
+            sourceMapSize: nodelink.sources.sourceMap?.size ?? null,
+            searchAliasMapSize: nodelink.sources.searchAliasMap?.size ?? null,
+            patternMapLength: nodelink.sources.patternMap?.length ?? null
+        } : null;
+        const trackCacheDebug = nodelink.trackCacheManager ? {
+            size: nodelink.trackCacheManager.cache?.size ?? null,
+            maxEntries: nodelink.trackCacheManager.maxEntries ?? null
+        } : null;
+        const credentialDebug = nodelink.credentialManager && typeof nodelink.credentialManager.getStats === 'function'
+            ? nodelink.credentialManager.getStats()
+            : null;
+        const statsDebug = nodelink.statsManager && typeof nodelink.statsManager.getSnapshot === 'function'
+            ? nodelink.statsManager.getSnapshot()
+            : null;
+        const connectionDebug = nodelink.connectionManager ? {
+            status: nodelink.connectionManager.status ?? null,
+            isChecking: nodelink.connectionManager.isChecking ?? null,
+            hasInterval: !!nodelink.connectionManager.interval
+        } : null;
+        const pluginDebug = nodelink.pluginManager ? {
+            loadedPlugins: nodelink.pluginManager.loadedPlugins ?? null
+        } : null;
+        const extensionsDebug = {
+            workerInterceptors: nodelink.extensions?.workerInterceptors?.length ?? 0,
+            audioInterceptors: nodelink.extensions?.audioInterceptors?.length ?? 0,
+            customFilters: nodelink.extensions?.filters?.size ?? 0,
+            customFilterNames: nodelink.extensions?.filters ? Array.from(nodelink.extensions.filters.keys()) : []
+        };
+        const httpAgentsDebug = (() => {
+            try {
+                const http = require('node:http');
+                const https = require('node:https');
+                const httpAgent = http.globalAgent;
+                const httpsAgent = https.globalAgent;
+                return {
+                    http: {
+                        sockets: Object.keys(httpAgent.sockets || {}).length,
+                        requests: Object.keys(httpAgent.requests || {}).length,
+                        freeSockets: Object.keys(httpAgent.freeSockets || {}).length
+                    },
+                    https: {
+                        sockets: Object.keys(httpsAgent.sockets || {}).length,
+                        requests: Object.keys(httpsAgent.requests || {}).length,
+                        freeSockets: Object.keys(httpsAgent.freeSockets || {}).length
+                    }
+                };
+            }
+            catch {
+                return null;
+            }
+        })();
         return {
             success: true,
             pid: process.pid,
@@ -382,6 +435,17 @@ const handleProfilerCommand = async (payload) => {
                 demuxers: {
                     webmOpus: getWebmOpusProfilerStats()
                 }
+            },
+            debugInternals: {
+                sourceManager: sourceManagerDebug,
+                trackCache: trackCacheDebug,
+                credentials: credentialDebug,
+                stats: statsDebug,
+                connection: connectionDebug,
+                plugins: pluginDebug,
+                extensions: extensionsDebug,
+                httpAgents: httpAgentsDebug,
+                ipcTracker: ipcMessageTracker.getStats()
             }
         };
     }
@@ -560,10 +624,59 @@ const handleProfilerCommand = async (payload) => {
     }
     return { success: false, error: `Unsupported profiler action: ${action}` };
 };
+const ipcMessageTracker = {
+    sent: new Map(),
+    received: new Map(),
+    enabled: true,
+    trackSent(type, payload) {
+        if (!this.enabled)
+            return;
+        try {
+            const size = Buffer.byteLength(JSON.stringify(payload));
+            const entry = this.sent.get(type) || { count: 0, totalBytes: 0, maxBytes: 0 };
+            entry.count++;
+            entry.totalBytes += size;
+            entry.maxBytes = Math.max(entry.maxBytes, size);
+            this.sent.set(type, entry);
+        }
+        catch { }
+    },
+    trackReceived(type, payload) {
+        if (!this.enabled)
+            return;
+        try {
+            const size = Buffer.byteLength(JSON.stringify(payload));
+            const entry = this.received.get(type) || { count: 0, totalBytes: 0, maxBytes: 0 };
+            entry.count++;
+            entry.totalBytes += size;
+            entry.maxBytes = Math.max(entry.maxBytes, size);
+            this.received.set(type, entry);
+        }
+        catch { }
+    },
+    getStats() {
+        const toSorted = (map) => Array.from(map.entries())
+            .map(([type, data]) => ({
+            type,
+            count: data.count,
+            totalBytes: data.totalBytes,
+            maxBytes: data.maxBytes,
+            avgBytes: Math.round(data.totalBytes / Math.max(data.count, 1))
+        }))
+            .sort((a, b) => b.totalBytes - a.totalBytes);
+        return {
+            sent: toSorted(this.sent),
+            received: toSorted(this.received)
+        };
+    }
+};
 const sendProcessMessage = (payload, onError) => {
     if (typeof process.send !== 'function')
         return false;
     try {
+        const msg = payload;
+        if (msg?.type)
+            ipcMessageTracker.trackSent(msg.type, payload);
         return process.send(payload) ?? false;
     }
     catch (error) {
@@ -1552,6 +1665,9 @@ process.on('message', (msg) => {
     if (!msg || typeof msg !== 'object')
         return;
     const message = msg;
+    if (message.type) {
+        ipcMessageTracker.trackReceived(message.type, message);
+    }
     if (message.type === 'ping') {
         if (process.connected) {
             try {

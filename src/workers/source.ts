@@ -686,6 +686,45 @@ if (isMainThread) {
     }
 
     if (action === 'status') {
+      const sourceManagerDebug = nodelink.sources ? {
+        enabledSources: Array.from(nodelink.sources.sources.keys()),
+        sourceMapSize: (nodelink.sources as unknown as { sourceMap?: Map<string, unknown> }).sourceMap?.size ?? null,
+        searchAliasMapSize: (nodelink.sources as unknown as { searchAliasMap?: Map<string, unknown> }).searchAliasMap?.size ?? null,
+        patternMapLength: (nodelink.sources as unknown as { patternMap?: unknown[] }).patternMap?.length ?? null
+      } : null
+
+      const trackCacheDebug = nodelink.trackCacheManager ? {
+        size: (nodelink.trackCacheManager as unknown as { cache?: Map<string, unknown> }).cache?.size ?? null,
+        maxEntries: (nodelink.trackCacheManager as unknown as { maxEntries?: number }).maxEntries ?? null
+      } : null
+
+      const credentialDebug = nodelink.credentialManager && typeof (nodelink.credentialManager as unknown as { getStats?: () => unknown }).getStats === 'function' 
+        ? (nodelink.credentialManager as unknown as { getStats: () => unknown }).getStats() 
+        : null
+
+      const httpAgentsDebug = (() => {
+        try {
+          const http = require('node:http')
+          const https = require('node:https')
+          const httpAgent = http.globalAgent
+          const httpsAgent = https.globalAgent
+          return {
+            http: {
+              sockets: Object.keys(httpAgent.sockets || {}).length,
+              requests: Object.keys(httpAgent.requests || {}).length,
+              freeSockets: Object.keys(httpAgent.freeSockets || {}).length
+            },
+            https: {
+              sockets: Object.keys(httpsAgent.sockets || {}).length,
+              requests: Object.keys(httpsAgent.requests || {}).length,
+              freeSockets: Object.keys(httpsAgent.freeSockets || {}).length
+            }
+          }
+        } catch {
+          return null
+        }
+      })()
+
       return {
         success: true,
         pid: process.pid,
@@ -705,6 +744,12 @@ if (isMainThread) {
           mapSizes: {
             activeChats: activeChats.size
           }
+        },
+        debugInternals: {
+          sourceManager: sourceManagerDebug,
+          trackCache: trackCacheDebug,
+          credentials: credentialDebug,
+          httpAgents: httpAgentsDebug
         }
       }
     }

@@ -147,6 +147,16 @@ function buildPage(code) {
           <div id="bufferPool" class="list list-scroll"></div>
         </div>
 
+        <div class="panel tab-panel" data-tab="traffic">
+          <h3>IPC Traffic</h3>
+          <div id="ipcTraffic" class="list list-scroll"></div>
+        </div>
+
+        <div class="panel tab-panel" data-tab="memory">
+          <h3>Debug Internals</h3>
+          <div id="debugInternals" class="list list-scroll"></div>
+        </div>
+
         <div class="panel tab-panel" data-tab="memory">
           <h3>Demux / WebmOpus</h3>
           <div id="demux" class="list list-scroll"></div>
@@ -249,6 +259,8 @@ function buildPage(code) {
     const caches = document.getElementById('caches')
     const streamLife = document.getElementById('streamLife')
     const bufferPool = document.getElementById('bufferPool')
+    const debugInternals = document.getElementById('debugInternals')
+    const ipcTraffic = document.getElementById('ipcTraffic')
     const demux = document.getElementById('demux')
     const snippet = document.getElementById('snippet')
     const snippetMeta = document.getElementById('snippetMeta')
@@ -1152,6 +1164,178 @@ function buildPage(code) {
       setList(demux, rows, '', 0)
     }
 
+    function renderDebugInternals(snapshot) {
+      const rows = []
+      
+      for (const w of (snapshot?.workers || [])) {
+        const dbg = w?.response?.debugInternals
+        if (!dbg) continue
+        const pid = w.pid || '-'
+        
+        if (dbg.sourceManager) {
+          const sm = dbg.sourceManager
+          rows.push({
+            text: '<span class="tag">worker ' + pid + '</span><b>SourceManager</b>' +
+              '<span class="tag">sources: ' + (sm.enabledSources?.length || 0) + '</span>' +
+              '<span class="tag">sourceMap: ' + (sm.sourceMapSize ?? '-') + '</span>' +
+              '<span class="tag">searchAlias: ' + (sm.searchAliasMapSize ?? '-') + '</span>' +
+              '<span class="tag">patterns: ' + (sm.patternMapLength ?? '-') + '</span>'
+          })
+        }
+        
+        if (dbg.trackCache) {
+          const tc = dbg.trackCache
+          rows.push({
+            text: '<span class="tag">worker ' + pid + '</span><b>TrackCache</b>' +
+              '<span class="tag">entries: ' + (tc.size ?? '-') + '</span>' +
+              '<span class="tag">max: ' + (tc.maxEntries ?? '-') + '</span>'
+          })
+        }
+        
+        if (dbg.credentials) {
+          const cr = dbg.credentials
+          rows.push({
+            text: '<span class="tag">worker ' + pid + '</span><b>Credentials</b>' +
+              '<span class="tag">entries: ' + (cr.totalEntries ?? '-') + '</span>' +
+              '<span class="tag">expired: ' + (cr.expiredEntries ?? '-') + '</span>'
+          })
+        }
+        
+        if (dbg.connection) {
+          const cn = dbg.connection
+          rows.push({
+            text: '<span class="tag">worker ' + pid + '</span><b>ConnectionManager</b>' +
+              '<span class="tag">status: ' + (cn.status ?? '-') + '</span>' +
+              '<span class="tag">checking: ' + (cn.isChecking ?? '-') + '</span>' +
+              '<span class="tag">interval: ' + (cn.hasInterval ? 'yes' : 'no') + '</span>'
+          })
+        }
+        
+        if (dbg.extensions) {
+          const ex = dbg.extensions
+          rows.push({
+            text: '<span class="tag">worker ' + pid + '</span><b>Extensions</b>' +
+              '<span class="tag">workerInterceptors: ' + (ex.workerInterceptors || 0) + '</span>' +
+              '<span class="tag">audioInterceptors: ' + (ex.audioInterceptors || 0) + '</span>' +
+              '<span class="tag">customFilters: ' + (ex.customFilters || 0) + '</span>' +
+              (ex.customFilterNames?.length ? '<span class="muted">[' + ex.customFilterNames.join(', ') + ']</span>' : '')
+          })
+        }
+        
+        if (dbg.httpAgents) {
+          const ha = dbg.httpAgents
+          rows.push({
+            text: '<span class="tag">worker ' + pid + '</span><b>HTTP Agents</b>' +
+              '<span class="tag">http sockets: ' + (ha.http?.sockets ?? '-') + '</span>' +
+              '<span class="tag">http requests: ' + (ha.http?.requests ?? '-') + '</span>' +
+              '<span class="tag">https sockets: ' + (ha.https?.sockets ?? '-') + '</span>' +
+              '<span class="tag">https requests: ' + (ha.https?.requests ?? '-') + '</span>'
+          })
+        }
+      }
+      
+      for (const s of (snapshot?.sourceWorkers || [])) {
+        const dbg = s?.response?.debugInternals
+        if (!dbg) continue
+        const pid = s.pid || '-'
+        
+        if (dbg.sourceManager) {
+          const sm = dbg.sourceManager
+          rows.push({
+            text: '<span class="tag">source ' + pid + '</span><b>SourceManager</b>' +
+              '<span class="tag">sources: ' + (sm.enabledSources?.length || 0) + '</span>' +
+              '<span class="tag">sourceMap: ' + (sm.sourceMapSize ?? '-') + '</span>' +
+              '<span class="tag">searchAlias: ' + (sm.searchAliasMapSize ?? '-') + '</span>' +
+              '<span class="tag">patterns: ' + (sm.patternMapLength ?? '-') + '</span>'
+          })
+        }
+        
+        if (dbg.trackCache) {
+          const tc = dbg.trackCache
+          rows.push({
+            text: '<span class="tag">source ' + pid + '</span><b>TrackCache</b>' +
+              '<span class="tag">entries: ' + (tc.size ?? '-') + '</span>' +
+              '<span class="tag">max: ' + (tc.maxEntries ?? '-') + '</span>'
+          })
+        }
+        
+        if (dbg.credentials) {
+          const cr = dbg.credentials
+          rows.push({
+            text: '<span class="tag">source ' + pid + '</span><b>Credentials</b>' +
+              '<span class="tag">entries: ' + (cr.totalEntries ?? '-') + '</span>' +
+              '<span class="tag">expired: ' + (cr.expiredEntries ?? '-') + '</span>'
+          })
+        }
+        
+        if (dbg.httpAgents) {
+          const ha = dbg.httpAgents
+          rows.push({
+            text: '<span class="tag">source ' + pid + '</span><b>HTTP Agents</b>' +
+              '<span class="tag">http sockets: ' + (ha.http?.sockets ?? '-') + '</span>' +
+              '<span class="tag">http requests: ' + (ha.http?.requests ?? '-') + '</span>' +
+              '<span class="tag">https sockets: ' + (ha.https?.sockets ?? '-') + '</span>' +
+              '<span class="tag">https requests: ' + (ha.https?.requests ?? '-') + '</span>'
+          })
+        }
+      }
+      
+      setList(debugInternals, rows, '', 0)
+    }
+
+    function renderIpcTraffic(snapshot) {
+      const rows = []
+      const fmtBytes = (n) => {
+        if (n < 1024) return n + ' B'
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+        return (n / 1024 / 1024).toFixed(2) + ' MB'
+      }
+      
+      for (const w of (snapshot?.workers || [])) {
+        const ipc = w?.response?.debugInternals?.ipcTracker
+        if (!ipc) continue
+        const pid = w.pid || '-'
+        
+        rows.push({
+          text: '<b>Worker ' + pid + ' - Sent</b>',
+          level: 'ok'
+        })
+        
+        const sentSorted = (ipc.sent || []).slice(0, 10)
+        for (const s of sentSorted) {
+          rows.push({
+            text: '<span class="tag">' + s.type + '</span>' +
+              '<span class="tag">count: ' + s.count + '</span>' +
+              '<span class="tag">total: ' + fmtBytes(s.totalBytes) + '</span>' +
+              '<span class="tag">avg: ' + fmtBytes(s.avgBytes) + '</span>' +
+              '<span class="tag">max: ' + fmtBytes(s.maxBytes) + '</span>'
+          })
+        }
+        
+        rows.push({
+          text: '<b>Worker ' + pid + ' - Received</b>',
+          level: 'ok'
+        })
+        
+        const recvSorted = (ipc.received || []).slice(0, 10)
+        for (const r of recvSorted) {
+          rows.push({
+            text: '<span class="tag">' + r.type + '</span>' +
+              '<span class="tag">count: ' + r.count + '</span>' +
+              '<span class="tag">total: ' + fmtBytes(r.totalBytes) + '</span>' +
+              '<span class="tag">avg: ' + fmtBytes(r.avgBytes) + '</span>' +
+              '<span class="tag">max: ' + fmtBytes(r.maxBytes) + '</span>'
+          })
+        }
+      }
+      
+      if (rows.length === 0) {
+        rows.push({ text: 'No IPC traffic data yet.' })
+      }
+      
+      setList(ipcTraffic, rows, '', 0)
+    }
+
     function renderOrigins(snapshot) {
       const rows = []
       for (const w of (snapshot?.workers || [])) {
@@ -1659,6 +1843,8 @@ function buildPage(code) {
               renderStreamLifecycle(lastSnapshot)
               renderBufferPool(lastSnapshot)
               renderDemux(lastSnapshot)
+              renderDebugInternals(lastSnapshot)
+              renderIpcTraffic(lastSnapshot)
               renderOrigins(lastSnapshot)
               renderGroups(lastSnapshot)
               renderWarnings(lastWarnings)
@@ -1685,6 +1871,8 @@ function buildPage(code) {
           renderStreamLifecycle(snapshot)
           renderBufferPool(snapshot)
           renderDemux(snapshot)
+          renderDebugInternals(snapshot)
+          renderIpcTraffic(snapshot)
           renderOrigins(snapshot)
           renderGroups(snapshot)
           renderWarnings(payload.warnings || [])
@@ -1735,6 +1923,8 @@ function buildPage(code) {
         renderStreamLifecycle(local.lastSnapshot)
         renderBufferPool(local.lastSnapshot)
         renderDemux(local.lastSnapshot)
+        renderDebugInternals(local.lastSnapshot)
+        renderIpcTraffic(local.lastSnapshot)
         renderOrigins(local.lastSnapshot)
         renderGroups(local.lastSnapshot)
         renderWarnings(local.lastWarnings || [])

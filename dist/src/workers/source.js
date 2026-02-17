@@ -489,6 +489,42 @@ else {
             return { success: false, error: 'Missing profiler action' };
         }
         if (action === 'status') {
+            const sourceManagerDebug = nodelink.sources ? {
+                enabledSources: Array.from(nodelink.sources.sources.keys()),
+                sourceMapSize: nodelink.sources.sourceMap?.size ?? null,
+                searchAliasMapSize: nodelink.sources.searchAliasMap?.size ?? null,
+                patternMapLength: nodelink.sources.patternMap?.length ?? null
+            } : null;
+            const trackCacheDebug = nodelink.trackCacheManager ? {
+                size: nodelink.trackCacheManager.cache?.size ?? null,
+                maxEntries: nodelink.trackCacheManager.maxEntries ?? null
+            } : null;
+            const credentialDebug = nodelink.credentialManager && typeof nodelink.credentialManager.getStats === 'function'
+                ? nodelink.credentialManager.getStats()
+                : null;
+            const httpAgentsDebug = (() => {
+                try {
+                    const http = require('node:http');
+                    const https = require('node:https');
+                    const httpAgent = http.globalAgent;
+                    const httpsAgent = https.globalAgent;
+                    return {
+                        http: {
+                            sockets: Object.keys(httpAgent.sockets || {}).length,
+                            requests: Object.keys(httpAgent.requests || {}).length,
+                            freeSockets: Object.keys(httpAgent.freeSockets || {}).length
+                        },
+                        https: {
+                            sockets: Object.keys(httpsAgent.sockets || {}).length,
+                            requests: Object.keys(httpsAgent.requests || {}).length,
+                            freeSockets: Object.keys(httpsAgent.freeSockets || {}).length
+                        }
+                    };
+                }
+                catch {
+                    return null;
+                }
+            })();
             return {
                 success: true,
                 pid: process.pid,
@@ -508,6 +544,12 @@ else {
                     mapSizes: {
                         activeChats: activeChats.size
                     }
+                },
+                debugInternals: {
+                    sourceManager: sourceManagerDebug,
+                    trackCache: trackCacheDebug,
+                    credentials: credentialDebug,
+                    httpAgents: httpAgentsDebug
                 }
             };
         }

@@ -533,6 +533,66 @@ const handleProfilerCommand = async (
       queuedCommands += entry.queue.length
     }
 
+    const sourceManagerDebug = nodelink.sources ? {
+      enabledSources: Array.from(nodelink.sources.sources.keys()),
+      sourceMapSize: (nodelink.sources as unknown as { sourceMap?: Map<string, unknown> }).sourceMap?.size ?? null,
+      searchAliasMapSize: (nodelink.sources as unknown as { searchAliasMap?: Map<string, unknown> }).searchAliasMap?.size ?? null,
+      patternMapLength: (nodelink.sources as unknown as { patternMap?: unknown[] }).patternMap?.length ?? null
+    } : null
+
+    const trackCacheDebug = nodelink.trackCacheManager ? {
+      size: (nodelink.trackCacheManager as unknown as { cache?: Map<string, unknown> }).cache?.size ?? null,
+      maxEntries: (nodelink.trackCacheManager as unknown as { maxEntries?: number }).maxEntries ?? null
+    } : null
+
+    const credentialDebug = nodelink.credentialManager && typeof (nodelink.credentialManager as unknown as { getStats?: () => unknown }).getStats === 'function' 
+      ? (nodelink.credentialManager as unknown as { getStats: () => unknown }).getStats() 
+      : null
+
+    const statsDebug = nodelink.statsManager && typeof (nodelink.statsManager as unknown as { getSnapshot?: () => unknown }).getSnapshot === 'function'
+      ? (nodelink.statsManager as unknown as { getSnapshot: () => unknown }).getSnapshot()
+      : null
+
+    const connectionDebug = nodelink.connectionManager ? {
+      status: (nodelink.connectionManager as unknown as { status?: string }).status ?? null,
+      isChecking: (nodelink.connectionManager as unknown as { isChecking?: boolean }).isChecking ?? null,
+      hasInterval: !!(nodelink.connectionManager as unknown as { interval?: unknown }).interval
+    } : null
+
+    const pluginDebug = nodelink.pluginManager ? {
+      loadedPlugins: (nodelink.pluginManager as unknown as { loadedPlugins?: string[] }).loadedPlugins ?? null
+    } : null
+
+    const extensionsDebug = {
+      workerInterceptors: nodelink.extensions?.workerInterceptors?.length ?? 0,
+      audioInterceptors: nodelink.extensions?.audioInterceptors?.length ?? 0,
+      customFilters: nodelink.extensions?.filters?.size ?? 0,
+      customFilterNames: nodelink.extensions?.filters ? Array.from(nodelink.extensions.filters.keys()) : []
+    }
+
+    const httpAgentsDebug = (() => {
+      try {
+        const http = require('node:http')
+        const https = require('node:https')
+        const httpAgent = http.globalAgent
+        const httpsAgent = https.globalAgent
+        return {
+          http: {
+            sockets: Object.keys(httpAgent.sockets || {}).length,
+            requests: Object.keys(httpAgent.requests || {}).length,
+            freeSockets: Object.keys(httpAgent.freeSockets || {}).length
+          },
+          https: {
+            sockets: Object.keys(httpsAgent.sockets || {}).length,
+            requests: Object.keys(httpsAgent.requests || {}).length,
+            freeSockets: Object.keys(httpsAgent.freeSockets || {}).length
+          }
+        }
+      } catch {
+        return null
+      }
+    })()
+
     return {
       success: true,
       pid: process.pid,
@@ -573,6 +633,17 @@ const handleProfilerCommand = async (
         demuxers: {
           webmOpus: getWebmOpusProfilerStats()
         }
+      },
+      debugInternals: {
+        sourceManager: sourceManagerDebug,
+        trackCache: trackCacheDebug,
+        credentials: credentialDebug,
+        stats: statsDebug,
+        connection: connectionDebug,
+        plugins: pluginDebug,
+        extensions: extensionsDebug,
+        httpAgents: httpAgentsDebug,
+        ipcTracker: ipcMessageTracker.getStats()
       }
     }
   }
@@ -789,12 +860,65 @@ const handleProfilerCommand = async (
   return { success: false, error: `Unsupported profiler action: ${action}` }
 }
 
+const ipcMessageTracker = {
+  sent: new Map<string, { count: number; totalBytes: number; maxBytes: number }>(),
+  received: new Map<string, { count: number; totalBytes: number; maxBytes: number }>(),
+  enabled: true,
+  
+  trackSent(type: string, payload: unknown): void {
+    if (!this.enabled) return
+    try {
+      const size = Buffer.byteLength(JSON.stringify(payload))
+      const entry = this.sent.get(type) || { count: 0, totalBytes: 0, maxBytes: 0 }
+      entry.count++
+      entry.totalBytes += size
+      entry.maxBytes = Math.max(entry.maxBytes, size)
+      this.sent.set(type, entry)
+    } catch {}
+  },
+  
+  trackReceived(type: string, payload: unknown): void {
+    if (!this.enabled) return
+    try {
+      const size = Buffer.byteLength(JSON.stringify(payload))
+      const entry = this.received.get(type) || { count: 0, totalBytes: 0, maxBytes: 0 }
+      entry.count++
+      entry.totalBytes += size
+      entry.maxBytes = Math.max(entry.maxBytes, size)
+      this.received.set(type, entry)
+    } catch {}
+  },
+  
+  getStats(): {
+    sent: Array<{ type: string; count: number; totalBytes: number; maxBytes: number; avgBytes: number }>
+    received: Array<{ type: string; count: number; totalBytes: number; maxBytes: number; avgBytes: number }>
+  } {
+    const toSorted = (map: Map<string, { count: number; totalBytes: number; maxBytes: number }>) =>
+      Array.from(map.entries())
+        .map(([type, data]) => ({
+          type,
+          count: data.count,
+          totalBytes: data.totalBytes,
+          maxBytes: data.maxBytes,
+          avgBytes: Math.round(data.totalBytes / Math.max(data.count, 1))
+        }))
+        .sort((a, b) => b.totalBytes - a.totalBytes)
+    
+    return {
+      sent: toSorted(this.sent),
+      received: toSorted(this.received)
+    }
+  }
+}
+
 const sendProcessMessage = (
   payload: unknown,
   onError?: (error: unknown) => void
 ): boolean => {
   if (typeof process.send !== 'function') return false
   try {
+    const msg = payload as { type?: string }
+    if (msg?.type) ipcMessageTracker.trackSent(msg.type, payload)
     return process.send(payload) ?? false
   } catch (error: unknown) {
     onError?.(error)
@@ -2053,6 +2177,10 @@ process.on('message', (msg: unknown) => {
     requestId?: string
     payload?: WorkerCommandPayload
     timestamp?: number
+  }
+
+  if (message.type) {
+    ipcMessageTracker.trackReceived(message.type, message)
   }
 
   if (message.type === 'ping') {
