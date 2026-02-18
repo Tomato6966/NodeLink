@@ -403,6 +403,15 @@ export class Player {
       EndReasons.LOAD_FAILED
     ]
 
+    if (state.status === 'idle' && this.isUpdatingTrack) {
+      logger(
+        'debug',
+        'Player',
+        `Ignoring idle event during track replacement for guild ${this.guildId}. Reason: ${state.reason}`
+      )
+      return
+    }
+
     if (
       state.status === 'idle' &&
       this.track &&
@@ -1539,6 +1548,7 @@ export class Player {
         if (this.track) {
           this._clearCrossfade()
           this._emitTrackEnd(EndReasons.REPLACED)
+          this._cleanupCurrentAudioStream('track-replaced')
         }
 
         this.track = { encoded, info, endTime, userData, audioTrackId }
@@ -2464,6 +2474,7 @@ export class Player {
       try {
         if (this.connection.audioStream) {
           this.connection.stop(EndReasons.CLEANUP)
+          this._cleanupCurrentAudioStream('destroy')
         }
         this.connection.destroy()
         this.connection = null
