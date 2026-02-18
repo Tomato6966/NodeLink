@@ -20,15 +20,15 @@ export default class LyricsManager {
     try {
       await fs.access(lyricsDir)
       const files = await fs.readdir(lyricsDir)
-      const jsFiles = files.filter((f) => f.endsWith('.js'))
+      const jsFiles = files.filter((f) => f.endsWith('.js') || f.endsWith('.ts'))
       const toLoad = jsFiles.filter((f) => {
-        const name = path.basename(f, '.js')
+        const name = path.basename(f, path.extname(f))
         return !!this.nodelink.options.lyrics?.[name]?.enabled
       })
 
       await Promise.all(
         toLoad.map(async (file) => {
-          const name = path.basename(file, '.js')
+          const name = path.basename(file, path.extname(file))
           const filePath = path.join(lyricsDir, file)
           const fileUrl = new URL(`file://${filePath}`)
           const Mod = (await import(fileUrl)).default
