@@ -329,6 +329,8 @@ export interface RingBufferLike {
   write(chunk: Buffer): void
   /** Removes and returns the requested number of bytes. */
   read(count: number): Buffer | null
+  /** Skips/discards bytes without allocating a new buffer. */
+  skip(count: number): number
   /** Returns the requested number of bytes without removing them. */
   peek(count: number): Buffer | null
   /** Discards all data in the buffer. */

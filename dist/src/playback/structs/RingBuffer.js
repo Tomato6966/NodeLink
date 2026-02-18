@@ -110,16 +110,14 @@ export class RingBuffer {
         const bytesToPeek = Math.min(Math.max(0, n), this._length);
         if (bytesToPeek === 0)
             return null;
-        const acquired = bufferPool.acquire(bytesToPeek);
-        const out = acquired.subarray(0, bytesToPeek);
         const availableAtEnd = this.size - this.readOffset;
         if (bytesToPeek <= availableAtEnd) {
-            this.buffer.copy(out, 0, this.readOffset, this.readOffset + bytesToPeek);
+            return this.buffer.subarray(this.readOffset, this.readOffset + bytesToPeek);
         }
-        else {
-            this.buffer.copy(out, 0, this.readOffset, this.size);
-            this.buffer.copy(out, availableAtEnd, 0, bytesToPeek - availableAtEnd);
-        }
+        const acquired = bufferPool.acquire(bytesToPeek);
+        const out = acquired.subarray(0, bytesToPeek);
+        this.buffer.copy(out, 0, this.readOffset, this.size);
+        this.buffer.copy(out, availableAtEnd, 0, bytesToPeek - availableAtEnd);
         return out;
     }
     /**

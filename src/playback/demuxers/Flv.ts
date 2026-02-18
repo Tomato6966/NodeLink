@@ -5,6 +5,7 @@ import {
 } from 'node:stream'
 import type { FlvTagInfo } from '../../typings/playback/demuxer.types.ts'
 import { logger } from '../../utils.ts'
+import { bufferPool } from '../structs/BufferPool.ts'
 import { RingBuffer } from '../structs/RingBuffer.ts'
 
 const STATE_HEADER = 0
@@ -85,7 +86,7 @@ export class FlvDemuxer extends Transform {
           callback(new Error('Invalid FLV header'))
           return
         }
-        this.ringBuffer.read(FLV_HEADER_TOTAL_BYTES)
+        this.ringBuffer.skip(FLV_HEADER_TOTAL_BYTES)
         this.state = STATE_TAG_HEADER
         this.expectedSize = FLV_TAG_HEADER_SIZE
       } else if (this.state === STATE_TAG_HEADER) {
@@ -96,6 +97,7 @@ export class FlvDemuxer extends Transform {
         }
         const type = header.readUInt8(0)
         const size = header.readUIntBE(1, 3)
+        bufferPool.release(header)
 
         this.currentTag = { type, size }
         this.state = STATE_TAG_BODY
@@ -110,11 +112,12 @@ export class FlvDemuxer extends Transform {
           callback(new Error('Missing FLV tag body'))
           return
         }
-        this.ringBuffer.read(FLV_PREVIOUS_TAG_SIZE_BYTES)
+        this.ringBuffer.skip(FLV_PREVIOUS_TAG_SIZE_BYTES)
 
         if (this.currentTag.type === TAG_TYPE_AUDIO) {
-          this.push(body)
+          this.push(Buffer.from(body))
         }
+        bufferPool.release(body)
 
         this.state = STATE_TAG_HEADER
         this.expectedSize = FLV_TAG_HEADER_SIZE

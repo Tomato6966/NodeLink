@@ -1,5 +1,6 @@
 import { Transform } from 'node:stream';
 import { logger } from "../../utils.js";
+import { bufferPool } from "../structs/BufferPool.js";
 import { RingBuffer } from "../structs/RingBuffer.js";
 const STATE_HEADER = 0;
 const STATE_TAG_HEADER = 1;
@@ -64,7 +65,7 @@ export class FlvDemuxer extends Transform {
                     callback(new Error('Invalid FLV header'));
                     return;
                 }
-                this.ringBuffer.read(FLV_HEADER_TOTAL_BYTES);
+                this.ringBuffer.skip(FLV_HEADER_TOTAL_BYTES);
                 this.state = STATE_TAG_HEADER;
                 this.expectedSize = FLV_TAG_HEADER_SIZE;
             }
@@ -76,6 +77,7 @@ export class FlvDemuxer extends Transform {
                 }
                 const type = header.readUInt8(0);
                 const size = header.readUIntBE(1, 3);
+                bufferPool.release(header);
                 this.currentTag = { type, size };
                 this.state = STATE_TAG_BODY;
                 this.expectedSize = size + FLV_PREVIOUS_TAG_SIZE_BYTES;
@@ -90,10 +92,11 @@ export class FlvDemuxer extends Transform {
                     callback(new Error('Missing FLV tag body'));
                     return;
                 }
-                this.ringBuffer.read(FLV_PREVIOUS_TAG_SIZE_BYTES);
+                this.ringBuffer.skip(FLV_PREVIOUS_TAG_SIZE_BYTES);
                 if (this.currentTag.type === TAG_TYPE_AUDIO) {
-                    this.push(body);
+                    this.push(Buffer.from(body));
                 }
+                bufferPool.release(body);
                 this.state = STATE_TAG_HEADER;
                 this.expectedSize = FLV_TAG_HEADER_SIZE;
             }

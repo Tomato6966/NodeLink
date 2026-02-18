@@ -8,6 +8,7 @@ import { logger } from "../../utils.js";
 import FlvDemuxer from "../demuxers/Flv.js";
 import WebmOpusDemuxer from "../demuxers/WebmOpus.js";
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from "../opus/Opus.js";
+import { bufferPool } from "../structs/BufferPool.js";
 import { RingBuffer } from "../structs/RingBuffer.js";
 import { CrossfadeController } from "./CrossfadeController.js";
 import { FadeTransformer } from "./FadeTransformer.js";
@@ -715,29 +716,34 @@ class MPEGTSDemuxer extends Transform {
                 !this._aborted) {
                 const head = this.ringBuffer.peek(1);
                 if (!head || head.length === 0 || head[0] !== MPEGTS_CONFIG.syncByte) {
-                    this.ringBuffer.read(1);
+                    this.ringBuffer.skip(1);
                     continue;
                 }
                 const packet = this.ringBuffer.read(MPEGTS_CONFIG.packetSize);
                 if (!packet || packet.length < MPEGTS_CONFIG.packetSize)
                     continue;
-                const pusi = !!((packet[1] ?? 0) & 0x40);
-                const pid = (((packet[1] ?? 0) & 0x1f) << 8) | (packet[2] ?? 0);
-                const afc = ((packet[3] ?? 0) & 0x30) >> 4;
-                let offset = 4;
-                if (afc > 1) {
-                    offset = 5 + (packet[4] ?? 0);
-                    if (offset >= MPEGTS_CONFIG.packetSize)
-                        continue;
+                try {
+                    const pusi = !!((packet[1] ?? 0) & 0x40);
+                    const pid = (((packet[1] ?? 0) & 0x1f) << 8) | (packet[2] ?? 0);
+                    const afc = ((packet[3] ?? 0) & 0x30) >> 4;
+                    let offset = 4;
+                    if (afc > 1) {
+                        offset = 5 + (packet[4] ?? 0);
+                        if (offset >= MPEGTS_CONFIG.packetSize)
+                            continue;
+                    }
+                    if (pid === 0 && pusi) {
+                        this._processPAT(packet, offset);
+                    }
+                    else if (this.patPmtId && pid === this.patPmtId && pusi) {
+                        this._processPMT(packet, offset);
+                    }
+                    else if (this.audioPid && pid === this.audioPid) {
+                        this._processAudioPacket(packet, pusi, offset);
+                    }
                 }
-                if (pid === 0 && pusi) {
-                    this._processPAT(packet, offset);
-                }
-                else if (this.patPmtId && pid === this.patPmtId && pusi) {
-                    this._processPMT(packet, offset);
-                }
-                else if (this.audioPid && pid === this.audioPid) {
-                    this._processAudioPacket(packet, pusi, offset);
+                finally {
+                    bufferPool.release(packet);
                 }
             }
             callback();
@@ -782,7 +788,7 @@ class MPEGTSDemuxer extends Transform {
                 this.pesSize = 0;
             }
         }
-        const payload = packet.subarray(offset);
+        const payload = _tightBuffer(packet.subarray(offset));
         if (payload.length > 0) {
             this.pesChunks.push(payload);
             this.pesSize += payload.length;
@@ -978,7 +984,7 @@ class AACDecoderStream extends Transform {
                 if (!frameInfo)
                     break;
                 if (frameInfo.start > 0) {
-                    this.ringBuffer.read(frameInfo.start);
+                    this.ringBuffer.skip(frameInfo.start);
                 }
                 const adtsFrame = frameInfo.frame;
                 if (!this.isConfigured) {
@@ -1039,7 +1045,7 @@ class AACDecoderStream extends Transform {
                 catch (_decodeErr) {
                     // Skip bad frame
                 }
-                this.ringBuffer.read(frameInfo.end);
+                this.ringBuffer.skip(frameInfo.end);
             }
             callback();
         }
