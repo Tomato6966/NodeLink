@@ -2682,7 +2682,10 @@ export class Player {
   private async _loadLyrics(): Promise<void> {
     if (!this.track) return
 
-    const lyricsData = await this.nodelink.lyrics.loadLyrics(
+    const lyricsManager = this.nodelink.lyrics ?? (await this.nodelink.getLyricsManager?.())
+    if (!lyricsManager) return
+
+    const lyricsData = await lyricsManager.loadLyrics(
       { info: this.track.info },
       undefined,
       this.skipTrackSource

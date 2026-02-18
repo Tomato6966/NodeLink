@@ -86,8 +86,8 @@ export interface WorkerNodeLink extends NodeLink {
   credentialManager: CredentialManagerLike
   trackCacheManager: TrackCacheManagerLike
   sources: WorkerSourceManager
-  lyrics: WorkerLyricsManager
-  meanings: MeaningManagerLike
+  lyrics: WorkerLyricsManager | null
+  meanings: MeaningManagerLike | null
   routePlanner: RoutePlannerManagerLike
   connectionManager: ConnectionManagerLike
   pluginManager: PluginManagerLike
@@ -96,6 +96,8 @@ export interface WorkerNodeLink extends NodeLink {
   registerSource: (name: string, source: SourceInstanceBase) => void
   registerFilter: (name: string, filter: unknown) => void
   registerAudioInterceptor: (fn: AudioInterceptor) => void
+  getLyricsManager: () => Promise<WorkerLyricsManager>
+  getMeaningManager: () => Promise<MeaningManagerLike>
   [key: string]: unknown
 }
 

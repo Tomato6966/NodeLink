@@ -1873,7 +1873,10 @@ export class Player {
     async _loadLyrics() {
         if (!this.track)
             return;
-        const lyricsData = await this.nodelink.lyrics.loadLyrics({ info: this.track.info }, undefined, this.skipTrackSource);
+        const lyricsManager = this.nodelink.lyrics ?? (await this.nodelink.getLyricsManager?.());
+        if (!lyricsManager)
+            return;
+        const lyricsData = await lyricsManager.loadLyrics({ info: this.track.info }, undefined, this.skipTrackSource);
         if (lyricsData && lyricsData.loadType === 'lyrics') {
             const lines = lyricsData.data.lines.map((line) => ({
                 timestamp: line.time,

@@ -212,22 +212,23 @@ export class CrossfadeController extends Transform {
         }
         return DEFAULT_CURVE;
     }
-    _asInt16Array(buffer, length) {
-        if (buffer.byteOffset % 2 === 0) {
-            return new Int16Array(buffer.buffer, buffer.byteOffset, length);
-        }
-        const aligned = Buffer.allocUnsafe(buffer.length);
-        buffer.copy(aligned);
-        return new Int16Array(aligned.buffer, aligned.byteOffset, length);
-    }
     _mixBuffers(main, next, runtime) {
         const sampleCount = main.length >> 1;
         if (sampleCount === 0)
             return main;
         const output = Buffer.allocUnsafe(main.length);
-        const mainView = this._asInt16Array(main, sampleCount);
-        const nextView = this._asInt16Array(next, sampleCount);
-        const outView = this._asInt16Array(output, sampleCount);
+        const mainAligned = main.byteOffset % 2 === 0;
+        const nextAligned = next.byteOffset % 2 === 0;
+        const outAligned = output.byteOffset % 2 === 0;
+        const mainView = mainAligned
+            ? new Int16Array(main.buffer, main.byteOffset, sampleCount)
+            : null;
+        const nextView = nextAligned
+            ? new Int16Array(next.buffer, next.byteOffset, sampleCount)
+            : null;
+        const outView = outAligned
+            ? new Int16Array(output.buffer, output.byteOffset, sampleCount)
+            : null;
         const frames = sampleCount / this.channels;
         const chunkDurationMs = (frames / this.sampleRate) * 1000;
         const durationMs = runtime.durationMs;
@@ -239,10 +240,18 @@ export class CrossfadeController extends Transform {
         const stepIn = sampleCount > 1 ? (endIn - startIn) / (sampleCount - 1) : 0;
         let gainOut = startOut;
         let gainIn = startIn;
+        const getMain = (i) => mainView ? (mainView[i] ?? 0) : main.readInt16LE(i * 2);
+        const getNext = (i) => nextView ? (nextView[i] ?? 0) : next.readInt16LE(i * 2);
+        const setOut = (i, val) => {
+            if (outView)
+                outView[i] = val;
+            else
+                output.writeInt16LE(val, i * 2);
+        };
         for (let i = 0; i < sampleCount; i++) {
-            const mixed = (mainView[i] ?? 0) * gainOut + (nextView[i] ?? 0) * gainIn;
-            outView[i] =
-                mixed < -32768 ? -32768 : mixed > 32767 ? 32767 : Math.round(mixed);
+            const mixed = getMain(i) * gainOut + getNext(i) * gainIn;
+            const clamped = mixed < -32768 ? -32768 : mixed > 32767 ? 32767 : Math.round(mixed);
+            setOut(i, clamped);
             gainOut += stepOut;
             gainIn += stepIn;
         }

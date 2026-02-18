@@ -380,9 +380,10 @@ export interface NodeLink {
     attach?: (connection: VoiceConnection, guildId: string) => void
   }
   sources: SourceManagerLike
-  lyrics: LyricsManagerLike
+  lyrics: LyricsManagerLike | null
   statistics?: { players?: number }
   extensions?: { audioInterceptors?: unknown[] } & Record<string, unknown>
+  getLyricsManager?: () => Promise<LyricsManagerLike>
   [key: string]: unknown
 }
 

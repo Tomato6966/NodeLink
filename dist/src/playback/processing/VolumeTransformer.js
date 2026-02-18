@@ -127,14 +127,14 @@ export class VolumeTransformer extends Transform {
         if (buffer.byteOffset % 2 === 0) {
             return {
                 buffer,
-                view: new Int16Array(buffer.buffer, buffer.byteOffset, sampleCount)
+                view: new Int16Array(buffer.buffer, buffer.byteOffset, sampleCount),
+                useBufferOps: false
             };
         }
-        const aligned = Buffer.allocUnsafe(buffer.length);
-        buffer.copy(aligned);
         return {
-            buffer: aligned,
-            view: new Int16Array(aligned.buffer, aligned.byteOffset, sampleCount)
+            buffer,
+            view: null,
+            useBufferOps: true
         };
     }
     _applyLimiter(value) {
@@ -179,8 +179,8 @@ export class VolumeTransformer extends Transform {
         const usableSamples = chunk.length >> 1;
         if (!usableSamples)
             return chunk;
-        const { buffer, view } = this._prepareView(chunk, usableSamples);
-        if (this.agc) {
+        const { view, useBufferOps } = this._prepareView(chunk, usableSamples);
+        if (this.agc && view) {
             this.agc.process(view);
         }
         const { gainStart, gainEnd } = this._computeFadeGains(usableSamples);
@@ -189,27 +189,51 @@ export class VolumeTransformer extends Transform {
         if (this.lookaheadSamples > 0) {
             const outputBuffer = alignedBufferIfRequired(chunk.length);
             const outputView = new Int16Array(outputBuffer.buffer, outputBuffer.byteOffset, usableSamples);
-            for (let i = 0; i < view.length; i++) {
-                const rawSample = view[i] ?? 0;
-                const scaled = rawSample * gain;
-                const limited = this._applyLimiter(scaled);
-                const outputSample = this.lookaheadBuffer[this.lookaheadIndex] ?? 0;
-                this.lookaheadBuffer[this.lookaheadIndex] = limited;
-                this.lookaheadIndex = (this.lookaheadIndex + 1) % this.lookaheadSamples;
-                outputView[i] = this._clampToInt16(outputSample);
-                gain += gainStep;
+            if (useBufferOps) {
+                for (let i = 0; i < usableSamples; i++) {
+                    const rawSample = chunk.readInt16LE(i * 2);
+                    const scaled = rawSample * gain;
+                    const limited = this._applyLimiter(scaled);
+                    const outputSample = this.lookaheadBuffer[this.lookaheadIndex] ?? 0;
+                    this.lookaheadBuffer[this.lookaheadIndex] = limited;
+                    this.lookaheadIndex = (this.lookaheadIndex + 1) % this.lookaheadSamples;
+                    outputView[i] = this._clampToInt16(outputSample);
+                    gain += gainStep;
+                }
+            }
+            else if (view) {
+                for (let i = 0; i < view.length; i++) {
+                    const rawSample = view[i] ?? 0;
+                    const scaled = rawSample * gain;
+                    const limited = this._applyLimiter(scaled);
+                    const outputSample = this.lookaheadBuffer[this.lookaheadIndex] ?? 0;
+                    this.lookaheadBuffer[this.lookaheadIndex] = limited;
+                    this.lookaheadIndex = (this.lookaheadIndex + 1) % this.lookaheadSamples;
+                    outputView[i] = this._clampToInt16(outputSample);
+                    gain += gainStep;
+                }
             }
             if (this.lookaheadIndex === 0)
                 this.lookaheadFull = true;
             return outputBuffer;
         }
-        for (let i = 0; i < view.length; i++) {
-            const scaled = (view[i] ?? 0) * gain;
-            const limited = this._applyLimiter(scaled);
-            view[i] = this._clampToInt16(limited);
-            gain += gainStep;
+        if (useBufferOps) {
+            for (let i = 0; i < usableSamples; i++) {
+                const scaled = chunk.readInt16LE(i * 2) * gain;
+                const limited = this._applyLimiter(scaled);
+                chunk.writeInt16LE(this._clampToInt16(limited), i * 2);
+                gain += gainStep;
+            }
         }
-        return buffer;
+        else if (view) {
+            for (let i = 0; i < view.length; i++) {
+                const scaled = (view[i] ?? 0) * gain;
+                const limited = this._applyLimiter(scaled);
+                view[i] = this._clampToInt16(limited);
+                gain += gainStep;
+            }
+        }
+        return chunk;
     }
     /**
      * Flushes any buffered data.

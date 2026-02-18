@@ -478,6 +478,8 @@ else {
         }
         return meaningManagerPromise;
     };
+    nodelink['getLyricsManager'] = getLyricsManager;
+    nodelink['getMeaningManager'] = getMeaningManager;
     /**
      * Active live chat sessions (session ID -> active flag)
      * @internal

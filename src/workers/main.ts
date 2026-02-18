@@ -1322,6 +1322,37 @@ function sendCommandError(requestId: string, error: unknown): boolean {
   return false
 }
 
+let lyricsManagerPromise: Promise<LyricsManager> | null = null
+let meaningManagerPromise: Promise<MeaningManager> | null = null
+
+const getLyricsManager = async (): Promise<LyricsManager> => {
+  if (!lyricsManagerPromise) {
+    lyricsManagerPromise = import('../managers/lyricsManager.js').then(
+      async (module) => {
+        const manager = new module.default(nodelink)
+        await manager.loadFolder()
+        nodelink.lyrics = manager as unknown as WorkerNodeLink['lyrics']
+        return manager
+      }
+    )
+  }
+  return lyricsManagerPromise
+}
+
+const getMeaningManager = async (): Promise<MeaningManager> => {
+  if (!meaningManagerPromise) {
+    meaningManagerPromise = import('../managers/meaningManager.js').then(
+      async (module) => {
+        const manager = new module.default(nodelink)
+        await manager.loadFolder()
+        nodelink.meanings = manager as unknown as WorkerNodeLink['meanings']
+        return manager
+      }
+    )
+  }
+  return meaningManagerPromise
+}
+
 const nodelink: WorkerNodeLink = {
   options: config as WorkerNodeLink['options'],
   logger,
@@ -1365,7 +1396,9 @@ const nodelink: WorkerNodeLink = {
       nodelink.extensions.audioInterceptors = []
     nodelink.extensions.audioInterceptors.push(interceptor)
     logger('info', 'Worker', 'Registered custom audio interceptor')
-  }
+  },
+  getLyricsManager,
+  getMeaningManager
 } as unknown as WorkerNodeLink
 
 const createdVoiceRelay = createVoiceRelay({
@@ -1389,37 +1422,6 @@ nodelink.routePlanner = new RoutePlannerManager(
 ) as RoutePlannerManagerLike
 nodelink.connectionManager = new ConnectionManager(nodelink as any)
 nodelink.pluginManager = new PluginManager(nodelink)
-
-let lyricsManagerPromise: Promise<LyricsManager> | null = null
-let meaningManagerPromise: Promise<MeaningManager> | null = null
-
-const getLyricsManager = async (): Promise<LyricsManager> => {
-  if (!lyricsManagerPromise) {
-    lyricsManagerPromise = import('../managers/lyricsManager.js').then(
-      async (module) => {
-        const manager = new module.default(nodelink)
-        await manager.loadFolder()
-        nodelink.lyrics = manager as unknown as WorkerNodeLink['lyrics']
-        return manager
-      }
-    )
-  }
-  return lyricsManagerPromise
-}
-
-const getMeaningManager = async (): Promise<MeaningManager> => {
-  if (!meaningManagerPromise) {
-    meaningManagerPromise = import('../managers/meaningManager.js').then(
-      async (module) => {
-        const manager = new module.default(nodelink)
-        await manager.loadFolder()
-        nodelink.meanings = manager as unknown as WorkerNodeLink['meanings']
-        return manager
-      }
-    )
-  }
-  return meaningManagerPromise
-}
 
 function setEfficiencyMode(enabled: boolean): void {
   try {

@@ -627,6 +627,9 @@ if (isMainThread) {
     return meaningManagerPromise
   }
 
+  nodelink['getLyricsManager'] = getLyricsManager as unknown as WorkerNodeLink['getLyricsManager']
+  nodelink['getMeaningManager'] = getMeaningManager as unknown as WorkerNodeLink['getMeaningManager']
+
   /**
    * Active live chat sessions (session ID -> active flag)
    * @internal
