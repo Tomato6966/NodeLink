@@ -54,6 +54,7 @@ import { RingBuffer } from '../structs/RingBuffer.ts'
 import { CrossfadeController } from './CrossfadeController.ts'
 import { FadeTransformer } from './FadeTransformer.ts'
 import { TapeTransformer } from './TapeTransformer.ts'
+import { ScratchTransformer } from './ScratchTransformer.ts'
 import { FlowController } from './FlowController.ts'
 import { FiltersManager } from './filtersManager.ts'
 import { VolumeTransformer } from './VolumeTransformer.ts'
@@ -438,6 +439,8 @@ class BaseAudioResource {
           targetMs: number
         }
         checkTapeRampCompleted?: () => boolean
+        scratchTo?: (durationMs: number, style: import('../../typings/playback/processing.types.ts').ScratchStyle) => void
+        checkScratchEffectCompleted?: () => boolean
       }
     voiceStream.setVolume = (volume: number) => this.setVolume(volume)
     voiceStream.setFilters = (filters: FiltersState) => this.setFilters(filters)
@@ -450,6 +453,10 @@ class BaseAudioResource {
     voiceStream.clearCrossfade = () => this.clearCrossfade()
     voiceStream.getCrossfadeState = () => this.getCrossfadeState()
     voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted()
+    voiceStream.scratchTo = (durationMs: number, style: import('../../typings/playback/processing.types.ts').ScratchStyle) =>
+      this.scratchTo(durationMs, style)
+    voiceStream.checkScratchEffectCompleted = () =>
+      this.checkScratchEffectCompleted()
     this.stream = voiceStream
   }
 
@@ -513,6 +520,15 @@ class BaseAudioResource {
   }
 
   checkTapeRampCompleted(): boolean {
+    return false
+  }
+
+  scratchTo(
+    _durationMs: number,
+    _style: import('../../typings/playback/processing.types.ts').ScratchStyle
+  ): void {}
+
+  checkScratchEffectCompleted(): boolean {
     return false
   }
 
@@ -2461,6 +2477,10 @@ class StreamAudioResource extends BaseAudioResource {
       sampleRate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels
     })
+    const scratchTransformer = new ScratchTransformer({
+      sampleRate: AUDIO_CONFIG.sampleRate,
+      channels: AUDIO_CONFIG.channels
+    })
     const crossfadeController = new CrossfadeController(
       AUDIO_CONFIG.sampleRate,
       AUDIO_CONFIG.channels
@@ -2472,6 +2492,7 @@ class StreamAudioResource extends BaseAudioResource {
       volumeTransformer,
       fadeTransformer,
       tapeTransformer,
+      scratchTransformer,
       audioMixer
     )
 
@@ -2567,6 +2588,15 @@ class StreamAudioResource extends BaseAudioResource {
     return flowController?.checkTapeRampCompleted() ?? false
   }
 
+  override checkScratchEffectCompleted(): boolean {
+    if (!this.pipes) return false
+
+    const flowController = this.pipes.find(
+      (p) => p instanceof FlowController
+    ) as FlowController | undefined
+    return flowController?.checkScratchEffectCompleted() ?? false
+  }
+
   tapeTo(durationMs: number, type: 'start' | 'stop', curve?: string): void {
     if (!this.pipes) return
 
@@ -2575,6 +2605,20 @@ class StreamAudioResource extends BaseAudioResource {
     ) as FlowController | undefined
     if (flowController) {
       flowController.tapeTo(durationMs, type, curve)
+    }
+  }
+
+  override scratchTo(
+    durationMs: number,
+    style: import('../../typings/playback/processing.types.ts').ScratchStyle
+  ): void {
+    if (!this.pipes) return
+
+    const flowController = this.pipes.find(
+      (p) => p instanceof FlowController
+    ) as FlowController | undefined
+    if (flowController) {
+      flowController.scratchTo(durationMs, style)
     }
   }
 

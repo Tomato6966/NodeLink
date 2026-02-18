@@ -6,15 +6,17 @@ import type {
 import type {
   IFadeTransformer,
   IFiltersManager,
+  IScratchTransformer,
   ITapeTransformer,
-  IVolumeTransformer
+  IVolumeTransformer,
+  ScratchStyle
 } from '../../typings/playback/processing.types.ts'
 
 const FRAME_SIZE = 3840
 const EMPTY_BUFFER = Buffer.alloc(0)
 
 /**
- * Controller that coordinates filters, volume, fading, and mixing in a single stream.
+ * Controller that coordinates filters, volume, fading, scratching, and mixing in a single stream.
  * @public
  */
 export class FlowController extends Transform {
@@ -22,6 +24,7 @@ export class FlowController extends Transform {
   private readonly volume: IVolumeTransformer
   private readonly fade: IFadeTransformer
   private readonly tape: ITapeTransformer
+  private readonly scratch: IScratchTransformer
   private readonly audioMixer: AudioMixer | null
   private pendingBuffer: Buffer
   private pendingLength: number
@@ -32,6 +35,7 @@ export class FlowController extends Transform {
    * @param volume - The VolumeTransformer instance.
    * @param fade - The FadeTransformer instance.
    * @param tape - The TapeTransformer instance.
+   * @param scratch - The ScratchTransformer instance.
    * @param audioMixer - Optional AudioMixer instance.
    */
   constructor(
@@ -39,6 +43,7 @@ export class FlowController extends Transform {
     volume: IVolumeTransformer,
     fade: IFadeTransformer,
     tape: ITapeTransformer,
+    scratch: IScratchTransformer,
     audioMixer: AudioMixer | null = null
   ) {
     super({ highWaterMark: FRAME_SIZE * 4 })
@@ -47,6 +52,7 @@ export class FlowController extends Transform {
     this.volume = volume
     this.fade = fade
     this.tape = tape
+    this.scratch = scratch
     this.audioMixer = audioMixer
     this.pendingBuffer = Buffer.allocUnsafe(FRAME_SIZE)
     this.pendingLength = 0
@@ -57,6 +63,7 @@ export class FlowController extends Transform {
 
     output = this.filters.process(output)
     output = this.tape.process(output)
+    output = this.scratch.process(output)
     output = this.volume.process(output)
     output = this.fade.process(output)
 
@@ -124,8 +131,21 @@ export class FlowController extends Transform {
     this.tape.tapeTo(durationMs, type, curve)
   }
 
+  /**
+   * Schedules a scratch effect.
+   * @param durationMs - Duration of the scratch movement.
+   * @param style - The style of scratch to apply.
+   */
+  public scratchTo(durationMs: number, style: ScratchStyle): void {
+    this.scratch.scratchTo(durationMs, style)
+  }
+
   public checkTapeRampCompleted(): boolean {
     return this.tape.checkRampCompleted()
+  }
+
+  public checkScratchEffectCompleted(): boolean {
+    return this.scratch.checkEffectCompleted()
   }
 
   public override _transform(
@@ -179,6 +199,7 @@ export class FlowController extends Transform {
 
     if (remaining.length > 0) {
       remaining = this.tape.process(remaining)
+      remaining = this.scratch.process(remaining)
       remaining = this.volume.process(remaining)
       remaining = this.fade.process(remaining)
 
@@ -201,6 +222,14 @@ export class FlowController extends Transform {
       }
 
       if (remaining.length > 0) this.push(remaining)
+    }
+
+    // Drain loop: Continue producing silence frames while effects are active.
+    // This ensures trackEnd scratch effects are fully audible even after source EOF.
+    const silence = Buffer.alloc(FRAME_SIZE, 0)
+    let drainLimit = 150 // ~1.2s safety limit
+    while ((this.scratch.isActive() || this.tape.isActive()) && drainLimit-- > 0) {
+      this._processFrame(silence)
     }
 
     callback()

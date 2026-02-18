@@ -2036,7 +2036,7 @@ export class Player {
         };
     }
     /**
-     * Handles fading and tape actions for start/stop/seek events.
+     * Handles fading, tape, and scratch actions for start/stop/seek/pause events.
      */
     _fading(action, payload = {}) {
         const timers = this._fadeTimers;
@@ -2089,6 +2089,7 @@ export class Player {
         if (!section || !Number.isFinite(section.duration) || section.duration <= 0)
             return false;
         const fadeType = section.type || 'volume';
+        const scratchStyle = section.curve || 'random';
         if (action === 'trackStartArm') {
             const resource = payload.resource;
             if (!resource)
@@ -2100,6 +2101,10 @@ export class Player {
             if (fadeType === 'tape' || fadeType === 'both') {
                 if (resource.tapeTo)
                     resource.tapeTo(0, 'stop');
+            }
+            if (fadeType === 'scratch') {
+                if (resource.scratchTo)
+                    resource.scratchTo(0, 'stop');
             }
             this._pendingTrackStartFade = true;
             return true;
@@ -2120,6 +2125,10 @@ export class Player {
                 if (stream.tapeTo)
                     stream.tapeTo?.(section.duration, 'start', section.curve);
             }
+            if (fadeType === 'scratch') {
+                if (stream.scratchTo)
+                    stream.scratchTo?.(section.duration, scratchStyle);
+            }
             return true;
         }
         if (action === 'seekPrepare') {
@@ -2134,6 +2143,10 @@ export class Player {
                 if (resource.tapeTo)
                     resource.tapeTo(0, 'stop');
             }
+            if (fadeType === 'scratch') {
+                if (resource.scratchTo)
+                    resource.scratchTo(0, 'stop');
+            }
             return true;
         }
         if (action === 'seek') {
@@ -2147,6 +2160,9 @@ export class Player {
             }
             if (fadeType === 'tape' || fadeType === 'both') {
                 stream.tapeTo?.(section.duration, 'start', section.curve);
+            }
+            if (fadeType === 'scratch') {
+                stream.scratchTo?.(section.duration, 'start');
             }
             return true;
         }
@@ -2171,10 +2187,16 @@ export class Player {
             if (fadeType === 'tape' || fadeType === 'both') {
                 stream.tapeTo?.(section.duration, 'stop', section.curve);
             }
+            if (fadeType === 'scratch') {
+                const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle) ? scratchStyle : 'wash';
+                stream.scratchTo?.(section.duration, style);
+            }
             // Active monitoring of the ramp completion
             const startTime = Date.now();
             const checkInterval = setInterval(() => {
-                const isRampDone = stream.checkTapeRampCompleted?.();
+                const isTapeDone = stream.checkTapeRampCompleted?.();
+                const isScratchDone = stream.checkScratchEffectCompleted?.();
+                const isRampDone = fadeType === 'scratch' ? isScratchDone : isTapeDone;
                 const isTimeUp = Date.now() - startTime > section.duration + 500; // Safety timeout
                 if (isRampDone || isTimeUp) {
                     clearInterval(checkInterval);
@@ -2209,6 +2231,10 @@ export class Player {
                 stream.tapeTo?.(0, 'stop');
                 stream.tapeTo?.(section.duration, 'start', section.curve);
             }
+            if (fadeType === 'scratch') {
+                stream.scratchTo?.(0, 'stop');
+                stream.scratchTo?.(section.duration, 'start');
+            }
             return true;
         }
         if (action === 'trackStop') {
@@ -2222,6 +2248,10 @@ export class Player {
             }
             if (fadeType === 'tape' || fadeType === 'both') {
                 stream.tapeTo?.(section.duration, 'stop', section.curve);
+            }
+            if (fadeType === 'scratch') {
+                const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle) ? scratchStyle : 'stop';
+                stream.scratchTo?.(section.duration, style);
             }
             timers.stop = setTimeout(() => {
                 this.connection?.stop(EndReasons.STOPPED);
@@ -2252,6 +2282,10 @@ export class Player {
                     }
                     if (fadeType === 'tape' || fadeType === 'both') {
                         stream.tapeTo?.(fadeDuration, 'stop', section.curve);
+                    }
+                    if (fadeType === 'scratch') {
+                        const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle) ? scratchStyle : 'wash';
+                        stream.scratchTo?.(fadeDuration, style);
                     }
                 }
                 if (timers.trackEnd) {

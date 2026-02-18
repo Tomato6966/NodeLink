@@ -86,7 +86,7 @@ const sanitizeFadingConfig = (raw) => {
     if (typeof section.curve === 'string') {
       safe[key].curve = section.curve
     }
-    if (['volume', 'tape', 'both'].includes(section.type)) {
+    if (['volume', 'tape', 'scratch', 'both'].includes(section.type)) {
       safe[key].type = section.type
     }
   }

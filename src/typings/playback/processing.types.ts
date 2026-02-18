@@ -62,6 +62,21 @@ export interface IFadeTransformer extends Transform {
 }
 
 /**
+ * Supported scratch styles.
+ */
+export type ScratchStyle = 'wash' | 'backspin' | 'baby' | 'start' | 'stop' | 'random'
+
+/**
+ * Interface for ScratchTransformer.
+ */
+export interface IScratchTransformer extends Transform {
+  scratchTo(durationMs: number, style: ScratchStyle): void
+  process(chunk: Buffer): Buffer
+  isActive(): boolean
+  checkEffectCompleted(): boolean
+}
+
+/**
  * Interface for TapeTransformer.
  */
 export interface ITapeTransformer extends Transform {

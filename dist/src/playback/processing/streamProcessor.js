@@ -13,6 +13,7 @@ import { RingBuffer } from "../structs/RingBuffer.js";
 import { CrossfadeController } from "./CrossfadeController.js";
 import { FadeTransformer } from "./FadeTransformer.js";
 import { TapeTransformer } from "./TapeTransformer.js";
+import { ScratchTransformer } from "./ScratchTransformer.js";
 import { FlowController } from "./FlowController.js";
 import { FiltersManager } from "./filtersManager.js";
 import { VolumeTransformer } from "./VolumeTransformer.js";
@@ -290,6 +291,8 @@ class BaseAudioResource {
         voiceStream.clearCrossfade = () => this.clearCrossfade();
         voiceStream.getCrossfadeState = () => this.getCrossfadeState();
         voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted();
+        voiceStream.scratchTo = (durationMs, style) => this.scratchTo(durationMs, style);
+        voiceStream.checkScratchEffectCompleted = () => this.checkScratchEffectCompleted();
         this.stream = voiceStream;
     }
     _end() {
@@ -327,6 +330,10 @@ class BaseAudioResource {
         return { active: false, bufferedMs: 0, targetMs: 0 };
     }
     checkTapeRampCompleted() {
+        return false;
+    }
+    scratchTo(_durationMs, _style) { }
+    checkScratchEffectCompleted() {
         return false;
     }
     setVolume(volume) {
@@ -1897,9 +1904,13 @@ class StreamAudioResource extends BaseAudioResource {
             sampleRate: AUDIO_CONFIG.sampleRate,
             channels: AUDIO_CONFIG.channels
         });
+        const scratchTransformer = new ScratchTransformer({
+            sampleRate: AUDIO_CONFIG.sampleRate,
+            channels: AUDIO_CONFIG.channels
+        });
         const crossfadeController = new CrossfadeController(AUDIO_CONFIG.sampleRate, AUDIO_CONFIG.channels);
         this.crossfadeController = crossfadeController;
-        const flowController = new FlowController(filters, volumeTransformer, fadeTransformer, tapeTransformer, audioMixer);
+        const flowController = new FlowController(filters, volumeTransformer, fadeTransformer, tapeTransformer, scratchTransformer, audioMixer);
         const opusEncoder = new OpusEncoder({
             rate: AUDIO_CONFIG.sampleRate,
             channels: AUDIO_CONFIG.channels
@@ -1968,12 +1979,26 @@ class StreamAudioResource extends BaseAudioResource {
         const flowController = this.pipes.find((p) => p instanceof FlowController);
         return flowController?.checkTapeRampCompleted() ?? false;
     }
+    checkScratchEffectCompleted() {
+        if (!this.pipes)
+            return false;
+        const flowController = this.pipes.find((p) => p instanceof FlowController);
+        return flowController?.checkScratchEffectCompleted() ?? false;
+    }
     tapeTo(durationMs, type, curve) {
         if (!this.pipes)
             return;
         const flowController = this.pipes.find((p) => p instanceof FlowController);
         if (flowController) {
             flowController.tapeTo(durationMs, type, curve);
+        }
+    }
+    scratchTo(durationMs, style) {
+        if (!this.pipes)
+            return;
+        const flowController = this.pipes.find((p) => p instanceof FlowController);
+        if (flowController) {
+            flowController.scratchTo(durationMs, style);
         }
     }
     _createPCMOutputPipeline(pcmStream, volume, enableAGC = true) {

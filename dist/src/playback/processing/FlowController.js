@@ -2,7 +2,7 @@ import { Transform } from 'node:stream';
 const FRAME_SIZE = 3840;
 const EMPTY_BUFFER = Buffer.alloc(0);
 /**
- * Controller that coordinates filters, volume, fading, and mixing in a single stream.
+ * Controller that coordinates filters, volume, fading, scratching, and mixing in a single stream.
  * @public
  */
 export class FlowController extends Transform {
@@ -10,6 +10,7 @@ export class FlowController extends Transform {
     volume;
     fade;
     tape;
+    scratch;
     audioMixer;
     pendingBuffer;
     pendingLength;
@@ -19,14 +20,16 @@ export class FlowController extends Transform {
      * @param volume - The VolumeTransformer instance.
      * @param fade - The FadeTransformer instance.
      * @param tape - The TapeTransformer instance.
+     * @param scratch - The ScratchTransformer instance.
      * @param audioMixer - Optional AudioMixer instance.
      */
-    constructor(filters, volume, fade, tape, audioMixer = null) {
+    constructor(filters, volume, fade, tape, scratch, audioMixer = null) {
         super({ highWaterMark: FRAME_SIZE * 4 });
         this.filters = filters;
         this.volume = volume;
         this.fade = fade;
         this.tape = tape;
+        this.scratch = scratch;
         this.audioMixer = audioMixer;
         this.pendingBuffer = Buffer.allocUnsafe(FRAME_SIZE);
         this.pendingLength = 0;
@@ -35,6 +38,7 @@ export class FlowController extends Transform {
         let output = frame;
         output = this.filters.process(output);
         output = this.tape.process(output);
+        output = this.scratch.process(output);
         output = this.volume.process(output);
         output = this.fade.process(output);
         if (this.audioMixer &&
@@ -89,8 +93,19 @@ export class FlowController extends Transform {
     tapeTo(durationMs, type, curve) {
         this.tape.tapeTo(durationMs, type, curve);
     }
+    /**
+     * Schedules a scratch effect.
+     * @param durationMs - Duration of the scratch movement.
+     * @param style - The style of scratch to apply.
+     */
+    scratchTo(durationMs, style) {
+        this.scratch.scratchTo(durationMs, style);
+    }
     checkTapeRampCompleted() {
         return this.tape.checkRampCompleted();
+    }
+    checkScratchEffectCompleted() {
+        return this.scratch.checkEffectCompleted();
     }
     _transform(chunk, _encoding, callback) {
         let offset = 0;
@@ -129,6 +144,7 @@ export class FlowController extends Transform {
         }
         if (remaining.length > 0) {
             remaining = this.tape.process(remaining);
+            remaining = this.scratch.process(remaining);
             remaining = this.volume.process(remaining);
             remaining = this.fade.process(remaining);
             if (this.audioMixer &&
@@ -148,6 +164,13 @@ export class FlowController extends Transform {
             }
             if (remaining.length > 0)
                 this.push(remaining);
+        }
+        // Drain loop: Continue producing silence frames while effects are active.
+        // This ensures trackEnd scratch effects are fully audible even after source EOF.
+        const silence = Buffer.alloc(FRAME_SIZE, 0);
+        let drainLimit = 150; // ~1.2s safety limit
+        while ((this.scratch.isActive() || this.tape.isActive()) && drainLimit-- > 0) {
+            this._processFrame(silence);
         }
         callback();
     }
