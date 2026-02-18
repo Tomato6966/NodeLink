@@ -167,7 +167,7 @@ const _floatToInt16Buffer = (floatArray: Float32Array): Buffer => {
       _clampSample(floatArray[i] || 0) * AUDIO_CONSTANTS.pcmFloatFactor
   }
 
-  return Buffer.from(output.buffer)
+  return Buffer.from(output.buffer, output.byteOffset, output.byteLength)
 }
 
 const _createAdtsHeader = (
