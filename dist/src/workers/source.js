@@ -84,6 +84,7 @@ if (isMainThread) {
     const workerPool = [];
     const taskQueue = [];
     let lastScaleUpAt = 0;
+    let nextThreadId = initialThreadCount + 1;
     nodelink.logger('info', 'SourceWorker', `Starting ${initialThreadCount}/${maxThreadCount} micro-worker(s) for API tasks...`);
     const createMicroWorker = (threadNumber) => {
         const worker = new Worker(__filename, {
@@ -134,7 +135,7 @@ if (isMainThread) {
             if (workerPool.length < initialThreadCount && !process.exitCode) {
                 setTimeout(() => {
                     if (workerPool.length < maxThreadCount) {
-                        const newThreadNumber = Math.max(...workerPool.map(w => w.threadNumber || 0)) + 1;
+                        const newThreadNumber = nextThreadId++;
                         nodelink.logger('info', 'SourceWorker', `Respawning micro-worker ${newThreadNumber}...`);
                         createMicroWorker(newThreadNumber);
                     }
@@ -162,7 +163,7 @@ if (isMainThread) {
         const threshold = workerPool.length * SCALE_UP_THRESHOLD;
         if (totalLoad <= threshold)
             return;
-        const nextThreadNumber = workerPool.length + 1;
+        const nextThreadNumber = nextThreadId++;
         createMicroWorker(nextThreadNumber);
         lastScaleUpAt = now;
         nodelink.logger('info', 'SourceWorker', `Scaling micro-workers: ${workerPool.length}/${maxThreadCount} (load=${totalLoad}, threshold=${threshold})`);
@@ -478,8 +479,10 @@ else {
         }
         return meaningManagerPromise;
     };
-    nodelink['getLyricsManager'] = getLyricsManager;
-    nodelink['getMeaningManager'] = getMeaningManager;
+    nodelink['getLyricsManager'] =
+        getLyricsManager;
+    nodelink['getMeaningManager'] =
+        getMeaningManager;
     /**
      * Active live chat sessions (session ID -> active flag)
      * @internal
@@ -564,17 +567,24 @@ else {
             return { success: false, error: 'Missing profiler action' };
         }
         if (action === 'status') {
-            const sourceManagerDebug = nodelink.sources ? {
-                enabledSources: Array.from(nodelink.sources.sources.keys()),
-                sourceMapSize: nodelink.sources.sourceMap?.size ?? null,
-                searchAliasMapSize: nodelink.sources.searchAliasMap?.size ?? null,
-                patternMapLength: nodelink.sources.patternMap?.length ?? null
-            } : null;
-            const trackCacheDebug = nodelink.trackCacheManager ? {
-                size: nodelink.trackCacheManager.cache?.size ?? null,
-                maxEntries: nodelink.trackCacheManager.maxEntries ?? null
-            } : null;
-            const credentialDebug = nodelink.credentialManager && typeof nodelink.credentialManager.getStats === 'function'
+            const sourceManagerDebug = nodelink.sources
+                ? {
+                    enabledSources: Array.from(nodelink.sources.sources.keys()),
+                    sourceMapSize: nodelink.sources.sourceMap?.size ?? null,
+                    searchAliasMapSize: nodelink.sources.searchAliasMap?.size ?? null,
+                    patternMapLength: nodelink.sources
+                        .patternMap?.length ?? null
+                }
+                : null;
+            const trackCacheDebug = nodelink.trackCacheManager
+                ? {
+                    size: nodelink.trackCacheManager.cache?.size ?? null,
+                    maxEntries: nodelink.trackCacheManager
+                        .maxEntries ?? null
+                }
+                : null;
+            const credentialDebug = nodelink.credentialManager &&
+                typeof nodelink.credentialManager.getStats === 'function'
                 ? nodelink.credentialManager.getStats()
                 : null;
             const httpAgentsDebug = (() => {
@@ -630,12 +640,15 @@ else {
         }
         if (action === 'openInspector') {
             const host = typeof payload['host'] === 'string' ? payload['host'] : '127.0.0.1';
-            const port = typeof payload['port'] === 'number' &&
-                Number.isInteger(payload['port'])
+            const port = typeof payload['port'] === 'number' && Number.isInteger(payload['port'])
                 ? payload['port']
                 : 0;
             inspector.open(port, host, payload['exposeWait'] === true);
-            return { success: true, pid: process.pid, inspectorUrl: inspector.url() || null };
+            return {
+                success: true,
+                pid: process.pid,
+                inspectorUrl: inspector.url() || null
+            };
         }
         if (action === 'closeInspector') {
             inspector.close();
@@ -671,7 +684,11 @@ else {
                 startedAt: Date.now(),
                 name: sanitizeProfileName(typeof payload['name'] === 'string' ? payload['name'] : undefined) || null
             };
-            return { success: true, pid: process.pid, startedAt: activeCpuSession.startedAt };
+            return {
+                success: true,
+                pid: process.pid,
+                startedAt: activeCpuSession.startedAt
+            };
         }
         if (action === 'cpuStop') {
             if (!activeCpuSession) {
@@ -682,14 +699,21 @@ else {
             const outputPath = await buildProfilerFilePath('cpu', 'cpuprofile', (typeof payload['name'] === 'string'
                 ? sanitizeProfileName(payload['name'])
                 : '') ||
-                name || undefined);
+                name ||
+                undefined);
             await fsPromises.writeFile(outputPath, JSON.stringify(result['profile']));
             try {
                 session.disconnect();
             }
             catch { }
             activeCpuSession = null;
-            return { success: true, pid: process.pid, startedAt, endedAt: Date.now(), outputPath };
+            return {
+                success: true,
+                pid: process.pid,
+                startedAt,
+                endedAt: Date.now(),
+                outputPath
+            };
         }
         if (action === 'heapSnapshot') {
             const outputPath = await buildProfilerFilePath('heap', 'heapsnapshot', typeof payload['name'] === 'string' ? payload['name'] : undefined);
@@ -794,17 +818,17 @@ else {
      * @internal
      */
     const sendStreamChunkFromWorker = (id, socketPath, chunk) => {
-        // Ensure we transfer only the chunk payload, not a larger shared backing store.
-        const tightChunk = chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength
-            ? chunk
-            : Buffer.from(chunk);
-        const transferable = tightChunk.buffer;
+        // Allocate a fresh, non-resizable ArrayBuffer to guarantee transferability.
+        // Buffer.buffer may return a pool-backed or resizable ArrayBuffer that V8
+        // rejects in the postMessage transfer list.
+        const ab = new ArrayBuffer(chunk.byteLength);
+        new Uint8Array(ab).set(new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength));
         parentPort.postMessage({
             type: 'stream',
             id,
             socketPath,
-            chunk: tightChunk
-        }, [transferable]);
+            chunk: ab
+        }, [ab]);
     };
     /**
      * Sends stream end signal to parent thread

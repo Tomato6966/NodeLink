@@ -124,6 +124,7 @@ if (isMainThread) {
   const workerPool: MicroWorker[] = []
   const taskQueue: TaskData[] = []
   let lastScaleUpAt = 0
+  let nextThreadId = initialThreadCount + 1
 
   nodelink.logger(
     'info',
@@ -176,19 +177,20 @@ if (isMainThread) {
     worker.on('exit', (code) => {
       const idx = workerPool.indexOf(worker)
       if (idx !== -1) workerPool.splice(idx, 1)
-      
-      const loadInfo = worker.load > 0 ? ` (had ${worker.load} pending tasks)` : ''
+
+      const loadInfo =
+        worker.load > 0 ? ` (had ${worker.load} pending tasks)` : ''
       nodelink.logger(
         'warn',
         'SourceWorker',
         `Micro-worker ${threadNumber} exited with code ${code}${loadInfo}`
       )
-      
+
       // Respawn worker if below minimum
       if (workerPool.length < initialThreadCount && !process.exitCode) {
         setTimeout(() => {
           if (workerPool.length < maxThreadCount) {
-            const newThreadNumber = Math.max(...workerPool.map(w => (w as unknown as { threadNumber?: number }).threadNumber || 0)) + 1
+            const newThreadNumber = nextThreadId++
             nodelink.logger(
               'info',
               'SourceWorker',
@@ -227,7 +229,7 @@ if (isMainThread) {
     const threshold = workerPool.length * SCALE_UP_THRESHOLD
     if (totalLoad <= threshold) return
 
-    const nextThreadNumber = workerPool.length + 1
+    const nextThreadNumber = nextThreadId++
     createMicroWorker(nextThreadNumber)
     lastScaleUpAt = now
 
@@ -509,7 +511,7 @@ if (isMainThread) {
 
   setInterval(() => {
     const now = Date.now()
-    
+
     // Clean up idle sockets
     for (const [path, lastUsed] of socketLastUsed) {
       if (now - lastUsed > SOCKET_IDLE_MS) {
@@ -523,7 +525,7 @@ if (isMainThread) {
         socketLastUsed.delete(path)
       }
     }
-    
+
     // Force GC if available and memory is high
     if (global.gc) {
       const mem = process.memoryUsage()
@@ -593,8 +595,12 @@ if (isMainThread) {
   await nodelink.trackCacheManager.load()
   await nodelink.sources.loadFolder()
 
-  type LyricsManagerType = InstanceType<typeof import('../managers/lyricsManager.js').default>
-  type MeaningManagerType = InstanceType<typeof import('../managers/meaningManager.js').default>
+  type LyricsManagerType = InstanceType<
+    typeof import('../managers/lyricsManager.js').default
+  >
+  type MeaningManagerType = InstanceType<
+    typeof import('../managers/meaningManager.js').default
+  >
 
   let lyricsManagerPromise: Promise<LyricsManagerType> | null = null
   let meaningManagerPromise: Promise<MeaningManagerType> | null = null
@@ -627,8 +633,10 @@ if (isMainThread) {
     return meaningManagerPromise
   }
 
-  nodelink['getLyricsManager'] = getLyricsManager as unknown as WorkerNodeLink['getLyricsManager']
-  nodelink['getMeaningManager'] = getMeaningManager as unknown as WorkerNodeLink['getMeaningManager']
+  nodelink['getLyricsManager'] =
+    getLyricsManager as unknown as WorkerNodeLink['getLyricsManager']
+  nodelink['getMeaningManager'] =
+    getMeaningManager as unknown as WorkerNodeLink['getMeaningManager']
 
   /**
    * Active live chat sessions (session ID -> active flag)
@@ -722,18 +730,16 @@ if (isMainThread) {
       }
     >()
 
-    const visit = (
-      node: {
-        callFrame?: {
-          functionName?: string
-          url?: string
-          lineNumber?: number
-          columnNumber?: number
-        }
-        selfSize?: number
-        children?: unknown[]
+    const visit = (node: {
+      callFrame?: {
+        functionName?: string
+        url?: string
+        lineNumber?: number
+        columnNumber?: number
       }
-    ): void => {
+      selfSize?: number
+      children?: unknown[]
+    }): void => {
       const frame = node.callFrame || {}
       const functionName = frame.functionName || '(anonymous)'
       const url = frame.url || '(internal)'
@@ -785,21 +791,52 @@ if (isMainThread) {
     }
 
     if (action === 'status') {
-      const sourceManagerDebug = nodelink.sources ? {
-        enabledSources: Array.from(nodelink.sources.sources.keys()),
-        sourceMapSize: (nodelink.sources as unknown as { sourceMap?: Map<string, unknown> }).sourceMap?.size ?? null,
-        searchAliasMapSize: (nodelink.sources as unknown as { searchAliasMap?: Map<string, unknown> }).searchAliasMap?.size ?? null,
-        patternMapLength: (nodelink.sources as unknown as { patternMap?: unknown[] }).patternMap?.length ?? null
-      } : null
-
-      const trackCacheDebug = nodelink.trackCacheManager ? {
-        size: (nodelink.trackCacheManager as unknown as { cache?: Map<string, unknown> }).cache?.size ?? null,
-        maxEntries: (nodelink.trackCacheManager as unknown as { maxEntries?: number }).maxEntries ?? null
-      } : null
-
-      const credentialDebug = nodelink.credentialManager && typeof (nodelink.credentialManager as unknown as { getStats?: () => unknown }).getStats === 'function' 
-        ? (nodelink.credentialManager as unknown as { getStats: () => unknown }).getStats() 
+      const sourceManagerDebug = nodelink.sources
+        ? {
+            enabledSources: Array.from(nodelink.sources.sources.keys()),
+            sourceMapSize:
+              (
+                nodelink.sources as unknown as {
+                  sourceMap?: Map<string, unknown>
+                }
+              ).sourceMap?.size ?? null,
+            searchAliasMapSize:
+              (
+                nodelink.sources as unknown as {
+                  searchAliasMap?: Map<string, unknown>
+                }
+              ).searchAliasMap?.size ?? null,
+            patternMapLength:
+              (nodelink.sources as unknown as { patternMap?: unknown[] })
+                .patternMap?.length ?? null
+          }
         : null
+
+      const trackCacheDebug = nodelink.trackCacheManager
+        ? {
+            size:
+              (
+                nodelink.trackCacheManager as unknown as {
+                  cache?: Map<string, unknown>
+                }
+              ).cache?.size ?? null,
+            maxEntries:
+              (nodelink.trackCacheManager as unknown as { maxEntries?: number })
+                .maxEntries ?? null
+          }
+        : null
+
+      const credentialDebug =
+        nodelink.credentialManager &&
+        typeof (
+          nodelink.credentialManager as unknown as { getStats?: () => unknown }
+        ).getStats === 'function'
+          ? (
+              nodelink.credentialManager as unknown as {
+                getStats: () => unknown
+              }
+            ).getStats()
+          : null
 
       const httpAgentsDebug = (() => {
         try {
@@ -857,12 +894,15 @@ if (isMainThread) {
       const host =
         typeof payload['host'] === 'string' ? payload['host'] : '127.0.0.1'
       const port =
-        typeof payload['port'] === 'number' &&
-        Number.isInteger(payload['port'])
+        typeof payload['port'] === 'number' && Number.isInteger(payload['port'])
           ? payload['port']
           : 0
       inspector.open(port, host, payload['exposeWait'] === true)
-      return { success: true, pid: process.pid, inspectorUrl: inspector.url() || null }
+      return {
+        success: true,
+        pid: process.pid,
+        inspectorUrl: inspector.url() || null
+      }
     }
 
     if (action === 'closeInspector') {
@@ -901,11 +941,16 @@ if (isMainThread) {
       activeCpuSession = {
         session,
         startedAt: Date.now(),
-        name: sanitizeProfileName(
-          typeof payload['name'] === 'string' ? payload['name'] : undefined
-        ) || null
+        name:
+          sanitizeProfileName(
+            typeof payload['name'] === 'string' ? payload['name'] : undefined
+          ) || null
       }
-      return { success: true, pid: process.pid, startedAt: activeCpuSession.startedAt }
+      return {
+        success: true,
+        pid: process.pid,
+        startedAt: activeCpuSession.startedAt
+      }
     }
 
     if (action === 'cpuStop') {
@@ -920,14 +965,21 @@ if (isMainThread) {
         (typeof payload['name'] === 'string'
           ? sanitizeProfileName(payload['name'])
           : '') ||
-          name || undefined
+          name ||
+          undefined
       )
       await fsPromises.writeFile(outputPath, JSON.stringify(result['profile']))
       try {
         session.disconnect()
       } catch {}
       activeCpuSession = null
-      return { success: true, pid: process.pid, startedAt, endedAt: Date.now(), outputPath }
+      return {
+        success: true,
+        pid: process.pid,
+        startedAt,
+        endedAt: Date.now(),
+        outputPath
+      }
     }
 
     if (action === 'heapSnapshot') {
@@ -989,9 +1041,10 @@ if (isMainThread) {
       activeHeapSampling = {
         session,
         startedAt: Date.now(),
-        name: sanitizeProfileName(
-          typeof payload['name'] === 'string' ? payload['name'] : undefined
-        ) || null,
+        name:
+          sanitizeProfileName(
+            typeof payload['name'] === 'string' ? payload['name'] : undefined
+          ) || null,
         samplingInterval
       }
       return {
@@ -1055,20 +1108,21 @@ if (isMainThread) {
     socketPath: string,
     chunk: Buffer
   ): void => {
-    // Ensure we transfer only the chunk payload, not a larger shared backing store.
-    const tightChunk =
-      chunk.byteOffset === 0 && chunk.byteLength === chunk.buffer.byteLength
-        ? chunk
-        : Buffer.from(chunk)
-    const transferable = tightChunk.buffer as ArrayBuffer
+    // Allocate a fresh, non-resizable ArrayBuffer to guarantee transferability.
+    // Buffer.buffer may return a pool-backed or resizable ArrayBuffer that V8
+    // rejects in the postMessage transfer list.
+    const ab = new ArrayBuffer(chunk.byteLength)
+    new Uint8Array(ab).set(
+      new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)
+    )
     ;(parentPort as MessagePort).postMessage(
       {
         type: 'stream',
         id,
         socketPath,
-        chunk: tightChunk
+        chunk: ab
       },
-      [transferable]
+      [ab]
     )
   }
 
@@ -1232,7 +1286,8 @@ if (isMainThread) {
         )
       }
 
-      const sourceName = urlResult.newTrack?.info?.sourceName || trackInfo.sourceName
+      const sourceName =
+        urlResult.newTrack?.info?.sourceName || trackInfo.sourceName
       const isHls = urlResult.protocol === 'hls'
       const isSabr = urlResult.protocol === 'sabr'
       const isLocal = sourceName === 'local'
@@ -1244,9 +1299,13 @@ if (isMainThread) {
           undefined,
           nodelink as unknown as NodeLink,
           {},
-          { 
-            streamInfo: urlResult, 
-            loudnessNormalizer: (nodelink.options as unknown as { audio?: { loudnessNormalizer?: boolean } }).audio?.loudnessNormalizer 
+          {
+            streamInfo: urlResult,
+            loudnessNormalizer: (
+              nodelink.options as unknown as {
+                audio?: { loudnessNormalizer?: boolean }
+              }
+            ).audio?.loudnessNormalizer
           },
           (payload?.volume ?? 100) / 100,
           null,
@@ -1273,7 +1332,9 @@ if (isMainThread) {
           )) || null
 
         if (!fetched || fetched.exception) {
-          throw new Error(fetched?.exception?.message || 'Failed to load stream')
+          throw new Error(
+            fetched?.exception?.message || 'Failed to load stream'
+          )
         }
 
         pcmStream = createPCMStream(
@@ -1374,7 +1435,7 @@ if (isMainThread) {
             info: (payload as { decodedTrackInfo: TrackInfo }).decodedTrackInfo
           })
           break
-       case 'profilerCommand':
+        case 'profilerCommand':
           result = await handleProfilerCommand(
             (payload as Record<string, unknown>) || {}
           )
