@@ -151,6 +151,7 @@ export class Player {
   public isUpdatingTrack = false
   private _isRestoring = false
   private _isSeeking = false
+  private _isStopping = false
 
   constructor(options: PlayerOptions) {
     if (
@@ -413,12 +414,20 @@ export class Player {
     ]
 
     if (state.status === 'idle' && this.isUpdatingTrack) {
-      logger(
-        'debug',
-        'Player',
-        `Ignoring idle event during track replacement for guild ${this.guildId}. Reason: ${state.reason}`
-      )
-      return
+      if (endReason === EndReasons.STOPPED) {
+        logger(
+          'debug',
+          'Player',
+          `Processing stop completion during track update for guild ${this.guildId}`
+        )
+      } else {
+        logger(
+          'debug',
+          'Player',
+          `Ignoring idle event during track replacement for guild ${this.guildId}. Reason: ${state.reason}`
+        )
+        return
+      }
     }
 
     if (
@@ -605,6 +614,7 @@ export class Player {
    */
   private _resetTrack(): void {
     this._clearCrossfade()
+    this._isStopping = false
     if (this.nextResource) {
       this.nextResource.destroy()
       this.nextResource = null
@@ -1516,7 +1526,7 @@ export class Player {
     const position = this._realPosition()
 
     const threshold = this.nodelink.options.trackStuckThresholdMs
-    if (threshold > 0 && !this.isUpdatingTrack && this.track) {
+    if (threshold > 0 && !this.isUpdatingTrack && !this._isStopping && this.track) {
       if (this._lastPosition === position) {
         this._stuckTime += this.nodelink.options.playerUpdateInterval
         if (
@@ -2332,7 +2342,9 @@ export class Player {
 
       if (this.connection && this.connStatus !== 'destroyed') {
         if (this.connection.audioStream) {
+          this._isStopping = true
           if (this._fading('trackStop')) return true
+          this._isStopping = false
           this.connection.stop(EndReasons.STOPPED)
         } else {
           this._emitTrackEnd(EndReasons.STOPPED)
@@ -3430,6 +3442,7 @@ export class Player {
       }
 
       timers.stop = setTimeout(() => {
+        this._isStopping = false
         this.connection?.stop(EndReasons.STOPPED)
         if (timers.stop) {
           clearTimeout(timers.stop)

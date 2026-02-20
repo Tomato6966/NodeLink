@@ -93,6 +93,7 @@ export class Player {
     isUpdatingTrack = false;
     _isRestoring = false;
     _isSeeking = false;
+    _isStopping = false;
     constructor(options) {
         if (!options.nodelink ||
             !options.session?.socket ||
@@ -284,8 +285,13 @@ export class Player {
             EndReasons.LOAD_FAILED
         ];
         if (state.status === 'idle' && this.isUpdatingTrack) {
-            logger('debug', 'Player', `Ignoring idle event during track replacement for guild ${this.guildId}. Reason: ${state.reason}`);
-            return;
+            if (endReason === EndReasons.STOPPED) {
+                logger('debug', 'Player', `Processing stop completion during track update for guild ${this.guildId}`);
+            }
+            else {
+                logger('debug', 'Player', `Ignoring idle event during track replacement for guild ${this.guildId}. Reason: ${state.reason}`);
+                return;
+            }
         }
         if (state.status === 'idle' &&
             this.track &&
@@ -416,6 +422,7 @@ export class Player {
      */
     _resetTrack() {
         this._clearCrossfade();
+        this._isStopping = false;
         if (this.nextResource) {
             this.nextResource.destroy();
             this.nextResource = null;
@@ -1074,7 +1081,7 @@ export class Player {
             return false;
         const position = this._realPosition();
         const threshold = this.nodelink.options.trackStuckThresholdMs;
-        if (threshold > 0 && !this.isUpdatingTrack && this.track) {
+        if (threshold > 0 && !this.isUpdatingTrack && !this._isStopping && this.track) {
             if (this._lastPosition === position) {
                 this._stuckTime += this.nodelink.options.playerUpdateInterval;
                 if (this._stuckTime >= threshold &&
@@ -1597,8 +1604,10 @@ export class Player {
             }
             if (this.connection && this.connStatus !== 'destroyed') {
                 if (this.connection.audioStream) {
+                    this._isStopping = true;
                     if (this._fading('trackStop'))
                         return true;
+                    this._isStopping = false;
                     this.connection.stop(EndReasons.STOPPED);
                 }
                 else {
@@ -2474,6 +2483,7 @@ export class Player {
                 stream.scratchTo?.(section.duration, style);
             }
             timers.stop = setTimeout(() => {
+                this._isStopping = false;
                 this.connection?.stop(EndReasons.STOPPED);
                 if (timers.stop) {
                     clearTimeout(timers.stop);
