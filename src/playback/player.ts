@@ -967,6 +967,15 @@ export class Player {
       return
     }
 
+    if (this._fadeTimers.trackEnd) {
+      clearTimeout(this._fadeTimers.trackEnd)
+      this._fadeTimers.trackEnd = null
+    }
+
+    if (audioStream.setFadeVolume) {
+      audioStream.setFadeVolume(1.0)
+    }
+
     const started = audioStream.startCrossfade(durationMs, config.curve)
     if (!started) {
       logger(
@@ -1042,6 +1051,8 @@ export class Player {
     const currentStream = this.connection.audioStream as AudioResource | null
     currentStream?.clearCrossfade?.()
 
+    this._fading('reset')
+
     this._isResuming = true
     const oldStream = this.connection.play(resource as unknown)
     await this.waitEvent(
@@ -1060,6 +1071,8 @@ export class Player {
     this._crossfadePrepared = false
     this._crossfadeIgnoreIdle = false
     this.nextCrossfadeDuration = 0
+
+    this._fading('trackEndSchedule', { startPosition: startTime })
 
     logger(
       'debug',
@@ -1160,13 +1173,19 @@ export class Player {
     if (fetched.exception) return fetched as { exception: { message: string } }
     const fetchedStream = fetched.stream
     const totalBytesRaw =
-      (urlData.additionalData as { contentLength?: number | string } | null | undefined)
-        ?.contentLength ?? null
+      (
+        urlData.additionalData as
+          | { contentLength?: number | string }
+          | null
+          | undefined
+      )?.contentLength ?? null
     const totalBytesNum = Number(totalBytesRaw)
     this.profilerStreamStats = {
       downloadedBytes: 0,
       totalBytes:
-        Number.isFinite(totalBytesNum) && totalBytesNum > 0 ? totalBytesNum : null,
+        Number.isFinite(totalBytesNum) && totalBytesNum > 0
+          ? totalBytesNum
+          : null,
       lastChunkAt: null
     }
     if (typeof (fetchedStream as { on?: unknown }).on === 'function') {
@@ -2915,7 +2934,12 @@ export class Player {
       timers.trackEnd = null
     }
 
-    if (this.crossfade?.enabled) return false
+    if (
+      this.crossfade?.enabled &&
+      this.nextCrossfadeTrack &&
+      this.nextCrossfadeResource
+    )
+      return false
     if (!this.fading || this.fading.enabled !== true) return false
 
     let section: FadingSection | undefined | null = null
@@ -2933,7 +2957,9 @@ export class Player {
       return false
 
     const fadeType = section.type || 'volume'
-    const scratchStyle = (section.curve as import('../typings/playback/processing.types.ts').ScratchStyle) || 'random'
+    const scratchStyle =
+      (section.curve as import('../typings/playback/processing.types.ts').ScratchStyle) ||
+      'random'
 
     if (action === 'trackStartArm') {
       const resource = payload.resource
@@ -3033,7 +3059,11 @@ export class Player {
         stream.tapeTo?.(section.duration, 'stop', section.curve)
       }
       if (fadeType === 'scratch') {
-        const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle) ? scratchStyle : 'wash'
+        const style = ['wash', 'backspin', 'baby', 'stop'].includes(
+          scratchStyle
+        )
+          ? scratchStyle
+          : 'wash'
         stream.scratchTo?.(section.duration, style)
       }
 
@@ -3102,7 +3132,11 @@ export class Player {
         stream.tapeTo?.(section.duration, 'stop', section.curve)
       }
       if (fadeType === 'scratch') {
-        const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle) ? scratchStyle : 'stop'
+        const style = ['wash', 'backspin', 'baby', 'stop'].includes(
+          scratchStyle
+        )
+          ? scratchStyle
+          : 'stop'
         stream.scratchTo?.(section.duration, style)
       }
 
@@ -3139,7 +3173,11 @@ export class Player {
             stream.tapeTo?.(fadeDuration, 'stop', section.curve)
           }
           if (fadeType === 'scratch') {
-            const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle) ? scratchStyle : 'wash'
+            const style = ['wash', 'backspin', 'baby', 'stop'].includes(
+              scratchStyle
+            )
+              ? scratchStyle
+              : 'wash'
             stream.scratchTo?.(fadeDuration, style)
           }
         }

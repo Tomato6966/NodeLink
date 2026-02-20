@@ -116,6 +116,12 @@ export class CrossfadeController extends Transform {
     this._pauseNextStream()
   }
 
+  private _resumeNextStream(): void {
+    const stream = this.nextStream as Readable | null
+    if (!stream) return
+    if (typeof stream.resume === 'function') stream.resume()
+  }
+
   /**
    * Creates a new CrossfadeController.
    *
@@ -217,6 +223,7 @@ export class CrossfadeController extends Transform {
    */
   public startCrossfade(durationMs: number, curve?: FadeCurve): boolean {
     if (!this.ringBuffer || !this.isReady()) return false
+    this._resumeNextStream()
     if (!Number.isFinite(durationMs) || durationMs <= 0) return false
 
     this.crossfade = {
@@ -377,6 +384,10 @@ export class CrossfadeController extends Transform {
       if (data.length) this.push(data)
       callback()
       return
+    }
+
+    if (this.ringBuffer.length < this.targetBufferBytes) {
+      this._resumeNextStream()
     }
 
     const nextChunk = this.ringBuffer.read(data.length)

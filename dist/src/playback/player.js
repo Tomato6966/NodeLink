@@ -680,6 +680,13 @@ export class Player {
             this._clearCrossfade({ clearNext: true });
             return;
         }
+        if (this._fadeTimers.trackEnd) {
+            clearTimeout(this._fadeTimers.trackEnd);
+            this._fadeTimers.trackEnd = null;
+        }
+        if (audioStream.setFadeVolume) {
+            audioStream.setFadeVolume(1.0);
+        }
         const started = audioStream.startCrossfade(durationMs, config.curve);
         if (!started) {
             logger('warn', 'Crossfade', `Crossfade could not start for guild ${this.guildId} (controller rejected).`);
@@ -739,6 +746,7 @@ export class Player {
         this._lyricsBasePackets = this.connection.statistics?.packetsExpected ?? 0;
         const currentStream = this.connection.audioStream;
         currentStream?.clearCrossfade?.();
+        this._fading('reset');
         this._isResuming = true;
         const oldStream = this.connection.play(resource);
         await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
@@ -753,6 +761,7 @@ export class Player {
         this._crossfadePrepared = false;
         this._crossfadeIgnoreIdle = false;
         this.nextCrossfadeDuration = 0;
+        this._fading('trackEndSchedule', { startPosition: startTime });
         logger('debug', 'Crossfade', `Crossfade completed for guild ${this.guildId} (previous: ${previousTrack.info.identifier}).`);
     }
     /**
@@ -825,12 +834,13 @@ export class Player {
         if (fetched.exception)
             return fetched;
         const fetchedStream = fetched.stream;
-        const totalBytesRaw = urlData.additionalData
-            ?.contentLength ?? null;
+        const totalBytesRaw = urlData.additionalData?.contentLength ?? null;
         const totalBytesNum = Number(totalBytesRaw);
         this.profilerStreamStats = {
             downloadedBytes: 0,
-            totalBytes: Number.isFinite(totalBytesNum) && totalBytesNum > 0 ? totalBytesNum : null,
+            totalBytes: Number.isFinite(totalBytesNum) && totalBytesNum > 0
+                ? totalBytesNum
+                : null,
             lastChunkAt: null
         };
         if (typeof fetchedStream.on === 'function') {
@@ -2070,7 +2080,9 @@ export class Player {
             clearTimeout(timers.trackEnd);
             timers.trackEnd = null;
         }
-        if (this.crossfade?.enabled)
+        if (this.crossfade?.enabled &&
+            this.nextCrossfadeTrack &&
+            this.nextCrossfadeResource)
             return false;
         if (!this.fading || this.fading.enabled !== true)
             return false;
@@ -2092,7 +2104,8 @@ export class Player {
         if (!section || !Number.isFinite(section.duration) || section.duration <= 0)
             return false;
         const fadeType = section.type || 'volume';
-        const scratchStyle = section.curve || 'random';
+        const scratchStyle = section.curve ||
+            'random';
         if (action === 'trackStartArm') {
             const resource = payload.resource;
             if (!resource)
@@ -2191,7 +2204,9 @@ export class Player {
                 stream.tapeTo?.(section.duration, 'stop', section.curve);
             }
             if (fadeType === 'scratch') {
-                const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle) ? scratchStyle : 'wash';
+                const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle)
+                    ? scratchStyle
+                    : 'wash';
                 stream.scratchTo?.(section.duration, style);
             }
             // Active monitoring of the ramp completion
@@ -2253,7 +2268,9 @@ export class Player {
                 stream.tapeTo?.(section.duration, 'stop', section.curve);
             }
             if (fadeType === 'scratch') {
-                const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle) ? scratchStyle : 'stop';
+                const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle)
+                    ? scratchStyle
+                    : 'stop';
                 stream.scratchTo?.(section.duration, style);
             }
             timers.stop = setTimeout(() => {
@@ -2287,7 +2304,9 @@ export class Player {
                         stream.tapeTo?.(fadeDuration, 'stop', section.curve);
                     }
                     if (fadeType === 'scratch') {
-                        const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle) ? scratchStyle : 'wash';
+                        const style = ['wash', 'backspin', 'baby', 'stop'].includes(scratchStyle)
+                            ? scratchStyle
+                            : 'wash';
                         stream.scratchTo?.(fadeDuration, style);
                     }
                 }
