@@ -655,8 +655,6 @@ class BaseAudioResource {
 
 class SymphoniaDecoderStream extends Transform {
   private decoder: SymphoniaDecoderLike | null
-  private resampler: ResamplerLike | null
-  private resamplingQuality: string
   private resumeInput: ((error?: Error | null) => void) | null
   private isFinished: boolean
   private _aborted: boolean
@@ -668,7 +666,6 @@ class SymphoniaDecoderStream extends Transform {
 
   constructor(
     options: {
-      resamplingQuality?: string
       highWaterMark?: number
       objectMode?: boolean
     } = {}
@@ -680,8 +677,6 @@ class SymphoniaDecoderStream extends Transform {
     })
 
     this.decoder = new SymphoniaDecoder() as SymphoniaDecoderLike
-    this.resampler = null
-    this.resamplingQuality = options.resamplingQuality || 'fastest'
     this.resumeInput = null
     this.isFinished = false
     this._aborted = false
@@ -783,7 +778,7 @@ class SymphoniaDecoderStream extends Transform {
         (this.readableFlowing as boolean) !== false &&
         this.readableLength < this.readableHighWaterMark
       ) {
-        hasMoreData = await this._processAudio()
+        hasMoreData = this._processAudio()
 
         if (hasMoreData && this._isDecoderValid()) {
           await new Promise<void>((resolve) => {
@@ -811,7 +806,7 @@ class SymphoniaDecoderStream extends Transform {
     }
   }
 
-  async _processAudio(): Promise<boolean> {
+  _processAudio(): boolean {
     if (!this._isDecoderValid()) return false
     if (this.readableLength >= this.readableHighWaterMark) return true
 
@@ -834,16 +829,7 @@ class SymphoniaDecoderStream extends Transform {
       const result = this.decoder?.decode()
       if (!result) break
 
-      const { samples, sampleRate, channels } = result
-
-      const output =
-        sampleRate !== AUDIO_CONFIG.sampleRate
-          ? await this._resample(samples, channels, sampleRate)
-          : samples
-
-      if (this._aborted) break
-
-      const canPush = this.push(output)
+      const canPush = this.push(result.samples)
       hasOutput = true
       decodeCount++
 
@@ -861,41 +847,6 @@ class SymphoniaDecoderStream extends Transform {
 
     const remainingBytes = this.decoder?.bufferedBytes ?? 0
     return hasOutput || remainingBytes > 0
-  }
-
-  async _resample(
-    pcmInt16Buf: Buffer,
-    channels: number,
-    inputRate: number
-  ): Promise<Buffer> {
-    if (this._aborted) return EMPTY_BUFFER
-
-    if (!this.resampler) {
-      const libSampleRate = await getLibSampleRate()
-      this.resampler = await libSampleRate.create(
-        channels,
-        inputRate,
-        AUDIO_CONFIG.sampleRate,
-        {
-          converterType: _getResamplerConverterType(
-            this.resamplingQuality as ResamplingQuality,
-            libSampleRate
-            // biome-ignore lint/suspicious/noExplicitAny: library type mismatch
-          ) as any
-        }
-      )
-    }
-
-    const i16 = new Int16Array(
-      pcmInt16Buf.buffer,
-      pcmInt16Buf.byteOffset,
-      pcmInt16Buf.byteLength / 2
-    )
-
-    const f32 = new Float32Array(i16.length)
-    for (let i = 0; i < i16.length; i++) f32[i] = (i16[i] ?? 0) / 32768
-
-    return _floatToInt16Buffer(this.resampler?.full(f32) || new Float32Array(0))
   }
 
   override _flush(callback: TransformCallback): void {
@@ -962,13 +913,6 @@ class SymphoniaDecoderStream extends Transform {
         this.decoder.free()
       } catch {}
       this.decoder = null
-    }
-
-    if (this.resampler) {
-      try {
-        this.resampler.destroy()
-      } catch {}
-      this.resampler = null
     }
   }
 }
@@ -2308,7 +2252,7 @@ class StreamAudioResource extends BaseAudioResource {
       case SupportedFormats.FLAC:
       case SupportedFormats.OGG_VORBIS:
       case SupportedFormats.WAV:
-        return this._createSymphoniaPipeline(stream, resamplingQuality)
+        return this._createSymphoniaPipeline(stream)
 
       case SupportedFormats.OPUS:
         return this._createOpusPipeline(stream, type)
@@ -2358,9 +2302,7 @@ class StreamAudioResource extends BaseAudioResource {
       streams.push(demuxer)
 
       if (lowerType.includes('mp3') || lowerType.includes('mpeg')) {
-        const decoder = new SymphoniaDecoderStream({
-          resamplingQuality: resamplingQuality as ResamplingQuality
-        })
+        const decoder = new SymphoniaDecoderStream()
         streams.push(decoder)
 
         this.pipes?.push(...streams.slice(1))
@@ -2409,12 +2351,9 @@ class StreamAudioResource extends BaseAudioResource {
   }
 
   _createSymphoniaPipeline(
-    stream: Readable,
-    resamplingQuality: string
+    stream: Readable
   ): Transform {
-    const decoder = new SymphoniaDecoderStream({
-      resamplingQuality: resamplingQuality as ResamplingQuality
-    })
+    const decoder = new SymphoniaDecoderStream()
     this.pipes?.push(decoder)
 
     pipeline(stream, decoder, (err: Error | null): void => {
@@ -2842,7 +2781,7 @@ export const createPCMStream = (
         streams.push(new MPEGTSDemuxer())
 
         if (lowerType.includes('mp3') || lowerType.includes('mpeg')) {
-          streams.push(new SymphoniaDecoderStream({ resamplingQuality }))
+          streams.push(new SymphoniaDecoderStream())
           break
         }
       } else if (_isMp4Format(lowerType)) streams.push(new MP4ToAACStream())
@@ -2869,7 +2808,7 @@ export const createPCMStream = (
     case SupportedFormats.FLAC:
     case SupportedFormats.OGG_VORBIS:
     case SupportedFormats.WAV: {
-      streams.push(new SymphoniaDecoderStream({ resamplingQuality }))
+      streams.push(new SymphoniaDecoderStream())
       break
     }
 

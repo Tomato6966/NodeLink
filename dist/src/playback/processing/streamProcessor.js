@@ -431,8 +431,6 @@ class BaseAudioResource {
 }
 class SymphoniaDecoderStream extends Transform {
     decoder;
-    resampler;
-    resamplingQuality;
     resumeInput;
     isFinished;
     _aborted;
@@ -448,8 +446,6 @@ class SymphoniaDecoderStream extends Transform {
             objectMode: false
         });
         this.decoder = new SymphoniaDecoder();
-        this.resampler = null;
-        this.resamplingQuality = options.resamplingQuality || 'fastest';
         this.resumeInput = null;
         this.isFinished = false;
         this._aborted = false;
@@ -531,7 +527,7 @@ class SymphoniaDecoderStream extends Transform {
                 this._isDecoderValid() &&
                 this.readableFlowing !== false &&
                 this.readableLength < this.readableHighWaterMark) {
-                hasMoreData = await this._processAudio();
+                hasMoreData = this._processAudio();
                 if (hasMoreData && this._isDecoderValid()) {
                     await new Promise((resolve) => {
                         this._immediateId = setImmediate(() => {
@@ -557,7 +553,7 @@ class SymphoniaDecoderStream extends Transform {
             this._scheduleDecode();
         }
     }
-    async _processAudio() {
+    _processAudio() {
         if (!this._isDecoderValid())
             return false;
         if (this.readableLength >= this.readableHighWaterMark)
@@ -579,13 +575,7 @@ class SymphoniaDecoderStream extends Transform {
             const result = this.decoder?.decode();
             if (!result)
                 break;
-            const { samples, sampleRate, channels } = result;
-            const output = sampleRate !== AUDIO_CONFIG.sampleRate
-                ? await this._resample(samples, channels, sampleRate)
-                : samples;
-            if (this._aborted)
-                break;
-            const canPush = this.push(output);
+            const canPush = this.push(result.samples);
             hasOutput = true;
             decodeCount++;
             if (this.resumeInput) {
@@ -601,23 +591,6 @@ class SymphoniaDecoderStream extends Transform {
         }
         const remainingBytes = this.decoder?.bufferedBytes ?? 0;
         return hasOutput || remainingBytes > 0;
-    }
-    async _resample(pcmInt16Buf, channels, inputRate) {
-        if (this._aborted)
-            return EMPTY_BUFFER;
-        if (!this.resampler) {
-            const libSampleRate = await getLibSampleRate();
-            this.resampler = await libSampleRate.create(channels, inputRate, AUDIO_CONFIG.sampleRate, {
-                converterType: _getResamplerConverterType(this.resamplingQuality, libSampleRate
-                // biome-ignore lint/suspicious/noExplicitAny: library type mismatch
-                )
-            });
-        }
-        const i16 = new Int16Array(pcmInt16Buf.buffer, pcmInt16Buf.byteOffset, pcmInt16Buf.byteLength / 2);
-        const f32 = new Float32Array(i16.length);
-        for (let i = 0; i < i16.length; i++)
-            f32[i] = (i16[i] ?? 0) / 32768;
-        return _floatToInt16Buffer(this.resampler?.full(f32) || new Float32Array(0));
     }
     _flush(callback) {
         this.isFinished = true;
@@ -675,13 +648,6 @@ class SymphoniaDecoderStream extends Transform {
             }
             catch { }
             this.decoder = null;
-        }
-        if (this.resampler) {
-            try {
-                this.resampler.destroy();
-            }
-            catch { }
-            this.resampler = null;
         }
     }
 }
@@ -1783,7 +1749,7 @@ class StreamAudioResource extends BaseAudioResource {
             case SupportedFormats.FLAC:
             case SupportedFormats.OGG_VORBIS:
             case SupportedFormats.WAV:
-                return this._createSymphoniaPipeline(stream, resamplingQuality);
+                return this._createSymphoniaPipeline(stream);
             case SupportedFormats.OPUS:
                 return this._createOpusPipeline(stream, type);
             default:
@@ -1817,9 +1783,7 @@ class StreamAudioResource extends BaseAudioResource {
             const demuxer = new MPEGTSDemuxer();
             streams.push(demuxer);
             if (lowerType.includes('mp3') || lowerType.includes('mpeg')) {
-                const decoder = new SymphoniaDecoderStream({
-                    resamplingQuality: resamplingQuality
-                });
+                const decoder = new SymphoniaDecoderStream();
                 streams.push(decoder);
                 this.pipes?.push(...streams.slice(1));
                 pipeline(streams, (err) => {
@@ -1853,10 +1817,8 @@ class StreamAudioResource extends BaseAudioResource {
         });
         return decoder;
     }
-    _createSymphoniaPipeline(stream, resamplingQuality) {
-        const decoder = new SymphoniaDecoderStream({
-            resamplingQuality: resamplingQuality
-        });
+    _createSymphoniaPipeline(stream) {
+        const decoder = new SymphoniaDecoderStream();
         this.pipes?.push(decoder);
         pipeline(stream, decoder, (err) => {
             if (err && !this._destroyed) {
@@ -2116,7 +2078,7 @@ export const createPCMStream = (stream, type, nodelink, volume = 1.0, filters = 
             else if (_isMpegtsFormat(lowerType)) {
                 streams.push(new MPEGTSDemuxer());
                 if (lowerType.includes('mp3') || lowerType.includes('mpeg')) {
-                    streams.push(new SymphoniaDecoderStream({ resamplingQuality }));
+                    streams.push(new SymphoniaDecoderStream());
                     break;
                 }
             }
@@ -2138,7 +2100,7 @@ export const createPCMStream = (stream, type, nodelink, volume = 1.0, filters = 
         case SupportedFormats.FLAC:
         case SupportedFormats.OGG_VORBIS:
         case SupportedFormats.WAV: {
-            streams.push(new SymphoniaDecoderStream({ resamplingQuality }));
+            streams.push(new SymphoniaDecoderStream());
             break;
         }
         case SupportedFormats.OPUS: {
