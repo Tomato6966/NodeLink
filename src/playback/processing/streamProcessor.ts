@@ -515,8 +515,9 @@ class BaseAudioResource {
     active: boolean
     bufferedMs: number
     targetMs: number
+    isFinished: boolean
   } {
-    return { active: false, bufferedMs: 0, targetMs: 0 }
+    return { active: false, bufferedMs: 0, targetMs: 0, isFinished: false }
   }
 
   checkTapeRampCompleted(): boolean {
@@ -2569,12 +2570,14 @@ class StreamAudioResource extends BaseAudioResource {
     active: boolean
     bufferedMs: number
     targetMs: number
+    isFinished: boolean
   } {
     return (
       this.crossfadeController?.getState() ?? {
         active: false,
         bufferedMs: 0,
-        targetMs: 0
+        targetMs: 0,
+        isFinished: false
       }
     )
   }

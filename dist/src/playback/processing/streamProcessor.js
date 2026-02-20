@@ -327,7 +327,7 @@ class BaseAudioResource {
     }
     clearCrossfade() { }
     getCrossfadeState() {
-        return { active: false, bufferedMs: 0, targetMs: 0 };
+        return { active: false, bufferedMs: 0, targetMs: 0, isFinished: false };
     }
     checkTapeRampCompleted() {
         return false;
@@ -1970,7 +1970,8 @@ class StreamAudioResource extends BaseAudioResource {
         return (this.crossfadeController?.getState() ?? {
             active: false,
             bufferedMs: 0,
-            targetMs: 0
+            targetMs: 0,
+            isFinished: false
         });
     }
     checkTapeRampCompleted() {

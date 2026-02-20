@@ -207,6 +207,7 @@ export interface AudioResource {
     active: boolean
     bufferedMs: number
     targetMs: number
+    isFinished: boolean
   }
   destroy(): void
   stream?: VoiceAudioStream | null

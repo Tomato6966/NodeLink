@@ -681,7 +681,7 @@ export class Player {
             }
             const audioStream = this.connection?.audioStream;
             const state = audioStream?.getCrossfadeState?.();
-            const isDone = state ? state.active === false : false;
+            const isDone = state ? state.active === false || state.isFinished === true : false;
             const timedOut = Date.now() >= this._crossfadeCompletionDeadline;
             if (!isDone && !timedOut)
                 return;
@@ -1312,7 +1312,7 @@ export class Player {
         this._isSeeking = true;
         try {
             const sourceName = this.track.info.sourceName;
-            const unsupportedSources = ['local'];
+            const unsupportedSources = ['local', 'deezer'];
             let seekPromise;
             if (!this.streamInfo?.url) {
                 logger('debug', 'Player', 'No stream info URL available for seek. awaiting getTrackUrl.');
@@ -1341,13 +1341,13 @@ export class Player {
             if (this.streamInfo?.protocol === 'sabr') {
                 seekPromise = this._seekUsingSource(seekPosition, endTime !== undefined ? endTime : this.track.endTime);
             }
+            else if (canNativeSeek) {
+                seekPromise = this._seekUsingSource(seekPosition, endTime !== undefined ? endTime : this.track.endTime);
+            }
             else if (!unsupportedSources.includes(sourceName) &&
                 this.streamInfo?.url &&
                 this.streamInfo.protocol !== 'hls') {
                 seekPromise = this._seekeableSeek(seekPosition, endTime !== undefined ? endTime : this.track.endTime);
-            }
-            else if (canNativeSeek) {
-                seekPromise = this._seekUsingSource(seekPosition, endTime !== undefined ? endTime : this.track.endTime);
             }
             else {
                 seekPromise = this._legacySeek(seekPosition, endTime !== undefined ? endTime : this.track.endTime);

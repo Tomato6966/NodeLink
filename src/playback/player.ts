@@ -959,7 +959,7 @@ export class Player {
         | AudioResource
         | undefined
       const state = audioStream?.getCrossfadeState?.()
-      const isDone = state ? state.active === false : false
+      const isDone = state ? state.active === false || state.isFinished === true : false
       const timedOut = Date.now() >= this._crossfadeCompletionDeadline
 
       if (!isDone && !timedOut) return
@@ -1863,7 +1863,7 @@ export class Player {
     this._isSeeking = true
     try {
       const sourceName = this.track.info.sourceName
-      const unsupportedSources = ['local']
+      const unsupportedSources = ['local', 'deezer']
 
       let seekPromise: Promise<boolean>
       if (!this.streamInfo?.url) {
@@ -1912,17 +1912,17 @@ export class Player {
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime
         )
+      } else if (canNativeSeek) {
+        seekPromise = this._seekUsingSource(
+          seekPosition,
+          endTime !== undefined ? endTime : this.track.endTime
+        )
       } else if (
         !unsupportedSources.includes(sourceName) &&
         this.streamInfo?.url &&
         this.streamInfo.protocol !== 'hls'
       ) {
         seekPromise = this._seekeableSeek(
-          seekPosition,
-          endTime !== undefined ? endTime : this.track.endTime
-        )
-      } else if (canNativeSeek) {
-        seekPromise = this._seekUsingSource(
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime
         )

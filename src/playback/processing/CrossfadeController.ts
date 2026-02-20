@@ -11,6 +11,7 @@ interface CrossfadeRuntime {
   durationFrames: number
   elapsedFrames: number
   curve: FadeCurve
+  isFinished: boolean
 }
 
 /**
@@ -65,9 +66,9 @@ export class CrossfadeController extends Transform {
   private minBufferBytes: number
   private ringBuffer: RingBuffer | null = null
   private nextStream: Readable | null = null
-  private nextPendingByte: null | number = null
+  private nextPending: Buffer | null = null
   private nextSpill: Buffer | null = null
-  private mainPendingByte: null | number = null
+  private mainPending: Buffer | null = null
   private crossfade: CrossfadeRuntime | null = null
   private bufferReady = false
   private warnedCurve: FadeCurve | null = null
@@ -76,18 +77,14 @@ export class CrossfadeController extends Transform {
     if (!this.ringBuffer) return
     let data = chunk
 
-    if (this.nextPendingByte !== null) {
-      if (chunk.length === 0) return
-      const merged = Buffer.allocUnsafe(chunk.length + 1)
-      merged[0] = this.nextPendingByte
-      chunk.copy(merged, 1)
-      data = merged
-      this.nextPendingByte = null
+    if (this.nextPending && this.nextPending.length > 0) {
+      data = Buffer.concat([this.nextPending, chunk])
+      this.nextPending = null
     }
 
-    const remainder = data.length % 2
+    const remainder = data.length % 4
     if (remainder > 0) {
-      this.nextPendingByte = data[data.length - 1] ?? 0
+      this.nextPending = Buffer.from(data.subarray(data.length - remainder))
       data = data.subarray(0, data.length - remainder)
     }
 
@@ -139,11 +136,14 @@ export class CrossfadeController extends Transform {
     if (remaining <= 0) return
 
     const toWrite = Math.min(remaining, this.nextSpill.length)
-    this.ringBuffer.write(this.nextSpill.subarray(0, toWrite))
+    const writeBytes = toWrite - (toWrite % 4)
+    if (writeBytes <= 0) return
+
+    this.ringBuffer.write(this.nextSpill.subarray(0, writeBytes))
     this.nextSpill =
-      toWrite >= this.nextSpill.length
+      writeBytes >= this.nextSpill.length
         ? null
-        : this.nextSpill.subarray(toWrite)
+        : Buffer.from(this.nextSpill.subarray(writeBytes))
 
     if (this.ringBuffer.length >= this.targetBufferBytes) {
       this.bufferReady = true
@@ -226,11 +226,12 @@ export class CrossfadeController extends Transform {
   /**
    * Returns the current crossfade status.
    */
-  public getState(): { active: boolean; bufferedMs: number; targetMs: number } {
+  public getState(): { active: boolean; bufferedMs: number; targetMs: number; isFinished: boolean } {
     return {
       active: this.crossfade !== null,
       bufferedMs: this.getBufferedMs(),
-      targetMs: this.targetBufferBytes / this.bytesPerMs
+      targetMs: this.targetBufferBytes / this.bytesPerMs,
+      isFinished: this.crossfade?.isFinished ?? false
     }
   }
 
@@ -269,7 +270,8 @@ export class CrossfadeController extends Transform {
     this.crossfade = {
       durationFrames,
       elapsedFrames: 0,
-      curve: this._resolveCurve(curve)
+      curve: this._resolveCurve(curve),
+      isFinished: false
     }
     return true
   }
@@ -286,9 +288,9 @@ export class CrossfadeController extends Transform {
     }
     this._pauseNextStream()
     this.nextStream = null
-    this.nextPendingByte = null
+    this.nextPending = null
     this.nextSpill = null
-    this.mainPendingByte = null
+    this.mainPending = null
     this.crossfade = null
     this.bufferReady = false
     this.targetBufferBytes = 0
@@ -342,7 +344,7 @@ export class CrossfadeController extends Transform {
       : null
 
     const totalFrames = Math.floor(sampleCount / this.channels)
-    const remainingFrames = Math.max(
+    const remainingFrames = runtime.isFinished ? 0 : Math.max(
       0,
       runtime.durationFrames - runtime.elapsedFrames
     )
@@ -358,10 +360,14 @@ export class CrossfadeController extends Transform {
     }
 
     for (let frame = 0; frame < totalFrames; frame++) {
-      const frameProgress =
-        frame < fadeFrames
-          ? (runtime.elapsedFrames + frame) / runtime.durationFrames
-          : 1
+      let frameProgress = 1
+      if (!runtime.isFinished) {
+        frameProgress =
+          frame < fadeFrames
+            ? (runtime.elapsedFrames + frame) / runtime.durationFrames
+            : 1
+      }
+      
       const [gainOut, gainIn] = this._fadeGains(frameProgress, runtime.curve)
       const base = frame * this.channels
       for (let c = 0; c < this.channels; c++) {
@@ -373,9 +379,11 @@ export class CrossfadeController extends Transform {
       }
     }
 
-    runtime.elapsedFrames += fadeFrames
-    if (runtime.elapsedFrames >= runtime.durationFrames) {
-      this.crossfade = null
+    if (!runtime.isFinished) {
+      runtime.elapsedFrames += fadeFrames
+      if (runtime.elapsedFrames >= runtime.durationFrames) {
+        runtime.isFinished = true
+      }
     }
 
     return output
@@ -397,21 +405,14 @@ export class CrossfadeController extends Transform {
     callback: TransformCallback
   ): void {
     let data = chunk
-    if (this.mainPendingByte !== null) {
-      if (chunk.length === 0) {
-        callback()
-        return
-      }
-      const merged = Buffer.allocUnsafe(chunk.length + 1)
-      merged[0] = this.mainPendingByte
-      chunk.copy(merged, 1)
-      data = merged
-      this.mainPendingByte = null
+    if (this.mainPending && this.mainPending.length > 0) {
+      data = Buffer.concat([this.mainPending, chunk])
+      this.mainPending = null
     }
 
-    const remainder = data.length % 2
+    const remainder = data.length % 4
     if (remainder > 0) {
-      this.mainPendingByte = data[data.length - 1] ?? 0
+      this.mainPending = Buffer.from(data.subarray(data.length - remainder))
       data = data.subarray(0, data.length - remainder)
     }
 
@@ -423,15 +424,18 @@ export class CrossfadeController extends Transform {
 
     this._drainSpillToRing()
 
-    if (this.ringBuffer.length < this.targetBufferBytes) {
-      if (!this.nextSpill || this.nextSpill.length === 0) {
-        this._resumeNextStream()
-      }
+    const needed = data.length
+    if (this.ringBuffer.length < needed) {
+      this._resumeNextStream()
     }
 
-    const nextChunk = this.ringBuffer.read(data.length)
+    const nextChunk = this.ringBuffer.read(needed)
     if (!nextChunk) {
-      this.push(data)
+      // If we don't have next track data yet, but crossfade is active,
+      // it means we are in a buffer underrun for the next track.
+      // We still mix Song A at its current fade level with silence.
+      const silence = Buffer.alloc(needed, 0)
+      this.push(this._mixBuffers(data, silence, this.crossfade))
       callback()
       return
     }
