@@ -65,6 +65,8 @@ export class Player {
     _fadeTimers = { trackEnd: null, pause: null, stop: null };
     _crossfadeTimer = null;
     _crossfadeEndTimer = null;
+    _crossfadeCompletionWatcher = null;
+    _crossfadeCompletionDeadline = 0;
     _crossfadeEndsAt = 0;
     _crossfadeCompletionRemainingMs = 0;
     _crossfadeCompletionContext = null;
@@ -586,6 +588,11 @@ export class Player {
             clearTimeout(this._crossfadeEndTimer);
             this._crossfadeEndTimer = null;
         }
+        if (this._crossfadeCompletionWatcher) {
+            clearInterval(this._crossfadeCompletionWatcher);
+            this._crossfadeCompletionWatcher = null;
+        }
+        this._crossfadeCompletionDeadline = 0;
         this._crossfadeEndsAt = 0;
         this._crossfadeCompletionRemainingMs = 0;
         this._crossfadeCompletionContext = null;
@@ -646,40 +653,71 @@ export class Player {
     _armCrossfadeCompletionTimer(delayMs) {
         if (!this._crossfadeCompletionContext)
             return;
-        if (this._crossfadeEndTimer) {
-            clearTimeout(this._crossfadeEndTimer);
-            this._crossfadeEndTimer = null;
+        if (this._crossfadeCompletionWatcher) {
+            clearInterval(this._crossfadeCompletionWatcher);
+            this._crossfadeCompletionWatcher = null;
         }
         const boundedDelay = Math.max(0, delayMs);
         this._crossfadeCompletionRemainingMs = boundedDelay;
         this._crossfadeEndsAt = Date.now() + boundedDelay;
+        // Safety deadline if crossfade state never flips to inactive.
+        this._crossfadeCompletionDeadline =
+            Date.now() + Math.max(4000, boundedDelay * 3, boundedDelay + 1500);
         logger('debug', 'Crossfade', `Armed crossfade completion timer for guild ${this.guildId}`, {
             delayMs: boundedDelay,
-            endsAt: this._crossfadeEndsAt
+            endsAt: this._crossfadeEndsAt,
+            deadline: this._crossfadeCompletionDeadline
         });
-        this._crossfadeEndTimer = setTimeout(() => {
+        this._crossfadeCompletionWatcher = setInterval(() => {
+            if (this.isPaused)
+                return;
+            const context = this._crossfadeCompletionContext;
+            if (!context) {
+                if (this._crossfadeCompletionWatcher) {
+                    clearInterval(this._crossfadeCompletionWatcher);
+                    this._crossfadeCompletionWatcher = null;
+                }
+                return;
+            }
+            const audioStream = this.connection?.audioStream;
+            const state = audioStream?.getCrossfadeState?.();
+            const isDone = state ? state.active === false : false;
+            const timedOut = Date.now() >= this._crossfadeCompletionDeadline;
+            if (!isDone && !timedOut)
+                return;
+            if (this._crossfadeCompletionWatcher) {
+                clearInterval(this._crossfadeCompletionWatcher);
+                this._crossfadeCompletionWatcher = null;
+            }
             this._crossfadeEndTimer = null;
             this._crossfadeEndsAt = 0;
             this._crossfadeCompletionRemainingMs = 0;
-            const context = this._crossfadeCompletionContext;
+            this._crossfadeCompletionDeadline = 0;
             this._crossfadeCompletionContext = null;
-            if (!context)
-                return;
-            logger('debug', 'Crossfade', `Crossfade completion timer fired for guild ${this.guildId}`, { token: context.token });
+            if (timedOut && !isDone) {
+                logger('warn', 'Crossfade', `Crossfade completion watchdog timed out for guild ${this.guildId}; forcing transition.`, {
+                    token: context.token,
+                    state
+                });
+            }
+            else {
+                logger('debug', 'Crossfade', `Crossfade completion detected by stream state for guild ${this.guildId}`, { token: context.token, state });
+            }
             this._completeCrossfade(context.token, context.previousTrack).catch((err) => this._onError(err));
-        }, boundedDelay);
+        }, 50);
     }
     /**
      * Freezes crossfade completion while playback is paused.
      */
     _pauseCrossfadeCompletionTimer() {
-        if (!this._crossfadeCompletionContext || !this._crossfadeEndTimer)
+        if (!this._crossfadeCompletionContext || !this._crossfadeCompletionWatcher)
             return;
-        const remaining = Math.max(0, this._crossfadeEndsAt - Date.now());
-        clearTimeout(this._crossfadeEndTimer);
-        this._crossfadeEndTimer = null;
+        const remaining = Math.max(0, this._crossfadeCompletionDeadline - Date.now());
+        clearInterval(this._crossfadeCompletionWatcher);
+        this._crossfadeCompletionWatcher = null;
         this._crossfadeEndsAt = 0;
         this._crossfadeCompletionRemainingMs = remaining;
+        this._crossfadeCompletionDeadline = 0;
         logger('debug', 'Crossfade', `Paused crossfade completion timer for guild ${this.guildId}`, {
             remainingMs: remaining
         });
@@ -689,7 +727,7 @@ export class Player {
      */
     _resumeCrossfadeCompletionTimer() {
         if (!this._crossfadeCompletionContext ||
-            this._crossfadeEndTimer ||
+            this._crossfadeCompletionWatcher ||
             this.isPaused)
             return;
         logger('debug', 'Crossfade', `Resuming crossfade completion timer for guild ${this.guildId}`, { delayMs: this._crossfadeCompletionRemainingMs || 1 });
@@ -879,6 +917,11 @@ export class Player {
         this._crossfadePrepared = false;
         this._crossfadeIgnoreIdle = false;
         this.nextCrossfadeDuration = 0;
+        if (this._crossfadeCompletionWatcher) {
+            clearInterval(this._crossfadeCompletionWatcher);
+            this._crossfadeCompletionWatcher = null;
+        }
+        this._crossfadeCompletionDeadline = 0;
         this._crossfadeCompletionContext = null;
         this._crossfadeCompletionRemainingMs = 0;
         this._crossfadeEndsAt = 0;
@@ -1582,6 +1625,23 @@ export class Player {
     async preload(payload) {
         if (this.destroying)
             return false;
+        const sameEncoded = !!payload.encoded &&
+            !!this.nextTrack?.encoded &&
+            this.nextTrack.encoded === payload.encoded;
+        const sameIdentifier = !!payload.info?.identifier &&
+            !!this.nextTrack?.info?.identifier &&
+            this.nextTrack.info.identifier === payload.info.identifier;
+        const isDuplicatePreload = (sameEncoded || sameIdentifier) && !!this.nextResource;
+        if (isDuplicatePreload) {
+            logger('debug', 'Crossfade', `Skipping duplicate nextTrack preload for guild ${this.guildId}`, {
+                identifier: payload.info?.identifier,
+                encodedMatch: sameEncoded,
+                identifierMatch: sameIdentifier
+            });
+            // Keep existing buffers warm and only refresh scheduling window.
+            this._scheduleCrossfade(this._realPosition());
+            return true;
+        }
         if (this.nextResource) {
             this.nextResource.destroy();
             this.nextResource = null;

@@ -28,6 +28,7 @@ export class CrossfadeController extends Transform {
     ringBuffer = null;
     nextStream = null;
     nextPendingByte = null;
+    nextSpill = null;
     mainPendingByte = null;
     crossfade = null;
     bufferReady = false;
@@ -52,13 +53,17 @@ export class CrossfadeController extends Transform {
         }
         if (!data.length || !this.ringBuffer)
             return;
+        // Drain buffered overflow first to preserve contiguous ordering.
+        this._drainSpillToRing();
         const remaining = this.bufferSize - this.ringBuffer.length;
         if (remaining <= 0) {
+            this._appendSpill(data);
             this._pauseNextStream();
             return;
         }
         if (data.length > remaining) {
             this.ringBuffer.write(data.subarray(0, remaining));
+            this._appendSpill(data.subarray(remaining));
             this.bufferReady = true;
             this._pauseNextStream();
             return;
@@ -72,6 +77,32 @@ export class CrossfadeController extends Transform {
     onNextEnd = () => {
         this._pauseNextStream();
     };
+    _appendSpill(data) {
+        if (!data.length)
+            return;
+        if (!this.nextSpill || this.nextSpill.length === 0) {
+            this.nextSpill = Buffer.from(data);
+            return;
+        }
+        this.nextSpill = Buffer.concat([this.nextSpill, data]);
+    }
+    _drainSpillToRing() {
+        if (!this.ringBuffer || !this.nextSpill || this.nextSpill.length === 0)
+            return;
+        const remaining = this.bufferSize - this.ringBuffer.length;
+        if (remaining <= 0)
+            return;
+        const toWrite = Math.min(remaining, this.nextSpill.length);
+        this.ringBuffer.write(this.nextSpill.subarray(0, toWrite));
+        this.nextSpill =
+            toWrite >= this.nextSpill.length
+                ? null
+                : this.nextSpill.subarray(toWrite);
+        if (this.ringBuffer.length >= this.targetBufferBytes) {
+            this.bufferReady = true;
+            this._pauseNextStream();
+        }
+    }
     _resumeNextStream() {
         const stream = this.nextStream;
         if (!stream)
@@ -171,12 +202,14 @@ export class CrossfadeController extends Transform {
     startCrossfade(durationMs, curve) {
         if (!this.ringBuffer || !this.isReady())
             return false;
+        this._drainSpillToRing();
         this._resumeNextStream();
         if (!Number.isFinite(durationMs) || durationMs <= 0)
             return false;
+        const durationFrames = Math.max(1, Math.round((durationMs / 1000) * this.sampleRate));
         this.crossfade = {
-            durationMs,
-            elapsedMs: 0,
+            durationFrames,
+            elapsedFrames: 0,
             curve: this._resolveCurve(curve)
         };
         return true;
@@ -194,6 +227,7 @@ export class CrossfadeController extends Transform {
         this._pauseNextStream();
         this.nextStream = null;
         this.nextPendingByte = null;
+        this.nextSpill = null;
         this.mainPendingByte = null;
         this.crossfade = null;
         this.bufferReady = false;
@@ -237,17 +271,9 @@ export class CrossfadeController extends Transform {
         const outView = outAligned
             ? new Int16Array(output.buffer, output.byteOffset, sampleCount)
             : null;
-        const frames = sampleCount / this.channels;
-        const chunkDurationMs = (frames / this.sampleRate) * 1000;
-        const durationMs = runtime.durationMs;
-        const startProgress = Math.min(1, runtime.elapsedMs / durationMs);
-        const endProgress = Math.min(1, (runtime.elapsedMs + chunkDurationMs) / durationMs);
-        const [startOut, startIn] = this._fadeGains(startProgress, runtime.curve);
-        const [endOut, endIn] = this._fadeGains(endProgress, runtime.curve);
-        const stepOut = sampleCount > 1 ? (endOut - startOut) / (sampleCount - 1) : 0;
-        const stepIn = sampleCount > 1 ? (endIn - startIn) / (sampleCount - 1) : 0;
-        let gainOut = startOut;
-        let gainIn = startIn;
+        const totalFrames = Math.floor(sampleCount / this.channels);
+        const remainingFrames = Math.max(0, runtime.durationFrames - runtime.elapsedFrames);
+        const fadeFrames = Math.min(totalFrames, remainingFrames);
         const getMain = (i) => mainView ? (mainView[i] ?? 0) : main.readInt16LE(i * 2);
         const getNext = (i) => nextView ? (nextView[i] ?? 0) : next.readInt16LE(i * 2);
         const setOut = (i, val) => {
@@ -256,15 +282,21 @@ export class CrossfadeController extends Transform {
             else
                 output.writeInt16LE(val, i * 2);
         };
-        for (let i = 0; i < sampleCount; i++) {
-            const mixed = getMain(i) * gainOut + getNext(i) * gainIn;
-            const clamped = mixed < -32768 ? -32768 : mixed > 32767 ? 32767 : Math.round(mixed);
-            setOut(i, clamped);
-            gainOut += stepOut;
-            gainIn += stepIn;
+        for (let frame = 0; frame < totalFrames; frame++) {
+            const frameProgress = frame < fadeFrames
+                ? (runtime.elapsedFrames + frame) / runtime.durationFrames
+                : 1;
+            const [gainOut, gainIn] = this._fadeGains(frameProgress, runtime.curve);
+            const base = frame * this.channels;
+            for (let c = 0; c < this.channels; c++) {
+                const idx = base + c;
+                const mixed = getMain(idx) * gainOut + getNext(idx) * gainIn;
+                const clamped = mixed < -32768 ? -32768 : mixed > 32767 ? 32767 : Math.round(mixed);
+                setOut(idx, clamped);
+            }
         }
-        runtime.elapsedMs += chunkDurationMs;
-        if (runtime.elapsedMs >= runtime.durationMs) {
+        runtime.elapsedFrames += fadeFrames;
+        if (runtime.elapsedFrames >= runtime.durationFrames) {
             this.crossfade = null;
         }
         return output;
@@ -302,8 +334,11 @@ export class CrossfadeController extends Transform {
             callback();
             return;
         }
+        this._drainSpillToRing();
         if (this.ringBuffer.length < this.targetBufferBytes) {
-            this._resumeNextStream();
+            if (!this.nextSpill || this.nextSpill.length === 0) {
+                this._resumeNextStream();
+            }
         }
         const nextChunk = this.ringBuffer.read(data.length);
         if (!nextChunk) {
