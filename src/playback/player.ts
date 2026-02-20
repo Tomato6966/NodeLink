@@ -74,6 +74,7 @@ export class Player {
   private holoTrack: PlayerTrack | null = null
   private nextTrack: PlayerTrack | null = null
   private nextResource: AudioResource | null = null
+  private nextStreamInfo: StreamInfo = null
   private nextCrossfadeTrack: PlayerTrack | null = null
   private nextCrossfadeResource: AudioResource | null = null
   private nextCrossfadePcm: AudioResource | null = null
@@ -109,6 +110,12 @@ export class Player {
   private _fadeTimers: FadeTimers = { trackEnd: null, pause: null, stop: null }
   private _crossfadeTimer: NodeJS.Timeout | null = null
   private _crossfadeEndTimer: NodeJS.Timeout | null = null
+  private _crossfadeEndsAt = 0
+  private _crossfadeCompletionRemainingMs = 0
+  private _crossfadeCompletionContext: {
+    token: number
+    previousTrack: PlayerTrack
+  } | null = null
   private _crossfadeIgnoreIdle = false
   private _crossfadeToken = 0
   private _crossfadePrepared = false
@@ -429,12 +436,15 @@ export class Player {
       ) {
         const resource = this.nextResource
         const nextTrack = this.nextTrack
+        const nextStreamInfo = this.nextStreamInfo
 
         this._emitTrackEnd(EndReasons.GAPLESS)
 
         this.track = nextTrack
         this.nextTrack = null
         this.nextResource = null
+        this.streamInfo = nextStreamInfo
+        this.nextStreamInfo = null
 
         this.position = 0
         this._lyricsBasePosition = 0
@@ -474,13 +484,17 @@ export class Player {
       state.status === 'playing' &&
       this.track &&
       !this._isSeeking &&
-      ['requested', 'reconnected'].includes(state.reason ?? '')
+      (['requested', 'reconnected'].includes(state.reason ?? '') ||
+        this._pendingTrackStartFade)
     ) {
       const wasResuming = this._isResuming
       this._isResuming = false
       this.isPaused = false
 
-      if (!wasResuming && !this._isRestoring) {
+      if (wasResuming) {
+        this._resumeCrossfadeCompletionTimer()
+        this._fading('trackEndSchedule', { startPosition: this._realPosition() })
+      } else if (!this._isRestoring) {
         this._lyricsBasePackets =
           this.connection?.statistics?.packetsExpected ?? 0
         this._fading('trackStart')
@@ -588,6 +602,7 @@ export class Player {
       this.nextResource.destroy()
       this.nextResource = null
       this.nextTrack = null
+      this.nextStreamInfo = null
     }
 
     this.track = null
@@ -805,6 +820,9 @@ export class Player {
       clearTimeout(this._crossfadeEndTimer)
       this._crossfadeEndTimer = null
     }
+    this._crossfadeEndsAt = 0
+    this._crossfadeCompletionRemainingMs = 0
+    this._crossfadeCompletionContext = null
     this._crossfadeIgnoreIdle = false
     this._crossfadePrepared = false
     this._crossfadeToken += 1
@@ -844,12 +862,82 @@ export class Player {
       | undefined
     if (!pcmResource?.stream || !audioStream?.prepareCrossfade) return
 
-    audioStream.prepareCrossfade(pcmResource.stream as unknown as Readable, {
-      durationMs: config.durationMs,
-      minBufferMs: config.minBufferMs,
-      bufferMs: config.bufferMs
-    })
+    const prepared = audioStream.prepareCrossfade(
+      pcmResource.stream as unknown as Readable,
+      {
+        durationMs: config.durationMs,
+        minBufferMs: config.minBufferMs,
+        bufferMs: config.bufferMs
+      }
+    )
+    if (!prepared) {
+      logger(
+        'warn',
+        'Crossfade',
+        `Crossfade buffer prepare failed for guild ${this.guildId}.`
+      )
+      return
+    }
     this._crossfadePrepared = true
+  }
+
+  /**
+   * Arms or re-arms deferred completion for an active crossfade.
+   */
+  private _armCrossfadeCompletionTimer(delayMs: number): void {
+    if (!this._crossfadeCompletionContext) return
+
+    if (this._crossfadeEndTimer) {
+      clearTimeout(this._crossfadeEndTimer)
+      this._crossfadeEndTimer = null
+    }
+
+    const boundedDelay = Math.max(0, delayMs)
+    this._crossfadeCompletionRemainingMs = boundedDelay
+    this._crossfadeEndsAt = Date.now() + boundedDelay
+
+    this._crossfadeEndTimer = setTimeout(() => {
+      this._crossfadeEndTimer = null
+      this._crossfadeEndsAt = 0
+      this._crossfadeCompletionRemainingMs = 0
+
+      const context = this._crossfadeCompletionContext
+      this._crossfadeCompletionContext = null
+      if (!context) return
+
+      this._completeCrossfade(context.token, context.previousTrack).catch(
+        (err) => this._onError(err as Error)
+      )
+    }, boundedDelay)
+  }
+
+  /**
+   * Freezes crossfade completion while playback is paused.
+   */
+  private _pauseCrossfadeCompletionTimer(): void {
+    if (!this._crossfadeCompletionContext || !this._crossfadeEndTimer) return
+
+    const remaining = Math.max(0, this._crossfadeEndsAt - Date.now())
+    clearTimeout(this._crossfadeEndTimer)
+    this._crossfadeEndTimer = null
+    this._crossfadeEndsAt = 0
+    this._crossfadeCompletionRemainingMs = remaining
+  }
+
+  /**
+   * Resumes deferred crossfade completion once playback is active again.
+   */
+  private _resumeCrossfadeCompletionTimer(): void {
+    if (
+      !this._crossfadeCompletionContext ||
+      this._crossfadeEndTimer ||
+      this.isPaused
+    )
+      return
+
+    this._armCrossfadeCompletionTimer(
+      this._crossfadeCompletionRemainingMs || 1
+    )
   }
 
   /**
@@ -996,6 +1084,7 @@ export class Player {
       this.nextResource.destroy()
       this.nextResource = null
       this.nextTrack = null
+      this.nextStreamInfo = null
     }
     this.nextCrossfadeTrack = null
     this.nextCrossfadeStreamInfo = null
@@ -1017,13 +1106,8 @@ export class Player {
     this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
     this._emitTrackStart().catch((err) => this._onError(err))
 
-    if (this._crossfadeEndTimer) clearTimeout(this._crossfadeEndTimer)
-    this._crossfadeEndTimer = setTimeout(() => {
-      this._crossfadeEndTimer = null
-      this._completeCrossfade(token, previousTrack).catch((err) =>
-        this._onError(err as Error)
-      )
-    }, durationMs)
+    this._crossfadeCompletionContext = { token, previousTrack }
+    this._armCrossfadeCompletionTimer(durationMs)
   }
 
   /**
@@ -1071,6 +1155,9 @@ export class Player {
     this._crossfadePrepared = false
     this._crossfadeIgnoreIdle = false
     this.nextCrossfadeDuration = 0
+    this._crossfadeCompletionContext = null
+    this._crossfadeCompletionRemainingMs = 0
+    this._crossfadeEndsAt = 0
 
     this._fading('trackEndSchedule', { startPosition: startTime })
 
@@ -1583,9 +1670,6 @@ export class Player {
           return resolve(true)
         }
 
-        // eslint-disable-next-line no-console
-        console.log(startTime)
-
         this._startPlayback(
           startTime !== undefined
             ? startTime === 0 && this.position < 1000
@@ -1637,8 +1721,6 @@ export class Player {
       (this.track.info.length > 0 && seekPosition > this.track.info.length)
     )
       return false
-    // eslint-disable-next-line no-console
-    console.log(seekPosition)
     this._isSeeking = true
     try {
       const sourceName = this.track.info.sourceName
@@ -2106,6 +2188,7 @@ export class Player {
         this.nextResource.destroy()
         this.nextResource = null
         this.nextTrack = null
+        this.nextStreamInfo = null
       }
 
       if (this.connection && this.connStatus !== 'destroyed') {
@@ -2139,6 +2222,7 @@ export class Player {
       this.nextResource.destroy()
       this.nextResource = null
       this.nextTrack = null
+      this.nextStreamInfo = null
     }
     this._clearCrossfade({ clearNext: true })
 
@@ -2156,6 +2240,7 @@ export class Player {
 
       this.nextTrack = payload
       this.nextResource = fetched.stream
+      this.nextStreamInfo = { ...urlData, trackInfo: payload.info }
 
       if (this.volumePercent !== 100) {
         this.nextResource.setVolume(this.volumePercent / 100)
@@ -3039,6 +3124,11 @@ export class Player {
     if (action === 'pause') {
       const stream = this.connection?.audioStream as AudioResource | undefined
       if (!stream) return false
+      this._pauseCrossfadeCompletionTimer()
+      if (timers.trackEnd) {
+        clearTimeout(timers.trackEnd)
+        timers.trackEnd = null
+      }
       if (timers.pause) {
         if (timers.pause instanceof Object && 'interval' in timers.pause) {
           const pauseTimer = timers.pause as {
@@ -3070,10 +3160,16 @@ export class Player {
       // Active monitoring of the ramp completion
       const startTime = Date.now()
       const checkInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime
         const isTapeDone = stream.checkTapeRampCompleted?.()
         const isScratchDone = stream.checkScratchEffectCompleted?.()
-        const isRampDone = fadeType === 'scratch' ? isScratchDone : isTapeDone
-        const isTimeUp = Date.now() - startTime > section.duration + 500 // Safety timeout
+        const isRampDone =
+          fadeType === 'scratch'
+            ? !!isScratchDone
+            : fadeType === 'tape' || fadeType === 'both'
+              ? !!isTapeDone
+              : elapsed >= section.duration
+        const isTimeUp = elapsed > section.duration + 500 // Safety timeout
 
         if (isRampDone || isTimeUp) {
           clearInterval(checkInterval)
@@ -3103,6 +3199,7 @@ export class Player {
     if (action === 'resume') {
       const stream = this.connection?.audioStream as AudioResource | undefined
       if (!stream) return false
+      this._resumeCrossfadeCompletionTimer()
 
       if (fadeType === 'volume' || fadeType === 'both') {
         if (stream.setFadeVolume) stream.setFadeVolume(0)

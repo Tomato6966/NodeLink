@@ -33,6 +33,7 @@ export class Player {
     holoTrack = null;
     nextTrack = null;
     nextResource = null;
+    nextStreamInfo = null;
     nextCrossfadeTrack = null;
     nextCrossfadeResource = null;
     nextCrossfadePcm = null;
@@ -64,6 +65,9 @@ export class Player {
     _fadeTimers = { trackEnd: null, pause: null, stop: null };
     _crossfadeTimer = null;
     _crossfadeEndTimer = null;
+    _crossfadeEndsAt = 0;
+    _crossfadeCompletionRemainingMs = 0;
+    _crossfadeCompletionContext = null;
     _crossfadeIgnoreIdle = false;
     _crossfadeToken = 0;
     _crossfadePrepared = false;
@@ -294,10 +298,13 @@ export class Player {
                 this.nextTrack) {
                 const resource = this.nextResource;
                 const nextTrack = this.nextTrack;
+                const nextStreamInfo = this.nextStreamInfo;
                 this._emitTrackEnd(EndReasons.GAPLESS);
                 this.track = nextTrack;
                 this.nextTrack = null;
                 this.nextResource = null;
+                this.streamInfo = nextStreamInfo;
+                this.nextStreamInfo = null;
                 this.position = 0;
                 this._lyricsBasePosition = 0;
                 this._lyricsBasePackets =
@@ -321,11 +328,16 @@ export class Player {
         else if (state.status === 'playing' &&
             this.track &&
             !this._isSeeking &&
-            ['requested', 'reconnected'].includes(state.reason ?? '')) {
+            (['requested', 'reconnected'].includes(state.reason ?? '') ||
+                this._pendingTrackStartFade)) {
             const wasResuming = this._isResuming;
             this._isResuming = false;
             this.isPaused = false;
-            if (!wasResuming && !this._isRestoring) {
+            if (wasResuming) {
+                this._resumeCrossfadeCompletionTimer();
+                this._fading('trackEndSchedule', { startPosition: this._realPosition() });
+            }
+            else if (!this._isRestoring) {
                 this._lyricsBasePackets =
                     this.connection?.statistics?.packetsExpected ?? 0;
                 this._fading('trackStart');
@@ -405,6 +417,7 @@ export class Player {
             this.nextResource.destroy();
             this.nextResource = null;
             this.nextTrack = null;
+            this.nextStreamInfo = null;
         }
         this.track = null;
         this.holoTrack = null;
@@ -567,6 +580,9 @@ export class Player {
             clearTimeout(this._crossfadeEndTimer);
             this._crossfadeEndTimer = null;
         }
+        this._crossfadeEndsAt = 0;
+        this._crossfadeCompletionRemainingMs = 0;
+        this._crossfadeCompletionContext = null;
         this._crossfadeIgnoreIdle = false;
         this._crossfadePrepared = false;
         this._crossfadeToken += 1;
@@ -596,12 +612,62 @@ export class Player {
         const audioStream = this.connection?.audioStream;
         if (!pcmResource?.stream || !audioStream?.prepareCrossfade)
             return;
-        audioStream.prepareCrossfade(pcmResource.stream, {
+        const prepared = audioStream.prepareCrossfade(pcmResource.stream, {
             durationMs: config.durationMs,
             minBufferMs: config.minBufferMs,
             bufferMs: config.bufferMs
         });
+        if (!prepared) {
+            logger('warn', 'Crossfade', `Crossfade buffer prepare failed for guild ${this.guildId}.`);
+            return;
+        }
         this._crossfadePrepared = true;
+    }
+    /**
+     * Arms or re-arms deferred completion for an active crossfade.
+     */
+    _armCrossfadeCompletionTimer(delayMs) {
+        if (!this._crossfadeCompletionContext)
+            return;
+        if (this._crossfadeEndTimer) {
+            clearTimeout(this._crossfadeEndTimer);
+            this._crossfadeEndTimer = null;
+        }
+        const boundedDelay = Math.max(0, delayMs);
+        this._crossfadeCompletionRemainingMs = boundedDelay;
+        this._crossfadeEndsAt = Date.now() + boundedDelay;
+        this._crossfadeEndTimer = setTimeout(() => {
+            this._crossfadeEndTimer = null;
+            this._crossfadeEndsAt = 0;
+            this._crossfadeCompletionRemainingMs = 0;
+            const context = this._crossfadeCompletionContext;
+            this._crossfadeCompletionContext = null;
+            if (!context)
+                return;
+            this._completeCrossfade(context.token, context.previousTrack).catch((err) => this._onError(err));
+        }, boundedDelay);
+    }
+    /**
+     * Freezes crossfade completion while playback is paused.
+     */
+    _pauseCrossfadeCompletionTimer() {
+        if (!this._crossfadeCompletionContext || !this._crossfadeEndTimer)
+            return;
+        const remaining = Math.max(0, this._crossfadeEndsAt - Date.now());
+        clearTimeout(this._crossfadeEndTimer);
+        this._crossfadeEndTimer = null;
+        this._crossfadeEndsAt = 0;
+        this._crossfadeCompletionRemainingMs = remaining;
+    }
+    /**
+     * Resumes deferred crossfade completion once playback is active again.
+     */
+    _resumeCrossfadeCompletionTimer() {
+        if (!this._crossfadeCompletionContext ||
+            this._crossfadeEndTimer ||
+            this.isPaused)
+            return;
+        this._armCrossfadeCompletionTimer(this._crossfadeCompletionRemainingMs || 1);
     }
     /**
      * Schedules a crossfade transition when possible.
@@ -701,6 +767,7 @@ export class Player {
             this.nextResource.destroy();
             this.nextResource = null;
             this.nextTrack = null;
+            this.nextStreamInfo = null;
         }
         this.nextCrossfadeTrack = null;
         this.nextCrossfadeStreamInfo = null;
@@ -719,12 +786,8 @@ export class Player {
         this._lyricsBasePosition = 0;
         this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0;
         this._emitTrackStart().catch((err) => this._onError(err));
-        if (this._crossfadeEndTimer)
-            clearTimeout(this._crossfadeEndTimer);
-        this._crossfadeEndTimer = setTimeout(() => {
-            this._crossfadeEndTimer = null;
-            this._completeCrossfade(token, previousTrack).catch((err) => this._onError(err));
-        }, durationMs);
+        this._crossfadeCompletionContext = { token, previousTrack };
+        this._armCrossfadeCompletionTimer(durationMs);
     }
     /**
      * Completes the crossfade transition and continues playback.
@@ -761,6 +824,9 @@ export class Player {
         this._crossfadePrepared = false;
         this._crossfadeIgnoreIdle = false;
         this.nextCrossfadeDuration = 0;
+        this._crossfadeCompletionContext = null;
+        this._crossfadeCompletionRemainingMs = 0;
+        this._crossfadeEndsAt = 0;
         this._fading('trackEndSchedule', { startPosition: startTime });
         logger('debug', 'Crossfade', `Crossfade completed for guild ${this.guildId} (previous: ${previousTrack.info.identifier}).`);
     }
@@ -1104,8 +1170,6 @@ export class Player {
                     this.isUpdatingTrack = false;
                     return resolve(true);
                 }
-                // eslint-disable-next-line no-console
-                console.log(startTime);
                 this._startPlayback(startTime !== undefined
                     ? startTime === 0 && this.position < 1000
                         ? 0
@@ -1147,8 +1211,6 @@ export class Player {
         if (seekPosition < 0 ||
             (this.track.info.length > 0 && seekPosition > this.track.info.length))
             return false;
-        // eslint-disable-next-line no-console
-        console.log(seekPosition);
         this._isSeeking = true;
         try {
             const sourceName = this.track.info.sourceName;
@@ -1433,6 +1495,7 @@ export class Player {
                 this.nextResource.destroy();
                 this.nextResource = null;
                 this.nextTrack = null;
+                this.nextStreamInfo = null;
             }
             if (this.connection && this.connStatus !== 'destroyed') {
                 if (this.connection.audioStream) {
@@ -1468,6 +1531,7 @@ export class Player {
             this.nextResource.destroy();
             this.nextResource = null;
             this.nextTrack = null;
+            this.nextStreamInfo = null;
         }
         this._clearCrossfade({ clearNext: true });
         try {
@@ -1483,6 +1547,7 @@ export class Player {
                 return false;
             this.nextTrack = payload;
             this.nextResource = fetched.stream;
+            this.nextStreamInfo = { ...urlData, trackInfo: payload.info };
             if (this.volumePercent !== 100) {
                 this.nextResource.setVolume(this.volumePercent / 100);
             }
@@ -2186,6 +2251,11 @@ export class Player {
             const stream = this.connection?.audioStream;
             if (!stream)
                 return false;
+            this._pauseCrossfadeCompletionTimer();
+            if (timers.trackEnd) {
+                clearTimeout(timers.trackEnd);
+                timers.trackEnd = null;
+            }
             if (timers.pause) {
                 if (timers.pause instanceof Object && 'interval' in timers.pause) {
                     const pauseTimer = timers.pause;
@@ -2212,10 +2282,15 @@ export class Player {
             // Active monitoring of the ramp completion
             const startTime = Date.now();
             const checkInterval = setInterval(() => {
+                const elapsed = Date.now() - startTime;
                 const isTapeDone = stream.checkTapeRampCompleted?.();
                 const isScratchDone = stream.checkScratchEffectCompleted?.();
-                const isRampDone = fadeType === 'scratch' ? isScratchDone : isTapeDone;
-                const isTimeUp = Date.now() - startTime > section.duration + 500; // Safety timeout
+                const isRampDone = fadeType === 'scratch'
+                    ? !!isScratchDone
+                    : fadeType === 'tape' || fadeType === 'both'
+                        ? !!isTapeDone
+                        : elapsed >= section.duration;
+                const isTimeUp = elapsed > section.duration + 500; // Safety timeout
                 if (isRampDone || isTimeUp) {
                     clearInterval(checkInterval);
                     // Pipeline Drain Delay: Wait for the last frames to clear the Opus encoder and network buffers
@@ -2239,6 +2314,7 @@ export class Player {
             const stream = this.connection?.audioStream;
             if (!stream)
                 return false;
+            this._resumeCrossfadeCompletionTimer();
             if (fadeType === 'volume' || fadeType === 'both') {
                 if (stream.setFadeVolume)
                     stream.setFadeVolume(0);
