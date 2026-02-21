@@ -62,8 +62,16 @@ export class ScratchTransformer extends Transform {
    * @param style - The character of the scratch (e.g., 'backspin', 'wash').
    */
   public scratchTo(durationMs: number, style: ScratchStyle): void {
-    const duration = Number.isFinite(durationMs) ? Math.max(50, durationMs) : 500
+    const duration = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 500
     this._lastEffectCompleted = false
+
+    // Allow true instant reset/arm behavior when duration is explicitly zero.
+    if (duration === 0) {
+      this.currentRate = style === 'start' ? 1.0 : 0.0
+      this.state = null
+      this._lastEffectCompleted = true
+      return
+    }
 
     // If 'random' is selected, we provide a seed to the rate calculator
     // to diversify the movement.
