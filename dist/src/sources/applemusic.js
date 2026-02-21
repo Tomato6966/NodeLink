@@ -10,7 +10,7 @@ export default class AppleMusicSource {
         this.config = nodelink.options;
         this.searchTerms = ['amsearch'];
         this.patterns = [
-            /https?:\/\/(?:www\.)?music\.apple\.com\/(?:[a-zA-Z]{2}\/)?(album|playlist|artist|song)\/[^/]+\/([a-zA-Z0-9\-.]+)(?:\?i=(\d+))?/
+            /https?:\/\/(?:www\.)?music\.apple\.com\/([a-z]{2})?\/?(album|playlist|artist|song)\/[^/]+\/([a-zA-Z0-9\-.]+)(?:\?i=(\d+))?/
         ];
         this.priority = 95;
         this.mediaApiToken = null;
@@ -363,28 +363,29 @@ export default class AppleMusicSource {
             const urlMatch = this.patterns[0].exec(url);
             if (!urlMatch)
                 return { loadType: 'empty', data: {} };
-            const type = urlMatch[1];
-            const id = urlMatch[2];
-            const altTrackId = urlMatch[3];
+            const country = urlMatch[1]?.toUpperCase();
+            const type = urlMatch[2];
+            const id = urlMatch[3];
+            const altTrackId = urlMatch[4];
             switch (type) {
                 case 'song':
-                    return await this._resolveTrack(id);
+                    return await this._resolveTrack(id, country);
                 case 'album':
                     return altTrackId
-                        ? await this._resolveTrack(altTrackId)
-                        : await this._resolveAlbum(id);
+                        ? await this._resolveTrack(altTrackId, country)
+                        : await this._resolveAlbum(id, country);
                 case 'playlist':
-                    return await this._resolvePlaylist(id);
+                    return await this._resolvePlaylist(id, country);
                 case 'artist':
-                    return await this._resolveArtist(id);
+                    return await this._resolveArtist(id, country);
             }
         }
         catch (error) {
             return { exception: { message: error.message, severity: 'fault' } };
         }
     }
-    async _resolveTrack(id) {
-        const data = await this._apiRequest(`/catalog/${this.country}/songs/${id}?extend=artistUrl,editorialVideo&include=albums`);
+    async _resolveTrack(id, country = this.country) {
+        const data = await this._apiRequest(`/catalog/${country}/songs/${id}?extend=artistUrl,editorialVideo&include=albums`);
         if (!data?.data?.[0]) {
             return { exception: { message: 'Track not found.', severity: 'common' } };
         }
@@ -392,15 +393,15 @@ export default class AppleMusicSource {
         let video = this._extractVideoUrl(song.attributes);
         if (!video && song.relationships?.albums?.data?.[0]?.id) {
             const albumId = song.relationships.albums.data[0].id;
-            const albumData = await this._apiRequest(`/catalog/${this.country}/albums/${albumId}?extend=editorialVideo`);
+            const albumData = await this._apiRequest(`/catalog/${country}/albums/${albumId}?extend=editorialVideo`);
             if (albumData?.data?.[0]) {
                 video = this._extractVideoUrl(albumData.data[0].attributes);
             }
         }
         return { loadType: 'track', data: this._buildTrack(song, null, video) };
     }
-    async _resolveAlbum(id) {
-        const albumData = await this._apiRequest(`/catalog/${this.country}/albums/${id}?extend=artistUrl,editorialVideo`);
+    async _resolveAlbum(id, country = this.country) {
+        const albumData = await this._apiRequest(`/catalog/${country}/albums/${id}?extend=artistUrl,editorialVideo`);
         if (!albumData?.data?.[0]) {
             return { exception: { message: 'Album not found.', severity: 'common' } };
         }
@@ -408,7 +409,7 @@ export default class AppleMusicSource {
         const editorialVideo = this._extractVideoUrl(album.attributes);
         const baseTracks = album.relationships?.tracks?.data || [];
         const total = album.relationships?.tracks?.meta?.total || baseTracks.length;
-        const extra = await this._paginate(`/catalog/${this.country}/albums/${id}/tracks`, total, this.albumPageLimit);
+        const extra = await this._paginate(`/catalog/${country}/albums/${id}/tracks`, total, this.albumPageLimit);
         const all = [...baseTracks, ...extra];
         const artwork = this._parseArtwork(album.attributes?.artwork);
         const tracks = all
@@ -428,8 +429,8 @@ export default class AppleMusicSource {
             }
         };
     }
-    async _resolvePlaylist(id) {
-        const playlistResponse = await this._apiRequest(`/catalog/${this.country}/playlists/${id}?extend=editorialVideo`);
+    async _resolvePlaylist(id, country = this.country) {
+        const playlistResponse = await this._apiRequest(`/catalog/${country}/playlists/${id}?extend=editorialVideo`);
         if (!playlistResponse?.data?.[0]) {
             return {
                 exception: { message: 'Playlist not found.', severity: 'common' }
@@ -439,7 +440,7 @@ export default class AppleMusicSource {
         const editorialVideo = this._extractVideoUrl(playlist.attributes);
         const baseTracks = playlist.relationships?.tracks?.data || [];
         const total = playlist.relationships?.tracks?.meta?.total || baseTracks.length;
-        const extra = await this._paginate(`/catalog/${this.country}/playlists/${id}/tracks?extend=artistUrl`, total, this.playlistPageLimit);
+        const extra = await this._paginate(`/catalog/${country}/playlists/${id}/tracks?extend=artistUrl`, total, this.playlistPageLimit);
         const all = [...baseTracks, ...extra];
         const artwork = this._parseArtwork(playlist.attributes.artwork);
         const tracks = all
@@ -453,15 +454,15 @@ export default class AppleMusicSource {
             }
         };
     }
-    async _resolveArtist(id) {
-        const artistInfo = await this._apiRequest(`/catalog/${this.country}/artists/${id}?extend=editorialVideo`);
+    async _resolveArtist(id, country = this.country) {
+        const artistInfo = await this._apiRequest(`/catalog/${country}/artists/${id}?extend=editorialVideo`);
         if (!artistInfo?.data?.[0]) {
             return { exception: { message: 'Artist not found.', severity: 'common' } };
         }
         const artistObj = artistInfo.data[0];
         const artwork = this._parseArtwork(artistObj.attributes?.artwork);
         const editorialVideo = this._extractVideoUrl(artistObj.attributes);
-        const topTracksData = await this._apiRequest(`/catalog/${this.country}/artists/${id}/view/top-songs`);
+        const topTracksData = await this._apiRequest(`/catalog/${country}/artists/${id}/view/top-songs`);
         if (!topTracksData?.data) {
             return { exception: { message: 'Artist top songs not found.', severity: 'common' } };
         }
