@@ -2043,14 +2043,12 @@ export class Player {
       }
 
       const source = this.nodelink.sources.getSource(sourceName)
-      const canNativeSeek = source && typeof source.loadStream === 'function'
+      const hasSourceLoader = source && typeof source.loadStream === 'function'
+      const canNativeSeek =
+        !!hasSourceLoader &&
+        (this.streamInfo?.protocol === 'sabr' || sourceName === 'deezer')
 
-      if (this.streamInfo?.protocol === 'sabr') {
-        seekPromise = this._seekUsingSource(
-          seekPosition,
-          endTime !== undefined ? endTime : this.track.endTime
-        )
-      } else if (canNativeSeek) {
+      if (canNativeSeek) {
         seekPromise = this._seekUsingSource(
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime
