@@ -75,6 +75,7 @@ export class Player {
     _crossfadePrepared = false;
     _isResuming = false;
     _pendingTrackStartFade = false;
+    _ignoreIdleStoppedUntil = 0;
     _lyricsBasePosition = 0;
     _lyricsBasePackets = 0;
     _lyricsMarkerTimer = null;
@@ -284,6 +285,12 @@ export class Player {
             EndReasons.FINISHED,
             EndReasons.LOAD_FAILED
         ];
+        if (state.status === 'idle' &&
+            endReason === EndReasons.STOPPED &&
+            Date.now() < this._ignoreIdleStoppedUntil) {
+            logger('debug', 'Player', `Ignoring internal idle/stopped during stream swap for guild ${this.guildId}`);
+            return;
+        }
         if (state.status === 'idle' && this.isUpdatingTrack) {
             if (endReason === EndReasons.STOPPED) {
                 logger('debug', 'Player', `Processing stop completion during track update for guild ${this.guildId}`);
@@ -297,6 +304,12 @@ export class Player {
             this.track &&
             endReason &&
             endingReasons.includes(endReason)) {
+            if (this._crossfadeCompletionContext &&
+                (state.reason === EndReasons.FINISHED ||
+                    state.reason === EndReasons.STOPPED)) {
+                logger('debug', 'Crossfade', `Ignoring idle/${state.reason} while crossfade transition is in progress for guild ${this.guildId}`);
+                return;
+            }
             if (this._crossfadeIgnoreIdle && state.reason === EndReasons.FINISHED) {
                 this._crossfadeIgnoreIdle = false;
                 return;
@@ -356,6 +369,12 @@ export class Player {
         else if (state.status === 'paused') {
             this.isPaused = true;
         }
+    }
+    /**
+     * Suppresses transient idle/stopped events emitted by internal stream replacement.
+     */
+    _guardInternalStreamSwap(ms = 1500) {
+        this._ignoreIdleStoppedUntil = Date.now() + Math.max(250, ms);
     }
     /**
      * Handles playback errors and emits exception events.
@@ -688,9 +707,13 @@ export class Player {
             }
             const audioStream = this.connection?.audioStream;
             const state = audioStream?.getCrossfadeState?.();
-            const isDone = state ? state.active === false || state.isFinished === true : false;
+            const currentPosition = this._realPosition();
+            const isPositionReached = currentPosition >= context.endPositionMs - 40;
+            const isDone = state
+                ? state.active === false || state.isFinished === true
+                : false;
             const timedOut = Date.now() >= this._crossfadeCompletionDeadline;
-            if (!isDone && !timedOut)
+            if (!(isDone && isPositionReached) && !timedOut)
                 return;
             if (this._crossfadeCompletionWatcher) {
                 clearInterval(this._crossfadeCompletionWatcher);
@@ -704,11 +727,18 @@ export class Player {
             if (timedOut && !isDone) {
                 logger('warn', 'Crossfade', `Crossfade completion watchdog timed out for guild ${this.guildId}; forcing transition.`, {
                     token: context.token,
-                    state
+                    state,
+                    currentPosition,
+                    endPositionMs: context.endPositionMs
                 });
             }
             else {
-                logger('debug', 'Crossfade', `Crossfade completion detected by stream state for guild ${this.guildId}`, { token: context.token, state });
+                logger('debug', 'Crossfade', `Crossfade completion detected by stream state for guild ${this.guildId}`, {
+                    token: context.token,
+                    state,
+                    currentPosition,
+                    endPositionMs: context.endPositionMs
+                });
             }
             this._completeCrossfade(context.token, context.previousTrack).catch((err) => this._onError(err));
         }, 50);
@@ -719,7 +749,7 @@ export class Player {
     _pauseCrossfadeCompletionTimer() {
         if (!this._crossfadeCompletionContext || !this._crossfadeCompletionWatcher)
             return;
-        const remaining = Math.max(0, this._crossfadeCompletionDeadline - Date.now());
+        const remaining = Math.max(0, this._crossfadeEndsAt - Date.now());
         clearInterval(this._crossfadeCompletionWatcher);
         this._crossfadeCompletionWatcher = null;
         this._crossfadeEndsAt = 0;
@@ -877,11 +907,19 @@ export class Player {
         this._lyricsBasePosition = 0;
         this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0;
         this._emitTrackStart().catch((err) => this._onError(err));
-        this._crossfadeCompletionContext = { token, previousTrack };
+        const startPositionMs = this._realPosition();
+        this._crossfadeCompletionContext = {
+            token,
+            previousTrack,
+            startPositionMs,
+            endPositionMs: startPositionMs + durationMs
+        };
         logger('debug', 'Crossfade', `Crossfade started for guild ${this.guildId}`, {
             token,
             previousTrack: previousTrack.info.identifier,
-            nextTrack: nextTrack.info.identifier
+            nextTrack: nextTrack.info.identifier,
+            startPositionMs,
+            endPositionMs: startPositionMs + durationMs
         });
         this._armCrossfadeCompletionTimer(durationMs);
     }
@@ -911,6 +949,7 @@ export class Player {
         currentStream?.clearCrossfade?.();
         this._fading('reset');
         this._isResuming = true;
+        this._guardInternalStreamSwap();
         const oldStream = this.connection.play(resource);
         await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
         if (oldStream) {
@@ -1229,6 +1268,7 @@ export class Player {
         this._scheduleCrossfade(startTime || 0);
         logger('debug', 'Player', `Playing resource for guild ${this.guildId}`);
         this._stuckTime = 0;
+        this._guardInternalStreamSwap();
         this.connection.play(resource);
         await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
         return true;
@@ -1458,6 +1498,7 @@ export class Player {
         logger('debug', 'Player', `Playing resource for guild ${this.guildId} after source seek`);
         this._lyricsBasePosition = position;
         this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0;
+        this._guardInternalStreamSwap();
         this.connection.play(resource);
         await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
         this._scheduleCrossfade(position);
@@ -1501,6 +1542,7 @@ export class Player {
             this._lyricsBasePosition = position;
             this._lyricsBasePackets =
                 this.connection?.statistics?.packetsExpected ?? 0;
+            this._guardInternalStreamSwap();
             const oldStream = this.connection?.play(resource);
             await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
             if (oldStream) {
@@ -1582,6 +1624,7 @@ export class Player {
         logger('debug', 'Player', `Playing resource for guild ${this.guildId} after legacy seek`);
         this._lyricsBasePosition = position;
         this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0;
+        this._guardInternalStreamSwap();
         this.connection.play(resource);
         await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
         this._scheduleCrossfade(position);

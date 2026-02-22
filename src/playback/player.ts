@@ -117,12 +117,15 @@ export class Player {
   private _crossfadeCompletionContext: {
     token: number
     previousTrack: PlayerTrack
+    startPositionMs: number
+    endPositionMs: number
   } | null = null
   private _crossfadeIgnoreIdle = false
   private _crossfadeToken = 0
   private _crossfadePrepared = false
   private _isResuming = false
   private _pendingTrackStartFade = false
+  private _ignoreIdleStoppedUntil = 0
   private _lyricsBasePosition = 0
   private _lyricsBasePackets = 0
   private _lyricsMarkerTimer: NodeJS.Timeout | null = null
@@ -413,6 +416,19 @@ export class Player {
       EndReasons.LOAD_FAILED
     ]
 
+    if (
+      state.status === 'idle' &&
+      endReason === EndReasons.STOPPED &&
+      Date.now() < this._ignoreIdleStoppedUntil
+    ) {
+      logger(
+        'debug',
+        'Player',
+        `Ignoring internal idle/stopped during stream swap for guild ${this.guildId}`
+      )
+      return
+    }
+
     if (state.status === 'idle' && this.isUpdatingTrack) {
       if (endReason === EndReasons.STOPPED) {
         logger(
@@ -436,6 +452,19 @@ export class Player {
       endReason &&
       endingReasons.includes(endReason)
     ) {
+      if (
+        this._crossfadeCompletionContext &&
+        (state.reason === EndReasons.FINISHED ||
+          state.reason === EndReasons.STOPPED)
+      ) {
+        logger(
+          'debug',
+          'Crossfade',
+          `Ignoring idle/${state.reason} while crossfade transition is in progress for guild ${this.guildId}`
+        )
+        return
+      }
+
       if (this._crossfadeIgnoreIdle && state.reason === EndReasons.FINISHED) {
         this._crossfadeIgnoreIdle = false
         return
@@ -519,6 +548,13 @@ export class Player {
     } else if (state.status === 'paused') {
       this.isPaused = true
     }
+  }
+
+  /**
+   * Suppresses transient idle/stopped events emitted by internal stream replacement.
+   */
+  private _guardInternalStreamSwap(ms = 1500): void {
+    this._ignoreIdleStoppedUntil = Date.now() + Math.max(250, ms)
   }
 
   /**
@@ -969,10 +1005,15 @@ export class Player {
         | AudioResource
         | undefined
       const state = audioStream?.getCrossfadeState?.()
-      const isDone = state ? state.active === false || state.isFinished === true : false
+      const currentPosition = this._realPosition()
+      const isPositionReached =
+        currentPosition >= context.endPositionMs - 40
+      const isDone = state
+        ? state.active === false || state.isFinished === true
+        : false
       const timedOut = Date.now() >= this._crossfadeCompletionDeadline
 
-      if (!isDone && !timedOut) return
+      if (!(isDone && isPositionReached) && !timedOut) return
 
       if (this._crossfadeCompletionWatcher) {
         clearInterval(this._crossfadeCompletionWatcher)
@@ -991,7 +1032,9 @@ export class Player {
           `Crossfade completion watchdog timed out for guild ${this.guildId}; forcing transition.`,
           {
             token: context.token,
-            state
+            state,
+            currentPosition,
+            endPositionMs: context.endPositionMs
           }
         )
       } else {
@@ -999,7 +1042,12 @@ export class Player {
           'debug',
           'Crossfade',
           `Crossfade completion detected by stream state for guild ${this.guildId}`,
-          { token: context.token, state }
+          {
+            token: context.token,
+            state,
+            currentPosition,
+            endPositionMs: context.endPositionMs
+          }
         )
       }
 
@@ -1018,7 +1066,7 @@ export class Player {
 
     const remaining = Math.max(
       0,
-      this._crossfadeCompletionDeadline - Date.now()
+      this._crossfadeEndsAt - Date.now()
     )
     clearInterval(this._crossfadeCompletionWatcher)
     this._crossfadeCompletionWatcher = null
@@ -1240,11 +1288,19 @@ export class Player {
     this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
     this._emitTrackStart().catch((err) => this._onError(err))
 
-    this._crossfadeCompletionContext = { token, previousTrack }
+    const startPositionMs = this._realPosition()
+    this._crossfadeCompletionContext = {
+      token,
+      previousTrack,
+      startPositionMs,
+      endPositionMs: startPositionMs + durationMs
+    }
     logger('debug', 'Crossfade', `Crossfade started for guild ${this.guildId}`, {
       token,
       previousTrack: previousTrack.info.identifier,
-      nextTrack: nextTrack.info.identifier
+      nextTrack: nextTrack.info.identifier,
+      startPositionMs,
+      endPositionMs: startPositionMs + durationMs
     })
     this._armCrossfadeCompletionTimer(durationMs)
   }
@@ -1282,6 +1338,7 @@ export class Player {
     this._fading('reset')
 
     this._isResuming = true
+    this._guardInternalStreamSwap()
     const oldStream = this.connection.play(resource as unknown)
     await this.waitEvent(
       'playerStateChange',
@@ -1743,6 +1800,7 @@ export class Player {
 
     logger('debug', 'Player', `Playing resource for guild ${this.guildId}`)
     this._stuckTime = 0
+    this._guardInternalStreamSwap()
     this.connection.play(resource as unknown)
     await this.waitEvent(
       'playerStateChange',
@@ -2095,6 +2153,7 @@ export class Player {
     )
     this._lyricsBasePosition = position
     this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
+    this._guardInternalStreamSwap()
     this.connection.play(resource as unknown)
     await this.waitEvent(
       'playerStateChange',
@@ -2181,6 +2240,7 @@ export class Player {
       this._lyricsBasePackets =
         this.connection?.statistics?.packetsExpected ?? 0
 
+      this._guardInternalStreamSwap()
       const oldStream = this.connection?.play(resource as unknown)
       await this.waitEvent(
         'playerStateChange',
@@ -2314,6 +2374,7 @@ export class Player {
     )
     this._lyricsBasePosition = position
     this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
+    this._guardInternalStreamSwap()
     this.connection.play(resource as unknown)
     await this.waitEvent(
       'playerStateChange',
