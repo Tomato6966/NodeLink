@@ -1584,6 +1584,7 @@ export class Player {
         this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0;
         this.connection.play(resource);
         await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
+        this._scheduleCrossfade(position);
         return true;
     }
     /**
@@ -1634,13 +1635,20 @@ export class Player {
     async preload(payload) {
         if (this.destroying)
             return false;
+        const crossfadeConfig = this._getCrossfadeConfig();
+        const shouldPrepareCrossfade = !!crossfadeConfig && !!this.track;
+        const hasPreparedCrossfade = !!this.nextCrossfadeTrack &&
+            !!this.nextCrossfadeResource &&
+            !!this.nextCrossfadePcm;
         const sameEncoded = !!payload.encoded &&
             !!this.nextTrack?.encoded &&
             this.nextTrack.encoded === payload.encoded;
         const sameIdentifier = !!payload.info?.identifier &&
             !!this.nextTrack?.info?.identifier &&
             this.nextTrack.info.identifier === payload.info.identifier;
-        const isDuplicatePreload = (sameEncoded || sameIdentifier) && !!this.nextResource;
+        const isDuplicatePreload = (sameEncoded || sameIdentifier) &&
+            !!this.nextResource &&
+            (!shouldPrepareCrossfade || hasPreparedCrossfade);
         if (isDuplicatePreload) {
             logger('debug', 'Crossfade', `Skipping duplicate nextTrack preload for guild ${this.guildId}`, {
                 identifier: payload.info?.identifier,
@@ -1676,7 +1684,6 @@ export class Player {
                 this.nextResource.setVolume(this.volumePercent / 100);
             }
             this.nextResource.setFilters(this.filters);
-            const crossfadeConfig = this._getCrossfadeConfig();
             if (crossfadeConfig && this.track) {
                 logger('debug', 'Crossfade', `Crossfade preload requested for guild ${this.guildId}`, {
                     durationMs: crossfadeConfig.durationMs,
