@@ -2241,6 +2241,8 @@ class StreamAudioResource extends BaseAudioResource {
     normalizedType: string,
     resamplingQuality: string
   ): Transform {
+    if (type === 'pcm') return stream as Transform
+
     switch (normalizedType) {
       case SupportedFormats.AAC:
         return this._createAACPipeline(stream, type, resamplingQuality)

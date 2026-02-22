@@ -1740,6 +1740,8 @@ class StreamAudioResource extends BaseAudioResource {
         }
     }
     _createDecoderPipeline(stream, type, normalizedType, resamplingQuality) {
+        if (type === 'pcm')
+            return stream;
         switch (normalizedType) {
             case SupportedFormats.AAC:
                 return this._createAACPipeline(stream, type, resamplingQuality);

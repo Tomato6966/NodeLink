@@ -477,7 +477,28 @@ export class Player {
         this.nextResource &&
         this.nextTrack
       ) {
-        const resource = this.nextResource
+        let resource = this.nextResource
+
+        if (this.nextCrossfadePcm === resource && createAudioResource) {
+          if (!resource.stream) {
+            this.stop()
+            return
+          }
+
+          resource = createAudioResource(
+            resource.stream as unknown as Readable,
+            'pcm',
+            this.nodelink,
+            this.filters,
+            this.volumePercent / 100,
+            this.audioMixer,
+            false,
+            this.loudnessNormalizer
+          )
+          this.nextCrossfadePcm = null
+          this.nextResource = resource
+        }
+
         const nextTrack = this.nextTrack
         const nextStreamInfo = this.nextStreamInfo
 
@@ -1140,7 +1161,6 @@ export class Player {
       !config ||
       !this.track ||
       !this.nextCrossfadeTrack ||
-      !this.nextCrossfadeResource ||
       !this.nextCrossfadePcm
     )
       return
@@ -1250,7 +1270,7 @@ export class Player {
         'Crossfade',
         `Crossfade could not start for guild ${this.guildId} (missing buffer).`
       )
-      this._clearCrossfade({ clearNext: true })
+      this._clearCrossfade({ clearNext: false, clearPcm: false })
       return
     }
 
@@ -1262,7 +1282,7 @@ export class Player {
           state.bufferedMs
         )}ms < ${durationMs}ms).`
       )
-      this._clearCrossfade({ clearNext: true })
+      this._clearCrossfade({ clearNext: false, clearPcm: false })
       return
     }
 
@@ -1282,7 +1302,7 @@ export class Player {
         'Crossfade',
         `Crossfade could not start for guild ${this.guildId} (controller rejected).`
       )
-      this._clearCrossfade({ clearNext: true })
+      this._clearCrossfade({ clearNext: false, clearPcm: false })
       return
     }
 
@@ -1291,12 +1311,7 @@ export class Player {
     const nextStreamInfo = this.nextCrossfadeStreamInfo
 
     this._crossfadeIgnoreIdle = true
-    if (this.nextResource) {
-      this.nextResource.destroy()
-      this.nextResource = null
-      this.nextTrack = null
-      this.nextStreamInfo = null
-    }
+    
     this.nextCrossfadeTrack = null
     this.nextCrossfadeStreamInfo = null
     this.nextCrossfadeDuration = durationMs
@@ -1345,21 +1360,48 @@ export class Player {
     previousTrack: PlayerTrack
   ): Promise<void> {
     if (token !== this._crossfadeToken) return
-    const resource = this.nextCrossfadeResource
+
+    let resource = this.nextCrossfadePcm
     if (!resource || !this.connection) {
       this._clearCrossfade({ clearNext: false })
       return
     }
 
-    logger('debug', 'Crossfade', `Completing crossfade for guild ${this.guildId}`, {
-      token,
-      previousTrack: previousTrack.info.identifier
-    })
+    if (!resource.stream) {
+      this._clearCrossfade({ clearNext: false })
+      return
+    }
+
+    if (createAudioResource) {
+      resource = createAudioResource(
+        resource.stream as unknown as Readable,
+        'pcm',
+        this.nodelink,
+        this.filters,
+        this.volumePercent / 100,
+        this.audioMixer,
+        false,
+        this.loudnessNormalizer
+      )
+      this.nextCrossfadePcm = null
+      this.nextResource = resource
+    }
+
+    logger(
+      'debug',
+      'Crossfade',
+      `Completing crossfade for guild ${this.guildId}`,
+      {
+        token,
+        previousTrack: previousTrack.info.identifier
+      }
+    )
 
     const startTime = this.nextCrossfadeDuration
     this.position = startTime
     this._lyricsBasePosition = startTime
-    this._lyricsBasePackets = this.connection.statistics?.packetsExpected ?? 0
+    this._lyricsBasePackets =
+      this.connection.statistics?.packetsExpected ?? 0
 
     const currentStream = this.connection.audioStream as AudioResource | null
     currentStream?.clearCrossfade?.()
@@ -2460,7 +2502,6 @@ export class Player {
     const shouldPrepareCrossfade = !!crossfadeConfig && !!this.track
     const hasPreparedCrossfade =
       !!this.nextCrossfadeTrack &&
-      !!this.nextCrossfadeResource &&
       !!this.nextCrossfadePcm
 
     const sameEncoded =
@@ -2487,7 +2528,6 @@ export class Player {
           identifierMatch: sameIdentifier
         }
       )
-      // Keep existing buffers warm and only refresh scheduling window.
       this._scheduleCrossfade(this._realPosition())
       return true
     }
@@ -2509,18 +2549,6 @@ export class Player {
       const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
       if (urlData.exception) return false
 
-      const fetched = await this._fetchResource(payload.info, urlData, 0)
-      if ('exception' in fetched) return false
-
-      this.nextTrack = payload
-      this.nextResource = fetched.stream
-      this.nextStreamInfo = { ...urlData, trackInfo: payload.info }
-
-      if (this.volumePercent !== 100) {
-        this.nextResource.setVolume(this.volumePercent / 100)
-      }
-      this.nextResource.setFilters(this.filters)
-
       if (crossfadeConfig && this.track) {
         logger(
           'debug',
@@ -2533,65 +2561,75 @@ export class Player {
             bufferMs: crossfadeConfig.bufferMs
           }
         )
+
         if (crossfadeConfig.mode === 'preload' && this.track.info.isStream) {
           logger(
             'debug',
             'Crossfade',
             `Crossfade preload skipped for guild ${this.guildId} (stream mode required).`
           )
-          return true
+          // Fallback to normal preload
+        } else {
+          const total =
+            this.track.endTime && this.track.endTime > 0
+              ? this.track.endTime
+              : this.track.info.length || 0
+
+          if (total > 0 && total < crossfadeConfig.durationMs) {
+            logger(
+              'debug',
+              'Crossfade',
+              `Crossfade preload skipped for guild ${this.guildId} (track shorter than ${crossfadeConfig.durationMs}ms).`
+            )
+            // Fallback to normal preload
+          } else {
+            const pcmFetched = await this._fetchPcmResource(
+              payload.info,
+              urlData,
+              0
+            )
+            if ('exception' in pcmFetched) return true
+
+            this.nextCrossfadeTrack = payload
+            this.nextCrossfadePcm = pcmFetched.stream
+            this.nextCrossfadeStreamInfo = { ...urlData, trackInfo: payload.info }
+            this.nextCrossfadeDuration = crossfadeConfig.durationMs
+            
+            // Assign to nextResource as well for fallback, but it's raw PCM!
+            this.nextResource = pcmFetched.stream
+            this.nextTrack = payload
+            this.nextStreamInfo = { ...urlData, trackInfo: payload.info }
+
+            logger(
+              'debug',
+              'Crossfade',
+              `Crossfade preload ready for guild ${this.guildId}`,
+              { nextTrack: payload.info.identifier }
+            )
+
+            this._prepareCrossfadeBuffer({
+              durationMs: crossfadeConfig.durationMs,
+              minBufferMs: crossfadeConfig.minBufferMs,
+              bufferMs: crossfadeConfig.bufferMs
+            })
+            this._scheduleCrossfade(this._realPosition())
+            return true
+          }
         }
-        const total =
-          this.track.endTime && this.track.endTime > 0
-            ? this.track.endTime
-            : this.track.info.length || 0
-        if (total > 0 && total < crossfadeConfig.durationMs) {
-          logger(
-            'debug',
-            'Crossfade',
-            `Crossfade preload skipped for guild ${this.guildId} (track shorter than ${crossfadeConfig.durationMs}ms).`
-          )
-          return true
-        }
-
-        const pcmFetched = await this._fetchPcmResource(
-          payload.info,
-          urlData,
-          0
-        )
-        if ('exception' in pcmFetched) return true
-
-        const crossfadeFetched = await this._fetchResource(
-          payload.info,
-          urlData,
-          crossfadeConfig.durationMs
-        )
-        if ('exception' in crossfadeFetched) return true
-
-        this.nextCrossfadeTrack = payload
-        this.nextCrossfadePcm = pcmFetched.stream
-        this.nextCrossfadeResource = crossfadeFetched.stream
-        this.nextCrossfadeStreamInfo = { ...urlData, trackInfo: payload.info }
-        this.nextCrossfadeDuration = crossfadeConfig.durationMs
-        logger(
-          'debug',
-          'Crossfade',
-          `Crossfade preload ready for guild ${this.guildId}`,
-          { nextTrack: payload.info.identifier }
-        )
-
-        if (this.volumePercent !== 100) {
-          this.nextCrossfadeResource.setVolume(this.volumePercent / 100)
-        }
-        this.nextCrossfadeResource.setFilters(this.filters)
-
-        this._prepareCrossfadeBuffer({
-          durationMs: crossfadeConfig.durationMs,
-          minBufferMs: crossfadeConfig.minBufferMs,
-          bufferMs: crossfadeConfig.bufferMs
-        })
-        this._scheduleCrossfade(this._realPosition())
       }
+
+      // Normal preload (Gapless)
+      const fetched = await this._fetchResource(payload.info, urlData, 0)
+      if ('exception' in fetched) return false
+
+      this.nextTrack = payload
+      this.nextResource = fetched.stream
+      this.nextStreamInfo = { ...urlData, trackInfo: payload.info }
+
+      if (this.volumePercent !== 100) {
+        this.nextResource.setVolume(this.volumePercent / 100)
+      }
+      this.nextResource.setFilters(this.filters)
 
       return true
     } catch (err) {
