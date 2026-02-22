@@ -120,6 +120,7 @@ export class Player {
     startPositionMs: number
     endPositionMs: number
   } | null = null
+  private _crossfadeCompleting = false
   private _crossfadeIgnoreIdle = false
   private _crossfadeToken = 0
   private _crossfadePrepared = false
@@ -419,7 +420,8 @@ export class Player {
     if (
       state.status === 'idle' &&
       endReason === EndReasons.STOPPED &&
-      Date.now() < this._ignoreIdleStoppedUntil
+      Date.now() < this._ignoreIdleStoppedUntil &&
+      this._isResuming
     ) {
       logger(
         'debug',
@@ -457,10 +459,11 @@ export class Player {
         (state.reason === EndReasons.FINISHED ||
           state.reason === EndReasons.STOPPED)
       ) {
-        logger(
-          'debug',
-          'Crossfade',
-          `Ignoring idle/${state.reason} while crossfade transition is in progress for guild ${this.guildId}`
+        const context = this._crossfadeCompletionContext
+        this._triggerCrossfadeCompletion(
+          context.token,
+          context.previousTrack,
+          `idle:${state.reason}`
         )
         return
       }
@@ -886,6 +889,7 @@ export class Player {
     this._crossfadeEndsAt = 0
     this._crossfadeCompletionRemainingMs = 0
     this._crossfadeCompletionContext = null
+    this._crossfadeCompleting = false
     this._crossfadeIgnoreIdle = false
     this._crossfadePrepared = false
     this._crossfadeToken += 1
@@ -1051,10 +1055,35 @@ export class Player {
         )
       }
 
-      this._completeCrossfade(context.token, context.previousTrack).catch(
-        (err) => this._onError(err as Error)
+      this._triggerCrossfadeCompletion(
+        context.token,
+        context.previousTrack,
+        timedOut ? 'watchdog-timeout' : 'watchdog-state'
       )
     }, 50)
+  }
+
+  /**
+   * Ensures crossfade completion is executed only once per transition.
+   */
+  private _triggerCrossfadeCompletion(
+    token: number,
+    previousTrack: PlayerTrack,
+    source: string
+  ): void {
+    if (this._crossfadeCompleting) return
+    this._crossfadeCompleting = true
+    logger(
+      'debug',
+      'Crossfade',
+      `Triggering crossfade completion for guild ${this.guildId} via ${source}`,
+      { token, previousTrack: previousTrack.info.identifier }
+    )
+    this._completeCrossfade(token, previousTrack)
+      .catch((err) => this._onError(err as Error))
+      .finally(() => {
+        this._crossfadeCompleting = false
+      })
   }
 
   /**
@@ -1800,7 +1829,6 @@ export class Player {
 
     logger('debug', 'Player', `Playing resource for guild ${this.guildId}`)
     this._stuckTime = 0
-    this._guardInternalStreamSwap()
     this.connection.play(resource as unknown)
     await this.waitEvent(
       'playerStateChange',
@@ -2153,7 +2181,6 @@ export class Player {
     )
     this._lyricsBasePosition = position
     this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
-    this._guardInternalStreamSwap()
     this.connection.play(resource as unknown)
     await this.waitEvent(
       'playerStateChange',
@@ -2240,7 +2267,6 @@ export class Player {
       this._lyricsBasePackets =
         this.connection?.statistics?.packetsExpected ?? 0
 
-      this._guardInternalStreamSwap()
       const oldStream = this.connection?.play(resource as unknown)
       await this.waitEvent(
         'playerStateChange',
@@ -2374,7 +2400,6 @@ export class Player {
     )
     this._lyricsBasePosition = position
     this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
-    this._guardInternalStreamSwap()
     this.connection.play(resource as unknown)
     await this.waitEvent(
       'playerStateChange',

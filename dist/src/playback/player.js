@@ -70,6 +70,7 @@ export class Player {
     _crossfadeEndsAt = 0;
     _crossfadeCompletionRemainingMs = 0;
     _crossfadeCompletionContext = null;
+    _crossfadeCompleting = false;
     _crossfadeIgnoreIdle = false;
     _crossfadeToken = 0;
     _crossfadePrepared = false;
@@ -287,7 +288,8 @@ export class Player {
         ];
         if (state.status === 'idle' &&
             endReason === EndReasons.STOPPED &&
-            Date.now() < this._ignoreIdleStoppedUntil) {
+            Date.now() < this._ignoreIdleStoppedUntil &&
+            this._isResuming) {
             logger('debug', 'Player', `Ignoring internal idle/stopped during stream swap for guild ${this.guildId}`);
             return;
         }
@@ -307,7 +309,8 @@ export class Player {
             if (this._crossfadeCompletionContext &&
                 (state.reason === EndReasons.FINISHED ||
                     state.reason === EndReasons.STOPPED)) {
-                logger('debug', 'Crossfade', `Ignoring idle/${state.reason} while crossfade transition is in progress for guild ${this.guildId}`);
+                const context = this._crossfadeCompletionContext;
+                this._triggerCrossfadeCompletion(context.token, context.previousTrack, `idle:${state.reason}`);
                 return;
             }
             if (this._crossfadeIgnoreIdle && state.reason === EndReasons.FINISHED) {
@@ -622,6 +625,7 @@ export class Player {
         this._crossfadeEndsAt = 0;
         this._crossfadeCompletionRemainingMs = 0;
         this._crossfadeCompletionContext = null;
+        this._crossfadeCompleting = false;
         this._crossfadeIgnoreIdle = false;
         this._crossfadePrepared = false;
         this._crossfadeToken += 1;
@@ -740,8 +744,22 @@ export class Player {
                     endPositionMs: context.endPositionMs
                 });
             }
-            this._completeCrossfade(context.token, context.previousTrack).catch((err) => this._onError(err));
+            this._triggerCrossfadeCompletion(context.token, context.previousTrack, timedOut ? 'watchdog-timeout' : 'watchdog-state');
         }, 50);
+    }
+    /**
+     * Ensures crossfade completion is executed only once per transition.
+     */
+    _triggerCrossfadeCompletion(token, previousTrack, source) {
+        if (this._crossfadeCompleting)
+            return;
+        this._crossfadeCompleting = true;
+        logger('debug', 'Crossfade', `Triggering crossfade completion for guild ${this.guildId} via ${source}`, { token, previousTrack: previousTrack.info.identifier });
+        this._completeCrossfade(token, previousTrack)
+            .catch((err) => this._onError(err))
+            .finally(() => {
+            this._crossfadeCompleting = false;
+        });
     }
     /**
      * Freezes crossfade completion while playback is paused.
@@ -1268,7 +1286,6 @@ export class Player {
         this._scheduleCrossfade(startTime || 0);
         logger('debug', 'Player', `Playing resource for guild ${this.guildId}`);
         this._stuckTime = 0;
-        this._guardInternalStreamSwap();
         this.connection.play(resource);
         await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
         return true;
@@ -1498,7 +1515,6 @@ export class Player {
         logger('debug', 'Player', `Playing resource for guild ${this.guildId} after source seek`);
         this._lyricsBasePosition = position;
         this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0;
-        this._guardInternalStreamSwap();
         this.connection.play(resource);
         await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
         this._scheduleCrossfade(position);
@@ -1542,7 +1558,6 @@ export class Player {
             this._lyricsBasePosition = position;
             this._lyricsBasePackets =
                 this.connection?.statistics?.packetsExpected ?? 0;
-            this._guardInternalStreamSwap();
             const oldStream = this.connection?.play(resource);
             await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
             if (oldStream) {
@@ -1624,7 +1639,6 @@ export class Player {
         logger('debug', 'Player', `Playing resource for guild ${this.guildId} after legacy seek`);
         this._lyricsBasePosition = position;
         this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0;
-        this._guardInternalStreamSwap();
         this.connection.play(resource);
         await this.waitEvent('playerStateChange', (s) => s.status === 'playing');
         this._scheduleCrossfade(position);
