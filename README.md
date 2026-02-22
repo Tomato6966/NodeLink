@@ -82,7 +82,7 @@ docker build -t nodelink .
 docker run -p 2333:2333 nodelink
 ```
 
-**See the Docker guide:** [nodelink.js.org/docs/advenced/docker](https://nodelink.js.org/docs/advenced/docker)
+**See the Docker guide:** [nodelink.js.org/docs/advanced/docker](https://nodelink.js.org/docs/advanced/docker)
 
 ---
 
@@ -151,7 +151,7 @@ NodeLink exposes **Prometheus metrics** at `/v4/metrics` for production monitori
 * API request tracking per endpoint
 * Source usage tracking
 
-**See the monitoring guide:** [nodelink.js.org/docs/advenced/prometheus](https://nodelink.js.org/docs/advenced/prometheus)
+**See the monitoring guide:** [nodelink.js.org/docs/advanced/prometheus](https://nodelink.js.org/docs/advanced/prometheus)
 
 ---
 
