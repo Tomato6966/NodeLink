@@ -697,61 +697,6 @@ class NodelinkServer extends EventEmitter {
   _validateConfig(): void {
     const manager = new ConfigValidationManager(this.options)
     manager.validate()
-
-    const validatePositiveInt = (value: number, path: string): void =>
-      validateProperty(
-        value,
-        path,
-        'integer > 0',
-        (v: number) => Number.isInteger(v) && v > 0
-      )
-
-    const rateLimitSections = [
-      'global',
-      'perIp',
-      'perUserId',
-      'perGuildId'
-    ] as const
-
-    if (this.options.rateLimit?.enabled !== false) {
-      for (let i = 0; i < rateLimitSections.length; i++) {
-        const section = rateLimitSections[
-          i
-        ] as (typeof rateLimitSections)[number]
-        const config = this.options.rateLimit?.[section]
-
-        if (!config) continue
-
-        validatePositiveInt(
-          config.maxRequests,
-          `rateLimit.${section}.maxRequests`
-        )
-
-        validatePositiveInt(
-          config.timeWindowMs,
-          `rateLimit.${section}.timeWindowMs`
-        )
-
-        if (i === 0) continue
-
-        const parentSection = rateLimitSections[
-          i - 1
-        ] as (typeof rateLimitSections)[number]
-        const parentConfig = this.options.rateLimit?.[parentSection]
-
-        if (!parentConfig) continue
-
-        validateProperty(
-          config.maxRequests,
-          `rateLimit.${section}.maxRequests`,
-          `integer <= rateLimit.${parentSection}.maxRequests (${parentConfig.maxRequests})`,
-          (value: number) =>
-            Number.isInteger(value) &&
-            value > 0 &&
-            value <= parentConfig.maxRequests
-        )
-      }
-    }
   }
 
   /**
