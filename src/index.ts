@@ -20,7 +20,6 @@ import {
   initLogger,
   logger,
   parseClient,
-  validateProperty,
   verifyDiscordID
 } from './utils.ts'
 import 'dotenv/config'
@@ -36,7 +35,7 @@ import RateLimitManager from './managers/rateLimitManager.ts'
 import type SourcesManager from './managers/sourceManager.ts'
 import type SourceWorkerManager from './managers/sourceWorkerManager.js'
 import type TrackCacheManager from './managers/trackCacheManager.ts'
-import type WorkerManager from './managers/workerManager.js'
+import type WorkerManager from './managers/workerManager.ts'
 import type { NodelinkConfig } from './typings/config/config.types.ts'
 import type {
   AudioInterceptorExtension,
@@ -62,7 +61,6 @@ import type {
   TrackModifierExtension,
   VoiceRelay,
   WebSocketInterceptorExtension,
-  Worker
 } from './typings/index.types.ts'
 import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types.ts'
 import { parseVoiceFrameHeader } from './voice/voiceFrames.ts'
@@ -136,13 +134,13 @@ const getPlayerManagerClass = async (): Promise<PlayerManagerConstructor> => {
 }
 
 let workerManagerClassPromise: Promise<
-  typeof import('./managers/workerManager.js').default
+  typeof import('./managers/workerManager.ts').default
 > | null = null
 const getWorkerManagerClass = async (): Promise<
-  typeof import('./managers/workerManager.js').default
+  typeof import('./managers/workerManager.ts').default
 > => {
   if (!workerManagerClassPromise) {
-    workerManagerClassPromise = import('./managers/workerManager.js').then(
+    workerManagerClassPromise = import('./managers/workerManager.ts').then(
       (module) => module.default
     )
   }
@@ -239,7 +237,6 @@ if (process.env['CLUSTER_WORKERS'])
 else if (typeof config.cluster?.workers === 'number')
   _configuredWorkers = config.cluster.workers
 
-// biome-ignore lint/suspicious/noExplicitAny: Config type alignment
 initLogger(config as unknown as { logging?: import('./typings/utils.types.ts').LoggingConfig })
 
 const isBun = typeof Bun !== 'undefined'
@@ -425,7 +422,10 @@ class NodelinkServer extends EventEmitter {
 
     memoryTrace('constructor:start')
 
-    this.sessions = new SessionManager(this, PlayerManagerClass)
+    this.sessions = new SessionManager(
+      this as unknown as INodelinkServer,
+      PlayerManagerClass
+    )
     memoryTrace('constructor:after-session-manager')
     this.sources = null
     this.lyrics = null
@@ -2163,7 +2163,7 @@ class NodelinkServer extends EventEmitter {
     } else if (msg.type === 'workerStats') {
       if (this.workerManager) {
         const worker = this.workerManager.workers.find(
-          (w: Worker) => w.process.pid === msg.pid
+          (w) => w.process.pid === msg.pid
         )
         if (worker) {
           this.workerManager.workerLoad.set(worker.id, msg.stats.players)

@@ -9,6 +9,14 @@ import v8 from 'node:v8';
 import { logger } from "../utils.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const getGlobalNodelink = () => globalThis.nodelink;
+const getErrorMessage = (error) => error instanceof Error ? error.message : String(error);
+const isWorkerStatsPacket = (value) => typeof value === 'object' &&
+    value !== null &&
+    typeof value.workerId === 'number';
+const isPidPacket = (value) => typeof value === 'object' &&
+    value !== null &&
+    typeof value.pid === 'number';
 const createSocketPath = (name) => os.platform() === 'win32'
     ? `\\\\.\\pipe\\nodelink-${name}-${crypto.randomBytes(8).toString('hex')}`
     : `/tmp/nodelink-${name}-${crypto.randomBytes(8).toString('hex')}.sock`;
@@ -44,18 +52,17 @@ const parseExecArgv = (value) => {
 };
 const buildWorkerExecArgv = (config = null) => {
     const args = new Set(process.execArgv || []);
-    const runtime = config?.cluster?.runtime || {};
+    const runtime = config?.cluster?.runtime ?? {};
+    const env = process.env;
     for (const arg of Array.from(args)) {
         if (arg.startsWith('--max-old-space-size='))
             args.delete(arg);
     }
-    const maxOldSpaceMb = parsePositiveInt(process.env.NODELINK_WORKER_MAX_OLD_SPACE_MB ??
-        runtime.workerMaxOldSpaceMb ??
-        0);
+    const maxOldSpaceMb = parsePositiveInt(env.NODELINK_WORKER_MAX_OLD_SPACE_MB ?? runtime.workerMaxOldSpaceMb ?? 0);
     if (maxOldSpaceMb > 0) {
         args.add(`--max-old-space-size=${maxOldSpaceMb}`);
     }
-    const exposeGc = parseBool(process.env.NODELINK_WORKER_EXPOSE_GC) ||
+    const exposeGc = parseBool(env.NODELINK_WORKER_EXPOSE_GC) ||
         parseBool(runtime.workerExposeGc);
     if (exposeGc) {
         args.add('--expose-gc');
@@ -64,13 +71,50 @@ const buildWorkerExecArgv = (config = null) => {
     for (const arg of configExtraArgs) {
         args.add(arg);
     }
-    const envExtraArgs = parseExecArgv(process.env.NODELINK_WORKER_EXEC_ARGV);
+    const envExtraArgs = parseExecArgv(env.NODELINK_WORKER_EXEC_ARGV);
     for (const arg of envExtraArgs) {
         args.add(arg);
     }
     return Array.from(args);
 };
 export default class WorkerManager {
+    config;
+    workers;
+    workersById;
+    guildToWorker;
+    workerToGuilds;
+    nextStatelessWorkerIndex;
+    pendingRequests;
+    streamRequests;
+    maxWorkers;
+    minWorkers;
+    workerLoad;
+    workerStats;
+    idleWorkers;
+    scaleCheckInterval;
+    healthCheckInterval;
+    workerFailureHistory;
+    statsUpdateBatch;
+    statsUpdateTimer;
+    workerHealth;
+    workerStartTime;
+    workerUniqueId;
+    workerReady;
+    nextWorkerId;
+    liveYoutubeConfig;
+    isDestroying;
+    commandTimeout;
+    fastCommandTimeout;
+    maxRetries;
+    scalingConfig;
+    socketPath;
+    server;
+    commandSocketPath;
+    commandServer;
+    commandSockets;
+    eventSockets;
+    socketRotateInProgress;
+    lastSocketRotateAt;
     constructor(config) {
         this.config = config;
         this.workers = [];
@@ -130,35 +174,37 @@ export default class WorkerManager {
         this._startScalingCheck();
         this._startHealthCheck();
         cluster.on('exit', (worker, code, signal) => {
-            if (worker.workerType !== 'playback')
+            const playbackWorker = worker;
+            if (playbackWorker.workerType !== 'playback')
                 return;
             const isSystemSignal = signal === 'SIGINT' ||
                 signal === 'SIGTERM' ||
                 code === 130 ||
                 code === 143;
             if (this.isDestroying || isSystemSignal) {
-                const index = this.workers.indexOf(worker);
+                const index = this.workers.indexOf(playbackWorker);
                 if (index !== -1)
                     this.workers.splice(index, 1);
-                this.workersById.delete(worker.id);
+                this.workersById.delete(playbackWorker.id);
                 return;
             }
-            this._updateWorkerFailureHistory(worker.id, code, signal);
-            if (global.nodelink?.statsManager) {
-                global.nodelink.statsManager.incrementWorkerFailure(worker.id, code);
+            this._updateWorkerFailureHistory(playbackWorker.id, code, signal);
+            const nodelink = getGlobalNodelink();
+            if (nodelink?.statsManager?.incrementWorkerFailure) {
+                nodelink.statsManager.incrementWorkerFailure(playbackWorker.id, code);
             }
-            const affectedGuilds = Array.from(this.workerToGuilds.get(worker.id) || []);
-            this._retryPendingRequestsForWorker(worker.id);
-            this.removeWorker(worker.id);
-            const shouldRespawn = this._shouldRespawnWorker(worker.id, code, affectedGuilds.length);
+            const affectedGuilds = Array.from(this.workerToGuilds.get(playbackWorker.id) || []);
+            this._retryPendingRequestsForWorker(playbackWorker.id);
+            this.removeWorker(playbackWorker.id);
+            const shouldRespawn = this._shouldRespawnWorker(playbackWorker.id, code, affectedGuilds.length);
             if (shouldRespawn) {
                 logger('info', 'Cluster', 'Respawning worker...');
-                const history = this.workerFailureHistory.get(worker.id);
+                const history = this.workerFailureHistory.get(playbackWorker.id);
                 const delay = history ? Math.min(history.count * 1000, 30000) : 500;
                 setTimeout(() => {
                     this.forkWorker();
-                    if (global.nodelink?.statsManager) {
-                        global.nodelink.statsManager.incrementWorkerRestart(worker.id);
+                    if (nodelink?.statsManager?.incrementWorkerRestart) {
+                        nodelink.statsManager.incrementWorkerRestart(playbackWorker.id);
                     }
                 }, delay);
             }
@@ -212,7 +258,7 @@ export default class WorkerManager {
                     setTimeout(() => {
                         const newWorker = this.getBestWorker();
                         if (newWorker) {
-                            this._executeCommand(newWorker, request.type, request.payload, request.resolve, request.reject, request.retryCount + 1, request.isFast);
+                            this._executeCommand(newWorker, request.type, request.payload, request.resolve, request.reject, request.retryCount + 1, request.isFast, undefined);
                         }
                         else {
                             request.reject(new Error('No workers available for retry'));
@@ -290,10 +336,10 @@ export default class WorkerManager {
         let cost = playingCount * playingWeight + pausedCount * pausedWeight;
         if (stats.isHibernating)
             return cost;
-        if (stats.cpu?.nodelinkLoad > this.scalingConfig.cpuPenaltyLimit) {
+        if ((stats.cpu?.nodelinkLoad ?? 0) > this.scalingConfig.cpuPenaltyLimit) {
             cost += this.scalingConfig.maxPlayersPerWorker + 5;
         }
-        if (stats.eventLoopLag > this.scalingConfig.lagPenaltyLimit) {
+        if ((stats.eventLoopLag ?? 0) > this.scalingConfig.lagPenaltyLimit) {
             cost += this.scalingConfig.maxPlayersPerWorker / 2;
         }
         return cost;
@@ -360,10 +406,11 @@ export default class WorkerManager {
                 return out;
             };
             socket.on('data', (chunk) => {
-                if (!chunk.length)
+                const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                if (!chunkBuffer.length)
                     return;
-                frameChunks.push(chunk);
-                frameBytes += chunk.length;
+                frameChunks.push(chunkBuffer);
+                frameBytes += chunkBuffer.length;
                 while (frameBytes >= 6) {
                     const header = peekBytes(6);
                     const idSize = header.readUInt8(0);
@@ -388,9 +435,10 @@ export default class WorkerManager {
                         continue;
                     }
                     if (type === 8) {
-                        if (global.nodelink?.handleVoiceFrame) {
+                        const nodelink = getGlobalNodelink();
+                        if (nodelink?.handleVoiceFrame) {
                             try {
-                                global.nodelink.handleVoiceFrame(payload);
+                                nodelink.handleVoiceFrame(payload);
                             }
                             catch { }
                         }
@@ -400,31 +448,34 @@ export default class WorkerManager {
                         const data = v8.deserialize(payload);
                         if (type === 3) {
                             // playerEvent
-                            if (global.nodelink)
-                                global.nodelink.handleIPCMessage({
+                            const nodelink = getGlobalNodelink();
+                            if (nodelink)
+                                nodelink.handleIPCMessage({
                                     type: 'playerEvent',
                                     payload: data
                                 });
                         }
                         else if (type === 4) {
                             // workerStats
-                            const workerId = data.workerId;
-                            delete data.workerId;
-                            this.statsUpdateBatch.set(workerId, data);
-                            if (!this.statsUpdateTimer) {
-                                this.statsUpdateTimer = setTimeout(() => this._flushStatsUpdates(), 100);
+                            if (isWorkerStatsPacket(data)) {
+                                const { workerId, ...stats } = data;
+                                this.statsUpdateBatch.set(workerId, stats);
+                                if (!this.statsUpdateTimer) {
+                                    this.statsUpdateTimer = setTimeout(() => this._flushStatsUpdates(), 100);
+                                }
                             }
                         }
                         else if (type === 9) {
-                            if (global.nodelink)
-                                global.nodelink.handleIPCMessage({
+                            const nodelink = getGlobalNodelink();
+                            if (nodelink)
+                                nodelink.handleIPCMessage({
                                     type: 'liveChatAction',
                                     payload: data
                                 });
                         }
                     }
                     catch (e) {
-                        logger('error', 'Cluster', `Socket event parse error: ${e.message}`);
+                        logger('error', 'Cluster', `Socket event parse error: ${getErrorMessage(e)}`);
                     }
                 }
             });
@@ -439,6 +490,7 @@ export default class WorkerManager {
     _startCommandSocketServer() {
         this._safeUnlinkSocketPath(this.commandSocketPath);
         this.commandServer = net.createServer((socket) => {
+            const commandSocket = socket;
             const frameChunks = [];
             let frameBytes = 0;
             const peekBytes = (count) => {
@@ -475,10 +527,11 @@ export default class WorkerManager {
                 return out;
             };
             socket.on('data', (chunk) => {
-                if (!chunk.length)
+                const chunkBuffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                if (!chunkBuffer.length)
                     return;
-                frameChunks.push(chunk);
-                frameBytes += chunk.length;
+                frameChunks.push(chunkBuffer);
+                frameBytes += chunkBuffer.length;
                 while (frameBytes >= 6) {
                     const header = peekBytes(6);
                     const idSize = header.readUInt8(0);
@@ -493,12 +546,11 @@ export default class WorkerManager {
                     if (type === 0) {
                         try {
                             const data = v8.deserialize(payload);
-                            const pid = data?.pid;
-                            if (pid)
-                                this._registerCommandSocket(pid, socket);
+                            if (isPidPacket(data))
+                                this._registerCommandSocket(data.pid, commandSocket);
                         }
                         catch (e) {
-                            logger('error', 'Cluster', `Command socket hello parse error: ${e.message}`);
+                            logger('error', 'Cluster', `Command socket hello parse error: ${getErrorMessage(e)}`);
                         }
                         continue;
                     }
@@ -525,8 +577,8 @@ export default class WorkerManager {
                     }
                 }
             });
-            socket.on('close', () => this._removeCommandSocket(socket));
-            socket.on('error', () => this._removeCommandSocket(socket));
+            commandSocket.on('close', () => this._removeCommandSocket(commandSocket));
+            commandSocket.on('error', () => this._removeCommandSocket(commandSocket));
         });
         this.commandServer.on('error', (err) => {
             logger('error', 'Cluster', `Command socket server error: ${err.message}`);
@@ -800,6 +852,7 @@ export default class WorkerManager {
             WORKER_TYPE: 'playback'
         });
         worker.workerType = 'playback';
+        worker.ready = false;
         this.workers.push(worker);
         this.workersById.set(worker.id, worker);
         this.workerLoad.set(worker.id, 0);
@@ -845,7 +898,10 @@ export default class WorkerManager {
         if (affectedGuilds.length > 0) {
             for (const playerKey of affectedGuilds) {
                 const [guildId] = playerKey.split(':');
-                for (const session of global.nodelink.sessions.values()) {
+                const nodelink = getGlobalNodelink();
+                if (!nodelink)
+                    continue;
+                for (const session of nodelink.sessions.values()) {
                     const sessionKey = `${guildId}:${session.userId}`;
                     if (session.players.players.has(sessionKey)) {
                         session.players.players.delete(sessionKey);
@@ -853,7 +909,8 @@ export default class WorkerManager {
                     }
                 }
             }
-            global.nodelink.handleIPCMessage({
+            const nodelink = getGlobalNodelink();
+            nodelink?.handleIPCMessage({
                 type: 'workerFailed',
                 payload: { workerId: worker.id, affectedGuilds }
             });
@@ -863,7 +920,7 @@ export default class WorkerManager {
             logger('info', 'Cluster', `Terminated worker ${worker.process.pid} (id: ${worker.id})`);
         }
         catch (e) {
-            logger('error', 'Cluster', `Failed to kill worker ${worker.process.pid}: ${e.message}`);
+            logger('error', 'Cluster', `Failed to kill worker ${worker.process.pid}: ${getErrorMessage(e)}`);
         }
     }
     _removeCommandSocketByWorkerId(workerId) {
@@ -877,39 +934,44 @@ export default class WorkerManager {
         catch { }
     }
     _handleWorkerMessage(worker, msg) {
-        if (msg.type === 'commandResult') {
-            this._handleCommandResponse(msg.requestId, msg.payload, msg.error);
+        if (!msg || typeof msg !== 'object')
+            return;
+        const message = msg;
+        if (message.type === 'commandResult' &&
+            typeof message.requestId === 'string') {
+            this._handleCommandResponse(message.requestId, message.payload, message.error);
         }
-        else if (msg.type === 'workerStats') {
-            this.statsUpdateBatch.set(worker.id, msg.stats);
+        else if (message.type === 'workerStats' && message.stats) {
+            this.statsUpdateBatch.set(worker.id, message.stats);
             if (!this.statsUpdateTimer) {
                 this.statsUpdateTimer = setTimeout(() => {
                     this._flushStatsUpdates();
                 }, 100);
             }
         }
-        else if (msg.type === 'pong') {
+        else if (message.type === 'pong') {
             this.workerHealth.set(worker.id, Date.now());
         }
-        else if (msg.type === 'ready') {
+        else if (message.type === 'ready') {
+            worker.ready = true;
             this.workerHealth.set(worker.id, Date.now());
             this.workerReady.add(worker.id);
             logger('info', 'Cluster', `Worker ${worker.id} (PID ${worker.process.pid}) ready`);
             if (this.liveYoutubeConfig.refreshToken ||
                 this.liveYoutubeConfig.visitorData) {
                 logger('info', 'Cluster', `Syncing live YouTube config to new worker ${worker.id}`);
-                this.execute(worker, 'updateYoutubeConfig', this.liveYoutubeConfig).catch((err) => logger('error', 'Cluster', `Failed to sync config to worker ${worker.id}: ${err.message}`));
+                this.execute(worker, 'updateYoutubeConfig', {
+                    ...this.liveYoutubeConfig
+                }).catch((err) => logger('error', 'Cluster', `Failed to sync config to worker ${worker.id}: ${getErrorMessage(err)}`));
             }
         }
-        else if (msg.type === 'workerSocketDisconnected') {
-            this._rotateSocketServers(msg.socketType || 'unknown', worker.id);
+        else if (message.type === 'workerSocketDisconnected') {
+            const socketType = typeof message.socketType === 'string' ? message.socketType : 'unknown';
+            this._rotateSocketServers(socketType, worker.id);
         }
-        else if (msg.type === 'ready' && worker.onSourceReady) {
-            // This part might be handled by SourceWorkerManager if integrated deeper,
-            // but for now we keep WorkerManager clean of SourceWorker logic.
-        }
-        else if (global.nodelink) {
-            global.nodelink.handleIPCMessage(msg);
+        else {
+            const nodelink = getGlobalNodelink();
+            nodelink?.handleIPCMessage(message);
         }
     }
     _handleCommandResponse(requestId, payload, error) {
@@ -931,12 +993,13 @@ export default class WorkerManager {
     }
     _flushStatsUpdates() {
         for (const [workerId, stats] of this.statsUpdateBatch) {
-            this.workerLoad.set(workerId, stats.players);
+            const players = stats.players ?? 0;
+            this.workerLoad.set(workerId, players);
             this.workerStats.set(workerId, stats);
-            if (stats.players === 0 && !this.idleWorkers.has(workerId)) {
+            if (players === 0 && !this.idleWorkers.has(workerId)) {
                 this.idleWorkers.set(workerId, Date.now());
             }
-            else if (stats.players > 0) {
+            else if (players > 0) {
                 this.idleWorkers.delete(workerId);
             }
         }
@@ -946,6 +1009,12 @@ export default class WorkerManager {
     getWorkerForGuild(playerKey) {
         if (this.guildToWorker.has(playerKey)) {
             const workerId = this.guildToWorker.get(playerKey);
+            if (workerId === undefined) {
+                this.guildToWorker.delete(playerKey);
+            }
+            if (workerId === undefined) {
+                return this.getBestWorker();
+            }
             const worker = this.workersById.get(workerId);
             if (worker?.isConnected())
                 return worker;
@@ -985,6 +1054,9 @@ export default class WorkerManager {
         }
         if (!hasConnectedWorker && this.workers.length > 0) {
             const bootstrappingWorker = this.workers[0];
+            if (!bootstrappingWorker) {
+                throw new Error('No workers available and cannot fork new ones.');
+            }
             this.assignGuildToWorker(playerKey, bootstrappingWorker);
             return bootstrappingWorker;
         }
@@ -1031,23 +1103,29 @@ export default class WorkerManager {
             return bestWorker;
         if (this.workers.length > 0) {
             // Reuse already spawned workers during startup to avoid over-forking.
-            return this.workers[0];
+            const firstWorker = this.workers[0];
+            if (firstWorker)
+                return firstWorker;
         }
-        return this.forkWorker();
+        const worker = this.forkWorker();
+        if (!worker) {
+            throw new Error('No workers available and cannot fork new ones.');
+        }
+        return worker;
     }
     assignGuildToWorker(playerKey, worker) {
         this.guildToWorker.set(playerKey, worker.id);
         if (!this.workerToGuilds.has(worker.id)) {
             this.workerToGuilds.set(worker.id, new Set());
         }
-        this.workerToGuilds.get(worker.id).add(playerKey);
+        this.workerToGuilds.get(worker.id)?.add(playerKey);
         logger('debug', 'Cluster', `Assigned player ${playerKey} to worker ${worker.id}`);
     }
     unassignGuild(playerKey) {
         const workerId = this.guildToWorker.get(playerKey);
         this.guildToWorker.delete(playerKey);
         if (workerId && this.workerToGuilds.has(workerId)) {
-            this.workerToGuilds.get(workerId).delete(playerKey);
+            this.workerToGuilds.get(workerId)?.delete(playerKey);
         }
     }
     isGuildAssigned(playerKey) {
@@ -1078,7 +1156,7 @@ export default class WorkerManager {
             const startTime = this.workerStartTime.get(workerId) || now;
             const uptimeSeconds = Math.floor((now - startTime) / 1000);
             const isHealthy = now - lastHealthCheck < 30000;
-            workerMetrics[uniqueId] = {
+            workerMetrics[String(uniqueId)] = {
                 clusterId: workerId,
                 pid,
                 stats,
@@ -1204,12 +1282,14 @@ export default class WorkerManager {
     }
     execute(worker, type, payload, options = {}) {
         return new Promise((resolve, reject) => {
-            this._executeCommand(worker, type, payload, resolve, reject, 0, options.fast || false, options.timeoutMs);
+            this._executeCommand(worker, type, payload, (result) => resolve(result), reject, 0, options.fast || false, options.timeoutMs);
         });
     }
     _executeCommand(worker, type, payload, resolve, reject, retryCount, isFast, timeoutOverride) {
         const requestId = crypto.randomBytes(16).toString('hex');
-        const timeoutMs = Number.isFinite(timeoutOverride) && timeoutOverride > 0
+        const timeoutMs = typeof timeoutOverride === 'number' &&
+            Number.isFinite(timeoutOverride) &&
+            timeoutOverride > 0
             ? timeoutOverride
             : isFast
                 ? this.fastCommandTimeout
@@ -1217,14 +1297,15 @@ export default class WorkerManager {
         const startTime = Date.now();
         const timeout = setTimeout(() => {
             this.pendingRequests.delete(requestId);
-            if (global.nodelink?.statsManager) {
-                global.nodelink.statsManager.incrementCommandTimeout(type);
+            const nodelink = getGlobalNodelink();
+            if (nodelink?.statsManager?.incrementCommandTimeout) {
+                nodelink.statsManager.incrementCommandTimeout(type);
             }
             if (retryCount < this.maxRetries &&
                 (worker.isConnected() || this.commandSockets.has(worker.id))) {
                 logger('warn', 'Cluster', `Command timeout (${timeoutMs}ms) for command '${type}' with payload:`, payload, `, retrying... (${retryCount + 1}/${this.maxRetries})`);
-                if (global.nodelink?.statsManager) {
-                    global.nodelink.statsManager.incrementCommandRetry(type);
+                if (nodelink?.statsManager?.incrementCommandRetry) {
+                    nodelink.statsManager.incrementCommandRetry(type);
                 }
                 setTimeout(() => {
                     const newWorker = this.getBestWorker() || worker;
@@ -1238,8 +1319,9 @@ export default class WorkerManager {
         this.pendingRequests.set(requestId, {
             resolve: (result) => {
                 const duration = Date.now() - startTime;
-                if (global.nodelink?.statsManager) {
-                    global.nodelink.statsManager.recordCommandExecutionTime(type, worker.id, duration);
+                const nodelink = getGlobalNodelink();
+                if (nodelink?.statsManager?.recordCommandExecutionTime) {
+                    nodelink.statsManager.recordCommandExecutionTime(type, worker.id, duration);
                 }
                 resolve(result);
             },
@@ -1293,8 +1375,9 @@ export default class WorkerManager {
                         this.pendingRequests.delete(requestId);
                         if (retryCount < this.maxRetries) {
                             logger('warn', 'Cluster', `Worker ${worker.id} did not become ready in time for '${type}', retrying... (${retryCount + 1}/${this.maxRetries})`);
-                            if (global.nodelink?.statsManager) {
-                                global.nodelink.statsManager.incrementCommandRetry(type);
+                            const nodelink = getGlobalNodelink();
+                            if (nodelink?.statsManager?.incrementCommandRetry) {
+                                nodelink.statsManager.incrementCommandRetry(type);
                             }
                             setTimeout(() => {
                                 const newWorker = this.getBestWorker() || worker;
@@ -1316,9 +1399,10 @@ export default class WorkerManager {
             clearTimeout(timeout);
             this.pendingRequests.delete(requestId);
             if (retryCount < this.maxRetries) {
-                logger('error', 'Cluster', `Send error: ${error.message}, retrying...`);
-                if (global.nodelink?.statsManager) {
-                    global.nodelink.statsManager.incrementCommandRetry(type);
+                logger('error', 'Cluster', `Send error: ${getErrorMessage(error)}, retrying...`);
+                const nodelink = getGlobalNodelink();
+                if (nodelink?.statsManager?.incrementCommandRetry) {
+                    nodelink.statsManager.incrementCommandRetry(type);
                 }
                 setTimeout(() => {
                     const newWorker = this.getBestWorker();
@@ -1326,12 +1410,12 @@ export default class WorkerManager {
                         this._executeCommand(newWorker, type, payload, resolve, reject, retryCount + 1, isFast, timeoutOverride);
                     }
                     else {
-                        reject(error);
+                        reject(error instanceof Error ? error : new Error(getErrorMessage(error)));
                     }
                 }, 500);
             }
             else {
-                reject(error);
+                reject(error instanceof Error ? error : new Error(getErrorMessage(error)));
             }
         }
     }

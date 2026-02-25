@@ -15,7 +15,7 @@ import WebSocketServer from '@performanc/pwsl-server';
 import RoutePlannerManager from './managers/routePlannerManager.js';
 import SessionManager from "./managers/sessionManager.js";
 import StatsManager from "./managers/statsManager.js";
-import { applyEnvOverrides, checkForUpdates, cleanupHttpAgents, cleanupLogger, decodeTrack, getGitInfo, getStats, getVersion, initLogger, logger, parseClient, validateProperty, verifyDiscordID } from "./utils.js";
+import { applyEnvOverrides, checkForUpdates, cleanupHttpAgents, cleanupLogger, decodeTrack, getGitInfo, getStats, getVersion, initLogger, logger, parseClient, verifyDiscordID } from "./utils.js";
 import 'dotenv/config';
 import { GatewayEvents } from "./constants.js";
 import DosProtectionManager from "./managers/dosProtectionManager.js";
@@ -68,7 +68,7 @@ const getPlayerManagerClass = async () => {
 let workerManagerClassPromise = null;
 const getWorkerManagerClass = async () => {
     if (!workerManagerClassPromise) {
-        workerManagerClassPromise = import('./managers/workerManager.js').then((module) => module.default);
+        workerManagerClassPromise = import("./managers/workerManager.js").then((module) => module.default);
     }
     return workerManagerClassPromise;
 };
@@ -130,7 +130,6 @@ if (process.env['CLUSTER_WORKERS'])
     _configuredWorkers = Number(process.env['CLUSTER_WORKERS']);
 else if (typeof config.cluster?.workers === 'number')
     _configuredWorkers = config.cluster.workers;
-// biome-ignore lint/suspicious/noExplicitAny: Config type alignment
 initLogger(config);
 const isBun = typeof Bun !== 'undefined';
 if (!cluster.isWorker) {
@@ -529,32 +528,6 @@ class NodelinkServer extends EventEmitter {
     _validateConfig() {
         const manager = new ConfigValidationManager(this.options);
         manager.validate();
-        const validatePositiveInt = (value, path) => validateProperty(value, path, 'integer > 0', (v) => Number.isInteger(v) && v > 0);
-        const rateLimitSections = [
-            'global',
-            'perIp',
-            'perUserId',
-            'perGuildId'
-        ];
-        if (this.options.rateLimit?.enabled !== false) {
-            for (let i = 0; i < rateLimitSections.length; i++) {
-                const section = rateLimitSections[i];
-                const config = this.options.rateLimit?.[section];
-                if (!config)
-                    continue;
-                validatePositiveInt(config.maxRequests, `rateLimit.${section}.maxRequests`);
-                validatePositiveInt(config.timeWindowMs, `rateLimit.${section}.timeWindowMs`);
-                if (i === 0)
-                    continue;
-                const parentSection = rateLimitSections[i - 1];
-                const parentConfig = this.options.rateLimit?.[parentSection];
-                if (!parentConfig)
-                    continue;
-                validateProperty(config.maxRequests, `rateLimit.${section}.maxRequests`, `integer <= rateLimit.${parentSection}.maxRequests (${parentConfig.maxRequests})`, (value) => Number.isInteger(value) &&
-                    value > 0 &&
-                    value <= parentConfig.maxRequests);
-            }
-        }
     }
     /**
      * Sets up WebSocket server event handlers
