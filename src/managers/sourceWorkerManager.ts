@@ -1,6 +1,7 @@
 import cluster from 'node:cluster'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
@@ -9,6 +10,119 @@ import { logger } from '../utils.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+
+/**
+ * Minimal NodeLink context consumed by SourceWorkerManager.
+ */
+interface SourceWorkerManagerContext {
+  options: {
+    cluster?: {
+      runtime?: {
+        sourceWorkerMaxOldSpaceMb?: unknown
+        sourceWorkerExposeGc?: unknown
+        sourceWorkerExecArgv?: unknown
+      }
+      specializedSourceWorker?: {
+        count?: number
+        scaleUpThreshold?: number
+        scaleCooldownMs?: number
+      }
+    }
+  }
+}
+
+/**
+ * Cluster worker extended with source-worker metadata.
+ */
+interface SourceClusterWorker extends cluster.Worker {
+  workerType?: 'source'
+}
+
+type SourceTaskType =
+  | 'resolve'
+  | 'search'
+  | 'unifiedSearch'
+  | 'loadLyrics'
+  | 'loadMeaning'
+  | 'loadChapters'
+  | 'loadStream'
+  | 'loadLiveChat'
+  | 'cancelLiveChat'
+  | 'profilerCommand'
+
+/**
+ * HTTP-like request shape accepted by delegate methods.
+ */
+interface DelegatedRequest {
+  url?: string
+}
+
+/**
+ * HTTP-like response shape accepted by delegate methods.
+ */
+interface DelegatedResponse {
+  headersSent: boolean
+  setHeader?(name: string, value: string): void
+  writeHead(statusCode: number, headers?: Record<string, string>): void
+  write(chunk: Buffer): void
+  end(chunk?: string | Buffer): void
+  send?(chunk: Buffer): void
+  on?(event: 'close', listener: () => void): void
+}
+
+/**
+ * Delegation options for HTTP/websocket behavior.
+ */
+interface DelegateOptions {
+  statusCode?: number
+  headers?: Record<string, string>
+  isWebSocket?: boolean
+}
+
+/**
+ * Internal options used by execute-on-worker helpers.
+ */
+interface ExecuteOptions extends DelegateOptions {
+  timeoutMs?: number
+  parseJson?: boolean
+}
+
+/**
+ * Tracked request state while a source task is active.
+ */
+interface SourceRequestEntry {
+  req: IncomingMessage | DelegatedRequest
+  res: ServerResponse | DelegatedResponse
+  task: SourceTaskType | string
+  timeout: NodeJS.Timeout | null
+  workerId: number
+  options: DelegateOptions
+  cleaned: boolean
+}
+
+type ExecuteAllResultEntry =
+  | { clusterId: number; pid: number | null; response: unknown }
+  | { clusterId: number; pid: number | null; error: string }
+
+const hasSocketSend = (
+  res: ServerResponse | DelegatedResponse
+): res is DelegatedResponse & { send: (chunk: Buffer) => void } =>
+  typeof (res as DelegatedResponse).send === 'function'
+
+type InternalResponse = {
+  headersSent: boolean
+  setHeader: (_name: string, _value: string) => void
+  writeHead: (code: number) => void
+  write: (chunk?: Buffer | string) => void
+  end: (chunk?: Buffer | string) => void
+  on: (_event: string, _listener?: (...args: unknown[]) => void) => void
+}
+
+interface SourceWorkerEnv {
+  NODELINK_SOURCE_WORKER_MAX_OLD_SPACE_MB?: string
+  NODELINK_SOURCE_WORKER_EXPOSE_GC?: string
+  NODELINK_SOURCE_WORKER_EXEC_ARGV?: string
+}
 
 const resolvePlaybackExecPath = () => {
   const distIndex = path.resolve(__dirname, '../index.js')
@@ -22,7 +136,7 @@ const resolveSourceExecPath = () => {
   return path.resolve(process.cwd(), 'src/workers/source.ts')
 }
 
-const parseBool = (value) => {
+const parseBool = (value: unknown): boolean => {
   if (value === true) return true
   if (value === false) return false
   return (
@@ -31,12 +145,12 @@ const parseBool = (value) => {
   )
 }
 
-const parsePositiveInt = (value) => {
+const parsePositiveInt = (value: unknown): number => {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
 }
 
-const parseExecArgv = (value) => {
+const parseExecArgv = (value: unknown): string[] => {
   if (Array.isArray(value)) {
     return value.map((v) => String(v).trim()).filter(Boolean)
   }
@@ -49,16 +163,19 @@ const parseExecArgv = (value) => {
   return []
 }
 
-const buildSourceWorkerExecArgv = (options = null) => {
+const buildSourceWorkerExecArgv = (
+  options: SourceWorkerManagerContext['options'] | null = null
+): string[] => {
   const args = new Set(process.execArgv || [])
   const runtime = options?.cluster?.runtime || {}
+  const env = process.env as NodeJS.ProcessEnv & SourceWorkerEnv
 
   for (const arg of Array.from(args)) {
     if (arg.startsWith('--max-old-space-size=')) args.delete(arg)
   }
 
   const maxOldSpaceMb = parsePositiveInt(
-    process.env.NODELINK_SOURCE_WORKER_MAX_OLD_SPACE_MB ??
+    env.NODELINK_SOURCE_WORKER_MAX_OLD_SPACE_MB ??
       runtime.sourceWorkerMaxOldSpaceMb ??
       0
   )
@@ -67,7 +184,7 @@ const buildSourceWorkerExecArgv = (options = null) => {
   }
 
   const exposeGc =
-    parseBool(process.env.NODELINK_SOURCE_WORKER_EXPOSE_GC) ||
+    parseBool(env.NODELINK_SOURCE_WORKER_EXPOSE_GC) ||
     parseBool(runtime.sourceWorkerExposeGc)
   if (exposeGc) {
     args.add('--expose-gc')
@@ -78,9 +195,7 @@ const buildSourceWorkerExecArgv = (options = null) => {
     args.add(arg)
   }
 
-  const envExtraArgs = parseExecArgv(
-    process.env.NODELINK_SOURCE_WORKER_EXEC_ARGV
-  )
+  const envExtraArgs = parseExecArgv(env.NODELINK_SOURCE_WORKER_EXEC_ARGV)
   for (const arg of envExtraArgs) {
     args.add(arg)
   }
@@ -89,7 +204,27 @@ const buildSourceWorkerExecArgv = (options = null) => {
 }
 
 class SourceWorkerManager {
-  constructor(nodelink) {
+  private nodelink: SourceWorkerManagerContext
+  private workers: SourceClusterWorker[]
+  private requests: Map<string, SourceRequestEntry>
+  private workerLoads: Map<number, number>
+  private maxWorkers: number
+  private scaleUpThreshold: number
+  private scaleCooldownMs: number
+  private lastScaleUpAt: number
+  private socketPath: string
+  private server: net.Server | null
+  private isDestroying: boolean
+  private _onClusterExit:
+    | ((
+        worker: SourceClusterWorker,
+        _code: number | null,
+        _signal: string | null
+      ) => void)
+    | null
+  private clientSockets: Set<net.Socket>
+
+  constructor(nodelink: SourceWorkerManagerContext) {
     this.nodelink = nodelink
     this.workers = []
     this.requests = new Map()
@@ -113,18 +248,18 @@ class SourceWorkerManager {
     this.clientSockets = new Set()
   }
 
-  _safeUnlinkSocketPath() {
+  private _safeUnlinkSocketPath(): void {
     if (!this.socketPath || os.platform() === 'win32') return
     try {
       if (fs.existsSync(this.socketPath)) fs.unlinkSync(this.socketPath)
     } catch {}
   }
 
-  async start() {
+  async start(): Promise<void> {
     this._safeUnlinkSocketPath()
     this.server = net.createServer((socket) => {
       this.clientSockets.add(socket)
-      const frameChunks = []
+      const frameChunks: Buffer[] = []
       let frameBytes = 0
 
       socket.on('error', () => {
@@ -134,7 +269,7 @@ class SourceWorkerManager {
         this.clientSockets.delete(socket)
       })
 
-      const peekBytes = (count) => {
+      const peekBytes = (count: number): Buffer => {
         const first = frameChunks[0]
         if (first && first.length >= count) return first.subarray(0, count)
 
@@ -149,7 +284,7 @@ class SourceWorkerManager {
         return out
       }
 
-      const readBytes = (count) => {
+      const readBytes = (count: number): Buffer => {
         const out = Buffer.allocUnsafe(count)
         let offset = 0
 
@@ -169,7 +304,7 @@ class SourceWorkerManager {
         return out
       }
 
-      socket.on('data', (chunk) => {
+      socket.on('data', (chunk: Buffer) => {
         if (!chunk.length) return
         frameChunks.push(chunk)
         frameBytes += chunk.length
@@ -194,14 +329,15 @@ class SourceWorkerManager {
                 clearTimeout(request.timeout)
                 request.timeout = null
               }
+
               if (!request.res.headersSent) {
                 const headers = request.options?.headers
                 if (headers) {
                   for (const [key, value] of Object.entries(headers)) {
-                    request.res.setHeader(key, value)
+                    request.res.setHeader?.(key, value)
                   }
                 } else {
-                  request.res.setHeader('Content-Type', 'application/json')
+                  request.res.setHeader?.('Content-Type', 'application/json')
                 }
                 request.res.writeHead(request.options?.statusCode || 200)
               }
@@ -220,10 +356,15 @@ class SourceWorkerManager {
                 clearTimeout(request.timeout)
                 request.timeout = null
               }
+
               if (!request.res.headersSent && request.options?.isWebSocket) {
-                request.res.send(payload)
+                if (hasSocketSend(request.res)) {
+                  request.res.send(payload)
+                } else {
+                  request.res.write(payload)
+                }
               } else if (!request.res.headersSent) {
-                request.res.setHeader('Content-Type', 'application/json')
+                request.res.setHeader?.('Content-Type', 'application/json')
                 request.res.writeHead(200)
                 try {
                   request.res.write(payload)
@@ -262,12 +403,18 @@ class SourceWorkerManager {
       })
     })
 
-    await new Promise((resolve, reject) => {
-      this.server.on('error', (err) => {
+    await new Promise<void>((resolve, reject) => {
+      const server = this.server
+      if (!server) {
+        reject(new Error('Source socket server was not initialized'))
+        return
+      }
+
+      server.on('error', (err: Error) => {
         logger('error', 'SourceCluster', `Server error: ${err.message}`)
         reject(err)
       })
-      this.server.listen(this.socketPath, () => {
+      server.listen(this.socketPath, () => {
         logger(
           'info',
           'SourceCluster',
@@ -315,12 +462,13 @@ class SourceWorkerManager {
     cluster.on('exit', this._onClusterExit)
   }
 
-  _forkWorker() {
+  private _forkWorker(): void {
     const worker = cluster.fork({
       WORKER_TYPE: 'source'
-    })
+    }) as SourceClusterWorker
+
     worker.workerType = 'source'
-    worker.on('message', (msg) => {
+    worker.on('message', (msg: { type?: string; pid?: number }) => {
       if (msg.type === 'ready')
         logger(
           'info',
@@ -328,7 +476,7 @@ class SourceWorkerManager {
           `Source worker manager ${msg.pid} ready`
         )
     })
-    worker.on('error', (err) => {
+    worker.on('error', (err: Error) => {
       logger(
         'error',
         'SourceCluster',
@@ -339,13 +487,13 @@ class SourceWorkerManager {
     this.workerLoads.set(worker.id, 0)
   }
 
-  _decrementLoad(workerId) {
+  private _decrementLoad(workerId: number): void {
     const load = this.workerLoads.get(workerId) || 0
     this.workerLoads.set(workerId, Math.max(0, load - 1))
     this._tryScaleUp(false)
   }
 
-  _getTotalLoad() {
+  private _getTotalLoad(): number {
     let total = 0
     for (const load of this.workerLoads.values()) {
       total += load || 0
@@ -353,7 +501,7 @@ class SourceWorkerManager {
     return total
   }
 
-  _tryScaleUp(force = false) {
+  private _tryScaleUp(force = false): boolean {
     if (this.isDestroying) return false
     if (this.workers.length >= this.maxWorkers) return false
 
@@ -382,7 +530,7 @@ class SourceWorkerManager {
     return true
   }
 
-  destroy() {
+  destroy(): void {
     this.isDestroying = true
 
     if (this._onClusterExit) {
@@ -440,7 +588,7 @@ class SourceWorkerManager {
     this.workers = []
   }
 
-  _cleanupRequest(id, request) {
+  private _cleanupRequest(id: string, request: SourceRequestEntry): void {
     if (!request || request.cleaned) return
     request.cleaned = true
     if (request.timeout) clearTimeout(request.timeout)
@@ -462,10 +610,16 @@ class SourceWorkerManager {
     this.requests.delete(id)
   }
 
-  delegate(req, res, task, payload, options = {}) {
+  delegate(
+    req: IncomingMessage | DelegatedRequest,
+    res: ServerResponse | DelegatedResponse,
+    task: SourceTaskType | string,
+    payload: unknown,
+    options: DelegateOptions = {}
+  ): boolean {
     const id = crypto.randomBytes(16).toString('hex')
 
-    let bestWorker = null
+    let bestWorker: SourceClusterWorker | null = null
     let minLoad = Number.POSITIVE_INFINITY
 
     for (const worker of this.workers) {
@@ -478,7 +632,7 @@ class SourceWorkerManager {
 
     if (!bestWorker) return false
 
-    const request = {
+    const request: SourceRequestEntry = {
       req,
       res,
       task,
@@ -487,6 +641,7 @@ class SourceWorkerManager {
       options,
       cleaned: false
     }
+
     request.timeout = setTimeout(() => {
       const activeRequest = this.requests.get(id)
       if (activeRequest) {
@@ -500,6 +655,7 @@ class SourceWorkerManager {
         this._cleanupRequest(id, activeRequest)
       }
     }, 60000)
+
     this.requests.set(id, request)
     this.workerLoads.set(bestWorker.id, minLoad + 1)
     this._tryScaleUp(false)
@@ -521,25 +677,33 @@ class SourceWorkerManager {
     return true
   }
 
-  _createInternalResponse(resolve, reject, parseJson) {
+  private _createInternalResponse(
+    resolve: (value: unknown) => void,
+    reject: (reason: Error) => void,
+    parseJson: boolean
+  ): InternalResponse {
     let statusCode = 200
-    const chunks = []
+    const chunks: Buffer[] = []
 
     return {
       headersSent: false,
       setHeader() {},
-      writeHead(code) {
+      writeHead(code: number) {
         statusCode = code
         this.headersSent = true
       },
-      write(chunk) {
-        if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      write(chunk?: Buffer | string) {
+        if (chunk)
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
       },
-      end(chunk) {
-        if (chunk) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+      end(chunk?: Buffer | string) {
+        if (chunk)
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
         const raw = Buffer.concat(chunks).toString('utf8')
         if (statusCode >= 400) {
-          reject(new Error(raw || `Source worker returned status ${statusCode}`))
+          reject(
+            new Error(raw || `Source worker returned status ${statusCode}`)
+          )
           return
         }
 
@@ -563,18 +727,26 @@ class SourceWorkerManager {
     }
   }
 
-  _executeOnWorker(worker, task, payload, options = {}) {
+  private _executeOnWorker(
+    worker: SourceClusterWorker,
+    task: SourceTaskType | string,
+    payload: unknown,
+    options: ExecuteOptions = {}
+  ): Promise<unknown> {
     const id = crypto.randomBytes(16).toString('hex')
+    const timeoutCandidate = options.timeoutMs
     const timeoutMs =
-      Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
-        ? options.timeoutMs
+      typeof timeoutCandidate === 'number' &&
+      Number.isFinite(timeoutCandidate) &&
+      timeoutCandidate > 0
+        ? timeoutCandidate
         : 60000
     const parseJson = options.parseJson !== false
 
     return new Promise((resolve, reject) => {
       const res = this._createInternalResponse(resolve, reject, parseJson)
       const req = { url: '/internal/source-worker-task' }
-      const request = {
+      const request: SourceRequestEntry = {
         req,
         res,
         task,
@@ -608,25 +780,42 @@ class SourceWorkerManager {
     })
   }
 
-  async executeAll(task, payload, options = {}) {
+  async executeAll(
+    task: SourceTaskType | string,
+    payload: unknown,
+    options: ExecuteOptions = {}
+  ): Promise<ExecuteAllResultEntry[]> {
     const targets = this.workers.filter((worker) => worker?.isConnected?.())
     const settled = await Promise.allSettled(
       targets.map((worker) =>
-        this._executeOnWorker(worker, task, payload, options).then((response) => ({
-          clusterId: worker.id,
-          pid: worker.process?.pid || null,
-          response
-        }))
+        this._executeOnWorker(worker, task, payload, options).then(
+          (response) => ({
+            clusterId: worker.id,
+            pid: worker.process?.pid || null,
+            response
+          })
+        )
       )
     )
 
     return settled.map((entry, index) => {
       const worker = targets[index]
+      if (!worker) {
+        return {
+          clusterId: -1,
+          pid: null,
+          error: 'Unknown source worker'
+        }
+      }
+
       if (entry.status === 'fulfilled') return entry.value
       return {
         clusterId: worker.id,
         pid: worker.process?.pid || null,
-        error: entry.reason instanceof Error ? entry.reason.message : String(entry.reason)
+        error:
+          entry.reason instanceof Error
+            ? entry.reason.message
+            : String(entry.reason)
       }
     })
   }
