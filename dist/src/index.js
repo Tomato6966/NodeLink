@@ -75,7 +75,7 @@ const getWorkerManagerClass = async () => {
 let sourceWorkerManagerClassPromise = null;
 const getSourceWorkerManagerClass = async () => {
     if (!sourceWorkerManagerClassPromise) {
-        sourceWorkerManagerClassPromise = import('./managers/sourceWorkerManager.js').then((module) => module.default);
+        sourceWorkerManagerClassPromise = import("./managers/sourceWorkerManager.js").then((module) => module.default);
     }
     return sourceWorkerManagerClassPromise;
 };

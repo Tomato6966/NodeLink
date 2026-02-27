@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { logger } from "../utils.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const hasSocketSend = (res) => typeof res.send === 'function';
 const resolvePlaybackExecPath = () => {
     const distIndex = path.resolve(__dirname, '../index.js');
     if (fs.existsSync(distIndex))
@@ -47,17 +48,18 @@ const parseExecArgv = (value) => {
 const buildSourceWorkerExecArgv = (options = null) => {
     const args = new Set(process.execArgv || []);
     const runtime = options?.cluster?.runtime || {};
+    const env = process.env;
     for (const arg of Array.from(args)) {
         if (arg.startsWith('--max-old-space-size='))
             args.delete(arg);
     }
-    const maxOldSpaceMb = parsePositiveInt(process.env.NODELINK_SOURCE_WORKER_MAX_OLD_SPACE_MB ??
+    const maxOldSpaceMb = parsePositiveInt(env.NODELINK_SOURCE_WORKER_MAX_OLD_SPACE_MB ??
         runtime.sourceWorkerMaxOldSpaceMb ??
         0);
     if (maxOldSpaceMb > 0) {
         args.add(`--max-old-space-size=${maxOldSpaceMb}`);
     }
-    const exposeGc = parseBool(process.env.NODELINK_SOURCE_WORKER_EXPOSE_GC) ||
+    const exposeGc = parseBool(env.NODELINK_SOURCE_WORKER_EXPOSE_GC) ||
         parseBool(runtime.sourceWorkerExposeGc);
     if (exposeGc) {
         args.add('--expose-gc');
@@ -66,13 +68,26 @@ const buildSourceWorkerExecArgv = (options = null) => {
     for (const arg of configExtraArgs) {
         args.add(arg);
     }
-    const envExtraArgs = parseExecArgv(process.env.NODELINK_SOURCE_WORKER_EXEC_ARGV);
+    const envExtraArgs = parseExecArgv(env.NODELINK_SOURCE_WORKER_EXEC_ARGV);
     for (const arg of envExtraArgs) {
         args.add(arg);
     }
     return Array.from(args);
 };
 class SourceWorkerManager {
+    nodelink;
+    workers;
+    requests;
+    workerLoads;
+    maxWorkers;
+    scaleUpThreshold;
+    scaleCooldownMs;
+    lastScaleUpAt;
+    socketPath;
+    server;
+    isDestroying;
+    _onClusterExit;
+    clientSockets;
     constructor(nodelink) {
         this.nodelink = nodelink;
         this.workers = [];
@@ -174,11 +189,11 @@ class SourceWorkerManager {
                                 const headers = request.options?.headers;
                                 if (headers) {
                                     for (const [key, value] of Object.entries(headers)) {
-                                        request.res.setHeader(key, value);
+                                        request.res.setHeader?.(key, value);
                                     }
                                 }
                                 else {
-                                    request.res.setHeader('Content-Type', 'application/json');
+                                    request.res.setHeader?.('Content-Type', 'application/json');
                                 }
                                 request.res.writeHead(request.options?.statusCode || 200);
                             }
@@ -202,10 +217,15 @@ class SourceWorkerManager {
                                 request.timeout = null;
                             }
                             if (!request.res.headersSent && request.options?.isWebSocket) {
-                                request.res.send(payload);
+                                if (hasSocketSend(request.res)) {
+                                    request.res.send(payload);
+                                }
+                                else {
+                                    request.res.write(payload);
+                                }
                             }
                             else if (!request.res.headersSent) {
-                                request.res.setHeader('Content-Type', 'application/json');
+                                request.res.setHeader?.('Content-Type', 'application/json');
                                 request.res.writeHead(200);
                                 try {
                                     request.res.write(payload);
@@ -247,11 +267,16 @@ class SourceWorkerManager {
             });
         });
         await new Promise((resolve, reject) => {
-            this.server.on('error', (err) => {
+            const server = this.server;
+            if (!server) {
+                reject(new Error('Source socket server was not initialized'));
+                return;
+            }
+            server.on('error', (err) => {
                 logger('error', 'SourceCluster', `Server error: ${err.message}`);
                 reject(err);
             });
-            this.server.listen(this.socketPath, () => {
+            server.listen(this.socketPath, () => {
                 logger('info', 'SourceCluster', `Source server listening at ${this.socketPath}`);
                 resolve();
             });
@@ -509,8 +534,11 @@ class SourceWorkerManager {
     }
     _executeOnWorker(worker, task, payload, options = {}) {
         const id = crypto.randomBytes(16).toString('hex');
-        const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
-            ? options.timeoutMs
+        const timeoutCandidate = options.timeoutMs;
+        const timeoutMs = typeof timeoutCandidate === 'number' &&
+            Number.isFinite(timeoutCandidate) &&
+            timeoutCandidate > 0
+            ? timeoutCandidate
             : 60000;
         const parseJson = options.parseJson !== false;
         return new Promise((resolve, reject) => {
@@ -556,12 +584,21 @@ class SourceWorkerManager {
         }))));
         return settled.map((entry, index) => {
             const worker = targets[index];
+            if (!worker) {
+                return {
+                    clusterId: -1,
+                    pid: null,
+                    error: 'Unknown source worker'
+                };
+            }
             if (entry.status === 'fulfilled')
                 return entry.value;
             return {
                 clusterId: worker.id,
                 pid: worker.process?.pid || null,
-                error: entry.reason instanceof Error ? entry.reason.message : String(entry.reason)
+                error: entry.reason instanceof Error
+                    ? entry.reason.message
+                    : String(entry.reason)
             };
         });
     }

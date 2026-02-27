@@ -33,7 +33,7 @@ import type MeaningManager from './managers/meaningManager.js'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.ts'
 import type SourcesManager from './managers/sourceManager.ts'
-import type SourceWorkerManager from './managers/sourceWorkerManager.js'
+import type SourceWorkerManager from './managers/sourceWorkerManager.ts'
 import type TrackCacheManager from './managers/trackCacheManager.ts'
 import type WorkerManager from './managers/workerManager.ts'
 import type { NodelinkConfig } from './typings/config/config.types.ts'
@@ -149,14 +149,14 @@ const getWorkerManagerClass = async (): Promise<
 }
 
 let sourceWorkerManagerClassPromise: Promise<
-  typeof import('./managers/sourceWorkerManager.js').default
+  typeof import('./managers/sourceWorkerManager.ts').default
 > | null = null
 const getSourceWorkerManagerClass = async (): Promise<
-  typeof import('./managers/sourceWorkerManager.js').default
+  typeof import('./managers/sourceWorkerManager.ts').default
 > => {
   if (!sourceWorkerManagerClassPromise) {
     sourceWorkerManagerClassPromise = import(
-      './managers/sourceWorkerManager.js'
+      './managers/sourceWorkerManager.ts'
     ).then((module) => module.default)
   }
 

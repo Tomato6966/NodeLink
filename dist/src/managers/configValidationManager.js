@@ -23,8 +23,8 @@ const VALID_VOICE_FORMATS = new Set(['opus', 'pcm_s16le']);
 const VALID_ROUTE_STRATEGIES = new Set(['RotateOnBan', 'RoundRobin', 'LoadBalance']);
 const VALID_METRICS_AUTH_TYPES = new Set(['Bearer', 'Basic']);
 export default class ConfigValidationManager {
-    options;
     warnings = [];
+    options;
     constructor(options) {
         this.options = options;
     }

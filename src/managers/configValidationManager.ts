@@ -39,10 +39,11 @@ const VALID_METRICS_AUTH_TYPES = new Set(['Bearer', 'Basic'])
 
 export default class ConfigValidationManager {
   private warnings: ValidationWarning[] = []
+  private options: any
 
-  constructor(private options: any) {}
-
-  
+  constructor(options: any) {
+    this.options = options
+  }
 
   validate(): void {
     const errors: string[] = []
@@ -86,8 +87,6 @@ export default class ConfigValidationManager {
       throw new Error('Configuration errors:\n\n' + errors.join('\n\n'))
     }
   }
-
-  
 
   private validateServer(): void {
     const server = this.options.server
@@ -786,7 +785,7 @@ export default class ConfigValidationManager {
     this.runRules(rules)
   }
 
-  
+
 
   private runRules(rules: ValidationRule[]): void {
     const errors: string[] = []
@@ -804,7 +803,7 @@ export default class ConfigValidationManager {
     }
   }
 
-  
+
 
   private warnIfPlaceholder(path: string, value: unknown): void {
     if (typeof value === 'string' && KNOWN_PLACEHOLDERS.has(value)) {
@@ -815,7 +814,7 @@ export default class ConfigValidationManager {
     }
   }
 
-  
+
 
   private nonNegativeIntRule(path: string, get: () => number): ValidationRule<number> {
     return {

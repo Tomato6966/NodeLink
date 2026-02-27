@@ -4,6 +4,7 @@
   "scripts": {
     "build": "tsc --incremental false",
     "start": "node --dns-result-order=ipv4first --import tsx src/index.ts",
+    "start:experimental": "node --dns-result-order=ipv4first src/index.ts",
     "start:dist": "node --dns-result-order=ipv4first dist/src/index.js",
     "start:bun": "bun run --dns-result-order=ipv4first src/index.js",
     "type-check": "tsc --noEmit",
