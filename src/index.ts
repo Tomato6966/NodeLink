@@ -125,7 +125,7 @@ const memoryTrace = (stage: string): void => {
 let playerManagerClassPromise: Promise<PlayerManagerConstructor> | null = null
 const getPlayerManagerClass = async (): Promise<PlayerManagerConstructor> => {
   if (!playerManagerClassPromise) {
-    playerManagerClassPromise = import('./managers/playerManager.js').then(
+    playerManagerClassPromise = import('./managers/playerManager.ts').then(
       (module) => module.default as unknown as PlayerManagerConstructor
     )
   }
