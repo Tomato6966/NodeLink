@@ -13,10 +13,18 @@ import type {
 } from '../typings/playback/player.types.ts'
 import { logger } from '../utils.ts'
 
+/**
+ * Minimal worker shape required by player manager cluster operations.
+ * @public
+ */
 interface ClusterWorkerLike {
   id: number
 }
 
+/**
+ * Minimal worker manager contract consumed by player manager.
+ * @public
+ */
 interface WorkerManagerLike {
   getWorkerForGuild: (playerKey: string) => ClusterWorkerLike | null
   execute: <T = unknown>(
@@ -30,6 +38,10 @@ interface WorkerManagerLike {
   isGuildAssigned: (playerKey: string) => boolean
 }
 
+/**
+ * Action names used by player interceptors.
+ * @public
+ */
 type PlayerInterceptorAction =
   | 'play'
   | 'preload'
@@ -42,12 +54,20 @@ type PlayerInterceptorAction =
   | 'setCrossfade'
   | 'updateVoice'
 
+/**
+ * Interceptor signature for player command hooks.
+ * @public
+ */
 type PlayerInterceptor = (
   action: PlayerInterceptorAction,
   guildId: string,
   args: readonly unknown[]
 ) => unknown | Promise<unknown>
 
+/**
+ * Minimal NodeLink runtime context consumed by player manager.
+ * @public
+ */
 interface PlayerManagerNodelinkContext extends PlaybackNodeLink {
   sessions: {
     get: (id: string) => Session | undefined
@@ -61,32 +81,56 @@ interface PlayerManagerNodelinkContext extends PlaybackNodeLink {
   }
 }
 
+/**
+ * Lightweight player entry stored when running in cluster mode.
+ * @public
+ */
 interface ClusterPlayerSnapshot {
   guildId: string
   userId: string | undefined
   sessionId: string
 }
 
+/**
+ * Result payload for remote player creation commands.
+ * @public
+ */
 interface CreatePlayerResult {
   created?: boolean
   reason?: string
 }
 
+/**
+ * Generic player command response payload for cluster commands.
+ * @public
+ */
 interface PlayerCommandResponse extends Record<string, unknown> {
   playerNotFound?: boolean
 }
 
+/**
+ * Interceptor execution result wrapper.
+ * @internal
+ */
 interface InterceptorResult {
   handled: true
   result: unknown
 }
 
+/**
+ * Mix creation result payload.
+ * @public
+ */
 interface MixAddResult {
   id: string
   track: PlayerTrack
   volume: number
 }
 
+/**
+ * Runtime mix state payload.
+ * @public
+ */
 interface MixState {
   id: string
   track: PlayerTrack
@@ -95,6 +139,10 @@ interface MixState {
   startTime: number
 }
 
+/**
+ * Internal union for locally managed players and cluster snapshots.
+ * @public
+ */
 type ManagedPlayer = PlaybackPlayer | ClusterPlayerSnapshot
 
 /**
@@ -114,6 +162,11 @@ export default class PlayerManager {
   private readonly isCluster: boolean
   private readonly pendingCreates: Map<string, Promise<ManagedPlayer>>
 
+  /**
+   * Creates a new session-scoped player manager.
+   * @param nodelink - NodeLink runtime context.
+   * @param sessionId - Owning session id.
+   */
   constructor(nodelink: PlayerManagerNodelinkContext, sessionId: string) {
     this.nodelink = nodelink
     this.sessionId = sessionId
@@ -122,10 +175,19 @@ export default class PlayerManager {
     this.pendingCreates = new Map()
   }
 
+  /**
+   * Builds the internal player key for a guild/session pair.
+   * @param guildId - Discord guild id.
+   * @internal
+   */
   private getPlayerKey(guildId: string): string {
     return `${this.sessionId}:${guildId}`
   }
 
+  /**
+   * Resolves the owning session or throws when missing.
+   * @internal
+   */
   private getSessionOrThrow(): Session {
     const session = this.nodelink.sessions.get(this.sessionId)
     if (!session) {
@@ -134,6 +196,11 @@ export default class PlayerManager {
     return session
   }
 
+  /**
+   * Resolves a normalized session user id.
+   * @param session - Source session.
+   * @internal
+   */
   private getSessionUserId(session: Session): string | undefined {
     if (Array.isArray(session.userId)) {
       return session.userId[0]
@@ -141,6 +208,10 @@ export default class PlayerManager {
     return session.userId
   }
 
+  /**
+   * Returns the worker manager instance when cluster mode is enabled.
+   * @internal
+   */
   private getWorkerManagerOrThrow(): WorkerManagerLike {
     if (!this.nodelink.workerManager) {
       throw new Error('Worker manager is not available in this context.')
@@ -148,12 +219,22 @@ export default class PlayerManager {
     return this.nodelink.workerManager
   }
 
+  /**
+   * Type guard for cluster snapshot entries.
+   * @param player - Player map entry.
+   * @internal
+   */
   private isClusterPlayerSnapshot(
     player: ManagedPlayer
   ): player is ClusterPlayerSnapshot {
     return typeof (player as Partial<PlaybackPlayer>).play !== 'function'
   }
 
+  /**
+   * Resolves a local playback player or throws when unavailable.
+   * @param playerKey - Internal player key.
+   * @internal
+   */
   private getLocalPlayerOrThrow(playerKey: string): PlaybackPlayer {
     const player = this.players.get(playerKey)
     if (!player || this.isClusterPlayerSnapshot(player)) {
@@ -162,6 +243,13 @@ export default class PlayerManager {
     return player
   }
 
+  /**
+   * Executes a player command on the assigned worker.
+   * @param guildId - Target guild id.
+   * @param command - Command name.
+   * @param args - Command argument list.
+   * @internal
+   */
   private async runClusterPlayerCommand(
     guildId: string,
     command: string,
@@ -195,6 +283,13 @@ export default class PlayerManager {
     return result
   }
 
+  /**
+   * Runs configured player interceptors for the given action.
+   * @param action - Interceptor action id.
+   * @param guildId - Target guild id.
+   * @param args - Action arguments.
+   * @internal
+   */
   async _runInterceptors(
     action: PlayerInterceptorAction,
     guildId: string,
@@ -225,6 +320,11 @@ export default class PlayerManager {
     return null
   }
 
+  /**
+   * Creates or returns a player for the provided guild.
+   * @param guildId - Target guild id.
+   * @param voice - Optional initial voice payload.
+   */
   async create(
     guildId: string,
     voice?: Partial<PlayerVoiceState>
@@ -260,6 +360,10 @@ export default class PlayerManager {
     return createPromise
   }
 
+  /**
+   * Internal player creation routine for local and cluster modes.
+   * @internal
+   */
   private async _createInternal(
     session: Session,
     guildId: string,
@@ -365,10 +469,18 @@ export default class PlayerManager {
     return player
   }
 
+  /**
+   * Returns a managed player entry by guild id.
+   * @param guildId - Target guild id.
+   */
   get(guildId: string): ManagedPlayer | undefined {
     return this.players.get(this.getPlayerKey(guildId))
   }
 
+  /**
+   * Destroys a player for the provided guild.
+   * @param guildId - Target guild id.
+   */
   async destroy(guildId: string): Promise<void> {
     const playerKey = this.getPlayerKey(guildId)
 
@@ -401,6 +513,9 @@ export default class PlayerManager {
     )
   }
 
+  /**
+   * Starts playback for a track payload.
+   */
   async play(
     guildId: string,
     trackPayload: PlayPayload
@@ -421,6 +536,9 @@ export default class PlayerManager {
     return player.play(trackPayload)
   }
 
+  /**
+   * Preloads a track without starting playback.
+   */
   async preload(
     guildId: string,
     trackPayload: PlayerTrack
@@ -441,6 +559,9 @@ export default class PlayerManager {
     return player.preload(trackPayload)
   }
 
+  /**
+   * Stops playback for the guild player.
+   */
   async stop(guildId: string): Promise<boolean | PlayerCommandResponse> {
     const interception = await this._runInterceptors('stop', guildId)
     if (interception?.handled)
@@ -454,6 +575,9 @@ export default class PlayerManager {
     return player.stop()
   }
 
+  /**
+   * Pauses or resumes playback.
+   */
   async pause(
     guildId: string,
     shouldPause: boolean
@@ -474,6 +598,9 @@ export default class PlayerManager {
     return player.pause(shouldPause)
   }
 
+  /**
+   * Seeks current playback to the provided position.
+   */
   async seek(
     guildId: string,
     position?: number,
@@ -496,6 +623,9 @@ export default class PlayerManager {
     return player.seek(position, endTime)
   }
 
+  /**
+   * Updates player output volume.
+   */
   async volume(
     guildId: string,
     level: number
@@ -512,6 +642,9 @@ export default class PlayerManager {
     return player.volume(level)
   }
 
+  /**
+   * Applies filter configuration to the player.
+   */
   async setFilters(
     guildId: string,
     filtersPayload: FiltersState | Record<string, unknown>
@@ -534,6 +667,9 @@ export default class PlayerManager {
     return player.setFilters(filtersPayload as FiltersState)
   }
 
+  /**
+   * Updates fading configuration.
+   */
   async setFading(
     guildId: string,
     fadingConfig?: FadingConfig
@@ -554,6 +690,9 @@ export default class PlayerManager {
     return player.setFading(fadingConfig)
   }
 
+  /**
+   * Updates crossfade configuration.
+   */
   async setCrossfade(
     guildId: string,
     crossfadeConfig?: CrossfadeConfig
@@ -576,6 +715,9 @@ export default class PlayerManager {
     return player.setCrossfade(crossfadeConfig)
   }
 
+  /**
+   * Enables or disables loudness normalization.
+   */
   async setLoudnessNormalizer(
     guildId: string,
     enabled: boolean
@@ -590,6 +732,9 @@ export default class PlayerManager {
     return player.setLoudnessNormalizer(enabled)
   }
 
+  /**
+   * Applies voice state updates to the player.
+   */
   async updateVoice(
     guildId: string,
     voicePayload: Partial<PlayerVoiceState>
@@ -613,6 +758,9 @@ export default class PlayerManager {
     return undefined
   }
 
+  /**
+   * Serializes player state to a JSON-compatible object.
+   */
   async toJSON(
     guildId: string
   ): Promise<PlayerStateJSON | PlayerCommandResponse> {
@@ -624,6 +772,9 @@ export default class PlayerManager {
     return player.toJSON()
   }
 
+  /**
+   * Adds a mix layer to the player.
+   */
   async addMix(
     guildId: string,
     trackPayload: PlayerTrack,
@@ -640,6 +791,9 @@ export default class PlayerManager {
     return player.addMix(trackPayload, volume)
   }
 
+  /**
+   * Removes a mix layer from the player.
+   */
   async removeMix(
     guildId: string,
     mixId: string
@@ -652,6 +806,9 @@ export default class PlayerManager {
     return player.removeMix(mixId)
   }
 
+  /**
+   * Updates the volume of an existing mix layer.
+   */
   async updateMix(
     guildId: string,
     mixId: string,
@@ -665,6 +822,9 @@ export default class PlayerManager {
     return player.updateMix(mixId, volume)
   }
 
+  /**
+   * Returns all active mix layers for the player.
+   */
   async getMixes(guildId: string): Promise<MixState[] | PlayerCommandResponse> {
     if (this.isCluster) {
       return this.runClusterPlayerCommand(guildId, 'getMixes', [])
@@ -674,6 +834,9 @@ export default class PlayerManager {
     return player.getMixes()
   }
 
+  /**
+   * Subscribes the player to lyrics updates.
+   */
   async subscribeLyrics(
     guildId: string,
     skipTrackSource: boolean | string | undefined
@@ -689,6 +852,9 @@ export default class PlayerManager {
     return undefined
   }
 
+  /**
+   * Unsubscribes the player from lyrics updates.
+   */
   async unsubscribeLyrics(
     guildId: string
   ): Promise<PlayerCommandResponse | undefined> {
