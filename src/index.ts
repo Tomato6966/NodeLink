@@ -5,7 +5,7 @@ import { resolve as resolvePath } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import WebSocketServer from '@performanc/pwsl-server'
 
-import RoutePlannerManager from './managers/routePlannerManager.js'
+import RoutePlannerManager from './managers/routePlannerManager.ts'
 import SessionManager from './managers/sessionManager.ts'
 import StatsManager from './managers/statsManager.ts'
 import {
@@ -29,8 +29,8 @@ import type ConnectionManager from './managers/connectionManager.ts'
 import type CredentialManager from './managers/credentialManager.ts'
 import DosProtectionManager from './managers/dosProtectionManager.ts'
 import type LyricsManager from './managers/lyricsManager.ts'
-import type MeaningManager from './managers/meaningManager.js'
-import PluginManager from './managers/pluginManager.js'
+import type MeaningManager from './managers/meaningManager.ts'
+import PluginManager from './managers/pluginManager.ts'
 import RateLimitManager from './managers/rateLimitManager.ts'
 import type SourcesManager from './managers/sourceManager.ts'
 import type SourceWorkerManager from './managers/sourceWorkerManager.ts'
@@ -520,7 +520,7 @@ class NodelinkServer extends EventEmitter {
       ] = await Promise.all([
         import('./managers/sourceManager.ts'),
         import('./managers/lyricsManager.ts'),
-        import('./managers/meaningManager.js')
+        import('./managers/meaningManager.ts')
       ])
       this.sources = new sourceMan(this)
       this.lyrics = new lyricsMan(this)

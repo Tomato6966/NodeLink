@@ -575,7 +575,7 @@ if (isMainThread) {
     import('../managers/sourceManager.ts'),
     import('../managers/credentialManager.ts'),
     import('../managers/trackCacheManager.ts'),
-    import('../managers/routePlannerManager.js'),
+    import('../managers/routePlannerManager.ts'),
     import('../managers/statsManager.ts')
   ])
 
@@ -599,7 +599,7 @@ if (isMainThread) {
     typeof import('../managers/lyricsManager.ts').default
   >
   type MeaningManagerType = InstanceType<
-    typeof import('../managers/meaningManager.js').default
+    typeof import('../managers/meaningManager.ts').default
   >
 
   let lyricsManagerPromise: Promise<LyricsManagerType> | null = null
@@ -621,7 +621,7 @@ if (isMainThread) {
 
   const getMeaningManager = async (): Promise<MeaningManagerType> => {
     if (!meaningManagerPromise) {
-      meaningManagerPromise = import('../managers/meaningManager.js').then(
+      meaningManagerPromise = import('../managers/meaningManager.ts').then(
         async (module) => {
           const manager = new module.default(nodelink)
           await manager.loadFolder()

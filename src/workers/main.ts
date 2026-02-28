@@ -11,13 +11,13 @@ import v8 from 'node:v8'
 import { GatewayEvents } from '../constants.ts'
 import ConnectionManager from '../managers/connectionManager.ts'
 import CredentialManager from '../managers/credentialManager.ts'
-import PluginManager from '../managers/pluginManager.js'
-import RoutePlannerManager from '../managers/routePlannerManager.js'
+import PluginManager from '../managers/pluginManager.ts'
+import RoutePlannerManager from '../managers/routePlannerManager.ts'
 import SourceManager from '../managers/sourceManager.ts'
 import StatsManager from '../managers/statsManager.ts'
 import TrackCacheManager from '../managers/trackCacheManager.ts'
 import type LyricsManager from '../managers/lyricsManager.ts'
-import type MeaningManager from '../managers/meaningManager.js'
+import type MeaningManager from '../managers/meaningManager.ts'
 import { getWebmOpusProfilerStats } from '../playback/demuxers/WebmOpus.ts'
 import { bufferPool } from '../playback/structs/BufferPool.ts'
 import type { TrackInfoExtended } from '../typings/playback/player.types.ts'
@@ -1341,7 +1341,7 @@ const getLyricsManager = async (): Promise<LyricsManager> => {
 
 const getMeaningManager = async (): Promise<MeaningManager> => {
   if (!meaningManagerPromise) {
-    meaningManagerPromise = import('../managers/meaningManager.js').then(
+    meaningManagerPromise = import('../managers/meaningManager.ts').then(
       async (module) => {
         const manager = new module.default(nodelink)
         await manager.loadFolder()
