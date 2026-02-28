@@ -135,7 +135,11 @@ export default class RoutePlannerManager {
 
     return octets.reduce<bigint>((acc, octet) => {
       const parsedOctet = Number.parseInt(octet, 10)
-      if (!Number.isInteger(parsedOctet) || parsedOctet < 0 || parsedOctet > 255) {
+      if (
+        !Number.isInteger(parsedOctet) ||
+        parsedOctet < 0 ||
+        parsedOctet > 255
+      ) {
         throw new Error(`Invalid IPv4 address: ${ip}`)
       }
 

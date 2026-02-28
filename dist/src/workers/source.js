@@ -444,7 +444,7 @@ else {
         import("../managers/sourceManager.js"),
         import("../managers/credentialManager.js"),
         import("../managers/trackCacheManager.js"),
-        import('../managers/routePlannerManager.js'),
+        import("../managers/routePlannerManager.js"),
         import("../managers/statsManager.js")
     ]);
     nodelink.statsManager = new StatsManager(nodelink);
@@ -470,7 +470,7 @@ else {
     };
     const getMeaningManager = async () => {
         if (!meaningManagerPromise) {
-            meaningManagerPromise = import('../managers/meaningManager.js').then(async (module) => {
+            meaningManagerPromise = import("../managers/meaningManager.js").then(async (module) => {
                 const manager = new module.default(nodelink);
                 await manager.loadFolder();
                 nodelink.meanings = manager;

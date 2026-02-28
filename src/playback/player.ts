@@ -562,7 +562,9 @@ export class Player {
           `Playback resumed; rearming crossfade/end schedule for guild ${this.guildId}`
         )
         this._resumeCrossfadeCompletionTimer()
-        this._fading('trackEndSchedule', { startPosition: this._realPosition() })
+        this._fading('trackEndSchedule', {
+          startPosition: this._realPosition()
+        })
       } else if (!this._isRestoring) {
         this._lyricsBasePackets =
           this.connection?.statistics?.packetsExpected ?? 0
@@ -889,11 +891,16 @@ export class Player {
     options: { clearNext?: boolean; clearPcm?: boolean } = {}
   ): void {
     const { clearNext = true, clearPcm = true } = options
-    logger('debug', 'Crossfade', `Clearing crossfade for guild ${this.guildId}`, {
-      clearNext,
-      clearPcm,
-      token: this._crossfadeToken
-    })
+    logger(
+      'debug',
+      'Crossfade',
+      `Clearing crossfade for guild ${this.guildId}`,
+      {
+        clearNext,
+        clearPcm,
+        token: this._crossfadeToken
+      }
+    )
     if (this._crossfadeTimer) {
       clearTimeout(this._crossfadeTimer)
       this._crossfadeTimer = null
@@ -965,11 +972,16 @@ export class Player {
       return
     }
 
-    logger('debug', 'Crossfade', `Preparing crossfade buffer for guild ${this.guildId}`, {
-      durationMs: config.durationMs,
-      minBufferMs: config.minBufferMs,
-      bufferMs: config.bufferMs
-    })
+    logger(
+      'debug',
+      'Crossfade',
+      `Preparing crossfade buffer for guild ${this.guildId}`,
+      {
+        durationMs: config.durationMs,
+        minBufferMs: config.minBufferMs,
+        bufferMs: config.bufferMs
+      }
+    )
 
     const prepared = audioStream.prepareCrossfade(
       pcmResource.stream as unknown as Readable,
@@ -988,7 +1000,11 @@ export class Player {
       return
     }
     this._crossfadePrepared = true
-    logger('debug', 'Crossfade', `Crossfade buffer prepared for guild ${this.guildId}`)
+    logger(
+      'debug',
+      'Crossfade',
+      `Crossfade buffer prepared for guild ${this.guildId}`
+    )
   }
 
   /**
@@ -1008,11 +1024,16 @@ export class Player {
     // Safety deadline if crossfade state never flips to inactive.
     this._crossfadeCompletionDeadline =
       Date.now() + Math.max(4000, boundedDelay * 3, boundedDelay + 1500)
-    logger('debug', 'Crossfade', `Armed crossfade completion timer for guild ${this.guildId}`, {
-      delayMs: boundedDelay,
-      endsAt: this._crossfadeEndsAt,
-      deadline: this._crossfadeCompletionDeadline
-    })
+    logger(
+      'debug',
+      'Crossfade',
+      `Armed crossfade completion timer for guild ${this.guildId}`,
+      {
+        delayMs: boundedDelay,
+        endsAt: this._crossfadeEndsAt,
+        deadline: this._crossfadeCompletionDeadline
+      }
+    )
 
     this._crossfadeCompletionWatcher = setInterval(() => {
       if (this.isPaused) return
@@ -1031,8 +1052,7 @@ export class Player {
         | undefined
       const state = audioStream?.getCrossfadeState?.()
       const currentPosition = this._realPosition()
-      const isPositionReached =
-        currentPosition >= context.endPositionMs - 40
+      const isPositionReached = currentPosition >= context.endPositionMs - 40
       const isDone = state
         ? state.active === false || state.isFinished === true
         : false
@@ -1114,18 +1134,20 @@ export class Player {
     if (!this._crossfadeCompletionContext || !this._crossfadeCompletionWatcher)
       return
 
-    const remaining = Math.max(
-      0,
-      this._crossfadeEndsAt - Date.now()
-    )
+    const remaining = Math.max(0, this._crossfadeEndsAt - Date.now())
     clearInterval(this._crossfadeCompletionWatcher)
     this._crossfadeCompletionWatcher = null
     this._crossfadeEndsAt = 0
     this._crossfadeCompletionRemainingMs = remaining
     this._crossfadeCompletionDeadline = 0
-    logger('debug', 'Crossfade', `Paused crossfade completion timer for guild ${this.guildId}`, {
-      remainingMs: remaining
-    })
+    logger(
+      'debug',
+      'Crossfade',
+      `Paused crossfade completion timer for guild ${this.guildId}`,
+      {
+        remainingMs: remaining
+      }
+    )
   }
 
   /**
@@ -1145,9 +1167,7 @@ export class Player {
       `Resuming crossfade completion timer for guild ${this.guildId}`,
       { delayMs: this._crossfadeCompletionRemainingMs || 1 }
     )
-    this._armCrossfadeCompletionTimer(
-      this._crossfadeCompletionRemainingMs || 1
-    )
+    this._armCrossfadeCompletionTimer(this._crossfadeCompletionRemainingMs || 1)
   }
 
   /**
@@ -1165,12 +1185,17 @@ export class Player {
     )
       return
 
-    logger('debug', 'Crossfade', `Scheduling crossfade for guild ${this.guildId}`, {
-      startPosition,
-      durationMs: config.durationMs,
-      mode: config.mode,
-      curve: config.curve
-    })
+    logger(
+      'debug',
+      'Crossfade',
+      `Scheduling crossfade for guild ${this.guildId}`,
+      {
+        startPosition,
+        durationMs: config.durationMs,
+        mode: config.mode,
+        curve: config.curve
+      }
+    )
 
     if (config.mode === 'preload' && this.track.info.isStream) {
       logger(
@@ -1223,17 +1248,27 @@ export class Player {
         : Math.max(0, Math.max(0, total - startPosition) - durationMs)
     this._crossfadeToken += 1
     const token = this._crossfadeToken
-    logger('debug', 'Crossfade', `Crossfade timer armed for guild ${this.guildId}`, {
-      token,
-      delayMs: delay
-    })
+    logger(
+      'debug',
+      'Crossfade',
+      `Crossfade timer armed for guild ${this.guildId}`,
+      {
+        token,
+        delayMs: delay
+      }
+    )
 
     this._crossfadeTimer = setTimeout(() => {
       this._crossfadeTimer = null
-      logger('debug', 'Crossfade', `Crossfade start timer fired for guild ${this.guildId}`, {
-        token,
-        durationMs
-      })
+      logger(
+        'debug',
+        'Crossfade',
+        `Crossfade start timer fired for guild ${this.guildId}`,
+        {
+          token,
+          durationMs
+        }
+      )
       this._startCrossfade(token, durationMs, config)
     }, delay)
   }
@@ -1253,12 +1288,17 @@ export class Player {
     if (token !== this._crossfadeToken) return
     if (!this.track || !this.nextCrossfadeTrack) return
 
-    logger('debug', 'Crossfade', `Starting crossfade for guild ${this.guildId}`, {
-      token,
-      durationMs,
-      mode: config.mode,
-      curve: config.curve
-    })
+    logger(
+      'debug',
+      'Crossfade',
+      `Starting crossfade for guild ${this.guildId}`,
+      {
+        token,
+        durationMs,
+        mode: config.mode,
+        curve: config.curve
+      }
+    )
 
     const audioStream = this.connection?.audioStream as
       | AudioResource
@@ -1311,7 +1351,7 @@ export class Player {
     const nextStreamInfo = this.nextCrossfadeStreamInfo
 
     this._crossfadeIgnoreIdle = true
-    
+
     this.nextCrossfadeTrack = null
     this.nextCrossfadeStreamInfo = null
     this.nextCrossfadeDuration = durationMs
@@ -1339,13 +1379,18 @@ export class Player {
       startPositionMs,
       endPositionMs: startPositionMs + durationMs
     }
-    logger('debug', 'Crossfade', `Crossfade started for guild ${this.guildId}`, {
-      token,
-      previousTrack: previousTrack.info.identifier,
-      nextTrack: nextTrack.info.identifier,
-      startPositionMs,
-      endPositionMs: startPositionMs + durationMs
-    })
+    logger(
+      'debug',
+      'Crossfade',
+      `Crossfade started for guild ${this.guildId}`,
+      {
+        token,
+        previousTrack: previousTrack.info.identifier,
+        nextTrack: nextTrack.info.identifier,
+        startPositionMs,
+        endPositionMs: startPositionMs + durationMs
+      }
+    )
     this._armCrossfadeCompletionTimer(durationMs)
   }
 
@@ -1400,8 +1445,7 @@ export class Player {
     const startTime = this.nextCrossfadeDuration
     this.position = startTime
     this._lyricsBasePosition = startTime
-    this._lyricsBasePackets =
-      this.connection.statistics?.packetsExpected ?? 0
+    this._lyricsBasePackets = this.connection.statistics?.packetsExpected ?? 0
 
     const currentStream = this.connection.audioStream as AudioResource | null
     currentStream?.clearCrossfade?.()
@@ -1654,7 +1698,12 @@ export class Player {
     const position = this._realPosition()
 
     const threshold = this.nodelink.options.trackStuckThresholdMs
-    if (threshold > 0 && !this.isUpdatingTrack && !this._isStopping && this.track) {
+    if (
+      threshold > 0 &&
+      !this.isUpdatingTrack &&
+      !this._isStopping &&
+      this.track
+    ) {
       if (this._lastPosition === position) {
         this._stuckTime += this.nodelink.options.playerUpdateInterval
         if (
@@ -2499,8 +2548,7 @@ export class Player {
     const crossfadeConfig = this._getCrossfadeConfig()
     const shouldPrepareCrossfade = !!crossfadeConfig && !!this.track
     const hasPreparedCrossfade =
-      !!this.nextCrossfadeTrack &&
-      !!this.nextCrossfadePcm
+      !!this.nextCrossfadeTrack && !!this.nextCrossfadePcm
 
     const sameEncoded =
       !!payload.encoded &&
@@ -2590,9 +2638,12 @@ export class Player {
 
             this.nextCrossfadeTrack = payload
             this.nextCrossfadePcm = pcmFetched.stream
-            this.nextCrossfadeStreamInfo = { ...urlData, trackInfo: payload.info }
+            this.nextCrossfadeStreamInfo = {
+              ...urlData,
+              trackInfo: payload.info
+            }
             this.nextCrossfadeDuration = crossfadeConfig.durationMs
-            
+
             // Assign to nextResource as well for fallback, but it's raw PCM!
             this.nextResource = pcmFetched.stream
             this.nextTrack = payload
@@ -3112,7 +3163,8 @@ export class Player {
   private async _loadLyrics(): Promise<void> {
     if (!this.track) return
 
-    const lyricsManager = this.nodelink.lyrics ?? (await this.nodelink.getLyricsManager?.())
+    const lyricsManager =
+      this.nodelink.lyrics ?? (await this.nodelink.getLyricsManager?.())
     if (!lyricsManager) return
 
     const lyricsData = await lyricsManager.loadLyrics(

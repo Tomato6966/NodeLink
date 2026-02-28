@@ -1,4 +1,4 @@
-import { IncomingHttpHeaders } from 'node:http'
+import type { IncomingHttpHeaders } from 'node:http'
 import type { NodelinkConfig } from '../config/config.types.ts'
 
 /**
@@ -21,7 +21,9 @@ export type ApiHttpMethod =
  * @remarks Header values may be normalized to strings or arrays by the runtime.
  * @public
  */
-export type ApiHeaders = IncomingHttpHeaders | Record<string, string | string[] | undefined>
+export type ApiHeaders =
+  | IncomingHttpHeaders
+  | Record<string, string | string[] | undefined>
 
 /**
  * Socket metadata available on API requests.

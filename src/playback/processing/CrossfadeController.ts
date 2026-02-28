@@ -226,7 +226,12 @@ export class CrossfadeController extends Transform {
   /**
    * Returns the current crossfade status.
    */
-  public getState(): { active: boolean; bufferedMs: number; targetMs: number; isFinished: boolean } {
+  public getState(): {
+    active: boolean
+    bufferedMs: number
+    targetMs: number
+    isFinished: boolean
+  } {
     return {
       active: this.crossfade !== null,
       bufferedMs: this.getBufferedMs(),
@@ -344,10 +349,9 @@ export class CrossfadeController extends Transform {
       : null
 
     const totalFrames = Math.floor(sampleCount / this.channels)
-    const remainingFrames = runtime.isFinished ? 0 : Math.max(
-      0,
-      runtime.durationFrames - runtime.elapsedFrames
-    )
+    const remainingFrames = runtime.isFinished
+      ? 0
+      : Math.max(0, runtime.durationFrames - runtime.elapsedFrames)
     const fadeFrames = Math.min(totalFrames, remainingFrames)
 
     const getMain = (i: number): number =>
@@ -367,7 +371,7 @@ export class CrossfadeController extends Transform {
             ? (runtime.elapsedFrames + frame) / runtime.durationFrames
             : 1
       }
-      
+
       const [gainOut, gainIn] = this._fadeGains(frameProgress, runtime.curve)
       const base = frame * this.channels
       for (let c = 0; c < this.channels; c++) {

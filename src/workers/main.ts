@@ -1,8 +1,8 @@
-import net from 'node:net'
-import os from 'node:os'
 import fs from 'node:fs'
 import fsPromises from 'node:fs/promises'
 import inspector from 'node:inspector'
+import net from 'node:net'
+import os from 'node:os'
 import { resolve as resolvePath } from 'node:path'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { pathToFileURL } from 'node:url'
@@ -11,13 +11,13 @@ import v8 from 'node:v8'
 import { GatewayEvents } from '../constants.ts'
 import ConnectionManager from '../managers/connectionManager.ts'
 import CredentialManager from '../managers/credentialManager.ts'
+import type LyricsManager from '../managers/lyricsManager.ts'
+import type MeaningManager from '../managers/meaningManager.ts'
 import PluginManager from '../managers/pluginManager.ts'
 import RoutePlannerManager from '../managers/routePlannerManager.ts'
 import SourceManager from '../managers/sourceManager.ts'
 import StatsManager from '../managers/statsManager.ts'
 import TrackCacheManager from '../managers/trackCacheManager.ts'
-import type LyricsManager from '../managers/lyricsManager.ts'
-import type MeaningManager from '../managers/meaningManager.ts'
 import { getWebmOpusProfilerStats } from '../playback/demuxers/WebmOpus.ts'
 import { bufferPool } from '../playback/structs/BufferPool.ts'
 import type { TrackInfoExtended } from '../typings/playback/player.types.ts'
@@ -199,7 +199,11 @@ const inferSourceName = (
 
 const getCodecAndContainer = (
   format: unknown
-): { codec: string | null; container: string | null; formatLabel: string | null } => {
+): {
+  codec: string | null
+  container: string | null
+  formatLabel: string | null
+} => {
   if (!format) return { codec: null, container: null, formatLabel: null }
 
   if (typeof format === 'string') {
@@ -260,7 +264,11 @@ const getCodecAndContainer = (
     (typeof info['label'] === 'string' ? info['label'] : null) ||
     container
 
-  return { codec: codec || null, container: container || null, formatLabel: formatLabel || null }
+  return {
+    codec: codec || null,
+    container: container || null,
+    formatLabel: formatLabel || null
+  }
 }
 
 type CpuProfilerState = {
@@ -374,18 +382,16 @@ const summarizeHeapSamplingProfile = (
     }
   >()
 
-  const visit = (
-    node: {
-      callFrame?: {
-        functionName?: string
-        url?: string
-        lineNumber?: number
-        columnNumber?: number
-      }
-      selfSize?: number
-      children?: unknown[]
+  const visit = (node: {
+    callFrame?: {
+      functionName?: string
+      url?: string
+      lineNumber?: number
+      columnNumber?: number
     }
-  ): void => {
+    selfSize?: number
+    children?: unknown[]
+  }): void => {
     const frame = node.callFrame || {}
     const functionName = frame.functionName || '(anonymous)'
     const url = frame.url || '(internal)'
@@ -419,7 +425,9 @@ const summarizeHeapSamplingProfile = (
 
   visit(head)
 
-  const entries = Array.from(aggregates.values()).sort((a, b) => b.bytes - a.bytes)
+  const entries = Array.from(aggregates.values()).sort(
+    (a, b) => b.bytes - a.bytes
+  )
   if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0) {
     return entries.slice(0, limit)
   }
@@ -435,187 +443,261 @@ const handleProfilerCommand = async (
   }
 
   if (action === 'status') {
-    const playersSummary = Array.from(players.values())
-      .map((player) => {
-        const track = player.track as
-          | {
-              info?: {
-                sourceName?: string
-                title?: string
-                uri?: string
-                author?: string
-                length?: number
-                artworkUrl?: string | null
-                isStream?: boolean
-                isSeekable?: boolean
-              }
-              endTime?: number
+    const playersSummary = Array.from(players.values()).map((player) => {
+      const track = player.track as
+        | {
+            info?: {
+              sourceName?: string
+              title?: string
+              uri?: string
+              author?: string
+              length?: number
+              artworkUrl?: string | null
+              isStream?: boolean
+              isSeekable?: boolean
             }
+            endTime?: number
+          }
+        | null
+        | undefined
+      const internal = player as unknown as {
+        streamInfo?: { protocol?: string; format?: string } | null
+        connStatus?: string
+        connection?: { ping?: number | null } | null
+        _realPosition?: () => number
+        position?: number
+      }
+      const uri = track?.info?.uri || null
+      const inferredSource = inferSourceName(
+        track?.info?.sourceName || null,
+        uri
+      )
+      const streamProtocol = internal.streamInfo?.protocol || null
+      const formatInfo = getCodecAndContainer(internal.streamInfo?.format)
+      const durationMsRaw =
+        typeof track?.endTime === 'number' &&
+        Number.isFinite(track.endTime) &&
+        track.endTime > 0
+          ? track.endTime
+          : typeof track?.info?.length === 'number' &&
+              Number.isFinite(track.info.length)
+            ? track.info.length
+            : 0
+      const positionMsRaw =
+        typeof internal._realPosition === 'function'
+          ? internal._realPosition()
+          : internal.position || 0
+      const durationMs = Math.max(0, Number(durationMsRaw) || 0)
+      const positionMs = Math.max(0, Number(positionMsRaw) || 0)
+      const clampedPosition =
+        durationMs > 0 ? Math.min(positionMs, durationMs) : positionMs
+      const remainingMs =
+        durationMs > 0 ? Math.max(0, durationMs - clampedPosition) : null
+      const progressPercent =
+        durationMs > 0
+          ? Number(((clampedPosition / durationMs) * 100).toFixed(2))
+          : null
+      const contentLengthRaw = (
+        internal.streamInfo as
+          | { additionalData?: { contentLength?: number | string } | null }
           | null
           | undefined
-        const internal = player as unknown as {
-          streamInfo?: { protocol?: string; format?: string } | null
-          connStatus?: string
-          connection?: { ping?: number | null } | null
-          _realPosition?: () => number
-          position?: number
-        }
-        const uri = track?.info?.uri || null
-        const inferredSource = inferSourceName(track?.info?.sourceName || null, uri)
-        const streamProtocol = internal.streamInfo?.protocol || null
-        const formatInfo = getCodecAndContainer(internal.streamInfo?.format)
-        const durationMsRaw =
-          typeof track?.endTime === 'number' && Number.isFinite(track.endTime) && track.endTime > 0
-            ? track.endTime
-            : typeof track?.info?.length === 'number' && Number.isFinite(track.info.length)
-              ? track.info.length
-              : 0
-        const positionMsRaw =
-          typeof internal._realPosition === 'function'
-            ? internal._realPosition()
-            : internal.position || 0
-        const durationMs = Math.max(0, Number(durationMsRaw) || 0)
-        const positionMs = Math.max(0, Number(positionMsRaw) || 0)
-        const clampedPosition = durationMs > 0 ? Math.min(positionMs, durationMs) : positionMs
-        const remainingMs = durationMs > 0 ? Math.max(0, durationMs - clampedPosition) : null
-        const progressPercent =
-          durationMs > 0 ? Number(((clampedPosition / durationMs) * 100).toFixed(2)) : null
-        const contentLengthRaw = (
-          internal.streamInfo as
-            | { additionalData?: { contentLength?: number | string } | null }
-            | null
-            | undefined
-        )?.additionalData?.contentLength
-        const contentLength = Number(contentLengthRaw)
-        const totalBytes =
-          Number.isFinite(contentLength) && contentLength > 0 ? contentLength : null
-        const downloadedRaw = Number(
-          (
-            player as unknown as {
-              profilerStreamStats?: { downloadedBytes?: number }
-            }
-          )?.profilerStreamStats?.downloadedBytes || 0
-        )
-        const seekOffsetBytes =
-          totalBytes && durationMs > 0
-            ? Math.max(
-                0,
-                Math.min(
-                  totalBytes,
-                  (totalBytes * Number((internal.streamInfo as { additionalData?: { startTime?: number } | null } | null | undefined)?.additionalData?.startTime || 0)) /
-                    durationMs
-                )
-              )
-            : 0
-        const decodedBytes =
-          totalBytes && durationMs > 0
-            ? Math.max(
-                0,
-                Math.min(totalBytes, (totalBytes * clampedPosition) / durationMs)
-              )
-            : null
-        const downloadedBytes = totalBytes
+      )?.additionalData?.contentLength
+      const contentLength = Number(contentLengthRaw)
+      const totalBytes =
+        Number.isFinite(contentLength) && contentLength > 0
+          ? contentLength
+          : null
+      const downloadedRaw = Number(
+        (
+          player as unknown as {
+            profilerStreamStats?: { downloadedBytes?: number }
+          }
+        )?.profilerStreamStats?.downloadedBytes || 0
+      )
+      const seekOffsetBytes =
+        totalBytes && durationMs > 0
           ? Math.max(
-              decodedBytes || 0,
-              Math.min(totalBytes, downloadedRaw + seekOffsetBytes)
+              0,
+              Math.min(
+                totalBytes,
+                (totalBytes *
+                  Number(
+                    (
+                      internal.streamInfo as
+                        | { additionalData?: { startTime?: number } | null }
+                        | null
+                        | undefined
+                    )?.additionalData?.startTime || 0
+                  )) /
+                  durationMs
+              )
+            )
+          : 0
+      const decodedBytes =
+        totalBytes && durationMs > 0
+          ? Math.max(
+              0,
+              Math.min(totalBytes, (totalBytes * clampedPosition) / durationMs)
             )
           : null
-        const missingBytes =
-          totalBytes && downloadedBytes !== null
-            ? Math.max(0, totalBytes - downloadedBytes)
-            : null
-        const hasTrack = !!track?.info
-        const status = !hasTrack
-          ? 'idle'
-          : player.isPaused
-            ? 'paused'
-            : internal.connStatus === 'connected'
-              ? 'working'
-              : internal.connStatus || 'connecting'
-        return {
-          guildId: player.guildId,
-          isPaused: !!player.isPaused,
-          status,
-          sourceName: inferredSource,
-          title: track?.info?.title || null,
-          author: track?.info?.author || null,
-          artworkUrl: track?.info?.artworkUrl || null,
-          uri,
-          uriHost: getHostFromUrl(uri),
-          protocol: streamProtocol || (uri?.startsWith('https://') ? 'https' : uri?.startsWith('http://') ? 'http' : null),
-          format: internal.streamInfo?.format || null,
-          formatLabel: formatInfo.formatLabel,
-          codec: formatInfo.codec,
-          container: formatInfo.container,
-          isStream: !!track?.info?.isStream,
-          isSeekable: track?.info?.isSeekable !== false,
-          streamUrlHost: getHostFromUrl(
+      const downloadedBytes = totalBytes
+        ? Math.max(
+            decodedBytes || 0,
+            Math.min(totalBytes, downloadedRaw + seekOffsetBytes)
+          )
+        : null
+      const missingBytes =
+        totalBytes && downloadedBytes !== null
+          ? Math.max(0, totalBytes - downloadedBytes)
+          : null
+      const hasTrack = !!track?.info
+      const status = !hasTrack
+        ? 'idle'
+        : player.isPaused
+          ? 'paused'
+          : internal.connStatus === 'connected'
+            ? 'working'
+            : internal.connStatus || 'connecting'
+      return {
+        guildId: player.guildId,
+        isPaused: !!player.isPaused,
+        status,
+        sourceName: inferredSource,
+        title: track?.info?.title || null,
+        author: track?.info?.author || null,
+        artworkUrl: track?.info?.artworkUrl || null,
+        uri,
+        uriHost: getHostFromUrl(uri),
+        protocol:
+          streamProtocol ||
+          (uri?.startsWith('https://')
+            ? 'https'
+            : uri?.startsWith('http://')
+              ? 'http'
+              : null),
+        format: internal.streamInfo?.format || null,
+        formatLabel: formatInfo.formatLabel,
+        codec: formatInfo.codec,
+        container: formatInfo.container,
+        isStream: !!track?.info?.isStream,
+        isSeekable: track?.info?.isSeekable !== false,
+        streamUrlHost: getHostFromUrl(
+          (
+            internal.streamInfo as
+              | { url?: string | null; hlsUrl?: string | null }
+              | null
+              | undefined
+          )?.url ||
             (
               internal.streamInfo as
                 | { url?: string | null; hlsUrl?: string | null }
                 | null
                 | undefined
-            )?.url ||
-              (
-                internal.streamInfo as
-                  | { url?: string | null; hlsUrl?: string | null }
-                  | null
-                  | undefined
-              )?.hlsUrl ||
-              null
-          ),
-          position: clampedPosition,
-          duration: durationMs,
-          remaining: remainingMs,
-          progressPercent,
-          streamBytesTotal: totalBytes,
-          streamBytesDownloaded: downloadedBytes,
-          streamBytesDecoded: decodedBytes,
-          streamBytesMissing: missingBytes,
-          ping: Number(internal.connection?.ping || 0)
-        }
-      })
+            )?.hlsUrl ||
+            null
+        ),
+        position: clampedPosition,
+        duration: durationMs,
+        remaining: remainingMs,
+        progressPercent,
+        streamBytesTotal: totalBytes,
+        streamBytesDownloaded: downloadedBytes,
+        streamBytesDecoded: decodedBytes,
+        streamBytesMissing: missingBytes,
+        ping: Number(internal.connection?.ping || 0)
+      }
+    })
 
     let queuedCommands = 0
     for (const entry of guildQueues.values()) {
       queuedCommands += entry.queue.length
     }
 
-    const sourceManagerDebug = nodelink.sources ? {
-      enabledSources: Array.from(nodelink.sources.sources.keys()),
-      sourceMapSize: (nodelink.sources as unknown as { sourceMap?: Map<string, unknown> }).sourceMap?.size ?? null,
-      searchAliasMapSize: (nodelink.sources as unknown as { searchAliasMap?: Map<string, unknown> }).searchAliasMap?.size ?? null,
-      patternMapLength: (nodelink.sources as unknown as { patternMap?: unknown[] }).patternMap?.length ?? null
-    } : null
-
-    const trackCacheDebug = nodelink.trackCacheManager ? {
-      size: (nodelink.trackCacheManager as unknown as { cache?: Map<string, unknown> }).cache?.size ?? null,
-      maxEntries: (nodelink.trackCacheManager as unknown as { maxEntries?: number }).maxEntries ?? null
-    } : null
-
-    const credentialDebug = nodelink.credentialManager && typeof (nodelink.credentialManager as unknown as { getStats?: () => unknown }).getStats === 'function'
-      ? (nodelink.credentialManager as unknown as { getStats: () => unknown }).getStats()
+    const sourceManagerDebug = nodelink.sources
+      ? {
+          enabledSources: Array.from(nodelink.sources.sources.keys()),
+          sourceMapSize:
+            (
+              nodelink.sources as unknown as {
+                sourceMap?: Map<string, unknown>
+              }
+            ).sourceMap?.size ?? null,
+          searchAliasMapSize:
+            (
+              nodelink.sources as unknown as {
+                searchAliasMap?: Map<string, unknown>
+              }
+            ).searchAliasMap?.size ?? null,
+          patternMapLength:
+            (nodelink.sources as unknown as { patternMap?: unknown[] })
+              .patternMap?.length ?? null
+        }
       : null
 
-    const statsDebug = nodelink.statsManager && typeof (nodelink.statsManager as unknown as { getSnapshot?: () => unknown }).getSnapshot === 'function'
-      ? (nodelink.statsManager as unknown as { getSnapshot: () => unknown }).getSnapshot()
+    const trackCacheDebug = nodelink.trackCacheManager
+      ? {
+          size:
+            (
+              nodelink.trackCacheManager as unknown as {
+                cache?: Map<string, unknown>
+              }
+            ).cache?.size ?? null,
+          maxEntries:
+            (nodelink.trackCacheManager as unknown as { maxEntries?: number })
+              .maxEntries ?? null
+        }
       : null
 
-    const connectionDebug = nodelink.connectionManager ? {
-      status: (nodelink.connectionManager as unknown as { status?: string }).status ?? null,
-      isChecking: (nodelink.connectionManager as unknown as { isChecking?: boolean }).isChecking ?? null,
-      hasInterval: !!(nodelink.connectionManager as unknown as { interval?: unknown }).interval
-    } : null
+    const credentialDebug =
+      nodelink.credentialManager &&
+      typeof (
+        nodelink.credentialManager as unknown as { getStats?: () => unknown }
+      ).getStats === 'function'
+        ? (
+            nodelink.credentialManager as unknown as { getStats: () => unknown }
+          ).getStats()
+        : null
 
-    const pluginDebug = nodelink.pluginManager ? {
-      loadedPlugins: (nodelink.pluginManager as unknown as { loadedPlugins?: string[] }).loadedPlugins ?? null
-    } : null
+    const statsDebug =
+      nodelink.statsManager &&
+      typeof (
+        nodelink.statsManager as unknown as { getSnapshot?: () => unknown }
+      ).getSnapshot === 'function'
+        ? (
+            nodelink.statsManager as unknown as { getSnapshot: () => unknown }
+          ).getSnapshot()
+        : null
+
+    const connectionDebug = nodelink.connectionManager
+      ? {
+          status:
+            (nodelink.connectionManager as unknown as { status?: string })
+              .status ?? null,
+          isChecking:
+            (nodelink.connectionManager as unknown as { isChecking?: boolean })
+              .isChecking ?? null,
+          hasInterval: !!(
+            nodelink.connectionManager as unknown as { interval?: unknown }
+          ).interval
+        }
+      : null
+
+    const pluginDebug = nodelink.pluginManager
+      ? {
+          loadedPlugins:
+            (nodelink.pluginManager as unknown as { loadedPlugins?: string[] })
+              .loadedPlugins ?? null
+        }
+      : null
 
     const extensionsDebug = {
       workerInterceptors: nodelink.extensions?.workerInterceptors?.length ?? 0,
       audioInterceptors: nodelink.extensions?.audioInterceptors?.length ?? 0,
       customFilters: nodelink.extensions?.filters?.size ?? 0,
-      customFilterNames: nodelink.extensions?.filters ? Array.from(nodelink.extensions.filters.keys()) : []
+      customFilterNames: nodelink.extensions?.filters
+        ? Array.from(nodelink.extensions.filters.keys())
+        : []
     }
 
     const httpAgentsDebug = (() => {
@@ -909,15 +991,25 @@ const handleProfilerCommand = async (
 }
 
 const ipcMessageTracker = {
-  sent: new Map<string, { count: number; totalBytes: number; maxBytes: number }>(),
-  received: new Map<string, { count: number; totalBytes: number; maxBytes: number }>(),
+  sent: new Map<
+    string,
+    { count: number; totalBytes: number; maxBytes: number }
+  >(),
+  received: new Map<
+    string,
+    { count: number; totalBytes: number; maxBytes: number }
+  >(),
   enabled: true,
 
   trackSent(type: string, payload: unknown): void {
     if (!this.enabled) return
     try {
       const size = Buffer.byteLength(JSON.stringify(payload))
-      const entry = this.sent.get(type) || { count: 0, totalBytes: 0, maxBytes: 0 }
+      const entry = this.sent.get(type) || {
+        count: 0,
+        totalBytes: 0,
+        maxBytes: 0
+      }
       entry.count++
       entry.totalBytes += size
       entry.maxBytes = Math.max(entry.maxBytes, size)
@@ -929,7 +1021,11 @@ const ipcMessageTracker = {
     if (!this.enabled) return
     try {
       const size = Buffer.byteLength(JSON.stringify(payload))
-      const entry = this.received.get(type) || { count: 0, totalBytes: 0, maxBytes: 0 }
+      const entry = this.received.get(type) || {
+        count: 0,
+        totalBytes: 0,
+        maxBytes: 0
+      }
       entry.count++
       entry.totalBytes += size
       entry.maxBytes = Math.max(entry.maxBytes, size)
@@ -938,10 +1034,24 @@ const ipcMessageTracker = {
   },
 
   getStats(): {
-    sent: Array<{ type: string; count: number; totalBytes: number; maxBytes: number; avgBytes: number }>
-    received: Array<{ type: string; count: number; totalBytes: number; maxBytes: number; avgBytes: number }>
+    sent: Array<{
+      type: string
+      count: number
+      totalBytes: number
+      maxBytes: number
+      avgBytes: number
+    }>
+    received: Array<{
+      type: string
+      count: number
+      totalBytes: number
+      maxBytes: number
+      avgBytes: number
+    }>
   } {
-    const toSorted = (map: Map<string, { count: number; totalBytes: number; maxBytes: number }>) =>
+    const toSorted = (
+      map: Map<string, { count: number; totalBytes: number; maxBytes: number }>
+    ) =>
       Array.from(map.entries())
         .map(([type, data]) => ({
           type,
@@ -2078,10 +2188,7 @@ async function processQueue(queueKey: string): Promise<void> {
           uri: decodedTrackInfo.uri
         }
         const meanings = await getMeaningManager()
-        result = await meanings.loadMeaning(
-          { info: trackInfo },
-          language
-        )
+        result = await meanings.loadMeaning({ info: trackInfo }, language)
         break
       }
 
@@ -2287,10 +2394,8 @@ process.on('message', (msg: unknown) => {
     const nextCommandPath =
       typeof (message as { commandSocketPath?: unknown }).commandSocketPath ===
       'string'
-        ? (
-            (message as { commandSocketPath?: string }).commandSocketPath ??
-            null
-          )
+        ? ((message as { commandSocketPath?: string }).commandSocketPath ??
+          null)
         : null
 
     if (nextEventPath) {

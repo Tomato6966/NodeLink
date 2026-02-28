@@ -2,11 +2,14 @@ import type { EventEmitter } from 'node:events'
 import type * as http from 'node:http'
 import type WebSocketServer from '@performanc/pwsl-server'
 import type { ServerWebSocket } from 'bun'
-import type { ApiMiddlewareExtension, ApiRouteExtension } from './api/api.types.ts'
-import type { NodelinkConfig } from './config/config.types.ts'
-import type { ClientInfo } from './shared.types.js'
-import type { PlayerVoiceState } from './playback/player.types.ts'
+import type {
+  ApiMiddlewareExtension,
+  ApiRouteExtension
+} from './api/api.types.ts'
 import type { WorkerMetricsEntry } from './api/stats.types.ts'
+import type { NodelinkConfig } from './config/config.types.ts'
+import type { PlayerVoiceState } from './playback/player.types.ts'
+import type { ClientInfo } from './shared.types.js'
 
 /**
  * Data associated with a Bun WebSocket connection
@@ -350,10 +353,10 @@ export interface FilterExtension {
    * Additional filter-specific properties
    */
   [key: string]:
-  | string
-  | number
-  | boolean
-  | ((data: Buffer, options?: FilterOptions) => Buffer | Promise<Buffer>)
+    | string
+    | number
+    | boolean
+    | ((data: Buffer, options?: FilterOptions) => Buffer | Promise<Buffer>)
 }
 
 /**
@@ -414,7 +417,7 @@ export interface HttpResponse {
  * Custom HTTP route extension
  * @public
  */
-export interface RouteExtension extends ApiRouteExtension { }
+export interface RouteExtension extends ApiRouteExtension {}
 
 /**
  * HTTP middleware extension executed before route resolution.
@@ -438,21 +441,21 @@ export type ParsedWebSocketData =
   | string
   | Buffer
   | {
-    op: string
-    guildId?: string
-    track?: string | TrackData
-    position?: number
-    paused?: boolean
-    volume?: number
-    filters?: Record<string, number | boolean>
-    [key: string]:
-    | string
-    | number
-    | boolean
-    | TrackData
-    | Record<string, number | boolean>
-    | undefined
-  }
+      op: string
+      guildId?: string
+      track?: string | TrackData
+      position?: number
+      paused?: boolean
+      volume?: number
+      filters?: Record<string, number | boolean>
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | TrackData
+        | Record<string, number | boolean>
+        | undefined
+    }
 
 /**
  * WebSocket interceptor context
@@ -657,12 +660,12 @@ export interface TrackData {
    * Additional track-specific properties
    */
   [key: string]:
-  | string
-  | number
-  | boolean
-  | Record<string, string | number | boolean | null>
-  | null
-  | undefined
+    | string
+    | number
+    | boolean
+    | Record<string, string | number | boolean | null>
+    | null
+    | undefined
 }
 
 /**

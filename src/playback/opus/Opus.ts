@@ -1,8 +1,6 @@
-import { Buffer } from 'node:buffer'
+import type { Buffer } from 'node:buffer'
 import { createRequire } from 'node:module'
 import { Transform } from 'node:stream'
-
-import { bufferPool } from '../structs/BufferPool.ts'
 import type {
   OpusApplication,
   OpusDecoderInstance,
@@ -10,6 +8,7 @@ import type {
   OpusInstanceResult,
   OpusLibrary
 } from '../../typings/playback/opus.types.ts'
+import { bufferPool } from '../structs/BufferPool.ts'
 
 const require = createRequire(import.meta.url)
 

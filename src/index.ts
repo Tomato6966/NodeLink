@@ -25,6 +25,7 @@ import {
 import 'dotenv/config'
 import type { ServerWebSocket } from 'bun'
 import { GatewayEvents } from './constants.ts'
+import ConfigValidationManager from './managers/configValidationManager.ts'
 import type ConnectionManager from './managers/connectionManager.ts'
 import type CredentialManager from './managers/credentialManager.ts'
 import DosProtectionManager from './managers/dosProtectionManager.ts'
@@ -60,12 +61,11 @@ import type {
   SourceExtension,
   TrackModifierExtension,
   VoiceRelay,
-  WebSocketInterceptorExtension,
+  WebSocketInterceptorExtension
 } from './typings/index.types.ts'
 import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types.ts'
 import { parseVoiceFrameHeader } from './voice/voiceFrames.ts'
 import { createVoiceRelay } from './voice/voiceRelay.ts'
-import ConfigValidationManager from './managers/configValidationManager.ts'
 
 type RequestHandlerType = typeof import('./api/index.ts').default
 let requestHandlerPromise: Promise<RequestHandlerType> | null = null
@@ -237,7 +237,11 @@ if (process.env['CLUSTER_WORKERS'])
 else if (typeof config.cluster?.workers === 'number')
   _configuredWorkers = config.cluster.workers
 
-initLogger(config as unknown as { logging?: import('./typings/utils.types.ts').LoggingConfig })
+initLogger(
+  config as unknown as {
+    logging?: import('./typings/utils.types.ts').LoggingConfig
+  }
+)
 
 const isBun = typeof Bun !== 'undefined'
 
@@ -927,7 +931,10 @@ class NodelinkServer extends EventEmitter {
         )
         const allocDurationMs = Math.min(
           15000,
-          Math.max(1000, Number(url.searchParams.get('allocDurationMs') || 3000))
+          Math.max(
+            1000,
+            Number(url.searchParams.get('allocDurationMs') || 3000)
+          )
         )
         const allocEveryRaw = Number(url.searchParams.get('allocEveryMs') || 0)
         const allocEveryMs =
@@ -1351,7 +1358,13 @@ class NodelinkServer extends EventEmitter {
               'ProfilerSocket',
               `Profiler socket connected from [External] (${ws.data.remoteAddress})`
             )
-            self.socket?.emit('/v4/profiler/socket', wrapper, reqShim, null, null)
+            self.socket?.emit(
+              '/v4/profiler/socket',
+              wrapper,
+              reqShim,
+              null,
+              null
+            )
             return
           }
 
@@ -1472,10 +1485,7 @@ class NodelinkServer extends EventEmitter {
 
     ;(this.server as http.Server).on(
       'clientError',
-      (
-        err: NodeJS.ErrnoException,
-        socket: import('net').Socket
-      ): void => {
+      (err: NodeJS.ErrnoException, socket: import('net').Socket): void => {
         if (err?.code !== 'EPIPE' && err?.code !== 'ECONNRESET') {
           logger('debug', 'Server', `HTTP client error: ${err.message}`)
         }
@@ -1562,7 +1572,8 @@ class NodelinkServer extends EventEmitter {
               : 'CAPYBARA'
 
           const queryCode = parsedUpgradeUrl.searchParams.get('code')
-          const headerCode = headers['x-nodelink-code'] || headers['x-worker-code']
+          const headerCode =
+            headers['x-nodelink-code'] || headers['x-worker-code']
           const providedCode =
             queryCode ||
             (Array.isArray(headerCode) ? headerCode[0] : headerCode)

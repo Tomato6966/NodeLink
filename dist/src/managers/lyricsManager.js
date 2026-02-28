@@ -108,7 +108,9 @@ export default class LyricsManager {
         }
         const trackInfo = getTrackInfoFromResolve(reliableTrackData, decodedTrack.info);
         const sourceName = trackInfo.sourceName;
-        const lyricsSource = sourceName ? this.lyricsSources.get(sourceName) : undefined;
+        const lyricsSource = sourceName
+            ? this.lyricsSources.get(sourceName)
+            : undefined;
         const isYouTube = sourceName === 'youtube' || sourceName === 'ytmusic';
         let youtubeCaptions = null;
         if (lyricsSource && !skipTrackSource) {

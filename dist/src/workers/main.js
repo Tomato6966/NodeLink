@@ -6,11 +6,11 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     }
     return path;
 };
-import net from 'node:net';
-import os from 'node:os';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import inspector from 'node:inspector';
+import net from 'node:net';
+import os from 'node:os';
 import { resolve as resolvePath } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
@@ -18,8 +18,8 @@ import v8 from 'node:v8';
 import { GatewayEvents } from "../constants.js";
 import ConnectionManager from "../managers/connectionManager.js";
 import CredentialManager from "../managers/credentialManager.js";
-import PluginManager from '../managers/pluginManager.js';
-import RoutePlannerManager from '../managers/routePlannerManager.js';
+import PluginManager from "../managers/pluginManager.js";
+import RoutePlannerManager from "../managers/routePlannerManager.js";
 import SourceManager from "../managers/sourceManager.js";
 import StatsManager from "../managers/statsManager.js";
 import TrackCacheManager from "../managers/trackCacheManager.js";
@@ -200,7 +200,11 @@ const getCodecAndContainer = (format) => {
         (typeof info['format'] === 'string' ? info['format'] : null) ||
         (typeof info['label'] === 'string' ? info['label'] : null) ||
         container;
-    return { codec: codec || null, container: container || null, formatLabel: formatLabel || null };
+    return {
+        codec: codec || null,
+        container: container || null,
+        formatLabel: formatLabel || null
+    };
 };
 const profilerBaseDir = process.env['NODELINK_PROFILER_DIR'] || '.profiles';
 let activeCpuProfiler = null;
@@ -281,17 +285,19 @@ const handleProfilerCommand = async (payload) => {
         return { success: false, error: 'Missing profiler action' };
     }
     if (action === 'status') {
-        const playersSummary = Array.from(players.values())
-            .map((player) => {
+        const playersSummary = Array.from(players.values()).map((player) => {
             const track = player.track;
             const internal = player;
             const uri = track?.info?.uri || null;
             const inferredSource = inferSourceName(track?.info?.sourceName || null, uri);
             const streamProtocol = internal.streamInfo?.protocol || null;
             const formatInfo = getCodecAndContainer(internal.streamInfo?.format);
-            const durationMsRaw = typeof track?.endTime === 'number' && Number.isFinite(track.endTime) && track.endTime > 0
+            const durationMsRaw = typeof track?.endTime === 'number' &&
+                Number.isFinite(track.endTime) &&
+                track.endTime > 0
                 ? track.endTime
-                : typeof track?.info?.length === 'number' && Number.isFinite(track.info.length)
+                : typeof track?.info?.length === 'number' &&
+                    Number.isFinite(track.info.length)
                     ? track.info.length
                     : 0;
             const positionMsRaw = typeof internal._realPosition === 'function'
@@ -301,13 +307,18 @@ const handleProfilerCommand = async (payload) => {
             const positionMs = Math.max(0, Number(positionMsRaw) || 0);
             const clampedPosition = durationMs > 0 ? Math.min(positionMs, durationMs) : positionMs;
             const remainingMs = durationMs > 0 ? Math.max(0, durationMs - clampedPosition) : null;
-            const progressPercent = durationMs > 0 ? Number(((clampedPosition / durationMs) * 100).toFixed(2)) : null;
+            const progressPercent = durationMs > 0
+                ? Number(((clampedPosition / durationMs) * 100).toFixed(2))
+                : null;
             const contentLengthRaw = internal.streamInfo?.additionalData?.contentLength;
             const contentLength = Number(contentLengthRaw);
-            const totalBytes = Number.isFinite(contentLength) && contentLength > 0 ? contentLength : null;
+            const totalBytes = Number.isFinite(contentLength) && contentLength > 0
+                ? contentLength
+                : null;
             const downloadedRaw = Number(player?.profilerStreamStats?.downloadedBytes || 0);
             const seekOffsetBytes = totalBytes && durationMs > 0
-                ? Math.max(0, Math.min(totalBytes, (totalBytes * Number(internal.streamInfo?.additionalData?.startTime || 0)) /
+                ? Math.max(0, Math.min(totalBytes, (totalBytes *
+                    Number(internal.streamInfo?.additionalData?.startTime || 0)) /
                     durationMs))
                 : 0;
             const decodedBytes = totalBytes && durationMs > 0
@@ -337,7 +348,12 @@ const handleProfilerCommand = async (payload) => {
                 artworkUrl: track?.info?.artworkUrl || null,
                 uri,
                 uriHost: getHostFromUrl(uri),
-                protocol: streamProtocol || (uri?.startsWith('https://') ? 'https' : uri?.startsWith('http://') ? 'http' : null),
+                protocol: streamProtocol ||
+                    (uri?.startsWith('https://')
+                        ? 'https'
+                        : uri?.startsWith('http://')
+                            ? 'http'
+                            : null),
                 format: internal.streamInfo?.format || null,
                 formatLabel: formatInfo.formatLabel,
                 codec: formatInfo.codec,
@@ -362,35 +378,52 @@ const handleProfilerCommand = async (payload) => {
         for (const entry of guildQueues.values()) {
             queuedCommands += entry.queue.length;
         }
-        const sourceManagerDebug = nodelink.sources ? {
-            enabledSources: Array.from(nodelink.sources.sources.keys()),
-            sourceMapSize: nodelink.sources.sourceMap?.size ?? null,
-            searchAliasMapSize: nodelink.sources.searchAliasMap?.size ?? null,
-            patternMapLength: nodelink.sources.patternMap?.length ?? null
-        } : null;
-        const trackCacheDebug = nodelink.trackCacheManager ? {
-            size: nodelink.trackCacheManager.cache?.size ?? null,
-            maxEntries: nodelink.trackCacheManager.maxEntries ?? null
-        } : null;
-        const credentialDebug = nodelink.credentialManager && typeof nodelink.credentialManager.getStats === 'function'
+        const sourceManagerDebug = nodelink.sources
+            ? {
+                enabledSources: Array.from(nodelink.sources.sources.keys()),
+                sourceMapSize: nodelink.sources.sourceMap?.size ?? null,
+                searchAliasMapSize: nodelink.sources.searchAliasMap?.size ?? null,
+                patternMapLength: nodelink.sources
+                    .patternMap?.length ?? null
+            }
+            : null;
+        const trackCacheDebug = nodelink.trackCacheManager
+            ? {
+                size: nodelink.trackCacheManager.cache?.size ?? null,
+                maxEntries: nodelink.trackCacheManager
+                    .maxEntries ?? null
+            }
+            : null;
+        const credentialDebug = nodelink.credentialManager &&
+            typeof nodelink.credentialManager.getStats === 'function'
             ? nodelink.credentialManager.getStats()
             : null;
-        const statsDebug = nodelink.statsManager && typeof nodelink.statsManager.getSnapshot === 'function'
+        const statsDebug = nodelink.statsManager &&
+            typeof nodelink.statsManager.getSnapshot === 'function'
             ? nodelink.statsManager.getSnapshot()
             : null;
-        const connectionDebug = nodelink.connectionManager ? {
-            status: nodelink.connectionManager.status ?? null,
-            isChecking: nodelink.connectionManager.isChecking ?? null,
-            hasInterval: !!nodelink.connectionManager.interval
-        } : null;
-        const pluginDebug = nodelink.pluginManager ? {
-            loadedPlugins: nodelink.pluginManager.loadedPlugins ?? null
-        } : null;
+        const connectionDebug = nodelink.connectionManager
+            ? {
+                status: nodelink.connectionManager
+                    .status ?? null,
+                isChecking: nodelink.connectionManager
+                    .isChecking ?? null,
+                hasInterval: !!nodelink.connectionManager.interval
+            }
+            : null;
+        const pluginDebug = nodelink.pluginManager
+            ? {
+                loadedPlugins: nodelink.pluginManager
+                    .loadedPlugins ?? null
+            }
+            : null;
         const extensionsDebug = {
             workerInterceptors: nodelink.extensions?.workerInterceptors?.length ?? 0,
             audioInterceptors: nodelink.extensions?.audioInterceptors?.length ?? 0,
             customFilters: nodelink.extensions?.filters?.size ?? 0,
-            customFilterNames: nodelink.extensions?.filters ? Array.from(nodelink.extensions.filters.keys()) : []
+            customFilterNames: nodelink.extensions?.filters
+                ? Array.from(nodelink.extensions.filters.keys())
+                : []
         };
         const httpAgentsDebug = (() => {
             try {
@@ -652,7 +685,11 @@ const ipcMessageTracker = {
             return;
         try {
             const size = Buffer.byteLength(JSON.stringify(payload));
-            const entry = this.sent.get(type) || { count: 0, totalBytes: 0, maxBytes: 0 };
+            const entry = this.sent.get(type) || {
+                count: 0,
+                totalBytes: 0,
+                maxBytes: 0
+            };
             entry.count++;
             entry.totalBytes += size;
             entry.maxBytes = Math.max(entry.maxBytes, size);
@@ -665,7 +702,11 @@ const ipcMessageTracker = {
             return;
         try {
             const size = Buffer.byteLength(JSON.stringify(payload));
-            const entry = this.received.get(type) || { count: 0, totalBytes: 0, maxBytes: 0 };
+            const entry = this.received.get(type) || {
+                count: 0,
+                totalBytes: 0,
+                maxBytes: 0
+            };
             entry.count++;
             entry.totalBytes += size;
             entry.maxBytes = Math.max(entry.maxBytes, size);
@@ -1014,7 +1055,7 @@ const getLyricsManager = async () => {
 };
 const getMeaningManager = async () => {
     if (!meaningManagerPromise) {
-        meaningManagerPromise = import('../managers/meaningManager.js').then(async (module) => {
+        meaningManagerPromise = import("../managers/meaningManager.js").then(async (module) => {
             const manager = new module.default(nodelink);
             await manager.loadFolder();
             nodelink.meanings = manager;

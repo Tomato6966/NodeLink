@@ -98,7 +98,8 @@ export default class TrackCacheManager {
 
       const expiredCount = this._purgeExpired()
       const evictedCount = this._enforceMaxEntries()
-      if (expiredCount > 0 || evictedCount > 0 || migratedFromLegacy) this.save()
+      if (expiredCount > 0 || evictedCount > 0 || migratedFromLegacy)
+        this.save()
 
       logger(
         'debug',

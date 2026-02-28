@@ -9,15 +9,15 @@ const parsePositiveIntEnv = (key: string, fallback: number): number => {
 
 const MAX_POOL_SIZE_BYTES = parsePositiveIntEnv(
   'NODELINK_BUFFER_POOL_MAX_BYTES',
-  20 * 1024 * 1024  // 20 MB - reduced from 50MB
+  20 * 1024 * 1024 // 20 MB - reduced from 50MB
 )
 const MAX_BUCKET_ENTRIES = parsePositiveIntEnv(
   'NODELINK_BUFFER_POOL_MAX_BUCKET_ENTRIES',
-  4  // reduced from 8
+  4 // reduced from 8
 )
 const IDLE_CLEAR_MS = parsePositiveIntEnv(
   'NODELINK_BUFFER_POOL_IDLE_CLEAR_MS',
-  60000  // 1 min - reduced from 3 min
+  60000 // 1 min - reduced from 3 min
 )
 const CLEANUP_INTERVAL = 60000
 
@@ -192,16 +192,15 @@ class BufferPool {
     const reuseRatio =
       this.acquireCalls > 0 ? this.reuseHits / this.acquireCalls : 0
 
-    const rejectionRate = this.releaseCalls > 0
-      ? this.rejectedReleases / this.releaseCalls
-      : 0
+    const rejectionRate =
+      this.releaseCalls > 0 ? this.rejectedReleases / this.releaseCalls : 0
     if (rejectionRate > 0.5 && this.rejectedReleases > 10) {
       logger(
         'warn',
         'BufferPool',
         `High rejection rate: ${(rejectionRate * 100).toFixed(1)}% (${this.rejectedReleases}/${this.releaseCalls}). ` +
-        `Pool: ${this.totalBytes} / ${MAX_POOL_SIZE_BYTES} bytes. ` +
-        `Consider increasing NODELINK_BUFFER_POOL_MAX_BYTES.`
+          `Pool: ${this.totalBytes} / ${MAX_POOL_SIZE_BYTES} bytes. ` +
+          `Consider increasing NODELINK_BUFFER_POOL_MAX_BYTES.`
       )
     }
 
@@ -244,7 +243,11 @@ class BufferPool {
           const count = bucket.length
           this.totalBytes -= size * count
           this.pools.delete(size)
-          logger('debug', 'BufferPool', `Cleared bucket ${size} (${count} entries, ${size * count} bytes)`)
+          logger(
+            'debug',
+            'BufferPool',
+            `Cleared bucket ${size} (${count} entries, ${size * count} bytes)`
+          )
         }
       }
       if (this.totalBytes > MAX_POOL_SIZE_BYTES) {

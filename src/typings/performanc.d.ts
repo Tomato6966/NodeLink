@@ -104,7 +104,12 @@ declare module '@performanc/voice' {
   import type { Readable } from 'node:stream'
 
   export interface VoiceConnectionState {
-    status: 'connecting' | 'connected' | 'disconnected' | 'destroyed' | 'reconnecting'
+    status:
+      | 'connecting'
+      | 'connected'
+      | 'disconnected'
+      | 'destroyed'
+      | 'reconnecting'
     code?: number
     closeReason?: string
   }
@@ -145,12 +150,30 @@ declare module '@performanc/voice' {
     ping?: number
     audioStream?: VoiceAudioStream | null
 
-    on(event: 'stateChange', listener: (oldState: VoiceConnectionState | null, newState: VoiceConnectionState) => void): this
-    on(event: 'playerStateChange', listener: (oldState: VoicePlayerState | null, newState: VoicePlayerState) => void): this
+    on(
+      event: 'stateChange',
+      listener: (
+        oldState: VoiceConnectionState | null,
+        newState: VoiceConnectionState
+      ) => void
+    ): this
+    on(
+      event: 'playerStateChange',
+      listener: (
+        oldState: VoicePlayerState | null,
+        newState: VoicePlayerState
+      ) => void
+    ): this
     on(event: 'error', listener: (error: Error) => void): this
     on(event: 'audioStream', listener: (stream: VoiceAudioStream) => void): this
-    on(event: 'speakStart', listener: (userId: string, ssrc: number) => void): this
-    on(event: 'speakEnd', listener: (userId: string, ssrc: number) => void): this
+    on(
+      event: 'speakStart',
+      listener: (userId: string, ssrc: number) => void
+    ): this
+    on(
+      event: 'speakEnd',
+      listener: (userId: string, ssrc: number) => void
+    ): this
     on(event: string, listener: (...args: unknown[]) => void): this
 
     play(resource: unknown): VoiceAudioStream | null | undefined
@@ -170,7 +193,9 @@ declare module '@performanc/voice' {
     encryption?: string | null
   }
 
-  export function joinVoiceChannel(options: JoinVoiceChannelOptions): VoiceConnection
+  export function joinVoiceChannel(
+    options: JoinVoiceChannelOptions
+  ): VoiceConnection
   export function getSpeakStream(ssrc: number): Readable | null
 
   const api: {

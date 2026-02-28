@@ -157,9 +157,7 @@ class BufferPool {
             .sort((a, b) => b.bytes - a.bytes)
             .slice(0, 20);
         const reuseRatio = this.acquireCalls > 0 ? this.reuseHits / this.acquireCalls : 0;
-        const rejectionRate = this.releaseCalls > 0
-            ? this.rejectedReleases / this.releaseCalls
-            : 0;
+        const rejectionRate = this.releaseCalls > 0 ? this.rejectedReleases / this.releaseCalls : 0;
         if (rejectionRate > 0.5 && this.rejectedReleases > 10) {
             logger('warn', 'BufferPool', `High rejection rate: ${(rejectionRate * 100).toFixed(1)}% (${this.rejectedReleases}/${this.releaseCalls}). ` +
                 `Pool: ${this.totalBytes} / ${MAX_POOL_SIZE_BYTES} bytes. ` +

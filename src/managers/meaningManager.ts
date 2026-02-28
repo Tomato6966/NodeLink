@@ -131,7 +131,9 @@ export default class MeaningManager {
     try {
       await fs.access(meaningsDir)
       const files = await fs.readdir(meaningsDir)
-      const jsFiles = files.filter((f) => f.endsWith('.js') || f.endsWith('.ts'))
+      const jsFiles = files.filter(
+        (f) => f.endsWith('.js') || f.endsWith('.ts')
+      )
       const toLoad = jsFiles.filter((f) => {
         const name = path.basename(f, path.extname(f))
         return isMeaningSourceEnabled(this.nodelink.options.meanings, name)

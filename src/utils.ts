@@ -1406,9 +1406,11 @@ async function _internalHttp1Request(
       finalStream.on('data', (chunk) => {
         bufferedBytes += chunk.length
         if (bufferedBytes > maxResponseBodyBytes) {
-          ;(finalStream as NodeJS.ReadableStream & {
-            destroy?: (error?: Error) => void
-          }).destroy?.(
+          ;(
+            finalStream as NodeJS.ReadableStream & {
+              destroy?: (error?: Error) => void
+            }
+          ).destroy?.(
             new Error(
               `Response body too large for ${urlString} (${bufferedBytes} bytes > ${maxResponseBodyBytes} bytes)`
             )

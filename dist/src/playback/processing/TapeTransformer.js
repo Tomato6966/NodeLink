@@ -122,7 +122,9 @@ export class TapeTransformer extends Transform {
                 break;
             const frac = (this.inputReadPos - iPos) / this.channels;
             for (let c = 0; c < this.channels; c++) {
-                const p0 = this.inputBuffer[iPos - this.channels + c] ?? this.inputBuffer[iPos + c] ?? 0;
+                const p0 = this.inputBuffer[iPos - this.channels + c] ??
+                    this.inputBuffer[iPos + c] ??
+                    0;
                 const p1 = this.inputBuffer[iPos + c] ?? 0;
                 const p2 = this.inputBuffer[iPos + this.channels + c] ?? 0;
                 const p3 = this.inputBuffer[iPos + this.channels * 2 + c] ?? 0;

@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks'
 import type { Readable } from 'node:stream'
 import { promisify } from 'node:util'
 import { GatewayEvents } from '../constants.ts'
+import type { ConnectionManagerContext } from '../typings/index.types.ts'
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
@@ -15,7 +16,6 @@ import type {
   PingResult
 } from '../typings/voice/connection.types.ts'
 import { http1makeRequest, logger } from '../utils.ts'
-import type { ConnectionManagerContext } from '../typings/index.types.ts'
 
 const execAsync = promisify(exec)
 const dnsLookup = promisify(dns.lookup)
@@ -127,7 +127,10 @@ export default class ConnectionManager {
      * 2. 25 minutes (1,500,000ms) since the last test
      * 3. Drastic ping change (>50% increase or >100ms increase)
      */
-    if (this._lastSpeedTestTime === 0 || now - this._lastSpeedTestTime > 1500000) {
+    if (
+      this._lastSpeedTestTime === 0 ||
+      now - this._lastSpeedTestTime > 1500000
+    ) {
       shouldRunSpeedTest = true
     } else if (currentPing !== undefined && this._lastPingMs !== undefined) {
       const pingDiff = currentPing - this._lastPingMs
@@ -150,7 +153,8 @@ export default class ConnectionManager {
           const result = await this._runSpeedTest(endpoint)
           if (!result) continue
 
-          const { speedMbps, downloadedBytes, durationSeconds, latencyMs } = result
+          const { speedMbps, downloadedBytes, durationSeconds, latencyMs } =
+            result
           const newStatus = this._classifyStatus(speedMbps)
 
           this.metrics = {
@@ -205,9 +209,17 @@ export default class ConnectionManager {
     if (shouldLog) {
       const logSummary = this._formatLogSummary(newStatus)
       if (newStatus === 'bad') {
-        logger('warn', 'Network', `Connection is very slow (${this.metrics.speed?.mbps} Mbps). ${logSummary}`)
+        logger(
+          'warn',
+          'Network',
+          `Connection is very slow (${this.metrics.speed?.mbps} Mbps). ${logSummary}`
+        )
       } else {
-        logger('network', 'ConnectionManager', `Connection speed: ${this.metrics.speed?.mbps} Mbps (${newStatus}). ${logSummary}`)
+        logger(
+          'network',
+          'ConnectionManager',
+          `Connection speed: ${this.metrics.speed?.mbps} Mbps (${newStatus}). ${logSummary}`
+        )
       }
     }
 

@@ -165,7 +165,9 @@ export default class LyricsManager {
     try {
       await fs.access(lyricsDir)
       const files = await fs.readdir(lyricsDir)
-      const jsFiles = files.filter((f) => f.endsWith('.js') || f.endsWith('.ts'))
+      const jsFiles = files.filter(
+        (f) => f.endsWith('.js') || f.endsWith('.ts')
+      )
       const toLoad = jsFiles.filter((f) => {
         const name = path.basename(f, path.extname(f))
         return isLyricsSourceEnabled(this.nodelink.options?.lyrics, name)
@@ -242,7 +244,11 @@ export default class LyricsManager {
     )
 
     if (!this.nodelink.sources?.resolve) {
-      logger('warn', 'Lyrics', 'Source manager is unavailable for lyrics loading')
+      logger(
+        'warn',
+        'Lyrics',
+        'Source manager is unavailable for lyrics loading'
+      )
       return {
         loadType: 'error',
         data: {
@@ -272,9 +278,14 @@ export default class LyricsManager {
       }
     }
 
-    const trackInfo = getTrackInfoFromResolve(reliableTrackData, decodedTrack.info)
+    const trackInfo = getTrackInfoFromResolve(
+      reliableTrackData,
+      decodedTrack.info
+    )
     const sourceName = trackInfo.sourceName
-    const lyricsSource = sourceName ? this.lyricsSources.get(sourceName) : undefined
+    const lyricsSource = sourceName
+      ? this.lyricsSources.get(sourceName)
+      : undefined
     const isYouTube = sourceName === 'youtube' || sourceName === 'ytmusic'
 
     let youtubeCaptions: LyricsLoadResult | null = null

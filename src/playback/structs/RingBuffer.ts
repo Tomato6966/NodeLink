@@ -119,7 +119,10 @@ export class RingBuffer {
     if (bytesToPeek === 0) return null
     const availableAtEnd = this.size - this.readOffset
     if (bytesToPeek <= availableAtEnd) {
-      return this.buffer.subarray(this.readOffset, this.readOffset + bytesToPeek)
+      return this.buffer.subarray(
+        this.readOffset,
+        this.readOffset + bytesToPeek
+      )
     }
 
     const acquired = bufferPool.acquire(bytesToPeek)

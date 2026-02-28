@@ -4,7 +4,9 @@
  */
 
 declare module 'fastest-validator' {
-  export type ValidationResult = true | Array<{ message: string; type: string; field: string }>
+  export type ValidationResult =
+    | true
+    | Array<{ message: string; type: string; field: string }>
 
   export interface ValidationRule {
     type: string

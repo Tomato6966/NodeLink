@@ -369,7 +369,9 @@ export class Player {
             if (wasResuming) {
                 logger('debug', 'Crossfade', `Playback resumed; rearming crossfade/end schedule for guild ${this.guildId}`);
                 this._resumeCrossfadeCompletionTimer();
-                this._fading('trackEndSchedule', { startPosition: this._realPosition() });
+                this._fading('trackEndSchedule', {
+                    startPosition: this._realPosition()
+                });
             }
             else if (!this._isRestoring) {
                 this._lyricsBasePackets =
@@ -973,8 +975,7 @@ export class Player {
         const startTime = this.nextCrossfadeDuration;
         this.position = startTime;
         this._lyricsBasePosition = startTime;
-        this._lyricsBasePackets =
-            this.connection.statistics?.packetsExpected ?? 0;
+        this._lyricsBasePackets = this.connection.statistics?.packetsExpected ?? 0;
         const currentStream = this.connection.audioStream;
         currentStream?.clearCrossfade?.();
         this._fading('reset');
@@ -1150,7 +1151,10 @@ export class Player {
             return false;
         const position = this._realPosition();
         const threshold = this.nodelink.options.trackStuckThresholdMs;
-        if (threshold > 0 && !this.isUpdatingTrack && !this._isStopping && this.track) {
+        if (threshold > 0 &&
+            !this.isUpdatingTrack &&
+            !this._isStopping &&
+            this.track) {
             if (this._lastPosition === position) {
                 this._stuckTime += this.nodelink.options.playerUpdateInterval;
                 if (this._stuckTime >= threshold &&
@@ -1705,8 +1709,7 @@ export class Player {
             return false;
         const crossfadeConfig = this._getCrossfadeConfig();
         const shouldPrepareCrossfade = !!crossfadeConfig && !!this.track;
-        const hasPreparedCrossfade = !!this.nextCrossfadeTrack &&
-            !!this.nextCrossfadePcm;
+        const hasPreparedCrossfade = !!this.nextCrossfadeTrack && !!this.nextCrossfadePcm;
         const sameEncoded = !!payload.encoded &&
             !!this.nextTrack?.encoded &&
             this.nextTrack.encoded === payload.encoded;
@@ -1765,7 +1768,10 @@ export class Player {
                             return true;
                         this.nextCrossfadeTrack = payload;
                         this.nextCrossfadePcm = pcmFetched.stream;
-                        this.nextCrossfadeStreamInfo = { ...urlData, trackInfo: payload.info };
+                        this.nextCrossfadeStreamInfo = {
+                            ...urlData,
+                            trackInfo: payload.info
+                        };
                         this.nextCrossfadeDuration = crossfadeConfig.durationMs;
                         // Assign to nextResource as well for fallback, but it's raw PCM!
                         this.nextResource = pcmFetched.stream;

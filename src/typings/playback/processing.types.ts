@@ -64,7 +64,13 @@ export interface IFadeTransformer extends Transform {
 /**
  * Supported scratch styles.
  */
-export type ScratchStyle = 'wash' | 'backspin' | 'baby' | 'start' | 'stop' | 'random'
+export type ScratchStyle =
+  | 'wash'
+  | 'backspin'
+  | 'baby'
+  | 'start'
+  | 'stop'
+  | 'random'
 
 /**
  * Interface for ScratchTransformer.

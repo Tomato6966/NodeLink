@@ -75,7 +75,11 @@ export interface OpusLibrary {
      * @param channels - Number of audio channels (e.g., 2).
      * @param application - Opus application type (numeric constant or string).
      */
-    new (rate: number, channels: number, application: number | string): OpusEncoderInstance & OpusDecoderInstance
+    new (
+      rate: number,
+      channels: number,
+      application: number | string
+    ): OpusEncoderInstance & OpusDecoderInstance
 
     /**
      * Map of application types to their numeric constants (used by libraries like opusscript).

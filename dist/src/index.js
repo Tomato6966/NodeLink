@@ -12,18 +12,18 @@ import http from 'node:http';
 import { resolve as resolvePath } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import WebSocketServer from '@performanc/pwsl-server';
-import RoutePlannerManager from './managers/routePlannerManager.js';
+import RoutePlannerManager from "./managers/routePlannerManager.js";
 import SessionManager from "./managers/sessionManager.js";
 import StatsManager from "./managers/statsManager.js";
 import { applyEnvOverrides, checkForUpdates, cleanupHttpAgents, cleanupLogger, decodeTrack, getGitInfo, getStats, getVersion, initLogger, logger, parseClient, verifyDiscordID } from "./utils.js";
 import 'dotenv/config';
 import { GatewayEvents } from "./constants.js";
+import ConfigValidationManager from "./managers/configValidationManager.js";
 import DosProtectionManager from "./managers/dosProtectionManager.js";
-import PluginManager from './managers/pluginManager.js';
+import PluginManager from "./managers/pluginManager.js";
 import RateLimitManager from "./managers/rateLimitManager.js";
 import { parseVoiceFrameHeader } from "./voice/voiceFrames.js";
 import { createVoiceRelay } from "./voice/voiceRelay.js";
-import ConfigValidationManager from "./managers/configValidationManager.js";
 let requestHandlerPromise = null;
 let profilerApiPromise = null;
 const getRequestHandler = async () => {
@@ -61,7 +61,7 @@ const memoryTrace = (stage) => {
 let playerManagerClassPromise = null;
 const getPlayerManagerClass = async () => {
     if (!playerManagerClassPromise) {
-        playerManagerClassPromise = import('./managers/playerManager.js').then((module) => module.default);
+        playerManagerClassPromise = import("./managers/playerManager.js").then((module) => module.default);
     }
     return playerManagerClassPromise;
 };
@@ -370,7 +370,7 @@ class NodelinkServer extends EventEmitter {
             const [{ default: sourceMan }, { default: lyricsMan }, { default: meaningMan }] = await Promise.all([
                 import("./managers/sourceManager.js"),
                 import("./managers/lyricsManager.js"),
-                import('./managers/meaningManager.js')
+                import("./managers/meaningManager.js")
             ]);
             this.sources = new sourceMan(this);
             this.lyrics = new lyricsMan(this);

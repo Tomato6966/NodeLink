@@ -231,7 +231,9 @@ export default class PluginManager {
                   url:
                     typeof (repository as Record<string, unknown>)['url'] ===
                     'string'
-                      ? ((repository as Record<string, unknown>)['url'] as string)
+                      ? ((repository as Record<string, unknown>)[
+                          'url'
+                        ] as string)
                       : undefined
                 }
               : undefined,

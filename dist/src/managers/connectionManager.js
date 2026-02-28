@@ -102,7 +102,8 @@ export default class ConnectionManager {
          * 2. 25 minutes (1,500,000ms) since the last test
          * 3. Drastic ping change (>50% increase or >100ms increase)
          */
-        if (this._lastSpeedTestTime === 0 || now - this._lastSpeedTestTime > 1500000) {
+        if (this._lastSpeedTestTime === 0 ||
+            now - this._lastSpeedTestTime > 1500000) {
             shouldRunSpeedTest = true;
         }
         else if (currentPing !== undefined && this._lastPingMs !== undefined) {

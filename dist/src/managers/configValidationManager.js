@@ -11,16 +11,26 @@ const KNOWN_PLACEHOLDERS = new Set([
     'YOUR_TOKEN',
     'YOUR_API_KEY',
     'YOUR_CLIENT_ID',
-    'YOUR_CLIENT_SECRET',
+    'YOUR_CLIENT_SECRET'
 ]);
 const VALID_AUDIO_QUALITIES = new Set(['high', 'medium', 'low', 'lowest']);
-const VALID_RESAMPLING_QUALITIES = new Set(['best', 'medium', 'fastest', 'zero', 'linear']);
+const VALID_RESAMPLING_QUALITIES = new Set([
+    'best',
+    'medium',
+    'fastest',
+    'zero',
+    'linear'
+]);
 const VALID_FADING_CURVES = new Set(['linear', 'exponential', 'sinusoidal']);
 const VALID_FADING_TYPES = new Set(['volume', 'tape', 'both']);
 const VALID_CROSSFADE_CURVES = new Set(['linear', 'sine', 'sinusoidal']);
 const VALID_CROSSFADE_MODES = new Set(['preload', 'stream']);
 const VALID_VOICE_FORMATS = new Set(['opus', 'pcm_s16le']);
-const VALID_ROUTE_STRATEGIES = new Set(['RotateOnBan', 'RoundRobin', 'LoadBalance']);
+const VALID_ROUTE_STRATEGIES = new Set([
+    'RotateOnBan',
+    'RoundRobin',
+    'LoadBalance'
+]);
 const VALID_METRICS_AUTH_TYPES = new Set(['Bearer', 'Basic']);
 export default class ConfigValidationManager {
     warnings = [];
@@ -45,7 +55,7 @@ export default class ConfigValidationManager {
             () => this.validateConnection(),
             () => this.validateVoiceReceive(),
             () => this.validateMix(),
-            () => this.validateMetrics(),
+            () => this.validateMetrics()
         ];
         for (const validateDomain of domains) {
             try {
@@ -71,7 +81,7 @@ export default class ConfigValidationManager {
             this.nonEmptyStringRule('server.host', () => server?.host),
             this.intRangeRule('server.port', () => server?.port, 1, 65535),
             this.nonEmptyStringRule('server.password', () => server?.password),
-            this.booleanRule('server.useBunServer', () => server?.useBunServer),
+            this.booleanRule('server.useBunServer', () => server?.useBunServer)
         ];
         this.runRules(rules);
     }
@@ -89,11 +99,11 @@ export default class ConfigValidationManager {
                     ? 'auto-scaled workers'
                     : `<= cluster.workers (${workers})`,
                 get: () => cluster.minWorkers,
-                validate: (v) => Number.isInteger(v) && (workers === 0 || v <= workers),
+                validate: (v) => Number.isInteger(v) && (workers === 0 || v <= workers)
             },
             this.positiveIntRule('cluster.commandTimeout', () => cluster.commandTimeout),
             this.positiveIntRule('cluster.fastCommandTimeout', () => cluster.fastCommandTimeout),
-            this.nonNegativeIntRule('cluster.maxRetries', () => cluster.maxRetries),
+            this.nonNegativeIntRule('cluster.maxRetries', () => cluster.maxRetries)
         ];
         if (cluster.hibernation) {
             rules.push(this.booleanRule('cluster.hibernation.enabled', () => cluster.hibernation.enabled), this.positiveIntRule('cluster.hibernation.timeoutMs', () => cluster.hibernation.timeoutMs));
@@ -112,34 +122,34 @@ export default class ConfigValidationManager {
                 path: 'cluster.scaling.targetUtilization',
                 expected: 'number between 0 and 1 (exclusive)',
                 get: () => scaling.targetUtilization,
-                validate: (v) => typeof v === 'number' && v > 0 && v < 1,
+                validate: (v) => typeof v === 'number' && v > 0 && v < 1
             }, {
                 path: 'cluster.scaling.scaleUpThreshold',
                 expected: 'number between 0 and 1 (exclusive)',
                 get: () => scaling.scaleUpThreshold,
-                validate: (v) => typeof v === 'number' && v > 0 && v < 1,
+                validate: (v) => typeof v === 'number' && v > 0 && v < 1
             }, {
                 path: 'cluster.scaling.scaleDownThreshold',
                 expected: 'number between 0 and 1 (exclusive)',
                 get: () => scaling.scaleDownThreshold,
-                validate: (v) => typeof v === 'number' && v > 0 && v < 1,
+                validate: (v) => typeof v === 'number' && v > 0 && v < 1
             }, {
                 path: 'cluster.scaling.cpuPenaltyLimit',
                 expected: 'number between 0 and 1 (exclusive)',
                 get: () => scaling.cpuPenaltyLimit,
-                validate: (v) => typeof v === 'number' && v > 0 && v < 1,
+                validate: (v) => typeof v === 'number' && v > 0 && v < 1
             }, {
                 path: 'cluster.scaling.scaleDownThreshold',
                 expected: `number < cluster.scaling.scaleUpThreshold (${scaling.scaleUpThreshold})`,
                 get: () => scaling.scaleDownThreshold,
-                validate: (v) => typeof v === 'number' && v < scaling.scaleUpThreshold,
+                validate: (v) => typeof v === 'number' && v < scaling.scaleUpThreshold
             }, {
                 path: 'cluster.scaling.targetUtilization',
                 expected: `number between scaleDownThreshold (${scaling.scaleDownThreshold}) and scaleUpThreshold (${scaling.scaleUpThreshold})`,
                 get: () => scaling.targetUtilization,
                 validate: (v) => typeof v === 'number' &&
                     v >= scaling.scaleDownThreshold &&
-                    v <= scaling.scaleUpThreshold,
+                    v <= scaling.scaleUpThreshold
             });
         }
         const endpoint = cluster.endpoint;
@@ -157,15 +167,22 @@ export default class ConfigValidationManager {
                 path: 'audio.gateThresholdLUFS',
                 expected: 'number <= 0',
                 get: () => audio?.gateThresholdLUFS,
-                validate: (v) => typeof v === 'number' && v <= 0,
+                validate: (v) => typeof v === 'number' && v <= 0
             },
             this.enumRule('audio.quality', () => audio?.quality, VALID_AUDIO_QUALITIES),
-            this.enumRule('audio.resamplingQuality', () => audio?.resamplingQuality, VALID_RESAMPLING_QUALITIES),
+            this.enumRule('audio.resamplingQuality', () => audio?.resamplingQuality, VALID_RESAMPLING_QUALITIES)
         ];
         const fading = audio?.fading;
         if (fading) {
             rules.push(this.booleanRule('audio.fading.enabled', () => fading.enabled));
-            const fadingEvents = ['trackStart', 'trackEnd', 'trackStop', 'seek', 'pause', 'resume'];
+            const fadingEvents = [
+                'trackStart',
+                'trackEnd',
+                'trackStop',
+                'seek',
+                'pause',
+                'resume'
+            ];
             for (const event of fadingEvents) {
                 const ev = fading[event];
                 if (!ev)
@@ -178,7 +195,7 @@ export default class ConfigValidationManager {
                     path: 'audio.fading.ducking.targetVolume',
                     expected: 'number between 0 and 1 (inclusive)',
                     get: () => ducking.targetVolume,
-                    validate: (v) => typeof v === 'number' && v >= 0 && v <= 1,
+                    validate: (v) => typeof v === 'number' && v >= 0 && v <= 1
                 });
             }
         }
@@ -190,7 +207,7 @@ export default class ConfigValidationManager {
                     path: 'audio.crossfade.duration',
                     expected: 'integer > 0 when audio.crossfade.enabled is true',
                     get: () => crossfade.duration,
-                    validate: (v) => Number.isInteger(v) && v > 0,
+                    validate: (v) => Number.isInteger(v) && v > 0
                 });
             }
             if (crossfade.bufferMs !== 0) {
@@ -198,7 +215,7 @@ export default class ConfigValidationManager {
                     path: 'audio.crossfade.minBufferMs',
                     expected: `integer <= audio.crossfade.bufferMs (${crossfade.bufferMs})`,
                     get: () => crossfade.minBufferMs,
-                    validate: (v) => Number.isInteger(v) && v <= crossfade.bufferMs,
+                    validate: (v) => Number.isInteger(v) && v <= crossfade.bufferMs
                 });
             }
         }
@@ -214,14 +231,14 @@ export default class ConfigValidationManager {
                 path: 'trackStuckThresholdMs',
                 expected: 'integer >= 1000 (milliseconds)',
                 get: () => trackStuck,
-                validate: (v) => Number.isInteger(v) && v >= 1000,
+                validate: (v) => Number.isInteger(v) && v >= 1000
             },
             {
                 path: 'zombieThresholdMs',
                 expected: `integer > trackStuckThresholdMs (${trackStuck})`,
                 get: () => this.options.zombieThresholdMs,
-                validate: (v) => Number.isInteger(v) && v > trackStuck,
-            },
+                validate: (v) => Number.isInteger(v) && v > trackStuck
+            }
         ];
         this.runRules(rules);
     }
@@ -236,7 +253,7 @@ export default class ConfigValidationManager {
                 path: 'sources.spotify.credentials',
                 expected: 'clientId and clientSecret must be set together',
                 get: () => Boolean(spotify.clientId) === Boolean(spotify.clientSecret),
-                validate: (v) => v === true,
+                validate: (v) => v === true
             });
             if (spotify.externalAuthUrl) {
                 rules.push(this.urlRule('sources.spotify.externalAuthUrl', () => spotify.externalAuthUrl));
@@ -255,7 +272,7 @@ export default class ConfigValidationManager {
                     path: 'sources.tidal.token',
                     expected: 'string (non-whitespace if provided)',
                     get: () => tidal.token,
-                    validate: (v) => typeof v === 'string' && (v === '' || v.trim().length > 0),
+                    validate: (v) => typeof v === 'string' && (v === '' || v.trim().length > 0)
                 });
                 this.warnIfPlaceholder('sources.tidal.token', tidal.token);
             }
@@ -265,17 +282,17 @@ export default class ConfigValidationManager {
                 path: 'sources.audius.appName',
                 expected: 'string',
                 get: () => audius.appName,
-                validate: (v) => v === undefined || typeof v === 'string',
+                validate: (v) => v === undefined || typeof v === 'string'
             }, {
                 path: 'sources.audius.apiKey',
                 expected: 'string',
                 get: () => audius.apiKey,
-                validate: (v) => v === undefined || typeof v === 'string',
+                validate: (v) => v === undefined || typeof v === 'string'
             }, {
                 path: 'sources.audius.apiSecret',
                 expected: 'string',
                 get: () => audius.apiSecret,
-                validate: (v) => v === undefined || typeof v === 'string',
+                validate: (v) => v === undefined || typeof v === 'string'
             }, this.nonNegativeIntRule('sources.audius.playlistLoadLimit', () => audius.playlistLoadLimit), this.nonNegativeIntRule('sources.audius.albumLoadLimit', () => audius.albumLoadLimit));
         }
         if (jiosaavn?.enabled) {
@@ -283,7 +300,7 @@ export default class ConfigValidationManager {
                 path: 'sources.jiosaavn.playlistLoadLimit',
                 expected: `integer >= artistLoadLimit (${jiosaavn.artistLoadLimit})`,
                 get: () => jiosaavn.playlistLoadLimit,
-                validate: (v) => v >= jiosaavn.artistLoadLimit,
+                validate: (v) => v >= jiosaavn.artistLoadLimit
             });
         }
         const eternalbox = sources.eternalbox;
@@ -292,17 +309,17 @@ export default class ConfigValidationManager {
                 path: 'sources.eternalbox.minRandomBranchChance',
                 expected: 'number between 0 and 1 (inclusive)',
                 get: () => eternalbox.minRandomBranchChance,
-                validate: (v) => typeof v === 'number' && v >= 0 && v <= 1,
+                validate: (v) => typeof v === 'number' && v >= 0 && v <= 1
             }, {
                 path: 'sources.eternalbox.maxRandomBranchChance',
                 expected: 'number between 0 and 1 (inclusive)',
                 get: () => eternalbox.maxRandomBranchChance,
-                validate: (v) => typeof v === 'number' && v >= 0 && v <= 1,
+                validate: (v) => typeof v === 'number' && v >= 0 && v <= 1
             }, {
                 path: 'sources.eternalbox.minRandomBranchChance',
                 expected: `number <= maxRandomBranchChance (${eternalbox.maxRandomBranchChance})`,
                 get: () => eternalbox.minRandomBranchChance,
-                validate: (v) => v <= eternalbox.maxRandomBranchChance,
+                validate: (v) => v <= eternalbox.maxRandomBranchChance
             });
         }
         const youtube = sources.youtube;
@@ -338,7 +355,7 @@ export default class ConfigValidationManager {
                 path: 'sources.flowery.speed',
                 expected: 'number > 0',
                 get: () => flowery.speed,
-                validate: (v) => typeof v === 'number' && v > 0,
+                validate: (v) => typeof v === 'number' && v > 0
             }, this.nonNegativeIntRule('sources.flowery.silence', () => flowery.silence), this.booleanRule('sources.flowery.translate', () => flowery.translate), this.booleanRule('sources.flowery.enforceConfig', () => flowery.enforceConfig));
         }
         const lazypytts = sources.lazypytts;
@@ -367,8 +384,8 @@ export default class ConfigValidationManager {
                         return v.every((name) => typeof name === 'string' && sources[name]?.enabled === true);
                     }
                     return false;
-                },
-            },
+                }
+            }
         ];
         const unified = this.options.unifiedSearchSources;
         if (unified !== undefined) {
@@ -381,7 +398,7 @@ export default class ConfigValidationManager {
                     if (!sources || !Array.isArray(v) || v.length === 0)
                         return false;
                     return v.every((name) => typeof name === 'string' && sources[name]?.enabled === true);
-                },
+                }
             });
         }
         this.runRules(rules);
@@ -391,7 +408,7 @@ export default class ConfigValidationManager {
         if (!routePlanner)
             return;
         const rules = [
-            this.enumRule('routePlanner.strategy', () => routePlanner.strategy, VALID_ROUTE_STRATEGIES),
+            this.enumRule('routePlanner.strategy', () => routePlanner.strategy, VALID_ROUTE_STRATEGIES)
         ];
         if (routePlanner.bannedIpCooldown !== undefined) {
             rules.push(this.positiveIntRule('routePlanner.bannedIpCooldown', () => routePlanner.bannedIpCooldown));
@@ -403,7 +420,7 @@ export default class ConfigValidationManager {
         if (!rateLimit || rateLimit.enabled === false)
             return;
         const rules = [
-            this.booleanRule('rateLimit.enabled', () => rateLimit.enabled),
+            this.booleanRule('rateLimit.enabled', () => rateLimit.enabled)
         ];
         const sections = ['global', 'perIp', 'perUserId', 'perGuildId'];
         let prevSection = null;
@@ -423,7 +440,7 @@ export default class ConfigValidationManager {
                     path: `rateLimit.${section}.maxRequests`,
                     expected: `integer <= rateLimit.${capturedPrevSection}.maxRequests (${capturedPrevCfg.maxRequests})`,
                     get: () => cfg.maxRequests,
-                    validate: (v) => Number.isInteger(v) && v > 0 && v <= capturedPrevCfg.maxRequests,
+                    validate: (v) => Number.isInteger(v) && v > 0 && v <= capturedPrevCfg.maxRequests
                 });
             }
             prevSection = section;
@@ -436,7 +453,7 @@ export default class ConfigValidationManager {
         if (!dos)
             return;
         const rules = [
-            this.booleanRule('dosProtection.enabled', () => dos.enabled),
+            this.booleanRule('dosProtection.enabled', () => dos.enabled)
         ];
         if (dos.thresholds) {
             rules.push(this.positiveIntRule('dosProtection.thresholds.burstRequests', () => dos.thresholds.burstRequests), this.positiveIntRule('dosProtection.thresholds.timeWindowMs', () => dos.thresholds.timeWindowMs));
@@ -459,8 +476,17 @@ export default class ConfigValidationManager {
         }
         if (logging.debug) {
             const debugFields = [
-                'all', 'request', 'session', 'player', 'filters',
-                'sources', 'lyrics', 'youtube', 'youtube-cipher', 'sabr', 'potoken',
+                'all',
+                'request',
+                'session',
+                'player',
+                'filters',
+                'sources',
+                'lyrics',
+                'youtube',
+                'youtube-cipher',
+                'sabr',
+                'potoken'
             ];
             for (const field of debugFields) {
                 if (logging.debug[field] !== undefined) {
@@ -477,24 +503,24 @@ export default class ConfigValidationManager {
         const rules = [
             this.booleanRule('connection.logAllChecks', () => connection.logAllChecks),
             this.positiveIntRule('connection.interval', () => connection.interval),
-            this.positiveIntRule('connection.timeout', () => connection.timeout),
+            this.positiveIntRule('connection.timeout', () => connection.timeout)
         ];
         if (connection.thresholds) {
             rules.push({
                 path: 'connection.thresholds.bad',
                 expected: 'number > 0 (Mbps)',
                 get: () => connection.thresholds.bad,
-                validate: (v) => typeof v === 'number' && v > 0,
+                validate: (v) => typeof v === 'number' && v > 0
             }, {
                 path: 'connection.thresholds.average',
                 expected: 'number > 0 (Mbps)',
                 get: () => connection.thresholds.average,
-                validate: (v) => typeof v === 'number' && v > 0,
+                validate: (v) => typeof v === 'number' && v > 0
             }, {
                 path: 'connection.thresholds.bad',
                 expected: `number < connection.thresholds.average (${connection.thresholds.average})`,
                 get: () => connection.thresholds.bad,
-                validate: (v) => v < connection.thresholds.average,
+                validate: (v) => v < connection.thresholds.average
             });
         }
         this.runRules(rules);
@@ -505,7 +531,7 @@ export default class ConfigValidationManager {
             return;
         const rules = [
             this.booleanRule('voiceReceive.enabled', () => voiceReceive.enabled),
-            this.enumRule('voiceReceive.format', () => voiceReceive.format, VALID_VOICE_FORMATS),
+            this.enumRule('voiceReceive.format', () => voiceReceive.format, VALID_VOICE_FORMATS)
         ];
         this.runRules(rules);
     }
@@ -521,8 +547,8 @@ export default class ConfigValidationManager {
                 path: 'mix.defaultVolume',
                 expected: 'number between 0 and 1 (inclusive)',
                 get: () => mix.defaultVolume,
-                validate: (v) => typeof v === 'number' && v >= 0 && v <= 1,
-            },
+                validate: (v) => typeof v === 'number' && v >= 0 && v <= 1
+            }
         ];
         this.runRules(rules);
     }
@@ -531,7 +557,7 @@ export default class ConfigValidationManager {
         if (!metrics)
             return;
         const rules = [
-            this.booleanRule('metrics.enabled', () => metrics.enabled),
+            this.booleanRule('metrics.enabled', () => metrics.enabled)
         ];
         if (metrics.authorization) {
             rules.push(this.enumRule('metrics.authorization.type', () => metrics.authorization.type, VALID_METRICS_AUTH_TYPES));
@@ -556,7 +582,7 @@ export default class ConfigValidationManager {
         if (typeof value === 'string' && KNOWN_PLACEHOLDERS.has(value)) {
             this.warnings.push({
                 path,
-                message: `Value "${value}" looks like an unfilled placeholder. The source may fail to authenticate at runtime.`,
+                message: `Value "${value}" looks like an unfilled placeholder. The source may fail to authenticate at runtime.`
             });
         }
     }
@@ -565,7 +591,7 @@ export default class ConfigValidationManager {
             path,
             expected: 'integer >= 0',
             get,
-            validate: (v) => Number.isInteger(v) && v >= 0,
+            validate: (v) => Number.isInteger(v) && v >= 0
         };
     }
     positiveIntRule(path, get) {
@@ -573,7 +599,7 @@ export default class ConfigValidationManager {
             path,
             expected: 'integer > 0',
             get,
-            validate: (v) => Number.isInteger(v) && v > 0,
+            validate: (v) => Number.isInteger(v) && v > 0
         };
     }
     intRangeRule(path, get, min, max) {
@@ -581,7 +607,7 @@ export default class ConfigValidationManager {
             path,
             expected: `integer between ${min} and ${max}`,
             get,
-            validate: (v) => Number.isInteger(v) && v >= min && v <= max,
+            validate: (v) => Number.isInteger(v) && v >= min && v <= max
         };
     }
     booleanRule(path, get) {
@@ -589,7 +615,7 @@ export default class ConfigValidationManager {
             path,
             expected: 'boolean',
             get,
-            validate: (v) => typeof v === 'boolean',
+            validate: (v) => typeof v === 'boolean'
         };
     }
     nonEmptyStringRule(path, get) {
@@ -597,7 +623,7 @@ export default class ConfigValidationManager {
             path,
             expected: 'non-empty string',
             get,
-            validate: (v) => typeof v === 'string' && v.trim().length > 0,
+            validate: (v) => typeof v === 'string' && v.trim().length > 0
         };
     }
     enumRule(path, get, allowed) {
@@ -606,7 +632,7 @@ export default class ConfigValidationManager {
             path,
             expected: `one of [${label}]`,
             get,
-            validate: (v) => allowed.has(v),
+            validate: (v) => allowed.has(v)
         };
     }
     urlRule(path, get) {
@@ -624,7 +650,7 @@ export default class ConfigValidationManager {
                 catch {
                     return false;
                 }
-            },
+            }
         };
     }
 }

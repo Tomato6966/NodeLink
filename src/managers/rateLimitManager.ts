@@ -1,4 +1,7 @@
-import type { ApiRateLimitResult, ApiRequest } from '../typings/api/api.types.ts'
+import type {
+  ApiRateLimitResult,
+  ApiRequest
+} from '../typings/api/api.types.ts'
 import type {
   RateLimitConfig,
   RateLimitEntry,

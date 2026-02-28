@@ -183,7 +183,10 @@ export interface AudioResource {
   fadeTo?(volume: number, durationMs: number, curve?: string): void
   tapeTo?(durationMs: number, type: 'start' | 'stop', curve?: string): void
   checkTapeRampCompleted?(): boolean
-  scratchTo?(durationMs: number, style: import('./processing.types.ts').ScratchStyle): void
+  scratchTo?(
+    durationMs: number,
+    style: import('./processing.types.ts').ScratchStyle
+  ): void
   checkScratchEffectCompleted?(): boolean
   /**
    * Buffers the next PCM stream for crossfading.

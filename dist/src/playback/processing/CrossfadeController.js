@@ -272,7 +272,9 @@ export class CrossfadeController extends Transform {
             ? new Int16Array(output.buffer, output.byteOffset, sampleCount)
             : null;
         const totalFrames = Math.floor(sampleCount / this.channels);
-        const remainingFrames = runtime.isFinished ? 0 : Math.max(0, runtime.durationFrames - runtime.elapsedFrames);
+        const remainingFrames = runtime.isFinished
+            ? 0
+            : Math.max(0, runtime.durationFrames - runtime.elapsedFrames);
         const fadeFrames = Math.min(totalFrames, remainingFrames);
         const getMain = (i) => mainView ? (mainView[i] ?? 0) : main.readInt16LE(i * 2);
         const getNext = (i) => nextView ? (nextView[i] ?? 0) : next.readInt16LE(i * 2);

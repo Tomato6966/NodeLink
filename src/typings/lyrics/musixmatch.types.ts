@@ -42,7 +42,11 @@ export interface CredentialManager {
   get: (key: string) => { value: string; expires: number } | null
 
   /** Stores a credential with a TTL */
-  set: (key: string, value: { value: string; expires: number }, ttl: number) => void
+  set: (
+    key: string,
+    value: { value: string; expires: number },
+    ttl: number
+  ) => void
 }
 
 /**

@@ -11,15 +11,43 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { logger } from "../utils.js";
+/**
+ * CommonJS resolver used to resolve npm package entry points.
+ * @internal
+ */
 const require = createRequire(import.meta.url);
+/**
+ * Loads and executes configured plugins from local paths and npm packages.
+ * @example
+ * ```ts
+ * const plugins = new PluginManager(nodelink)
+ * await plugins.load('master')
+ * ```
+ * @public
+ */
 export default class PluginManager {
+    nodelink;
+    config;
+    pluginConfigs;
+    pluginsDir;
+    loadedPlugins;
+    /**
+     * Creates a new plugin manager instance.
+     * @param nodelink - NodeLink runtime context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        this.config = nodelink.options.plugins || [];
-        this.pluginConfigs = nodelink.options.pluginConfig || {};
+        this.config = Array.isArray(nodelink.options.plugins)
+            ? nodelink.options.plugins
+            : [];
+        this.pluginConfigs = nodelink.options.pluginConfig ?? {};
         this.pluginsDir = path.join(process.cwd(), 'plugins');
         this.loadedPlugins = new Map();
     }
+    /**
+     * Loads and executes all configured plugins for the current process context.
+     * @param contextType - Runtime context identifier (e.g. master/worker).
+     */
     async load(contextType) {
         logger('info', 'PluginManager', `Initializing plugins in ${contextType} context...`);
         try {
@@ -28,13 +56,16 @@ export default class PluginManager {
         catch {
             await fs.mkdir(this.pluginsDir, { recursive: true });
         }
-        if (Array.isArray(this.config)) {
-            for (const pluginDef of this.config) {
-                await this._loadPlugin(pluginDef, contextType);
-            }
+        for (const pluginDef of this.config) {
+            await this._loadPlugin(pluginDef, contextType);
         }
         logger('info', 'PluginManager', `Plugins processed for ${contextType}.`);
     }
+    /**
+     * Locates the nearest package.json for a resolved module path.
+     * @param startPath - Resolved file path inside a package.
+     * @internal
+     */
     async _findPackageJson(startPath) {
         let currentDir = path.dirname(startPath);
         while (currentDir !== path.parse(currentDir).root) {
@@ -42,7 +73,7 @@ export default class PluginManager {
             try {
                 await fs.access(pkgPath);
                 const data = await fs.readFile(pkgPath, 'utf-8');
-                return JSON.parse(data);
+                return this._parsePackageJson(data);
             }
             catch {
                 if (path.basename(currentDir) === 'node_modules')
@@ -52,12 +83,115 @@ export default class PluginManager {
         }
         return null;
     }
+    /**
+     * Safely parses package.json raw content.
+     * @param raw - Raw JSON string.
+     * @internal
+     */
+    _parsePackageJson(raw) {
+        try {
+            const parsed = JSON.parse(raw);
+            if (!parsed || typeof parsed !== 'object')
+                return null;
+            const pkg = parsed;
+            const repository = pkg['repository'];
+            const author = pkg['author'];
+            return {
+                version: typeof pkg['version'] === 'string' ? pkg['version'] : undefined,
+                author: typeof author === 'string'
+                    ? author
+                    : author && typeof author === 'object'
+                        ? {
+                            name: typeof author['name'] ===
+                                'string'
+                                ? author['name']
+                                : undefined
+                        }
+                        : undefined,
+                homepage: typeof pkg['homepage'] === 'string' ? pkg['homepage'] : undefined,
+                repository: typeof repository === 'string'
+                    ? repository
+                    : repository && typeof repository === 'object'
+                        ? {
+                            url: typeof repository['url'] ===
+                                'string'
+                                ? repository['url']
+                                : undefined
+                        }
+                        : undefined,
+                main: typeof pkg['main'] === 'string' ? pkg['main'] : undefined
+            };
+        }
+        catch {
+            return null;
+        }
+    }
+    /**
+     * Extracts an author string from parsed package metadata.
+     * @param pkg - Parsed package metadata.
+     * @internal
+     */
+    _extractAuthor(pkg) {
+        if (typeof pkg.author === 'string' && pkg.author.length > 0) {
+            return pkg.author;
+        }
+        if (pkg.author &&
+            typeof pkg.author === 'object' &&
+            typeof pkg.author.name === 'string' &&
+            pkg.author.name.length > 0) {
+            return pkg.author.name;
+        }
+        return null;
+    }
+    /**
+     * Extracts a topic/homepage/repository URL from package metadata.
+     * @param pkg - Parsed package metadata.
+     * @internal
+     */
+    _extractTopic(pkg) {
+        if (typeof pkg.homepage === 'string' && pkg.homepage.length > 0) {
+            return pkg.homepage;
+        }
+        if (pkg.repository &&
+            typeof pkg.repository === 'object' &&
+            typeof pkg.repository.url === 'string' &&
+            pkg.repository.url.length > 0) {
+            return pkg.repository.url;
+        }
+        if (typeof pkg.repository === 'string' && pkg.repository.length > 0) {
+            return pkg.repository;
+        }
+        return null;
+    }
+    /**
+     * Validates and narrows a dynamic module into a plugin module contract.
+     * @param moduleValue - Dynamically imported module value.
+     * @internal
+     */
+    _coercePluginModule(moduleValue) {
+        if (!moduleValue || typeof moduleValue !== 'object')
+            return null;
+        const record = moduleValue;
+        if (typeof record['default'] !== 'function')
+            return null;
+        return {
+            default: record['default']
+        };
+    }
+    /**
+     * Loads a single plugin definition and executes its entrypoint.
+     * @param def - Plugin definition from config.
+     * @param contextType - Current runtime context identifier.
+     * @internal
+     */
     async _loadPlugin(def, contextType) {
         const { name, source, path: localPath, package: packageName } = def;
-        if (!name)
+        if (!name || name.trim().length === 0)
             return;
         if (this.loadedPlugins.has(name)) {
             const cached = this.loadedPlugins.get(name);
+            if (!cached)
+                return;
             await this._executePlugin(cached.module, name, contextType, cached.meta);
             return;
         }
@@ -76,16 +210,18 @@ export default class PluginManager {
                     const pkgPath = path.join(resolvedPath, 'package.json');
                     try {
                         const pkgData = await fs.readFile(pkgPath, 'utf-8');
-                        const pkg = JSON.parse(pkgData);
-                        if (pkg.version)
+                        const pkg = this._parsePackageJson(pkgData);
+                        if (pkg?.version)
                             pluginMeta.version = pkg.version;
-                        if (pkg.author)
-                            pluginMeta.author =
-                                typeof pkg.author === 'object' ? pkg.author.name : pkg.author;
-                        if (pkg.homepage || pkg.repository?.url) {
-                            pluginMeta.topic = pkg.homepage || pkg.repository.url;
+                        const author = pkg ? this._extractAuthor(pkg) : null;
+                        if (author) {
+                            pluginMeta.author = author;
                         }
-                        if (pkg.main) {
+                        const topic = pkg ? this._extractTopic(pkg) : null;
+                        if (topic) {
+                            pluginMeta.topic = topic;
+                        }
+                        if (pkg?.main) {
                             entryPoint = path.join(resolvedPath, pkg.main);
                         }
                         else {
@@ -108,11 +244,13 @@ export default class PluginManager {
                     if (pkg) {
                         if (pkg.version)
                             pluginMeta.version = pkg.version;
-                        if (pkg.author)
-                            pluginMeta.author =
-                                typeof pkg.author === 'object' ? pkg.author.name : pkg.author;
-                        if (pkg.homepage || pkg.repository?.url) {
-                            pluginMeta.topic = pkg.homepage || pkg.repository.url;
+                        const author = this._extractAuthor(pkg);
+                        if (author) {
+                            pluginMeta.author = author;
+                        }
+                        const topic = this._extractTopic(pkg);
+                        if (topic) {
+                            pluginMeta.topic = topic;
                         }
                     }
                 }
@@ -124,8 +262,9 @@ export default class PluginManager {
             if (!entryPoint)
                 return;
             const fileUrl = pathToFileURL(entryPoint).href;
-            const pluginModule = await import(__rewriteRelativeImportExtension(fileUrl));
-            if (typeof pluginModule.default !== 'function') {
+            const importedModule = await import(__rewriteRelativeImportExtension(fileUrl));
+            const pluginModule = this._coercePluginModule(importedModule);
+            if (!pluginModule) {
                 throw new Error(`Plugin '${name}' entry point must export a default function.`);
             }
             this.loadedPlugins.set(name, {
@@ -145,9 +284,18 @@ export default class PluginManager {
             logger('info', 'PluginManager', `Loaded: ${creditString}`);
         }
         catch (error) {
-            logger('error', 'PluginManager', `Failed to load plugin '${name}': ${error.message}`);
+            const message = error instanceof Error ? error.message : String(error);
+            logger('error', 'PluginManager', `Failed to load plugin '${name}': ${message}`);
         }
     }
+    /**
+     * Executes the plugin default export with resolved config and metadata.
+     * @param pluginModule - Coerced plugin module.
+     * @param name - Plugin display name.
+     * @param contextType - Current runtime context identifier.
+     * @param meta - Resolved plugin metadata.
+     * @internal
+     */
     async _executePlugin(pluginModule, name, contextType, meta) {
         const specificConfig = this.pluginConfigs[name] || {};
         const context = {
@@ -160,7 +308,8 @@ export default class PluginManager {
             await pluginModule.default(this.nodelink, specificConfig, context);
         }
         catch (err) {
-            logger('error', 'PluginManager', `Error executing plugin '${name}' in '${contextType}' context: ${err.message}`);
+            const message = err instanceof Error ? err.message : String(err);
+            logger('error', 'PluginManager', `Error executing plugin '${name}' in '${contextType}' context: ${message}`);
         }
     }
 }

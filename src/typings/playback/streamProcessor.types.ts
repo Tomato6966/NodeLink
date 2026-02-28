@@ -1,5 +1,11 @@
 import type { Readable, Transform, TransformOptions } from 'node:stream'
-import type { AudioMixer, AudioResource, FiltersState, NodeLink, StreamInfo } from './player.types.ts'
+import type {
+  AudioMixer,
+  AudioResource,
+  FiltersState,
+  NodeLink,
+  StreamInfo
+} from './player.types.ts'
 
 /**
  * Configuration for general audio stream parameters.
@@ -97,14 +103,21 @@ export interface ADTSFrameInfo {
 export interface FlvDemuxerLike extends Transform {
   on(event: 'data', listener: (audioTag: Buffer) => void): this
   on(event: 'error', listener: (err: Error) => void): this
-  write(chunk: Buffer, encoding?: BufferEncoding, callback?: (error?: Error | null) => void): boolean
+  write(
+    chunk: Buffer,
+    encoding?: BufferEncoding,
+    callback?: (error?: Error | null) => void
+  ): boolean
   write(chunk: Buffer, callback?: (error?: Error | null) => void): boolean
   end(callback?: (error?: Error | null) => void): this
   end(chunk: Buffer, callback?: (error?: Error | null) => void): this
-  end(chunk: Buffer, encoding?: BufferEncoding, callback?: (error?: Error | null) => void): this
+  end(
+    chunk: Buffer,
+    encoding?: BufferEncoding,
+    callback?: (error?: Error | null) => void
+  ): this
   destroy(error?: Error): this
 }
-
 
 /**
  * Configuration for an AAC track derived from headers or metadata.
@@ -271,13 +284,19 @@ export interface MP4BoxFile {
   /** Callback triggered when file metadata is ready. */
   onReady: ((info: MP4BoxInfo) => void) | null
   /** Callback triggered when new samples are extracted. */
-  onSamples: ((id: number, user: unknown, samples: MP4BoxSample[]) => void) | null
+  onSamples:
+    | ((id: number, user: unknown, samples: MP4BoxSample[]) => void)
+    | null
   /** Callback triggered on parsing errors. */
   onError: ((error: string) => void) | null
   /** Appends raw data to the MP4Box parser. */
   appendBuffer(buffer: ArrayBufferLike & { fileStart?: number }): void
   /** Configures sample extraction for a specific track. */
-  setExtractionOptions(trackId: number, user: unknown, options: { nbSamples: number }): void
+  setExtractionOptions(
+    trackId: number,
+    user: unknown,
+    options: { nbSamples: number }
+  ): void
   /** Starts the extraction process. */
   start(): void
   /** Stops the extraction process. */
@@ -338,8 +357,6 @@ export interface RingBufferLike {
   /** Disposes of resources and marks the buffer as dead. */
   dispose(): void
 }
-
-
 
 /**
  * Initialization options for the Opus decoder.
@@ -459,7 +476,12 @@ export type CreatePCMStreamFn = (
 /**
  * Levels of quality/speed for the internal resampler.
  */
-export type ResamplingQuality = 'best' | 'medium' | 'fastest' | 'zero order holder' | 'linear'
+export type ResamplingQuality =
+  | 'best'
+  | 'medium'
+  | 'fastest'
+  | 'zero order holder'
+  | 'linear'
 
 /**
  * Internal numeric ID for libsamplerate converter types.

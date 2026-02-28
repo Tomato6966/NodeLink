@@ -268,7 +268,8 @@ export class VolumeTransformer extends Transform implements IVolumeTransformer {
 
           const outputSample = this.lookaheadBuffer[this.lookaheadIndex] ?? 0
           this.lookaheadBuffer[this.lookaheadIndex] = limited
-          this.lookaheadIndex = (this.lookaheadIndex + 1) % this.lookaheadSamples
+          this.lookaheadIndex =
+            (this.lookaheadIndex + 1) % this.lookaheadSamples
 
           outputView[i] = this._clampToInt16(outputSample)
           gain += gainStep
@@ -281,7 +282,8 @@ export class VolumeTransformer extends Transform implements IVolumeTransformer {
 
           const outputSample = this.lookaheadBuffer[this.lookaheadIndex] ?? 0
           this.lookaheadBuffer[this.lookaheadIndex] = limited
-          this.lookaheadIndex = (this.lookaheadIndex + 1) % this.lookaheadSamples
+          this.lookaheadIndex =
+            (this.lookaheadIndex + 1) % this.lookaheadSamples
 
           outputView[i] = this._clampToInt16(outputSample)
           gain += gainStep

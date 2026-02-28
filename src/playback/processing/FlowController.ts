@@ -228,7 +228,10 @@ export class FlowController extends Transform {
     // This ensures trackEnd scratch effects are fully audible even after source EOF.
     const silence = Buffer.alloc(FRAME_SIZE, 0)
     let drainLimit = 150 // ~1.2s safety limit
-    while ((this.scratch.isActive() || this.tape.isActive()) && drainLimit-- > 0) {
+    while (
+      (this.scratch.isActive() || this.tape.isActive()) &&
+      drainLimit-- > 0
+    ) {
       this._processFrame(silence)
     }
 

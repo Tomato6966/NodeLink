@@ -139,7 +139,9 @@ export default class SourcesManager implements SourceManagerLike {
     try {
       await fs.access(sourcesDir)
 
-      const enabledSourceKeys = Object.entries(this.nodelink.options.sources || {})
+      const enabledSourceKeys = Object.entries(
+        this.nodelink.options.sources || {}
+      )
         .filter(([, cfg]) => !!cfg?.enabled)
         .map(([key]) => key.toLowerCase())
 

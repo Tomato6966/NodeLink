@@ -57,7 +57,7 @@ export class ScratchTransformer extends Transform {
             durationMs: duration,
             elapsedMs: 0,
             startRate: this.currentRate,
-            targetRate: (style === 'start') ? 1.0 : 0.0,
+            targetRate: style === 'start' ? 1.0 : 0.0,
             seed: Math.random()
         };
     }
@@ -89,33 +89,33 @@ export class ScratchTransformer extends Transform {
         let style = state.style;
         if (style === 'random') {
             // Map random to a transitional style based on target
-            style = state.targetRate > 0 ? 'start' : (s > 0.5 ? 'backspin' : 'wash');
+            style = state.targetRate > 0 ? 'start' : s > 0.5 ? 'backspin' : 'wash';
         }
         switch (style) {
             case 'wash':
                 // Fast deceleration with a "friction bounce" at the end.
                 if (t < 0.6)
-                    return state.startRate * Math.pow(1 - (t / 0.6), 2.5);
+                    return state.startRate * (1 - t / 0.6) ** 2.5;
                 // Mechanical bounce: stronger oscillation to be audible.
-                return Math.sin((t - 0.6) * 25) * (0.4 + (s * 0.2)) * (1 - t);
+                return Math.sin((t - 0.6) * 25) * (0.4 + s * 0.2) * (1 - t);
             case 'backspin':
                 // Rapidly spins the record backwards.
                 if (t < 0.15)
                     return state.startRate * (1 - t * 6.6); // Cross zero fast
                 if (t < 0.8)
-                    return -3.0 - (s * 5.0) * (1 - t); // Higher speed reverse
+                    return -3.0 - s * 5.0 * (1 - t); // Higher speed reverse
                 return -0.8 * (1 - t); // Slow down to stop
             case 'baby':
                 // Rhythmic forward/backward oscillation (the classic 'wicka-wicka').
-                return Math.cos(t * Math.PI * (5 + (s * 3))) * (1 - t);
+                return Math.cos(t * Math.PI * (5 + s * 3)) * (1 - t);
             case 'start':
                 // Initial push: More dramatic acceleration.
                 if (t < 0.5)
-                    return Math.pow(t / 0.5, 2) * 1.5; // Quadratic ramp to 1.5x speed
+                    return (t / 0.5) ** 2 * 1.5; // Quadratic ramp to 1.5x speed
                 return 1.5 - ((t - 0.5) / 0.5) * 0.5; // Settle back to 1.0
             case 'stop':
                 // Standard vinyl brake simulation.
-                return state.startRate * (1 - Math.pow(t, 2.2));
+                return state.startRate * (1 - t ** 2.2);
             default:
                 return 1 - t;
         }
@@ -155,7 +155,9 @@ export class ScratchTransformer extends Transform {
         // let the buffer fill a bit before we start reading at 1.0.
         // This provides "future" samples for movements > 1.0.
         const latencyFrames = 1024; // ~21ms at 48kHz
-        if (!this.state && this.currentRate === 1.0 && this.inputWritePos < latencyFrames * this.channels * 2) {
+        if (!this.state &&
+            this.currentRate === 1.0 &&
+            this.inputWritePos < latencyFrames * this.channels * 2) {
             // Just pass through and keep read head at 0 until we have some slack
             this.inputReadPos = 0;
             return chunk;
@@ -188,10 +190,11 @@ export class ScratchTransformer extends Transform {
                 const p1 = this.inputBuffer[safeIPos + c] || 0;
                 const p2 = this.inputBuffer[safeIPos + this.channels + c] || 0;
                 const p3 = this.inputBuffer[safeIPos + this.channels * 2 + c] || 0;
-                const val = 0.5 * (2 * p1 +
-                    (-p0 + p2) * frac +
-                    (2 * p0 - 5 * p1 + 4 * p2 - p3) * frac * frac +
-                    (-p0 + 3 * p1 - 3 * p2 + p3) * frac * frac * frac);
+                const val = 0.5 *
+                    (2 * p1 +
+                        (-p0 + p2) * frac +
+                        (2 * p0 - 5 * p1 + 4 * p2 - p3) * frac * frac +
+                        (-p0 + 3 * p1 - 3 * p2 + p3) * frac * frac * frac);
                 outI16[f * this.channels + c] = Math.max(-32768, Math.min(32767, Math.round(val * 32767)));
             }
             // Update the read position (supports negative movement).

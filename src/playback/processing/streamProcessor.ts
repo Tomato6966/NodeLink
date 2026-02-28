@@ -439,7 +439,10 @@ class BaseAudioResource {
           targetMs: number
         }
         checkTapeRampCompleted?: () => boolean
-        scratchTo?: (durationMs: number, style: import('../../typings/playback/processing.types.ts').ScratchStyle) => void
+        scratchTo?: (
+          durationMs: number,
+          style: import('../../typings/playback/processing.types.ts').ScratchStyle
+        ) => void
         checkScratchEffectCompleted?: () => boolean
       }
     voiceStream.setVolume = (volume: number) => this.setVolume(volume)
@@ -453,8 +456,10 @@ class BaseAudioResource {
     voiceStream.clearCrossfade = () => this.clearCrossfade()
     voiceStream.getCrossfadeState = () => this.getCrossfadeState()
     voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted()
-    voiceStream.scratchTo = (durationMs: number, style: import('../../typings/playback/processing.types.ts').ScratchStyle) =>
-      this.scratchTo(durationMs, style)
+    voiceStream.scratchTo = (
+      durationMs: number,
+      style: import('../../typings/playback/processing.types.ts').ScratchStyle
+    ) => this.scratchTo(durationMs, style)
     voiceStream.checkScratchEffectCompleted = () =>
       this.checkScratchEffectCompleted()
     this.stream = voiceStream
@@ -2352,9 +2357,7 @@ class StreamAudioResource extends BaseAudioResource {
     return decoder
   }
 
-  _createSymphoniaPipeline(
-    stream: Readable
-  ): Transform {
+  _createSymphoniaPipeline(stream: Readable): Transform {
     const decoder = new SymphoniaDecoderStream()
     this.pipes?.push(decoder)
 
