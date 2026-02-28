@@ -28,7 +28,7 @@ import { GatewayEvents } from './constants.ts'
 import type ConnectionManager from './managers/connectionManager.ts'
 import type CredentialManager from './managers/credentialManager.ts'
 import DosProtectionManager from './managers/dosProtectionManager.ts'
-import type LyricsManager from './managers/lyricsManager.js'
+import type LyricsManager from './managers/lyricsManager.ts'
 import type MeaningManager from './managers/meaningManager.js'
 import PluginManager from './managers/pluginManager.js'
 import RateLimitManager from './managers/rateLimitManager.ts'
@@ -519,7 +519,7 @@ class NodelinkServer extends EventEmitter {
         { default: meaningMan }
       ] = await Promise.all([
         import('./managers/sourceManager.ts'),
-        import('./managers/lyricsManager.js'),
+        import('./managers/lyricsManager.ts'),
         import('./managers/meaningManager.js')
       ])
       this.sources = new sourceMan(this)

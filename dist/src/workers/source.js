@@ -459,7 +459,7 @@ else {
     let meaningManagerPromise = null;
     const getLyricsManager = async () => {
         if (!lyricsManagerPromise) {
-            lyricsManagerPromise = import('../managers/lyricsManager.js').then(async (module) => {
+            lyricsManagerPromise = import("../managers/lyricsManager.js").then(async (module) => {
                 const manager = new module.default(nodelink);
                 await manager.loadFolder();
                 nodelink.lyrics = manager;

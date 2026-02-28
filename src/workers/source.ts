@@ -596,7 +596,7 @@ if (isMainThread) {
   await nodelink.sources.loadFolder()
 
   type LyricsManagerType = InstanceType<
-    typeof import('../managers/lyricsManager.js').default
+    typeof import('../managers/lyricsManager.ts').default
   >
   type MeaningManagerType = InstanceType<
     typeof import('../managers/meaningManager.js').default
@@ -607,7 +607,7 @@ if (isMainThread) {
 
   const getLyricsManager = async (): Promise<LyricsManagerType> => {
     if (!lyricsManagerPromise) {
-      lyricsManagerPromise = import('../managers/lyricsManager.js').then(
+      lyricsManagerPromise = import('../managers/lyricsManager.ts').then(
         async (module) => {
           const manager = new module.default(nodelink)
           await manager.loadFolder()

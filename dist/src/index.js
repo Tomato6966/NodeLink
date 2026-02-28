@@ -369,7 +369,7 @@ class NodelinkServer extends EventEmitter {
         if (!isClusterPrimary) {
             const [{ default: sourceMan }, { default: lyricsMan }, { default: meaningMan }] = await Promise.all([
                 import("./managers/sourceManager.js"),
-                import('./managers/lyricsManager.js'),
+                import("./managers/lyricsManager.js"),
                 import('./managers/meaningManager.js')
             ]);
             this.sources = new sourceMan(this);

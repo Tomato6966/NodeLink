@@ -16,7 +16,7 @@ import RoutePlannerManager from '../managers/routePlannerManager.js'
 import SourceManager from '../managers/sourceManager.ts'
 import StatsManager from '../managers/statsManager.ts'
 import TrackCacheManager from '../managers/trackCacheManager.ts'
-import type LyricsManager from '../managers/lyricsManager.js'
+import type LyricsManager from '../managers/lyricsManager.ts'
 import type MeaningManager from '../managers/meaningManager.js'
 import { getWebmOpusProfilerStats } from '../playback/demuxers/WebmOpus.ts'
 import { bufferPool } from '../playback/structs/BufferPool.ts'
@@ -593,8 +593,8 @@ const handleProfilerCommand = async (
       maxEntries: (nodelink.trackCacheManager as unknown as { maxEntries?: number }).maxEntries ?? null
     } : null
 
-    const credentialDebug = nodelink.credentialManager && typeof (nodelink.credentialManager as unknown as { getStats?: () => unknown }).getStats === 'function' 
-      ? (nodelink.credentialManager as unknown as { getStats: () => unknown }).getStats() 
+    const credentialDebug = nodelink.credentialManager && typeof (nodelink.credentialManager as unknown as { getStats?: () => unknown }).getStats === 'function'
+      ? (nodelink.credentialManager as unknown as { getStats: () => unknown }).getStats()
       : null
 
     const statsDebug = nodelink.statsManager && typeof (nodelink.statsManager as unknown as { getSnapshot?: () => unknown }).getSnapshot === 'function'
@@ -912,7 +912,7 @@ const ipcMessageTracker = {
   sent: new Map<string, { count: number; totalBytes: number; maxBytes: number }>(),
   received: new Map<string, { count: number; totalBytes: number; maxBytes: number }>(),
   enabled: true,
-  
+
   trackSent(type: string, payload: unknown): void {
     if (!this.enabled) return
     try {
@@ -924,7 +924,7 @@ const ipcMessageTracker = {
       this.sent.set(type, entry)
     } catch {}
   },
-  
+
   trackReceived(type: string, payload: unknown): void {
     if (!this.enabled) return
     try {
@@ -936,7 +936,7 @@ const ipcMessageTracker = {
       this.received.set(type, entry)
     } catch {}
   },
-  
+
   getStats(): {
     sent: Array<{ type: string; count: number; totalBytes: number; maxBytes: number; avgBytes: number }>
     received: Array<{ type: string; count: number; totalBytes: number; maxBytes: number; avgBytes: number }>
@@ -951,7 +951,7 @@ const ipcMessageTracker = {
           avgBytes: Math.round(data.totalBytes / Math.max(data.count, 1))
         }))
         .sort((a, b) => b.totalBytes - a.totalBytes)
-    
+
     return {
       sent: toSorted(this.sent),
       received: toSorted(this.received)
@@ -1327,7 +1327,7 @@ let meaningManagerPromise: Promise<MeaningManager> | null = null
 
 const getLyricsManager = async (): Promise<LyricsManager> => {
   if (!lyricsManagerPromise) {
-    lyricsManagerPromise = import('../managers/lyricsManager.js').then(
+    lyricsManagerPromise = import('../managers/lyricsManager.ts').then(
       async (module) => {
         const manager = new module.default(nodelink)
         await manager.loadFolder()
