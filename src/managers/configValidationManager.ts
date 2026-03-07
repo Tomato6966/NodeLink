@@ -1,10 +1,8 @@
-import { validateProperty } from '../utils.ts'
-
 type ValidationRule<T = any> = {
   path: string
   expected: string
-  get: () => T
-  validate: (value: T) => boolean
+  value: T
+  validate: (v: T) => boolean
 }
 
 type ValidationWarning = {
@@ -49,38 +47,39 @@ const VALID_METRICS_AUTH_TYPES = new Set(['Bearer', 'Basic'])
 
 export default class ConfigValidationManager {
   private warnings: ValidationWarning[] = []
-  private options: any
 
-  constructor(options: any) {
-    this.options = options
-  }
+  constructor(private options: any) {}
 
   validate(): void {
-    const errors: string[] = []
     this.warnings = []
 
-    const domains = [
-      () => this.validateServer(),
-      () => this.validateCluster(),
-      () => this.validateAudio(),
-      () => this.validatePlayback(),
-      () => this.validateSources(),
-      () => this.validateSearch(),
-      () => this.validateRoutePlanner(),
-      () => this.validateRateLimit(),
-      () => this.validateDosProtection(),
-      () => this.validateLogging(),
-      () => this.validateConnection(),
-      () => this.validateVoiceReceive(),
-      () => this.validateMix(),
-      () => this.validateMetrics()
+    const allRules: ValidationRule[] = [
+      ...this.validateServer(),
+      ...this.validateCluster(),
+      ...this.validateAudio(),
+      ...this.validatePlayback(),
+      ...this.validateSources(),
+      ...this.validateSearch(),
+      ...this.validateRoutePlanner(),
+      ...this.validateRateLimit(),
+      ...this.validateDosProtection(),
+      ...this.validateLogging(),
+      ...this.validateConnection(),
+      ...this.validateVoiceReceive(),
+      ...this.validateMix(),
+      ...this.validateMetrics(),
+      ...this.validateFilters()
     ]
 
-    for (const validateDomain of domains) {
-      try {
-        validateDomain()
-      } catch (err: any) {
-        errors.push(err.message)
+    const errors: string[] = []
+    for (const rule of allRules) {
+      if (!rule.validate(rule.value)) {
+        errors.push(
+          `Configuration error:\n` +
+            `- Property: ${rule.path}\n` +
+            `- Received: ${JSON.stringify(rule.value)}\n` +
+            `- Expected: ${rule.expected}`
+        )
       }
     }
 
@@ -92,62 +91,63 @@ export default class ConfigValidationManager {
     }
 
     if (errors.length > 0) {
-      throw new Error('Configuration errors:\n\n' + errors.join('\n\n'))
+      throw new Error(`Configuration errors:\n\n${errors.join('\n\n')}`)
     }
   }
 
-  private validateServer(): void {
+  private validateServer(): ValidationRule[] {
     const server = this.options.server
 
-    const rules: ValidationRule[] = [
-      this.nonEmptyStringRule('server.host', () => server?.host),
-      this.intRangeRule('server.port', () => server?.port, 1, 65535),
-      this.nonEmptyStringRule('server.password', () => server?.password),
-      this.booleanRule('server.useBunServer', () => server?.useBunServer)
+    return [
+      this.nonEmptyStringRule('server.host', server?.host),
+      this.intRangeRule('server.port', server?.port, 1, 65535),
+      this.nonEmptyStringRule('server.password', server?.password),
+      this.booleanRule('server.useBunServer', server?.useBunServer)
     ]
-
-    this.runRules(rules)
   }
 
-  private validateCluster(): void {
+  private validateCluster(): ValidationRule[] {
     const cluster = this.options.cluster
-    if (!cluster) return
+    if (!cluster) return []
 
     const workers = cluster.workers
 
     const rules: ValidationRule[] = [
-      this.nonNegativeIntRule('cluster.workers', () => workers),
-      this.nonNegativeIntRule('cluster.minWorkers', () => cluster.minWorkers),
-      {
-        path: 'cluster.minWorkers',
-        expected:
-          workers === 0
-            ? 'auto-scaled workers'
-            : `<= cluster.workers (${workers})`,
-        get: () => cluster.minWorkers,
-        validate: (v: number) =>
-          Number.isInteger(v) && (workers === 0 || v <= workers)
-      },
-      this.positiveIntRule(
-        'cluster.commandTimeout',
-        () => cluster.commandTimeout
+      this.booleanRule('cluster.enabled', cluster.enabled)
+    ]
+
+    if (cluster.enabled !== true) return rules
+
+    rules.push(
+      this.nonNegativeIntRule('cluster.workers', workers),
+      this.nonNegativeIntRule('cluster.minWorkers', cluster.minWorkers),
+      this.crossFieldIntRule(
+        'cluster.minWorkers',
+        cluster.minWorkers,
+        workers,
+        'cluster.workers',
+        workers === 0
+          ? 'auto-scaled workers'
+          : `<= cluster.workers (${workers})`,
+        (v, dep) => dep === 0 || v <= dep
       ),
+      this.positiveIntRule('cluster.commandTimeout', cluster.commandTimeout),
       this.positiveIntRule(
         'cluster.fastCommandTimeout',
-        () => cluster.fastCommandTimeout
+        cluster.fastCommandTimeout
       ),
-      this.nonNegativeIntRule('cluster.maxRetries', () => cluster.maxRetries)
-    ]
+      this.nonNegativeIntRule('cluster.maxRetries', cluster.maxRetries)
+    )
 
     if (cluster.hibernation) {
       rules.push(
         this.booleanRule(
           'cluster.hibernation.enabled',
-          () => cluster.hibernation.enabled
+          cluster.hibernation.enabled
         ),
         this.positiveIntRule(
           'cluster.hibernation.timeoutMs',
-          () => cluster.hibernation.timeoutMs
+          cluster.hibernation.timeoutMs
         )
       )
     }
@@ -157,23 +157,23 @@ export default class ConfigValidationManager {
       rules.push(
         this.booleanRule(
           'cluster.specializedSourceWorker.enabled',
-          () => ssw.enabled
+          ssw.enabled
         ),
         this.positiveIntRule(
           'cluster.specializedSourceWorker.count',
-          () => ssw.count
+          ssw.count
         ),
         this.positiveIntRule(
           'cluster.specializedSourceWorker.microWorkers',
-          () => ssw.microWorkers
+          ssw.microWorkers
         ),
         this.positiveIntRule(
           'cluster.specializedSourceWorker.tasksPerWorker',
-          () => ssw.tasksPerWorker
+          ssw.tasksPerWorker
         ),
         this.booleanRule(
           'cluster.specializedSourceWorker.silentLogs',
-          () => ssw.silentLogs
+          ssw.silentLogs
         )
       )
     }
@@ -183,19 +183,19 @@ export default class ConfigValidationManager {
       rules.push(
         this.nonNegativeIntRule(
           'cluster.runtime.workerMaxOldSpaceMb',
-          () => runtime.workerMaxOldSpaceMb
+          runtime.workerMaxOldSpaceMb
         ),
         this.nonNegativeIntRule(
           'cluster.runtime.sourceWorkerMaxOldSpaceMb',
-          () => runtime.sourceWorkerMaxOldSpaceMb
+          runtime.sourceWorkerMaxOldSpaceMb
         ),
         this.booleanRule(
           'cluster.runtime.workerExposeGc',
-          () => runtime.workerExposeGc
+          runtime.workerExposeGc
         ),
         this.booleanRule(
           'cluster.runtime.sourceWorkerExposeGc',
-          () => runtime.sourceWorkerExposeGc
+          runtime.sourceWorkerExposeGc
         )
       )
     }
@@ -205,62 +205,52 @@ export default class ConfigValidationManager {
       rules.push(
         this.positiveIntRule(
           'cluster.scaling.maxPlayersPerWorker',
-          () => scaling.maxPlayersPerWorker
+          scaling.maxPlayersPerWorker
         ),
         this.positiveIntRule(
           'cluster.scaling.checkIntervalMs',
-          () => scaling.checkIntervalMs
+          scaling.checkIntervalMs
         ),
         this.positiveIntRule(
           'cluster.scaling.idleWorkerTimeoutMs',
-          () => scaling.idleWorkerTimeoutMs
+          scaling.idleWorkerTimeoutMs
         ),
         this.positiveIntRule(
           'cluster.scaling.queueLengthScaleUpFactor',
-          () => scaling.queueLengthScaleUpFactor
+          scaling.queueLengthScaleUpFactor
         ),
         this.positiveIntRule(
           'cluster.scaling.lagPenaltyLimit',
-          () => scaling.lagPenaltyLimit
+          scaling.lagPenaltyLimit
         ),
-        {
-          path: 'cluster.scaling.targetUtilization',
-          expected: 'number between 0 and 1 (exclusive)',
-          get: () => scaling.targetUtilization,
-          validate: (v: number) => typeof v === 'number' && v > 0 && v < 1
-        },
         {
           path: 'cluster.scaling.scaleUpThreshold',
           expected: 'number between 0 and 1 (exclusive)',
-          get: () => scaling.scaleUpThreshold,
-          validate: (v: number) => typeof v === 'number' && v > 0 && v < 1
-        },
-        {
-          path: 'cluster.scaling.scaleDownThreshold',
-          expected: 'number between 0 and 1 (exclusive)',
-          get: () => scaling.scaleDownThreshold,
+          value: scaling.scaleUpThreshold,
           validate: (v: number) => typeof v === 'number' && v > 0 && v < 1
         },
         {
           path: 'cluster.scaling.cpuPenaltyLimit',
           expected: 'number between 0 and 1 (exclusive)',
-          get: () => scaling.cpuPenaltyLimit,
+          value: scaling.cpuPenaltyLimit,
           validate: (v: number) => typeof v === 'number' && v > 0 && v < 1
         },
-
         {
           path: 'cluster.scaling.scaleDownThreshold',
           expected: `number < cluster.scaling.scaleUpThreshold (${scaling.scaleUpThreshold})`,
-          get: () => scaling.scaleDownThreshold,
+          value: scaling.scaleDownThreshold,
           validate: (v: number) =>
-            typeof v === 'number' && v < scaling.scaleUpThreshold
+            typeof scaling.scaleUpThreshold === 'number' &&
+            typeof v === 'number' &&
+            v < scaling.scaleUpThreshold
         },
-
         {
           path: 'cluster.scaling.targetUtilization',
           expected: `number between scaleDownThreshold (${scaling.scaleDownThreshold}) and scaleUpThreshold (${scaling.scaleUpThreshold})`,
-          get: () => scaling.targetUtilization,
+          value: scaling.targetUtilization,
           validate: (v: number) =>
+            typeof scaling.scaleDownThreshold === 'number' &&
+            typeof scaling.scaleUpThreshold === 'number' &&
             typeof v === 'number' &&
             v >= scaling.scaleDownThreshold &&
             v <= scaling.scaleUpThreshold
@@ -273,49 +263,42 @@ export default class ConfigValidationManager {
       rules.push(
         this.booleanRule(
           'cluster.endpoint.patchEnabled',
-          () => endpoint.patchEnabled
+          endpoint.patchEnabled
         ),
         this.booleanRule(
           'cluster.endpoint.allowExternalPatch',
-          () => endpoint.allowExternalPatch
+          endpoint.allowExternalPatch
         ),
-        this.nonEmptyStringRule('cluster.endpoint.code', () => endpoint.code)
+        this.nonEmptyStringRule('cluster.endpoint.code', endpoint.code)
       )
     }
 
-    this.runRules(rules)
+    return rules
   }
 
-  private validateAudio(): void {
+  private validateAudio(): ValidationRule[] {
     const audio = this.options.audio
 
     const rules: ValidationRule[] = [
-      this.booleanRule(
-        'audio.loudnessNormalizer',
-        () => audio?.loudnessNormalizer
-      ),
-      this.nonNegativeIntRule('audio.lookaheadMs', () => audio?.lookaheadMs),
+      this.booleanRule('audio.loudnessNormalizer', audio?.loudnessNormalizer),
+      this.nonNegativeIntRule('audio.lookaheadMs', audio?.lookaheadMs),
       {
         path: 'audio.gateThresholdLUFS',
         expected: 'number <= 0',
-        get: () => audio?.gateThresholdLUFS,
+        value: audio?.gateThresholdLUFS,
         validate: (v: number) => typeof v === 'number' && v <= 0
       },
-      this.enumRule(
-        'audio.quality',
-        () => audio?.quality,
-        VALID_AUDIO_QUALITIES
-      ),
+      this.enumRule('audio.quality', audio?.quality, VALID_AUDIO_QUALITIES),
       this.enumRule(
         'audio.resamplingQuality',
-        () => audio?.resamplingQuality,
+        audio?.resamplingQuality,
         VALID_RESAMPLING_QUALITIES
       )
     ]
 
     const fading = audio?.fading
     if (fading) {
-      rules.push(this.booleanRule('audio.fading.enabled', () => fading.enabled))
+      rules.push(this.booleanRule('audio.fading.enabled', fading.enabled))
 
       const fadingEvents = [
         'trackStart',
@@ -331,16 +314,16 @@ export default class ConfigValidationManager {
         rules.push(
           this.nonNegativeIntRule(
             `audio.fading.${event}.duration`,
-            () => ev.duration
+            ev.duration
           ),
           this.enumRule(
             `audio.fading.${event}.curve`,
-            () => ev.curve,
+            ev.curve,
             VALID_FADING_CURVES
           ),
           this.enumRule(
             `audio.fading.${event}.type`,
-            () => ev.type,
+            ev.type,
             VALID_FADING_TYPES
           )
         )
@@ -349,23 +332,20 @@ export default class ConfigValidationManager {
       const ducking = fading.ducking
       if (ducking) {
         rules.push(
-          this.booleanRule(
-            'audio.fading.ducking.enabled',
-            () => ducking.enabled
-          ),
+          this.booleanRule('audio.fading.ducking.enabled', ducking.enabled),
           this.nonNegativeIntRule(
             'audio.fading.ducking.duration',
-            () => ducking.duration
+            ducking.duration
           ),
           this.enumRule(
             'audio.fading.ducking.curve',
-            () => ducking.curve,
+            ducking.curve,
             VALID_FADING_CURVES
           ),
           {
             path: 'audio.fading.ducking.targetVolume',
             expected: 'number between 0 and 1 (inclusive)',
-            get: () => ducking.targetVolume,
+            value: ducking.targetVolume,
             validate: (v: number) => typeof v === 'number' && v >= 0 && v <= 1
           }
         )
@@ -375,91 +355,156 @@ export default class ConfigValidationManager {
     const crossfade = audio?.crossfade
     if (crossfade) {
       rules.push(
-        this.booleanRule('audio.crossfade.enabled', () => crossfade.enabled),
-        this.nonNegativeIntRule(
-          'audio.crossfade.duration',
-          () => crossfade.duration
-        ),
+        this.booleanRule('audio.crossfade.enabled', crossfade.enabled),
+        this.nonNegativeIntRule('audio.crossfade.duration', crossfade.duration),
         this.enumRule(
           'audio.crossfade.curve',
-          () => crossfade.curve,
+          crossfade.curve,
           VALID_CROSSFADE_CURVES
         ),
         this.enumRule(
           'audio.crossfade.mode',
-          () => crossfade.mode,
+          crossfade.mode,
           VALID_CROSSFADE_MODES
         ),
         this.nonNegativeIntRule(
           'audio.crossfade.minBufferMs',
-          () => crossfade.minBufferMs
+          crossfade.minBufferMs
         ),
-        this.nonNegativeIntRule(
-          'audio.crossfade.bufferMs',
-          () => crossfade.bufferMs
-        )
+        this.nonNegativeIntRule('audio.crossfade.bufferMs', crossfade.bufferMs)
       )
 
       if (crossfade.enabled) {
         rules.push({
           path: 'audio.crossfade.duration',
           expected: 'integer > 0 when audio.crossfade.enabled is true',
-          get: () => crossfade.duration,
+          value: crossfade.duration,
           validate: (v: number) => Number.isInteger(v) && v > 0
         })
       }
 
       if (crossfade.bufferMs !== 0) {
-        rules.push({
-          path: 'audio.crossfade.minBufferMs',
-          expected: `integer <= audio.crossfade.bufferMs (${crossfade.bufferMs})`,
-          get: () => crossfade.minBufferMs,
-          validate: (v: number) =>
-            Number.isInteger(v) && v <= crossfade.bufferMs
-        })
+        rules.push(
+          this.crossFieldIntRule(
+            'audio.crossfade.minBufferMs',
+            crossfade.minBufferMs,
+            crossfade.bufferMs,
+            'audio.crossfade.bufferMs',
+            `integer <= audio.crossfade.bufferMs (${crossfade.bufferMs})`,
+            (v, dep) => v <= dep
+          )
+        )
       }
     }
 
-    this.runRules(rules)
+    return rules
   }
 
-  private validatePlayback(): void {
+  private validatePlayback(): ValidationRule[] {
     const trackStuck = this.options.trackStuckThresholdMs
 
-    const rules: ValidationRule[] = [
+    return [
       this.intRangeRule(
         'playerUpdateInterval',
-        () => this.options.playerUpdateInterval,
+        this.options.playerUpdateInterval,
         250,
         60000
       ),
       this.positiveIntRule(
         'statsUpdateInterval',
-        () => this.options.statsUpdateInterval
+        this.options.statsUpdateInterval
       ),
-      this.positiveIntRule('eventTimeoutMs', () => this.options.eventTimeoutMs),
+      this.positiveIntRule('eventTimeoutMs', this.options.eventTimeoutMs),
+      this.booleanRule('enableHoloTracks', this.options.enableHoloTracks),
+      this.booleanRule(
+        'enableTrackStreamEndpoint',
+        this.options.enableTrackStreamEndpoint
+      ),
+      this.booleanRule(
+        'enableLoadStreamEndpoint',
+        this.options.enableLoadStreamEndpoint
+      ),
+      this.booleanRule(
+        'resolveExternalLinks',
+        this.options.resolveExternalLinks
+      ),
+      this.booleanRule('fetchChannelInfo', this.options.fetchChannelInfo),
       {
         path: 'trackStuckThresholdMs',
         expected: 'integer >= 1000 (milliseconds)',
-        get: () => trackStuck,
+        value: trackStuck,
         validate: (v: number) => Number.isInteger(v) && v >= 1000
       },
-      {
-        path: 'zombieThresholdMs',
-        expected: `integer > trackStuckThresholdMs (${trackStuck})`,
-        get: () => this.options.zombieThresholdMs,
-        validate: (v: number) => Number.isInteger(v) && v > trackStuck
-      }
+      this.crossFieldIntRule(
+        'zombieThresholdMs',
+        this.options.zombieThresholdMs,
+        trackStuck,
+        'trackStuckThresholdMs',
+        `integer > trackStuckThresholdMs (${trackStuck})`,
+        (v, dep) => v > dep
+      )
     ]
-
-    this.runRules(rules)
   }
 
-  private validateSources(): void {
+  private validateSources(): ValidationRule[] {
     const sources = this.options.sources
-    if (!sources) return
+    if (!sources) return []
 
     const rules: ValidationRule[] = []
+
+    const allSources = [
+      'youtube',
+      'soundcloud',
+      'spotify',
+      'tidal',
+      'applemusic',
+      'audius',
+      'jiosaavn',
+      'eternalbox',
+      'pipertts',
+      'pandora',
+      'yandexmusic',
+      'gaana',
+      'flowery',
+      'lazypytts',
+      'qobuz',
+      'iheartradio',
+      'vkmusic',
+      'amazonmusic',
+      'bluesky',
+      'anghami',
+      'rss',
+      'songlink',
+      'mixcloud',
+      'audiomack',
+      'deezer',
+      'bandcamp',
+      'local',
+      'http',
+      'vimeo',
+      'telegram',
+      'shazam',
+      'bilibili',
+      'genius',
+      'pinterest',
+      'google-tts',
+      'instagram',
+      'kwai',
+      'twitch',
+      'nicovideo',
+      'reddit',
+      'tumblr',
+      'twitter',
+      'lastfm',
+      'letrasmus'
+    ]
+    for (const name of allSources) {
+      if (sources[name] !== undefined) {
+        rules.push(
+          this.booleanRule(`sources.${name}.enabled`, sources[name].enabled)
+        )
+      }
+    }
 
     const { spotify, applemusic, tidal, jiosaavn, audius } = sources
 
@@ -467,25 +512,24 @@ export default class ConfigValidationManager {
       rules.push(
         this.nonNegativeIntRule(
           'sources.spotify.playlistLoadLimit',
-          () => spotify.playlistLoadLimit
+          spotify.playlistLoadLimit
         ),
         this.nonNegativeIntRule(
           'sources.spotify.albumLoadLimit',
-          () => spotify.albumLoadLimit
+          spotify.albumLoadLimit
         ),
         this.positiveIntRule(
           'sources.spotify.playlistPageLoadConcurrency',
-          () => spotify.playlistPageLoadConcurrency
+          spotify.playlistPageLoadConcurrency
         ),
         this.positiveIntRule(
           'sources.spotify.albumPageLoadConcurrency',
-          () => spotify.albumPageLoadConcurrency
+          spotify.albumPageLoadConcurrency
         ),
         {
           path: 'sources.spotify.credentials',
           expected: 'clientId and clientSecret must be set together',
-          get: () =>
-            Boolean(spotify.clientId) === Boolean(spotify.clientSecret),
+          value: Boolean(spotify.clientId) === Boolean(spotify.clientSecret),
           validate: (v: boolean) => v === true
         }
       )
@@ -494,7 +538,7 @@ export default class ConfigValidationManager {
         rules.push(
           this.urlRule(
             'sources.spotify.externalAuthUrl',
-            () => spotify.externalAuthUrl
+            spotify.externalAuthUrl
           )
         )
       }
@@ -510,19 +554,19 @@ export default class ConfigValidationManager {
       rules.push(
         this.nonNegativeIntRule(
           'sources.applemusic.playlistLoadLimit',
-          () => applemusic.playlistLoadLimit
+          applemusic.playlistLoadLimit
         ),
         this.nonNegativeIntRule(
           'sources.applemusic.albumLoadLimit',
-          () => applemusic.albumLoadLimit
+          applemusic.albumLoadLimit
         ),
         this.positiveIntRule(
           'sources.applemusic.playlistPageLoadConcurrency',
-          () => applemusic.playlistPageLoadConcurrency
+          applemusic.playlistPageLoadConcurrency
         ),
         this.positiveIntRule(
           'sources.applemusic.albumPageLoadConcurrency',
-          () => applemusic.albumPageLoadConcurrency
+          applemusic.albumPageLoadConcurrency
         )
       )
 
@@ -536,11 +580,11 @@ export default class ConfigValidationManager {
       rules.push(
         this.nonNegativeIntRule(
           'sources.tidal.playlistLoadLimit',
-          () => tidal.playlistLoadLimit
+          tidal.playlistLoadLimit
         ),
         this.positiveIntRule(
           'sources.tidal.playlistPageLoadConcurrency',
-          () => tidal.playlistPageLoadConcurrency
+          tidal.playlistPageLoadConcurrency
         )
       )
 
@@ -548,7 +592,7 @@ export default class ConfigValidationManager {
         rules.push({
           path: 'sources.tidal.token',
           expected: 'string (non-whitespace if provided)',
-          get: () => tidal.token,
+          value: tidal.token,
           validate: (v: string) =>
             typeof v === 'string' && (v === '' || v.trim().length > 0)
         })
@@ -561,28 +605,28 @@ export default class ConfigValidationManager {
         {
           path: 'sources.audius.appName',
           expected: 'string',
-          get: () => audius.appName,
+          value: audius.appName,
           validate: (v: string) => v === undefined || typeof v === 'string'
         },
         {
           path: 'sources.audius.apiKey',
           expected: 'string',
-          get: () => audius.apiKey,
+          value: audius.apiKey,
           validate: (v: string) => v === undefined || typeof v === 'string'
         },
         {
           path: 'sources.audius.apiSecret',
           expected: 'string',
-          get: () => audius.apiSecret,
+          value: audius.apiSecret,
           validate: (v: string) => v === undefined || typeof v === 'string'
         },
         this.nonNegativeIntRule(
           'sources.audius.playlistLoadLimit',
-          () => audius.playlistLoadLimit
+          audius.playlistLoadLimit
         ),
         this.nonNegativeIntRule(
           'sources.audius.albumLoadLimit',
-          () => audius.albumLoadLimit
+          audius.albumLoadLimit
         )
       )
     }
@@ -591,104 +635,98 @@ export default class ConfigValidationManager {
       rules.push(
         this.nonNegativeIntRule(
           'sources.jiosaavn.playlistLoadLimit',
-          () => jiosaavn.playlistLoadLimit
+          jiosaavn.playlistLoadLimit
         ),
         this.nonNegativeIntRule(
           'sources.jiosaavn.artistLoadLimit',
-          () => jiosaavn.artistLoadLimit
+          jiosaavn.artistLoadLimit
         ),
-        {
-          path: 'sources.jiosaavn.playlistLoadLimit',
-          expected: `integer >= artistLoadLimit (${jiosaavn.artistLoadLimit})`,
-          get: () => jiosaavn.playlistLoadLimit,
-          validate: (v: number) => v >= jiosaavn.artistLoadLimit
-        }
+        this.crossFieldIntRule(
+          'sources.jiosaavn.playlistLoadLimit',
+          jiosaavn.playlistLoadLimit,
+          jiosaavn.artistLoadLimit,
+          'sources.jiosaavn.artistLoadLimit',
+          `0 (no limit) or integer >= artistLoadLimit (${jiosaavn.artistLoadLimit})`,
+          (v, dep) => v === 0 || v >= dep
+        )
       )
     }
 
     const eternalbox = sources.eternalbox
     if (eternalbox?.enabled) {
       rules.push(
-        this.urlRule('sources.eternalbox.baseUrl', () => eternalbox.baseUrl),
+        this.urlRule('sources.eternalbox.baseUrl', eternalbox.baseUrl),
         this.positiveIntRule(
           'sources.eternalbox.searchResults',
-          () => eternalbox.searchResults
+          eternalbox.searchResults
         ),
         this.positiveIntRule(
           'sources.eternalbox.maxBranches',
-          () => eternalbox.maxBranches
+          eternalbox.maxBranches
         ),
         this.nonNegativeIntRule(
           'sources.eternalbox.cacheMaxBytes',
-          () => eternalbox.cacheMaxBytes
+          eternalbox.cacheMaxBytes
         ),
         this.booleanRule(
           'sources.eternalbox.enrichSpotify',
-          () => eternalbox.enrichSpotify
+          eternalbox.enrichSpotify
         ),
         this.booleanRule(
           'sources.eternalbox.includeAnalysis',
-          () => eternalbox.includeAnalysis
+          eternalbox.includeAnalysis
         ),
         this.booleanRule(
           'sources.eternalbox.eternalStream',
-          () => eternalbox.eternalStream
+          eternalbox.eternalStream
         ),
         this.booleanRule(
           'sources.eternalbox.infiniteStream',
-          () => eternalbox.infiniteStream
+          eternalbox.infiniteStream
         ),
         this.nonNegativeIntRule(
           'sources.eternalbox.maxReconnects',
-          () => eternalbox.maxReconnects
+          eternalbox.maxReconnects
         ),
         this.positiveIntRule(
           'sources.eternalbox.reconnectDelayMs',
-          () => eternalbox.reconnectDelayMs
+          eternalbox.reconnectDelayMs
         ),
         {
           path: 'sources.eternalbox.minRandomBranchChance',
           expected: 'number between 0 and 1 (inclusive)',
-          get: () => eternalbox.minRandomBranchChance,
+          value: eternalbox.minRandomBranchChance,
           validate: (v: number) => typeof v === 'number' && v >= 0 && v <= 1
         },
         {
           path: 'sources.eternalbox.maxRandomBranchChance',
           expected: 'number between 0 and 1 (inclusive)',
-          get: () => eternalbox.maxRandomBranchChance,
+          value: eternalbox.maxRandomBranchChance,
           validate: (v: number) => typeof v === 'number' && v >= 0 && v <= 1
         },
-
         {
           path: 'sources.eternalbox.minRandomBranchChance',
           expected: `number <= maxRandomBranchChance (${eternalbox.maxRandomBranchChance})`,
-          get: () => eternalbox.minRandomBranchChance,
+          value: eternalbox.minRandomBranchChance,
           validate: (v: number) => v <= eternalbox.maxRandomBranchChance
         }
       )
     }
 
     const youtube = sources.youtube
-    if (youtube?.enabled) {
-      if (youtube.cipher?.url !== undefined) {
-        rules.push(
-          this.urlRule('sources.youtube.cipher.url', () => youtube.cipher.url)
-        )
-      }
+    if (youtube?.enabled && youtube.cipher?.url !== undefined) {
+      rules.push(this.urlRule('sources.youtube.cipher.url', youtube.cipher.url))
     }
 
     const pipertts = sources.pipertts
     if (pipertts?.enabled) {
-      rules.push(this.urlRule('sources.pipertts.url', () => pipertts.url))
+      rules.push(this.urlRule('sources.pipertts.url', pipertts.url))
     }
 
     const pandora = sources.pandora
     if (pandora?.enabled && pandora.remoteTokenUrl) {
       rules.push(
-        this.urlRule(
-          'sources.pandora.remoteTokenUrl',
-          () => pandora.remoteTokenUrl
-        )
+        this.urlRule('sources.pandora.remoteTokenUrl', pandora.remoteTokenUrl)
       )
     }
 
@@ -702,15 +740,15 @@ export default class ConfigValidationManager {
       rules.push(
         this.nonNegativeIntRule(
           'sources.yandexmusic.artistLoadLimit',
-          () => yandexmusic.artistLoadLimit
+          yandexmusic.artistLoadLimit
         ),
         this.nonNegativeIntRule(
           'sources.yandexmusic.albumLoadLimit',
-          () => yandexmusic.albumLoadLimit
+          yandexmusic.albumLoadLimit
         ),
         this.nonNegativeIntRule(
           'sources.yandexmusic.playlistLoadLimit',
-          () => yandexmusic.playlistLoadLimit
+          yandexmusic.playlistLoadLimit
         )
       )
       this.warnIfPlaceholder(
@@ -724,15 +762,15 @@ export default class ConfigValidationManager {
       rules.push(
         this.nonNegativeIntRule(
           'sources.gaana.playlistLoadLimit',
-          () => gaana.playlistLoadLimit
+          gaana.playlistLoadLimit
         ),
         this.nonNegativeIntRule(
           'sources.gaana.albumLoadLimit',
-          () => gaana.albumLoadLimit
+          gaana.albumLoadLimit
         ),
         this.nonNegativeIntRule(
           'sources.gaana.artistLoadLimit',
-          () => gaana.artistLoadLimit
+          gaana.artistLoadLimit
         )
       )
     }
@@ -743,18 +781,12 @@ export default class ConfigValidationManager {
         {
           path: 'sources.flowery.speed',
           expected: 'number > 0',
-          get: () => flowery.speed,
+          value: flowery.speed,
           validate: (v: number) => typeof v === 'number' && v > 0
         },
-        this.nonNegativeIntRule(
-          'sources.flowery.silence',
-          () => flowery.silence
-        ),
-        this.booleanRule('sources.flowery.translate', () => flowery.translate),
-        this.booleanRule(
-          'sources.flowery.enforceConfig',
-          () => flowery.enforceConfig
-        )
+        this.nonNegativeIntRule('sources.flowery.silence', flowery.silence),
+        this.booleanRule('sources.flowery.translate', flowery.translate),
+        this.booleanRule('sources.flowery.enforceConfig', flowery.enforceConfig)
       )
     }
 
@@ -763,29 +795,29 @@ export default class ConfigValidationManager {
       rules.push(
         this.positiveIntRule(
           'sources.lazypytts.maxTextLength',
-          () => lazypytts.maxTextLength
+          lazypytts.maxTextLength
         ),
         this.booleanRule(
           'sources.lazypytts.enforceConfig',
-          () => lazypytts.enforceConfig
+          lazypytts.enforceConfig
         )
       )
     }
 
-    this.runRules(rules)
+    return rules
   }
 
-  private validateSearch(): void {
+  private validateSearch(): ValidationRule[] {
     const rules: ValidationRule[] = [
       this.intRangeRule(
         'maxSearchResults',
-        () => this.options.maxSearchResults,
+        this.options.maxSearchResults,
         1,
         100
       ),
       this.intRangeRule(
         'maxAlbumPlaylistLength',
-        () => this.options.maxAlbumPlaylistLength,
+        this.options.maxAlbumPlaylistLength,
         1,
         500
       ),
@@ -793,13 +825,11 @@ export default class ConfigValidationManager {
         path: 'defaultSearchSource',
         expected:
           'string or non-empty string[] of enabled source names in config.sources',
-        get: () => this.options.defaultSearchSource,
+        value: this.options.defaultSearchSource,
         validate: (v: any) => {
           const sources = this.options.sources
           if (!sources) return false
-
           if (typeof v === 'string') return sources[v]?.enabled === true
-
           if (Array.isArray(v)) {
             if (v.length === 0) return false
             return v.every(
@@ -807,7 +837,6 @@ export default class ConfigValidationManager {
                 typeof name === 'string' && sources[name]?.enabled === true
             )
           }
-
           return false
         }
       }
@@ -819,7 +848,7 @@ export default class ConfigValidationManager {
         path: 'unifiedSearchSources',
         expected:
           'non-empty string[] of enabled source names in config.sources',
-        get: () => unified,
+        value: unified,
         validate: (v: any) => {
           const sources = this.options.sources
           if (!sources || !Array.isArray(v) || v.length === 0) return false
@@ -831,17 +860,17 @@ export default class ConfigValidationManager {
       })
     }
 
-    this.runRules(rules)
+    return rules
   }
 
-  private validateRoutePlanner(): void {
+  private validateRoutePlanner(): ValidationRule[] {
     const routePlanner = this.options.routePlanner
-    if (!routePlanner) return
+    if (!routePlanner) return []
 
     const rules: ValidationRule[] = [
       this.enumRule(
         'routePlanner.strategy',
-        () => routePlanner.strategy,
+        routePlanner.strategy,
         VALID_ROUTE_STRATEGIES
       )
     ]
@@ -850,20 +879,20 @@ export default class ConfigValidationManager {
       rules.push(
         this.positiveIntRule(
           'routePlanner.bannedIpCooldown',
-          () => routePlanner.bannedIpCooldown
+          routePlanner.bannedIpCooldown
         )
       )
     }
 
-    this.runRules(rules)
+    return rules
   }
 
-  private validateRateLimit(): void {
+  private validateRateLimit(): ValidationRule[] {
     const rateLimit = this.options.rateLimit
-    if (!rateLimit || rateLimit.enabled === false) return
+    if (!rateLimit || rateLimit.enabled === false) return []
 
     const rules: ValidationRule[] = [
-      this.booleanRule('rateLimit.enabled', () => rateLimit.enabled)
+      this.booleanRule('rateLimit.enabled', rateLimit.enabled)
     ]
 
     type RateLimitSection = { maxRequests: number; timeWindowMs: number }
@@ -875,58 +904,59 @@ export default class ConfigValidationManager {
     for (const section of sections) {
       const cfg = rateLimit[section] as RateLimitSection | undefined
       if (!cfg) {
-        prevSection = section
-        prevCfg = null
         continue
       }
 
       rules.push(
         this.positiveIntRule(
           `rateLimit.${section}.maxRequests`,
-          () => cfg.maxRequests
+          cfg.maxRequests
         ),
         this.positiveIntRule(
           `rateLimit.${section}.timeWindowMs`,
-          () => cfg.timeWindowMs
+          cfg.timeWindowMs
         )
       )
 
       if (prevSection !== null && prevCfg !== null) {
         const capturedPrevSection = prevSection
         const capturedPrevCfg = prevCfg
-        rules.push({
-          path: `rateLimit.${section}.maxRequests`,
-          expected: `integer <= rateLimit.${capturedPrevSection}.maxRequests (${capturedPrevCfg.maxRequests})`,
-          get: () => cfg.maxRequests,
-          validate: (v: number) =>
-            Number.isInteger(v) && v > 0 && v <= capturedPrevCfg.maxRequests
-        })
+        rules.push(
+          this.crossFieldIntRule(
+            `rateLimit.${section}.maxRequests`,
+            cfg.maxRequests,
+            capturedPrevCfg.maxRequests,
+            `rateLimit.${capturedPrevSection}.maxRequests`,
+            `integer <= rateLimit.${capturedPrevSection}.maxRequests (${capturedPrevCfg.maxRequests})`,
+            (v, dep) => v <= dep
+          )
+        )
       }
 
       prevSection = section
       prevCfg = cfg
     }
 
-    this.runRules(rules)
+    return rules
   }
 
-  private validateDosProtection(): void {
+  private validateDosProtection(): ValidationRule[] {
     const dos = this.options.dosProtection
-    if (!dos) return
+    if (!dos) return []
 
     const rules: ValidationRule[] = [
-      this.booleanRule('dosProtection.enabled', () => dos.enabled)
+      this.booleanRule('dosProtection.enabled', dos.enabled)
     ]
 
     if (dos.thresholds) {
       rules.push(
         this.positiveIntRule(
           'dosProtection.thresholds.burstRequests',
-          () => dos.thresholds.burstRequests
+          dos.thresholds.burstRequests
         ),
         this.positiveIntRule(
           'dosProtection.thresholds.timeWindowMs',
-          () => dos.thresholds.timeWindowMs
+          dos.thresholds.timeWindowMs
         )
       )
     }
@@ -935,33 +965,33 @@ export default class ConfigValidationManager {
       rules.push(
         this.nonNegativeIntRule(
           'dosProtection.mitigation.delayMs',
-          () => dos.mitigation.delayMs
+          dos.mitigation.delayMs
         ),
         this.positiveIntRule(
           'dosProtection.mitigation.blockDurationMs',
-          () => dos.mitigation.blockDurationMs
+          dos.mitigation.blockDurationMs
         )
       )
     }
 
-    this.runRules(rules)
+    return rules
   }
 
-  private validateLogging(): void {
+  private validateLogging(): ValidationRule[] {
     const logging = this.options.logging
-    if (!logging) return
+    if (!logging) return []
 
     const rules: ValidationRule[] = []
 
     if (logging.file) {
       rules.push(
-        this.booleanRule('logging.file.enabled', () => logging.file.enabled),
-        this.positiveIntRule('logging.file.ttlDays', () => logging.file.ttlDays)
+        this.booleanRule('logging.file.enabled', logging.file.enabled),
+        this.positiveIntRule('logging.file.ttlDays', logging.file.ttlDays)
       )
 
       if (logging.file.enabled) {
         rules.push(
-          this.nonEmptyStringRule('logging.file.path', () => logging.file.path)
+          this.nonEmptyStringRule('logging.file.path', logging.file.path)
         )
       }
     }
@@ -983,29 +1013,23 @@ export default class ConfigValidationManager {
       for (const field of debugFields) {
         if (logging.debug[field] !== undefined) {
           rules.push(
-            this.booleanRule(
-              `logging.debug.${field}`,
-              () => logging.debug[field]
-            )
+            this.booleanRule(`logging.debug.${field}`, logging.debug[field])
           )
         }
       }
     }
 
-    this.runRules(rules)
+    return rules
   }
 
-  private validateConnection(): void {
+  private validateConnection(): ValidationRule[] {
     const connection = this.options.connection
-    if (!connection) return
+    if (!connection) return []
 
     const rules: ValidationRule[] = [
-      this.booleanRule(
-        'connection.logAllChecks',
-        () => connection.logAllChecks
-      ),
-      this.positiveIntRule('connection.interval', () => connection.interval),
-      this.positiveIntRule('connection.timeout', () => connection.timeout)
+      this.booleanRule('connection.logAllChecks', connection.logAllChecks),
+      this.positiveIntRule('connection.interval', connection.interval),
+      this.positiveIntRule('connection.timeout', connection.timeout)
     ]
 
     if (connection.thresholds) {
@@ -1013,98 +1037,106 @@ export default class ConfigValidationManager {
         {
           path: 'connection.thresholds.bad',
           expected: 'number > 0 (Mbps)',
-          get: () => connection.thresholds.bad,
+          value: connection.thresholds.bad,
           validate: (v: number) => typeof v === 'number' && v > 0
         },
         {
           path: 'connection.thresholds.average',
           expected: 'number > 0 (Mbps)',
-          get: () => connection.thresholds.average,
+          value: connection.thresholds.average,
           validate: (v: number) => typeof v === 'number' && v > 0
         },
-
         {
           path: 'connection.thresholds.bad',
           expected: `number < connection.thresholds.average (${connection.thresholds.average})`,
-          get: () => connection.thresholds.bad,
-          validate: (v: number) => v < connection.thresholds.average
+          value: connection.thresholds.bad,
+          validate: (v: number) =>
+            typeof connection.thresholds.average === 'number' &&
+            typeof v === 'number' &&
+            v < connection.thresholds.average
         }
       )
     }
 
-    this.runRules(rules)
+    return rules
   }
 
-  private validateVoiceReceive(): void {
+  private validateVoiceReceive(): ValidationRule[] {
     const voiceReceive = this.options.voiceReceive
-    if (!voiceReceive) return
+    if (!voiceReceive) return []
 
-    const rules: ValidationRule[] = [
-      this.booleanRule('voiceReceive.enabled', () => voiceReceive.enabled),
+    return [
+      this.booleanRule('voiceReceive.enabled', voiceReceive.enabled),
       this.enumRule(
         'voiceReceive.format',
-        () => voiceReceive.format,
+        voiceReceive.format,
         VALID_VOICE_FORMATS
       )
     ]
-
-    this.runRules(rules)
   }
 
-  private validateMix(): void {
+  private validateMix(): ValidationRule[] {
     const mix = this.options.mix
-    if (!mix) return
+    if (!mix) return []
 
-    const rules: ValidationRule[] = [
-      this.booleanRule('mix.enabled', () => mix.enabled),
-      this.positiveIntRule('mix.maxLayersMix', () => mix.maxLayersMix),
-      this.booleanRule('mix.autoCleanup', () => mix.autoCleanup),
+    return [
+      this.booleanRule('mix.enabled', mix.enabled),
+      this.positiveIntRule('mix.maxLayersMix', mix.maxLayersMix),
+      this.booleanRule('mix.autoCleanup', mix.autoCleanup),
       {
         path: 'mix.defaultVolume',
         expected: 'number between 0 and 1 (inclusive)',
-        get: () => mix.defaultVolume,
+        value: mix.defaultVolume,
         validate: (v: number) => typeof v === 'number' && v >= 0 && v <= 1
       }
     ]
-
-    this.runRules(rules)
   }
 
-  private validateMetrics(): void {
+  private validateMetrics(): ValidationRule[] {
     const metrics = this.options.metrics
-    if (!metrics) return
+    if (!metrics) return []
 
     const rules: ValidationRule[] = [
-      this.booleanRule('metrics.enabled', () => metrics.enabled)
+      this.booleanRule('metrics.enabled', metrics.enabled)
     ]
 
     if (metrics.authorization) {
       rules.push(
         this.enumRule(
           'metrics.authorization.type',
-          () => metrics.authorization.type,
+          metrics.authorization.type,
           VALID_METRICS_AUTH_TYPES
         )
       )
     }
 
-    this.runRules(rules)
+    return rules
   }
 
-  private runRules(rules: ValidationRule[]): void {
-    const errors: string[] = []
+  private validateFilters(): ValidationRule[] {
+    const filters = this.options.filters
+    if (!filters?.enabled) return []
 
-    for (const rule of rules) {
-      try {
-        validateProperty(rule.get(), rule.path, rule.expected, rule.validate)
-      } catch (err: any) {
-        errors.push(err.message)
-      }
-    }
+    const filterFields = [
+      'tremolo',
+      'vibrato',
+      'lowpass',
+      'highpass',
+      'rotation',
+      'karaoke',
+      'distortion',
+      'channelMix',
+      'equalizer',
+      'chorus',
+      'compressor',
+      'echo',
+      'phaser',
+      'timescale'
+    ] as const
 
-    if (errors.length > 0) {
-      throw new Error('Configuration errors:\n\n' + errors.join('\n\n'))
-    }
+    return filterFields
+      .filter((f) => filters.enabled[f] !== undefined)
+      .map((f) => this.booleanRule(`filters.enabled.${f}`, filters.enabled[f]))
   }
 
   private warnIfPlaceholder(path: string, value: unknown): void {
@@ -1118,85 +1150,79 @@ export default class ConfigValidationManager {
 
   private nonNegativeIntRule(
     path: string,
-    get: () => number
+    value: number
   ): ValidationRule<number> {
     return {
       path,
       expected: 'integer >= 0',
-      get,
+      value,
       validate: (v) => Number.isInteger(v) && v >= 0
     }
   }
 
-  private positiveIntRule(
-    path: string,
-    get: () => number
-  ): ValidationRule<number> {
+  private positiveIntRule(path: string, value: number): ValidationRule<number> {
     return {
       path,
       expected: 'integer > 0',
-      get,
+      value,
       validate: (v) => Number.isInteger(v) && v > 0
     }
   }
 
   private intRangeRule(
     path: string,
-    get: () => number,
+    value: number,
     min: number,
     max: number
   ): ValidationRule<number> {
     return {
       path,
       expected: `integer between ${min} and ${max}`,
-      get,
+      value,
       validate: (v) => Number.isInteger(v) && v >= min && v <= max
     }
   }
 
-  private booleanRule(
-    path: string,
-    get: () => boolean
-  ): ValidationRule<boolean> {
+  private booleanRule(path: string, value: boolean): ValidationRule<boolean> {
     return {
       path,
       expected: 'boolean',
-      get,
+      value,
       validate: (v) => typeof v === 'boolean'
     }
   }
 
   private nonEmptyStringRule(
     path: string,
-    get: () => string
+    value: string
   ): ValidationRule<string> {
     return {
       path,
       expected: 'non-empty string',
-      get,
+      value,
       validate: (v) => typeof v === 'string' && v.trim().length > 0
     }
   }
 
   private enumRule(
     path: string,
-    get: () => any,
+    value: any,
     allowed: Set<string>
   ): ValidationRule<any> {
     const label = [...allowed].join(', ')
     return {
       path,
       expected: `one of [${label}]`,
-      get,
+      value,
       validate: (v) => allowed.has(v)
     }
   }
 
-  private urlRule(path: string, get: () => string): ValidationRule<string> {
+  private urlRule(path: string, value: string): ValidationRule<string> {
     return {
       path,
       expected: 'valid http or https URL (e.g. https://example.com)',
-      get,
+      value,
       validate: (v) => {
         if (typeof v !== 'string' || v.trim().length === 0) return false
         try {
@@ -1206,6 +1232,25 @@ export default class ConfigValidationManager {
           return false
         }
       }
+    }
+  }
+
+  private crossFieldIntRule(
+    path: string,
+    value: number,
+    dependency: number,
+    _dependencyPath: string,
+    expected: string,
+    compare: (v: number, dep: number) => boolean
+  ): ValidationRule<number> {
+    return {
+      path,
+      expected,
+      value,
+      validate: (v: number) =>
+        Number.isInteger(v) &&
+        Number.isInteger(dependency) &&
+        compare(v, dependency)
     }
   }
 }
