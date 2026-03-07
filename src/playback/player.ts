@@ -9,19 +9,28 @@ import discordVoice, {
 import { EndReasons, GatewayEvents } from '../constants.ts'
 import type {
   AudioMixer,
+  AudioOptionsWithTransitions,
   AudioResource,
+  AutomixConfig,
   CreateAudioResource,
   CreateSeekeableAudioResource,
   CrossfadeConfig,
   CrossfadeMode,
+  DeezerApiTrackResponse,
+  DeezerMetadataConfig,
+  DeezerTrackMetadata,
+  ExtendedAudioStream,
   FadeTimers,
   FadingConfig,
   FadingSection,
+  FilterStateEntry,
   FiltersState,
+  FilterTransitionsConfig,
   LyricsLine,
   LyricsPayload,
   NodeLink,
   PlayerOptions,
+  PlayerPluginInfo,
   PlayerStateJSON,
   PlayerTrack,
   PlayerVoiceState,
@@ -29,10 +38,15 @@ import type {
   Session,
   StreamInfo,
   TrackFormat,
-  TrackInfoExtended
+  TrackInfoExtended,
+  TrackKeyResult
 } from '../typings/playback/player.types.ts'
 import type { TrackUrlResult } from '../typings/sources/source.types.ts'
-import { logger } from '../utils.ts'
+import { logger, makeRequest } from '../utils.ts'
+import type {
+  AutoMixDecision,
+  AutoMixMode
+} from './processing/automixController.ts'
 
 export type GatewayEventName =
   (typeof GatewayEvents)[keyof typeof GatewayEvents]
@@ -40,10 +54,14 @@ export type EndReason = (typeof EndReasons)[keyof typeof EndReasons]
 
 let createAudioResource: CreateAudioResource | null = null
 let createSeekeableAudioResource: CreateSeekeableAudioResource | null = null
+const env = process.env as NodeJS.ProcessEnv & {
+  NODELINK_TRACK_FINISH_MEMORY_TRACE?: string
+  NODELINK_TRACK_FINISH_FORCE_GC?: string
+}
 const trackFinishMemoryTraceEnabled =
-  process.env['NODELINK_TRACK_FINISH_MEMORY_TRACE']?.toLowerCase() === 'true'
+  env.NODELINK_TRACK_FINISH_MEMORY_TRACE?.toLowerCase() === 'true'
 const trackFinishForceGcEnabled =
-  process.env['NODELINK_TRACK_FINISH_FORCE_GC']?.toLowerCase() === 'true'
+  env.NODELINK_TRACK_FINISH_FORCE_GC?.toLowerCase() === 'true'
 
 async function getStreamProcessor(): Promise<void> {
   if (createAudioResource && createSeekeableAudioResource) return
@@ -52,6 +70,30 @@ async function getStreamProcessor(): Promise<void> {
   createAudioResource = processor.createAudioResource as CreateAudioResource
   createSeekeableAudioResource =
     processor.createSeekeableAudioResource as CreateSeekeableAudioResource
+}
+
+let _automixModule: typeof import('./processing/automixController.ts') | null =
+  null
+async function getAutomixController() {
+  if (_automixModule) return _automixModule.default
+  _automixModule = await import('./processing/automixController.ts')
+  return _automixModule.default
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeAutoMixMode(mode: string | undefined): AutoMixMode {
+  switch (mode) {
+    case 'fusion':
+    case 'dj_fx':
+    case 'radio':
+    case 'turntable':
+      return mode
+    default:
+      return 'smart'
+  }
 }
 
 /**
@@ -79,7 +121,6 @@ export class Player {
   private nextCrossfadeResource: AudioResource | null = null
   private nextCrossfadePcm: AudioResource | null = null
   private nextCrossfadeStreamInfo: StreamInfo = null
-  private nextCrossfadeDuration = 0
   public isPaused = false
   public volumePercent: number
   public filters: FiltersState = {}
@@ -109,6 +150,7 @@ export class Player {
   public loudnessNormalizer: boolean
   private _fadeTimers: FadeTimers = { trackEnd: null, pause: null, stop: null }
   private _crossfadeTimer: NodeJS.Timeout | null = null
+  private _silenceWatchdog: NodeJS.Timeout | null = null
   private _crossfadeEndTimer: NodeJS.Timeout | null = null
   private _crossfadeCompletionWatcher: NodeJS.Timeout | null = null
   private _crossfadeCompletionDeadline = 0
@@ -122,11 +164,28 @@ export class Player {
   } | null = null
   private _crossfadeCompleting = false
   private _crossfadeIgnoreIdle = false
+  private _crossfadeBlendStartedAt = 0
+  private _preAutomixFilters: Record<string, unknown> | null = null
+  private _automixPreLeadTimer: NodeJS.Timeout | null = null
+  private _pendingTriggerAutomix: (() => void) | null = null
+  private _automixDeezerCache = new Map<
+    string,
+    {
+      bpm: number | null
+      gain: number | null
+      expiresAt: number
+    }
+  >()
+  private _preAutomixUserVolume: number | undefined
   private _crossfadeToken = 0
   private _crossfadePrepared = false
+  private _crossfadeStartRetryToken = 0
+  private _crossfadeStartRetryCount = 0
   private _isResuming = false
   private _pendingTrackStartFade = false
+  private _pendingPreload: PlayerTrack | null = null
   private _ignoreIdleStoppedUntil = 0
+  private _lastStaleBridgeStarvationLogAt = 0
   private _lyricsBasePosition = 0
   private _lyricsBasePackets = 0
   private _lyricsMarkerTimer: NodeJS.Timeout | null = null
@@ -150,6 +209,7 @@ export class Player {
   private _lastPosition = 0
   private _stuckTime = 0
   private _lastStreamDataTime = 0
+  private _lastCrossfadeCompletedAt = 0
   private _isRecovering = false
   public destroying = false
   public isUpdatingTrack = false
@@ -203,9 +263,7 @@ export class Player {
 
       try {
         this.session.socket.send(eventData)
-      } catch {
-        /* ignore */
-      }
+      } catch {}
     }
 
     this.emitEvent(GatewayEvents.PLAYER_CREATED, {
@@ -239,8 +297,124 @@ export class Player {
 
         this.connection?.on(event, handler)
       })
+  }
 
-    // Voice connection and mixer are initialized lazily to reduce per-player baseline memory.
+  private _getAudioOptions(): AudioOptionsWithTransitions | undefined {
+    return this.nodelink.options.audio as
+      | AudioOptionsWithTransitions
+      | undefined
+  }
+
+  private _getAutomixConfig(): AutomixConfig | undefined {
+    return this._getAudioOptions()?.automix
+  }
+
+  private _getFilterTransitions(): FilterTransitionsConfig | undefined {
+    return this._getAudioOptions()?.filterTransitions
+  }
+
+  private _getAudioStream(): ExtendedAudioStream | null {
+    return (this.connection?.audioStream as ExtendedAudioStream | null) ?? null
+  }
+
+  private _getPluginInfo(track: PlayerTrack | null): PlayerPluginInfo {
+    return (track?.pluginInfo || {}) as PlayerPluginInfo
+  }
+
+  /**
+   * Whether the crossfade bridge is draining without any pending next track.
+   *
+   * In this state, stuck-recovery seek attempts can restart/loop playback near
+   * the tail because the current stream is already finishing naturally.
+   */
+  private _isBridgeDrainWithoutPendingNext(): boolean {
+    const audioStream = this._getAudioStream()
+    const bridgeDraining =
+      typeof audioStream?.isBridgeDraining === 'function' &&
+      audioStream.isBridgeDraining()
+
+    if (!bridgeDraining) return false
+
+    const hasPendingNext = Boolean(
+      this.nextCrossfadeTrack ||
+        this.nextCrossfadePcm ||
+        this.nextTrack ||
+        this.nextResource ||
+        this._pendingPreload
+    )
+
+    return !hasPendingNext
+  }
+
+  /**
+   * Installs bridge-starvation rescue for the active crossfade token.
+   *
+   * The crossfade bridge can enter starvation when Track A ends before
+   * crossfade initialization has started. This handler forces the pending
+   * automix trigger (or direct crossfade fallback) immediately.
+   */
+  private _bindBridgeStarvationRescue(token: number): void {
+    const crossfadeCtrl = this._getAudioStream()?.crossfadeController
+    if (
+      !crossfadeCtrl ||
+      typeof crossfadeCtrl.onBridgeStarving === 'undefined'
+    ) {
+      return
+    }
+
+    const onBridgeStarving = () => {
+      if (token !== this._crossfadeToken) {
+        // This callback belongs to an older crossfade token. Detach it from
+        // this controller to avoid starvation-spam loops on stale bridges.
+        if (crossfadeCtrl.onBridgeStarving === onBridgeStarving) {
+          crossfadeCtrl.onBridgeStarving = null
+        }
+        const now = Date.now()
+        if (now - this._lastStaleBridgeStarvationLogAt > 1500) {
+          this._lastStaleBridgeStarvationLogAt = now
+          logger(
+            'debug',
+            'AutoMix',
+            `Ignoring stale bridge starvation callback for guild ${this.guildId} (callback token: ${token}, current token: ${this._crossfadeToken})`
+          )
+        }
+        return
+      }
+
+      logger(
+        'warn',
+        'AutoMix',
+        `Bridge starvation rescue for guild ${this.guildId} — forcing transition start`
+      )
+
+      if (this._pendingTriggerAutomix) {
+        const fn = this._pendingTriggerAutomix
+        this._pendingTriggerAutomix = null
+        fn()
+        return
+      }
+
+      const crossfadeConfig = this._getCrossfadeConfig()
+      if (
+        crossfadeConfig &&
+        this.track &&
+        this.nextCrossfadeTrack &&
+        this.nextCrossfadePcm
+      ) {
+        this._startCrossfade(token, crossfadeConfig.durationMs, crossfadeConfig)
+        return
+      }
+
+      logger(
+        'debug',
+        'AutoMix',
+        `Bridge starvation fallback for guild ${this.guildId}: no pending next track; draining bridge.`
+      )
+
+      this._getAudioStream()?.clearCrossfade?.()
+    }
+
+    crossfadeCtrl.onBridgeStarving = onBridgeStarving
   }
 
   /**
@@ -431,6 +605,17 @@ export class Player {
       return
     }
 
+    if (state.status === 'idle' && state.reason === 'stuck') {
+      logger(
+        'warn',
+        'Player',
+        `Track became stuck for guild ${this.guildId}. Triggering immediate recovery.`
+      )
+      this._stuckTime = this.nodelink.options.trackStuckThresholdMs + 1
+      this._sendUpdate()
+      return
+    }
+
     if (state.status === 'idle' && this.isUpdatingTrack) {
       if (endReason === EndReasons.STOPPED) {
         logger(
@@ -459,6 +644,20 @@ export class Player {
         (state.reason === EndReasons.FINISHED ||
           state.reason === EndReasons.STOPPED)
       ) {
+        const MIN_BLEND_WALL_MS = 2000
+        const blendElapsed =
+          this._crossfadeBlendStartedAt > 0
+            ? Date.now() - this._crossfadeBlendStartedAt
+            : 0
+        if (blendElapsed < MIN_BLEND_WALL_MS) {
+          logger(
+            'debug',
+            'Crossfade',
+            `Ignoring premature idle:${state.reason} during crossfade for guild ${this.guildId} (blend elapsed: ${blendElapsed}ms)`
+          )
+          return
+        }
+
         const context = this._crossfadeCompletionContext
         this._triggerCrossfadeCompletion(
           context.token,
@@ -535,7 +734,7 @@ export class Player {
       logger(
         'debug',
         'Player',
-        `Track ended for guild ${this.guildId}. Reason: ${state.reason}. Current position: ${this.position}`
+        `Track ended for guild ${this.guildId}. Reason: ${state.reason}. Current position: ${this._realPosition()}`
       )
       this._traceTrackFinishMemory('before-cleanup')
       this._cleanupCurrentAudioStream('track-end')
@@ -548,14 +747,16 @@ export class Player {
       state.status === 'playing' &&
       this.track &&
       !this._isSeeking &&
-      (['requested', 'reconnected'].includes(state.reason ?? '') ||
+      (['requested', 'reconnected', 'seamless_bridge'].includes(
+        state.reason ?? ''
+      ) ||
         this._pendingTrackStartFade)
     ) {
       const wasResuming = this._isResuming
       this._isResuming = false
       this.isPaused = false
 
-      if (wasResuming) {
+      if (wasResuming && state.reason !== 'seamless_bridge') {
         logger(
           'debug',
           'Crossfade',
@@ -574,13 +775,6 @@ export class Player {
     } else if (state.status === 'paused') {
       this.isPaused = true
     }
-  }
-
-  /**
-   * Suppresses transient idle/stopped events emitted by internal stream replacement.
-   */
-  private _guardInternalStreamSwap(ms = 1500): void {
-    this._ignoreIdleStoppedUntil = Date.now() + Math.max(250, ms)
   }
 
   /**
@@ -677,6 +871,7 @@ export class Player {
   private _resetTrack(): void {
     this._clearCrossfade()
     this._isStopping = false
+    this._pendingPreload = null
     if (this.nextResource) {
       this.nextResource.destroy()
       this.nextResource = null
@@ -872,14 +1067,241 @@ export class Player {
         ? Math.max(minBufferMs, config.bufferMs as number)
         : durationMs
 
+    const SCAN_AHEAD_MS = 20_000
+    const effectiveBufferMs = Math.max(bufferMs, durationMs + SCAN_AHEAD_MS)
+
     return {
       enabled: true,
       durationMs,
       curve,
       mode,
       minBufferMs,
-      bufferMs
+      bufferMs: effectiveBufferMs
     }
+  }
+
+  private _normalizeIsrc(value: unknown): string | null {
+    if (typeof value !== 'string') return null
+    const normalized = value.trim().replace(/-/g, '').toUpperCase()
+    return /^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(normalized) ? normalized : null
+  }
+
+  private async _ensureAutomixDeezerMetadata(
+    track: PlayerTrack | null,
+    deezerMetadataCfg: DeezerMetadataConfig | undefined
+  ): Promise<void> {
+    if (!track || deezerMetadataCfg?.enabled !== true) return
+
+    const pluginInfo = this._getPluginInfo(track)
+    const existingMeta = (pluginInfo.deezer || pluginInfo.deezerMetadata) as
+      | DeezerTrackMetadata
+      | undefined
+
+    const hasBpm = Number.isFinite(Number(existingMeta?.bpm))
+    const hasGain = Number.isFinite(Number(existingMeta?.gain))
+    const needsBpm = deezerMetadataCfg.useBpm !== false && !hasBpm
+    const needsGain = deezerMetadataCfg.useGain !== false && !hasGain
+    if (!needsBpm && !needsGain) return
+
+    const isrc = this._normalizeIsrc(track.info?.isrc)
+    if (!isrc) return
+
+    const now = Date.now()
+    const cached = this._automixDeezerCache.get(isrc)
+    if (cached && cached.expiresAt > now) {
+      const merged = {
+        ...(existingMeta || {}),
+        bpm: cached.bpm,
+        gain: cached.gain
+      }
+      track.pluginInfo = {
+        ...pluginInfo,
+        deezer: merged
+      }
+      return
+    }
+
+    const requestTimeoutMs = deezerMetadataCfg.requestTimeoutMs
+    const timeout =
+      typeof requestTimeoutMs === 'number' &&
+      Number.isInteger(requestTimeoutMs) &&
+      requestTimeoutMs > 0
+        ? requestTimeoutMs
+        : 2500
+
+    try {
+      const { body, error } = await makeRequest(
+        `https://api.deezer.com/2.0/track/isrc:${isrc}`,
+        {
+          method: 'GET',
+          timeout
+        }
+      )
+      const deezerBody = body as DeezerApiTrackResponse
+
+      if (error || deezerBody?.error) return
+
+      const bpm = Number(deezerBody?.bpm)
+      const gain = Number(deezerBody?.gain)
+      const normalized = {
+        bpm: Number.isFinite(bpm) && bpm > 0 ? bpm : null,
+        gain: Number.isFinite(gain) ? gain : null
+      }
+
+      logger(
+        'debug',
+        'AutoMix',
+        `Deezer metadata for ISRC ${isrc}: BPM=${normalized.bpm ?? 'N/A'}, gain=${normalized.gain ?? 'N/A'}`
+      )
+
+      this._automixDeezerCache.set(isrc, {
+        ...normalized,
+        expiresAt: now + 6 * 60 * 60 * 1000
+      })
+
+      track.pluginInfo = {
+        ...pluginInfo,
+        deezer: {
+          ...(existingMeta || {}),
+          ...normalized
+        }
+      }
+    } catch {}
+  }
+
+  private async _primeAutomixMetadata(
+    trackA: PlayerTrack | null,
+    trackB: PlayerTrack | null,
+    deezerMetadataCfg: DeezerMetadataConfig | undefined
+  ): Promise<void> {
+    if (deezerMetadataCfg?.enabled !== true) return
+    await Promise.all([
+      this._ensureAutomixDeezerMetadata(trackA, deezerMetadataCfg),
+      this._ensureAutomixDeezerMetadata(trackB, deezerMetadataCfg)
+    ])
+  }
+
+  private _getAutomixLiveSignals(
+    stream?: ExtendedAudioStream | null
+  ): {
+    liveBpmA?: number
+    liveBpmB?: number
+    liveBpmAConfidence?: number
+    liveBpmBConfidence?: number
+  } {
+    const audioStream = stream ?? this._getAudioStream()
+    if (!audioStream) return {}
+
+    const beatA = audioStream.getRealtimeBeatState?.() ?? null
+    const beatB = audioStream.getNextTrackBeatState?.() ?? null
+    const bpmA = audioStream.getMainTrackBpm?.() ?? null
+    const bpmB = audioStream.getNextTrackBpm?.() ?? null
+
+    const liveBpmA = Number.isFinite(bpmA) && (bpmA as number) > 0
+      ? Number(bpmA)
+      : undefined
+    const liveBpmB = Number.isFinite(bpmB) && (bpmB as number) > 0
+      ? Number(bpmB)
+      : undefined
+
+    const liveBpmAConfidence = beatA
+      ? Math.max(0, Math.min(1, beatA.confidence))
+      : liveBpmA != null
+        ? 0.55
+        : undefined
+    const liveBpmBConfidence = beatB
+      ? Math.max(0, Math.min(1, beatB.confidence))
+      : liveBpmB != null
+        ? 0.50
+        : undefined
+
+    return {
+      liveBpmA,
+      liveBpmB,
+      liveBpmAConfidence,
+      liveBpmBConfidence
+    }
+  }
+
+  /**
+   * Triggers an immediate crossfade to the preloaded next track.
+   * Useful for manual "/automix start" bot commands.
+   *
+   * @param durationMs - Optional override for crossfade duration.
+   * @returns True if crossfade started, false otherwise.
+   */
+  public async triggerCrossfade(durationMs?: number): Promise<boolean> {
+    if (!this.track || !this.nextCrossfadeTrack || !this.nextCrossfadePcm) {
+      logger(
+        'warn',
+        'Crossfade',
+        `Cannot trigger crossfade manually for guild ${this.guildId} (missing next track buffer)`
+      )
+      return false
+    }
+
+    const config = this._getCrossfadeConfig()
+    if (!config) {
+      logger(
+        'warn',
+        'Crossfade',
+        `Cannot trigger crossfade manually for guild ${this.guildId} (crossfade is disabled)`
+      )
+      return false
+    }
+
+    if (this._crossfadeTimer) {
+      clearTimeout(this._crossfadeTimer)
+      this._crossfadeTimer = null
+    }
+
+    const automixConfig = this._getAutomixConfig()
+    let automixDecision: AutoMixDecision | null = null
+    if (automixConfig?.enabled) {
+      try {
+        await this._primeAutomixMetadata(
+          this.track,
+          this.nextCrossfadeTrack,
+          automixConfig.deezerMetadata
+        )
+        const Controller = await getAutomixController()
+        const audioStream = this._getAudioStream()
+        const energy = audioStream?.getMainEnergy?.()
+        const bEnergy = audioStream?.getNextTrackOpeningEnergy?.() ?? 0
+        automixDecision = Controller.analyze(
+          this.track,
+          this.nextCrossfadeTrack,
+          durationMs || config.durationMs,
+          normalizeAutoMixMode(automixConfig.mode),
+          {
+            deezerMetadata: automixConfig.deezerMetadata,
+            trackAEnergy: energy?.rms,
+            trackBOpeningEnergy: bEnergy,
+            ...this._getAutomixLiveSignals(audioStream)
+          }
+        )
+      } catch (e) {
+        logger(
+          'warn',
+          'AutoMix',
+          `Failed to analyze manual crossfade: ${(e as Error).message}`
+        )
+      }
+    }
+
+    const token = ++this._crossfadeToken
+    logger(
+      'info',
+      'Crossfade',
+      `Manual crossfade triggered for guild ${this.guildId}`
+    )
+    this._startCrossfade(
+      token,
+      durationMs || config.durationMs,
+      config,
+      automixDecision
+    )
+    return true
   }
 
   /**
@@ -888,9 +1310,9 @@ export class Player {
    * @param options - Controls which buffered resources to dispose.
    */
   private _clearCrossfade(
-    options: { clearNext?: boolean; clearPcm?: boolean } = {}
+    options: { clearNext?: boolean; clearPcm?: boolean; force?: boolean } = {}
   ): void {
-    const { clearNext = true, clearPcm = true } = options
+    const { clearNext = true, clearPcm = true, force = false } = options
     logger(
       'debug',
       'Crossfade',
@@ -901,10 +1323,42 @@ export class Player {
         token: this._crossfadeToken
       }
     )
+    if (force) this._pendingPreload = null
     if (this._crossfadeTimer) {
       clearTimeout(this._crossfadeTimer)
       this._crossfadeTimer = null
     }
+    if (this._silenceWatchdog) {
+      clearInterval(this._silenceWatchdog)
+      clearTimeout(this._silenceWatchdog)
+      this._silenceWatchdog = null
+    }
+    if (this._automixPreLeadTimer) {
+      clearTimeout(this._automixPreLeadTimer)
+      this._automixPreLeadTimer = null
+    }
+    this._pendingTriggerAutomix = null
+    if (this._preAutomixFilters !== null) {
+      if (force) {
+        logger(
+          'debug',
+          'AutoMix',
+          `Force-restoring pre-automix filters for guild ${this.guildId}`
+        )
+        this.filters = {
+          ...this.filters,
+          filters: { ...this._preAutomixFilters }
+        } as FiltersState
+      } else {
+        logger(
+          'debug',
+          'AutoMix',
+          `Restoring pre-automix filters for guild ${this.guildId}`
+        )
+        this.setFilters({ filters: this._preAutomixFilters } as FiltersState)
+      }
+    }
+    this._preAutomixFilters = null
     if (this._crossfadeEndTimer) {
       clearTimeout(this._crossfadeEndTimer)
       this._crossfadeEndTimer = null
@@ -919,13 +1373,29 @@ export class Player {
     this._crossfadeCompletionContext = null
     this._crossfadeCompleting = false
     this._crossfadeIgnoreIdle = false
+    this._crossfadeBlendStartedAt = 0
     this._crossfadePrepared = false
+    this._crossfadeStartRetryToken = 0
+    this._crossfadeStartRetryCount = 0
     this._crossfadeToken += 1
 
-    const audioStream = this.connection?.audioStream as
-      | AudioResource
-      | undefined
-    audioStream?.clearCrossfade?.()
+    const audioStream = this._getAudioStream()
+
+    const streamInBridge =
+      !force &&
+      ((typeof audioStream?.isBridgeDraining === 'function' &&
+        audioStream.isBridgeDraining()) ||
+        (typeof audioStream?.isBridgeMode === 'function' &&
+          audioStream.isBridgeMode()))
+    const crossfadeCtrl = audioStream?.crossfadeController
+    if (crossfadeCtrl) {
+      crossfadeCtrl.onBridgeDrained = null
+      crossfadeCtrl.onBridgeStarving = null
+    }
+    if (force || (!this._crossfadeCompletionContext && !streamInBridge)) {
+      audioStream?.clearCrossfade?.()
+    }
+    audioStream?.setIncomingGain?.(1.0)
 
     if (clearPcm && this.nextCrossfadePcm) {
       this.nextCrossfadePcm.destroy()
@@ -938,7 +1408,6 @@ export class Player {
     if (clearNext) {
       this.nextCrossfadeTrack = null
       this.nextCrossfadeStreamInfo = null
-      this.nextCrossfadeDuration = 0
     }
     logger('debug', 'Crossfade', `Crossfade cleared for guild ${this.guildId}`)
   }
@@ -960,14 +1429,24 @@ export class Player {
       return
     }
     const pcmResource = this.nextCrossfadePcm
-    const audioStream = this.connection?.audioStream as
-      | AudioResource
-      | undefined
+    const audioStream = this._getAudioStream()
     if (!pcmResource?.stream || !audioStream?.prepareCrossfade) {
       logger(
         'debug',
         'Crossfade',
         `Crossfade buffer preparation skipped for guild ${this.guildId} (missing stream/hook)`
+      )
+      return
+    }
+
+    if (
+      typeof audioStream?.isFlushed === 'function' &&
+      audioStream.isFlushed()
+    ) {
+      logger(
+        'debug',
+        'Crossfade',
+        `Crossfade buffer preparation skipped for guild ${this.guildId} (pipeline flushed)`
       )
       return
     }
@@ -1021,7 +1500,6 @@ export class Player {
     const boundedDelay = Math.max(0, delayMs)
     this._crossfadeCompletionRemainingMs = boundedDelay
     this._crossfadeEndsAt = Date.now() + boundedDelay
-    // Safety deadline if crossfade state never flips to inactive.
     this._crossfadeCompletionDeadline =
       Date.now() + Math.max(4000, boundedDelay * 3, boundedDelay + 1500)
     logger(
@@ -1047,18 +1525,28 @@ export class Player {
         return
       }
 
-      const audioStream = this.connection?.audioStream as
-        | AudioResource
-        | undefined
+      const audioStream = this._getAudioStream()
       const state = audioStream?.getCrossfadeState?.()
       const currentPosition = this._realPosition()
       const isPositionReached = currentPosition >= context.endPositionMs - 40
-      const isDone = state
-        ? state.active === false || state.isFinished === true
-        : false
+
+      const isBridgeReady =
+        typeof audioStream?.isBridgeMode === 'function' &&
+        audioStream.isBridgeMode()
+      const isBlendComplete = state
+        ? state.isFinished === true
+        : isPositionReached
       const timedOut = Date.now() >= this._crossfadeCompletionDeadline
 
-      if (!(isDone && isPositionReached) && !timedOut) return
+      const MIN_BLEND_WALL_MS = 2000
+      const elapsedSinceBlend = Date.now() - this._crossfadeBlendStartedAt
+      if (elapsedSinceBlend < MIN_BLEND_WALL_MS && !timedOut) return
+
+      if (
+        !(isPositionReached && (isBridgeReady || isBlendComplete)) &&
+        !timedOut
+      )
+        return
 
       if (this._crossfadeCompletionWatcher) {
         clearInterval(this._crossfadeCompletionWatcher)
@@ -1070,7 +1558,7 @@ export class Player {
       this._crossfadeCompletionDeadline = 0
       this._crossfadeCompletionContext = null
 
-      if (timedOut && !isDone) {
+      if (timedOut && !(isBridgeReady || isBlendComplete)) {
         logger(
           'warn',
           'Crossfade',
@@ -1078,6 +1566,8 @@ export class Player {
           {
             token: context.token,
             state,
+            isBridgeReady,
+            isBlendComplete,
             currentPosition,
             endPositionMs: context.endPositionMs
           }
@@ -1090,6 +1580,8 @@ export class Player {
           {
             token: context.token,
             state,
+            isBridgeReady,
+            isBlendComplete,
             currentPosition,
             endPositionMs: context.endPositionMs
           }
@@ -1186,7 +1678,7 @@ export class Player {
       return
 
     logger(
-      'debug',
+      'info',
       'Crossfade',
       `Scheduling crossfade for guild ${this.guildId}`,
       {
@@ -1217,7 +1709,22 @@ export class Player {
 
     const durationMs = config.durationMs
     if (durationMs <= 0) return
-    if (config.mode !== 'stream' && total > 0) {
+
+    if (this._crossfadeCompletionContext) {
+      logger(
+        'debug',
+        'Crossfade',
+        `Crossfade scheduling deferred for guild ${this.guildId} (pipeline is transitioning).`
+      )
+      return
+    }
+
+    const currentAudioStream = this._getAudioStream()
+    const _bridgeDrain =
+      typeof currentAudioStream?.isBridgeDraining === 'function' &&
+      currentAudioStream.isBridgeDraining()
+
+    if (config.mode !== 'stream' && total > 0 && !_bridgeDrain) {
       const remaining = Math.max(0, total - startPosition)
       if (remaining < durationMs) {
         logger(
@@ -1227,6 +1734,10 @@ export class Player {
             remaining
           )}ms < ${durationMs}ms).`
         )
+        if (this._crossfadePrepared) {
+          currentAudioStream?.clearCrossfade?.()
+          this._crossfadePrepared = false
+        }
         return
       }
     }
@@ -1243,11 +1754,14 @@ export class Player {
     }
 
     const delay =
-      config.mode === 'stream'
+      config.mode === 'stream' || _bridgeDrain
         ? 0
         : Math.max(0, Math.max(0, total - startPosition) - durationMs)
     this._crossfadeToken += 1
     const token = this._crossfadeToken
+    this._crossfadeStartRetryToken = token
+    this._crossfadeStartRetryCount = 0
+    this._bindBridgeStarvationRescue(token)
     logger(
       'debug',
       'Crossfade',
@@ -1258,19 +1772,800 @@ export class Player {
       }
     )
 
-    this._crossfadeTimer = setTimeout(() => {
-      this._crossfadeTimer = null
-      logger(
-        'debug',
-        'Crossfade',
-        `Crossfade start timer fired for guild ${this.guildId}`,
-        {
+    let automixDecision: AutoMixDecision | null = null
+    const automixConfig = this._getAutomixConfig()
+    if (automixConfig?.enabled && this.track && this.nextCrossfadeTrack) {
+      const trackA = this.track
+      const trackB = this.nextCrossfadeTrack
+      void this._primeAutomixMetadata(
+        trackA,
+        trackB,
+        automixConfig.deezerMetadata
+      )
+        .then(() => getAutomixController())
+        .then((Controller) => {
+          if (this._crossfadeToken !== token) return
+          const audioStream = this._getAudioStream()
+          const energy = audioStream?.getMainEnergy?.()
+          const bEnergy = audioStream?.getNextTrackOpeningEnergy?.() ?? 0
+          automixDecision = Controller.analyze(
+            trackA,
+            trackB,
+            durationMs,
+            normalizeAutoMixMode(automixConfig.mode),
+            {
+              deezerMetadata: automixConfig.deezerMetadata,
+              trackAEnergy: energy?.rms,
+              trackBOpeningEnergy: bEnergy,
+              ...this._getAutomixLiveSignals(audioStream)
+            }
+          )
+          logger(
+            'info',
+            'AutoMix',
+            `Decision for guild ${this.guildId}`,
+            automixDecision
+          )
+        })
+        .catch((e) =>
+          logger(
+            'warn',
+            'AutoMix',
+            `Failed to analyze: ${(e as Error).message}`
+          )
+        )
+    }
+
+    const ANALYSIS_WINDOW_MS = 120_000 // Start monitoring 120s before end
+    const MIN_REMAINING_MS = 28_000 // Fallback at 28s remaining
+    const SMART_ZONE_MS = 35_000 // Only trigger sensitive strategies in the last 35s
+    const ENERGY_POLL_MS = 200 // Faster polling to catch beat anchors reliably
+    const ENERGY_HISTORY_SIZE = 100 // 20 seconds of history (100 × 200ms)
+    const ENERGY_DROP_RATIO = 0.5 // Trigger when energy < 50% of average (was 70% — too eager)
+    const ENERGY_MATCH_TOLERANCE = 0.2 // Trigger when A is within 20% of B's energy (was 40%)
+    const MIN_RMS_FLOOR = 0.015 // Ignore strategies if energy is below 1.5%
+
+    const analysisWindowStart = Math.max(
+      0,
+      total - ANALYSIS_WINDOW_MS - startPosition
+    )
+    const fallbackDelay = Math.max(0, total - startPosition - MIN_REMAINING_MS)
+
+    const triggerAutomix = (reason: string) => {
+      if (this._crossfadeToken !== token) return
+
+      this._pendingTriggerAutomix = null
+
+      this._crossfadeIgnoreIdle = true
+
+      if (this._silenceWatchdog) {
+        clearInterval(this._silenceWatchdog)
+        this._silenceWatchdog = null
+      }
+      if (this._automixPreLeadTimer) {
+        clearTimeout(this._automixPreLeadTimer)
+        this._automixPreLeadTimer = null
+      }
+      if (this._crossfadeTimer) {
+        clearTimeout(this._crossfadeTimer)
+        this._crossfadeTimer = null
+      }
+
+      if (!automixDecision || automixDecision.transition === 'gapless') {
+        logger(
+          'info',
+          'AutoMix',
+          `Triggering gapless for guild ${this.guildId} (${reason})`
+        )
+        this._startCrossfade(
           token,
-          durationMs
+          automixDecision?.transitionDurationMs ?? durationMs,
+          config,
+          automixDecision,
+          reason
+        )
+        return
+      }
+
+      if (reason === 'bridge_starving') {
+        const transitionMs = automixDecision.transitionDurationMs || 10000
+        logger(
+          'info',
+          'AutoMix',
+          `Triggering bridge-starving rescue for guild ${this.guildId} (skip preLeadMs, transitionMs=${transitionMs})`
+        )
+        this._startCrossfade(
+          token,
+          transitionMs,
+          config,
+          automixDecision,
+          reason
+        )
+        return
+      }
+
+      let transitionMs = automixDecision.transitionDurationMs || 10000
+      let preLeadMs = Math.min(5000, Math.round(transitionMs * 0.4))
+      const fusionLikeTransition =
+        automixDecision.transition === 'fusion_morph' ||
+        automixDecision.transition === 'harmonic_weave'
+      const fallbackFusion =
+        reason.includes('fallback') && fusionLikeTransition
+
+      if (fusionLikeTransition) {
+        const fusionFloorMs =
+          normalizeAutoMixMode(automixConfig?.mode) === 'fusion'
+            ? 16000
+            : 14000
+        transitionMs = Math.max(transitionMs, fusionFloorMs)
+      }
+
+      const physicalEffectMs = Math.max(
+        automixDecision.scratchA?.durationMs || 0,
+        automixDecision.tapeStopA?.durationMs || 0
+      )
+
+      if (physicalEffectMs > 0) {
+        preLeadMs = Math.max(
+          Math.min(5000, Math.round(transitionMs * 0.6)), // min 60% transition if physical
+          Math.min(
+            Math.round(transitionMs * 0.85),
+            Math.round(physicalEffectMs * 0.8) // start blend at 80% mark
+          )
+        )
+        preLeadMs = Math.max(1200, preLeadMs)
+      }
+
+      if (fallbackFusion) {
+        transitionMs = Math.max(transitionMs, 13500)
+        preLeadMs = Math.max(preLeadMs, Math.round(transitionMs * 0.52), 4800)
+      } else if (fusionLikeTransition) {
+        preLeadMs = Math.max(preLeadMs, Math.round(transitionMs * 0.46), 3600)
+      }
+
+      // Smoother filter ramps: filters should reach their target at the END of the blend,
+      // not early. This preserves energy during the transition.
+      const filterRampMs = Math.round(preLeadMs + transitionMs * 0.95)
+
+      logger(
+        'info',
+        'AutoMix',
+        `Triggering "${automixDecision.transition}" for guild ${this.guildId} (${reason})`,
+        {
+          transitionMs,
+          preLeadMs,
+          filterRampMs
         }
       )
-      this._startCrossfade(token, durationMs, config)
-    }, delay)
+
+      const audioStream = this._getAudioStream()
+      if (typeof audioStream?.startShowcaseRecording === 'function') {
+        audioStream.startShowcaseRecording(
+          10000,
+          preLeadMs + transitionMs,
+          10000,
+          automixDecision.transition
+        )
+      }
+
+      const currentFiltersPayload = this.filters.filters as
+        | Record<string, unknown>
+        | undefined
+      this._preAutomixFilters = currentFiltersPayload
+        ? JSON.parse(JSON.stringify(currentFiltersPayload))
+        : {}
+
+      const preLeadFilters: Record<string, unknown> & {
+        lowpass?: Record<string, unknown>
+        highpass?: Record<string, unknown>
+        echo?: Record<string, unknown>
+        reverb?: Record<string, unknown>
+        timescale?: Record<string, unknown>
+        karaoke?: Record<string, unknown>
+        phaser?: Record<string, unknown>
+        tremolo?: Record<string, unknown>
+      } = {
+        ...((this.filters.filters as Record<string, unknown>) || {})
+      }
+      if (automixDecision.lowpassA) {
+        preLeadFilters.lowpass = {
+          smoothing: automixDecision.lowpassA.smoothing,
+          transition: {
+            durationMs: filterRampMs,
+            curve: 'sinusoidal'
+          }
+        }
+      }
+      if (automixDecision.highpassA) {
+        preLeadFilters.highpass = {
+          smoothing: automixDecision.highpassA.smoothing,
+          transition: {
+            durationMs: filterRampMs,
+            curve: 'sinusoidal'
+          }
+        }
+      }
+      if (automixDecision.echoA) {
+        const { rampMs: _echoRamp, ...echoParams } = automixDecision.echoA
+        preLeadFilters.echo = {
+          ...echoParams,
+          ...(automixDecision.echoA.rampMs
+            ? {
+                transition: {
+                  durationMs: automixDecision.echoA.rampMs,
+                  curve: 'sinusoidal'
+                }
+              }
+            : {})
+        }
+      }
+      if (automixDecision.reverbA) {
+        const { rampMs: _reverbRamp, ...reverbParams } = automixDecision.reverbA
+        preLeadFilters.reverb = {
+          ...reverbParams,
+          ...(automixDecision.reverbA.rampMs
+            ? {
+                transition: {
+                  durationMs: automixDecision.reverbA.rampMs,
+                  curve: 'sinusoidal'
+                }
+              }
+            : {})
+        }
+      }
+      if (automixDecision.timescaleA?.speed) {
+        const currentTimescale =
+          (this.filters.filters?.timescale as
+            | Record<string, unknown>
+            | undefined) || {}
+        preLeadFilters.timescale = {
+          ...currentTimescale,
+          speed: automixDecision.timescaleA.speed,
+          ...(automixDecision.timescaleA.pitch != null
+            ? { pitch: automixDecision.timescaleA.pitch }
+            : {}),
+          transition: {
+            durationMs: automixDecision.timescaleA.durationMs || preLeadMs,
+            curve: automixDecision.timescaleA.curve || 'sinusoidal'
+          }
+        }
+      }
+      if (automixDecision.karaokeA) {
+        const { rampMs: _karaokeRamp, ...karaokeParams } =
+          automixDecision.karaokeA
+        preLeadFilters.karaoke = {
+          ...karaokeParams,
+          ...(automixDecision.karaokeA.rampMs
+            ? {
+                transition: {
+                  durationMs: automixDecision.karaokeA.rampMs,
+                  curve: 'sinusoidal'
+                }
+              }
+            : {})
+        }
+      }
+      if (automixDecision.phaserA) {
+        const { rampMs: _phaserRamp, ...phaserParams } = automixDecision.phaserA
+        preLeadFilters.phaser = {
+          ...phaserParams,
+          ...(automixDecision.phaserA.rampMs
+            ? {
+                transition: {
+                  durationMs: automixDecision.phaserA.rampMs,
+                  curve: 'sinusoidal'
+                }
+              }
+            : {})
+        }
+      }
+      if (automixDecision.tremoloA) {
+        const { rampMs: _tremoloRamp, ...tremoloParams } =
+          automixDecision.tremoloA
+        preLeadFilters.tremolo = {
+          ...tremoloParams,
+          ...(automixDecision.tremoloA.rampMs
+            ? {
+                transition: {
+                  durationMs: automixDecision.tremoloA.rampMs,
+                  curve: 'sinusoidal'
+                }
+              }
+            : {})
+        }
+      }
+      this.setFilters({ filters: preLeadFilters } as FiltersState, true)
+
+      const activeStreamForPreLead = this._getAudioStream()
+      this._preAutomixUserVolume = undefined
+      if (typeof activeStreamForPreLead?.setFadeVolume === 'function') {
+        if (
+          typeof this.volumePercent === 'number' &&
+          this.volumePercent !== 100
+        ) {
+          this._preAutomixUserVolume = this.volumePercent
+        }
+        activeStreamForPreLead.setFadeVolume(1.0)
+      }
+      if (typeof activeStreamForPreLead?.setFilterBypass === 'function') {
+        activeStreamForPreLead.setFilterBypass(false)
+      }
+
+      const audioStreamForEffects = this._getAudioStream()
+      if (automixDecision.tapeStopA && audioStreamForEffects?.tapeTo) {
+        const tapeDuration = Math.round(automixDecision.tapeStopA.durationMs)
+        audioStreamForEffects.tapeTo(
+          tapeDuration,
+          'stop',
+          automixDecision.tapeStopA.curve || 'sinusoidal'
+        )
+        logger(
+          'info',
+          'AutoMix',
+          `Pre-lead: tape stop (${tapeDuration}ms, ${automixDecision.tapeStopA.curve || 'sinusoidal'}) for guild ${this.guildId}`
+        )
+      }
+      if (automixDecision.scratchA && audioStreamForEffects?.scratchTo) {
+        const scratchDuration = Math.round(automixDecision.scratchA.durationMs)
+        audioStreamForEffects.scratchTo(
+          scratchDuration,
+          automixDecision.scratchA.style
+        )
+        logger(
+          'info',
+          'AutoMix',
+          `Pre-lead: scratch ${automixDecision.scratchA.style} (${scratchDuration}ms) for guild ${this.guildId}`
+        )
+      }
+
+      const hasPhysicalPreLead = !!(
+        automixDecision.tapeStopA || automixDecision.scratchA
+      )
+      if (
+        hasPhysicalPreLead &&
+        typeof audioStreamForEffects?.fadeTo === 'function'
+      ) {
+        if (typeof audioStreamForEffects.setFadeVolume === 'function') {
+          audioStreamForEffects.setFadeVolume(1.0)
+        }
+        audioStreamForEffects.fadeTo(0.0, preLeadMs, 'exponential')
+      }
+
+      const blendMs = hasPhysicalPreLead
+        ? Math.min(transitionMs, 3000)
+        : transitionMs
+      this._automixPreLeadTimer = setTimeout(() => {
+        if (this._crossfadeToken !== token) return
+        logger(
+          'info',
+          'Crossfade',
+          `Crossfade blend starting for guild ${this.guildId}`,
+          {
+            token,
+            transitionMs: blendMs
+          }
+        )
+        this._startCrossfade(token, blendMs, config, automixDecision, reason)
+        if (
+          this._preAutomixUserVolume !== undefined &&
+          typeof this.volume === 'function'
+        ) {
+          this.volume(this._preAutomixUserVolume)
+          this._preAutomixUserVolume = undefined
+        }
+      }, preLeadMs)
+    }
+
+    this._pendingTriggerAutomix = () => {
+      if (this._crossfadeToken !== token) return
+      triggerAutomix('bridge_starving')
+    }
+
+    if (automixConfig?.enabled && total > 0 && !this.track?.info.isStream) {
+      const energyHistory: number[] = []
+      let triggered = false
+      let trackBEnergy = 0
+      let prevSlope = 0 // For derivative tracking
+      let steadyCount = 0 // For plateau detection
+
+      const patienceMs = 8000 + Math.round(Math.random() * 12000)
+      const effectivePatienceMs = Math.min(
+        patienceMs,
+        Math.max(3000, fallbackDelay - 1500)
+      )
+
+      const windowDelay = Math.max(0, analysisWindowStart)
+      this._silenceWatchdog = setTimeout(() => {
+        if (this._crossfadeToken !== token) return
+
+        const audioStream = this._getAudioStream()
+        trackBEnergy = audioStream?.getNextTrackOpeningEnergy?.() ?? 0
+
+        logger(
+          'info',
+          'AutoMix',
+          `Analysis window open for guild ${this.guildId}`,
+          {
+            trackBOpeningEnergy: `${(trackBEnergy * 100).toFixed(1)}%`
+          }
+        )
+
+        const initialLiveSignals = this._getAutomixLiveSignals(audioStream)
+        let bpmFallbackTriggered = Boolean(
+          initialLiveSignals.liveBpmA || initialLiveSignals.liveBpmB
+        )
+        if (bpmFallbackTriggered) {
+          logger(
+            'info',
+            'AutoMix',
+            `Live tempo signals ready for guild ${this.guildId} (A: ${initialLiveSignals.liveBpmA?.toFixed(1) ?? 'N/A'}, B: ${initialLiveSignals.liveBpmB?.toFixed(1) ?? 'N/A'})`
+          )
+        }
+
+        let keyA: TrackKeyResult | null =
+          audioStream?.getMainTrackKey?.() ?? null
+        let keyB: TrackKeyResult | null =
+          audioStream?.getNextTrackKey?.() ?? null
+        if (keyA) {
+          logger(
+            'info',
+            'AutoMix',
+            `Key for Track A [${this.track?.info.title}]: ${keyA.key} (${keyA.camelot}, confidence: ${(keyA.confidence * 100).toFixed(0)}%)`
+          )
+        }
+        if (keyB) {
+          logger(
+            'info',
+            'AutoMix',
+            `Key for Track B [${this.nextCrossfadeTrack?.info.title}]: ${keyB.key} (${keyB.camelot}, confidence: ${(keyB.confidence * 100).toFixed(0)}%)`
+          )
+        }
+
+        if (
+          (trackBEnergy > 0 || bpmFallbackTriggered || keyA || keyB) &&
+          automixDecision &&
+          this.track &&
+          this.nextCrossfadeTrack
+        ) {
+          const currentTrack = this.track
+          const queuedTrack = this.nextCrossfadeTrack
+          const currentDecision = automixDecision
+          if (!currentDecision) return
+          void getAutomixController()
+            .then((Controller) => {
+              if (this._crossfadeToken !== token) return
+              const energy = this._getAudioStream()?.getMainEnergy?.()
+              const refined = Controller.analyze(
+                currentTrack,
+                queuedTrack,
+                durationMs,
+                normalizeAutoMixMode(automixConfig.mode),
+                {
+                  deezerMetadata: automixConfig.deezerMetadata,
+                  trackAEnergy: energy?.rms,
+                  trackBOpeningEnergy: trackBEnergy,
+                  keyA,
+                  keyB,
+                  ...this._getAutomixLiveSignals(this._getAudioStream())
+                }
+              )
+              if (refined.transition !== currentDecision.transition) {
+                logger(
+                  'info',
+                  'AutoMix',
+                  `Decision refined with Track B energy for guild ${this.guildId}: ${currentDecision.transition} → ${refined.transition}`
+                )
+              }
+              automixDecision = refined
+            })
+            .catch(() => {})
+        }
+
+        this._silenceWatchdog = setInterval(() => {
+          if (this._crossfadeToken !== token || triggered) return
+
+          const stream = this._getAudioStream()
+          const energy = stream?.getMainEnergy?.()
+          if (!energy) return
+
+          const currentTotal =
+            this.track?.endTime && this.track.endTime > 0
+              ? this.track.endTime
+              : this.track?.info.length || 0
+          const remainingMs =
+            currentTotal -
+            (startPosition + energyHistory.length * ENERGY_POLL_MS)
+
+          if (trackBEnergy <= 0) {
+            trackBEnergy = stream?.getNextTrackOpeningEnergy?.() ?? 0
+            if (trackBEnergy > 0) {
+              logger(
+                'info',
+                'AutoMix',
+                `Track B energy captured for guild ${this.guildId}: ${(trackBEnergy * 100).toFixed(1)}%`
+              )
+
+              if (automixDecision && this.track && this.nextCrossfadeTrack) {
+                if (!keyB) keyB = stream?.getNextTrackKey?.() ?? null
+                if (!keyA) keyA = stream?.getMainTrackKey?.() ?? null
+                const currentTrack = this.track
+                const queuedTrack = this.nextCrossfadeTrack
+                const currentDecision = automixDecision
+                if (!currentDecision) return
+                void getAutomixController()
+                  .then((Controller) => {
+                    if (this._crossfadeToken !== token) return
+                    const refined = Controller.analyze(
+                      currentTrack,
+                      queuedTrack,
+                      durationMs,
+                      normalizeAutoMixMode(automixConfig.mode),
+                      {
+                        deezerMetadata: automixConfig.deezerMetadata,
+                        trackAEnergy: energy.rms,
+                        trackBOpeningEnergy: trackBEnergy,
+                        keyA,
+                        keyB,
+                        ...this._getAutomixLiveSignals(stream)
+                      }
+                    )
+                    if (refined.transition !== currentDecision.transition) {
+                      logger(
+                        'info',
+                        'AutoMix',
+                        `Decision refined with Track B energy for guild ${this.guildId}: ${currentDecision.transition} → ${refined.transition}`
+                      )
+                    }
+                    automixDecision = refined
+                  })
+                  .catch(() => {})
+              }
+            }
+          }
+
+          energyHistory.push(energy.rms)
+          if (energyHistory.length > ENERGY_HISTORY_SIZE) {
+            energyHistory.shift()
+          }
+
+          if (!bpmFallbackTriggered) {
+            const liveSignals = this._getAutomixLiveSignals(stream)
+            if (liveSignals.liveBpmA || liveSignals.liveBpmB) {
+              bpmFallbackTriggered = true
+              logger(
+                'info',
+                'AutoMix',
+                `Live tempo detected during polling for guild ${this.guildId} (A: ${liveSignals.liveBpmA?.toFixed(1) ?? 'N/A'}, B: ${liveSignals.liveBpmB?.toFixed(1) ?? 'N/A'})`
+              )
+              if (automixDecision && this.track && this.nextCrossfadeTrack) {
+                if (!keyA) keyA = stream?.getMainTrackKey?.() ?? null
+                if (!keyB) keyB = stream?.getNextTrackKey?.() ?? null
+                const currentTrack = this.track
+                const queuedTrack = this.nextCrossfadeTrack
+                const currentDecision = automixDecision
+                void getAutomixController()
+                  .then((Controller) => {
+                    if (this._crossfadeToken !== token) return
+                    const eng = this._getAudioStream()?.getMainEnergy?.()
+                    const refined = Controller.analyze(
+                      currentTrack,
+                      queuedTrack,
+                      durationMs,
+                      normalizeAutoMixMode(automixConfig.mode),
+                      {
+                        deezerMetadata: automixConfig.deezerMetadata,
+                        trackAEnergy: eng?.rms,
+                        trackBOpeningEnergy: trackBEnergy,
+                        keyA,
+                        keyB,
+                        ...this._getAutomixLiveSignals(this._getAudioStream())
+                      }
+                    )
+                    if (
+                      refined.transition !== currentDecision.transition ||
+                      refined.timescaleA !== currentDecision.timescaleA
+                    ) {
+                      logger(
+                        'info',
+                        'AutoMix',
+                        `Decision refined with live tempo for guild ${this.guildId}: ${currentDecision.transition} → ${refined.transition}${refined.timescaleA ? ` (timescale: ${refined.timescaleA.speed.toFixed(3)})` : ''}`
+                      )
+                    }
+                    automixDecision = refined
+                  })
+                  .catch(() => {})
+              }
+            }
+          }
+
+          if (energyHistory.length < 16) return
+          if (energyHistory.length * ENERGY_POLL_MS < effectivePatienceMs) return
+
+          const avg =
+            energyHistory.reduce((a, b) => a + b, 0) / energyHistory.length
+          const current = energy.rms
+
+          const beatState = stream?.getRealtimeBeatState?.() ?? null
+          const beatLocked = Boolean(
+            beatState &&
+              beatState.locked &&
+              beatState.bpm > 0 &&
+              beatState.confidence >= 0.55
+          )
+          const isFusionMode = automixConfig.mode === 'fusion'
+          if (
+            beatLocked &&
+            trackBEnergy > 0.015 &&
+            remainingMs < SMART_ZONE_MS &&
+            remainingMs > Math.max(8000, MIN_REMAINING_MS * 0.35)
+          ) {
+            const nearDownbeat =
+              (isFusionMode
+                ? beatState!.phase <= 0.18 ||
+                  beatState!.phase >= 0.82 ||
+                  beatState!.lastBeatAgeSec <= 0.16
+                : beatState!.phase <= 0.12 ||
+                  beatState!.phase >= 0.88 ||
+                  beatState!.lastBeatAgeSec <= 0.12)
+
+            // For Fusion mode, we prioritize structural alignment over energy matching.
+            // We allow triggering on intro beats that might be quieter than the body.
+            const minEnergy = isFusionMode
+              ? Math.max(MIN_RMS_FLOOR * 0.85, avg * 0.55, trackBEnergy * 0.45)
+              : Math.max(MIN_RMS_FLOOR * 1.2, avg * 0.78, trackBEnergy * 0.72)
+
+            if (nearDownbeat && current > minEnergy) {
+              triggered = true
+              triggerAutomix(
+                `fusion phase trigger: bpm=${beatState!.bpm.toFixed(1)} phase=${beatState!.phase.toFixed(2)} mode=${automixConfig.mode}`
+              )
+              return
+            }
+          }
+
+          if (
+            isFusionMode &&
+            remainingMs < SMART_ZONE_MS &&
+            remainingMs > Math.max(7000, MIN_REMAINING_MS * 0.3)
+          ) {
+            const recent = energyHistory.slice(-10)
+            const recentAvg =
+              recent.reduce((sum, v) => sum + v, 0) / Math.max(1, recent.length)
+            const variance =
+              recent.reduce((sum, v) => sum + Math.abs(v - recentAvg), 0) /
+              Math.max(1, recent.length)
+            const continuityFloor = Math.max(
+              MIN_RMS_FLOOR * 0.7,
+              trackBEnergy * 0.33,
+              avg * 0.44
+            )
+            const phaseFriendly = !beatLocked
+              ? true
+              : !!beatState &&
+                (beatState.phase <= 0.2 ||
+                  beatState.phase >= 0.8 ||
+                  beatState.lastBeatAgeSec <= 0.16)
+            if (
+              phaseFriendly &&
+              current >= continuityFloor &&
+              variance <= Math.max(0.0045, recentAvg * 0.24)
+            ) {
+              triggered = true
+              triggerAutomix(
+                `fusion continuity trigger: A=${(current * 100).toFixed(1)}% B=${(trackBEnergy * 100).toFixed(1)}% var=${(variance * 100).toFixed(2)}%`
+              )
+              return
+            }
+          }
+
+          if (
+            trackBEnergy > 0.02 &&
+            current > 0.02 &&
+            remainingMs < SMART_ZONE_MS
+          ) {
+            const ratio = current / trackBEnergy
+            if (
+              ratio > 1 - ENERGY_MATCH_TOLERANCE &&
+              ratio < 1 + ENERGY_MATCH_TOLERANCE
+            ) {
+              triggered = true
+              triggerAutomix(
+                `energy match with Track B: A=${(current * 100).toFixed(1)}% ≈ B=${(trackBEnergy * 100).toFixed(1)}%`
+              )
+              return
+            }
+          }
+
+          if (
+            avg > MIN_RMS_FLOOR &&
+            current < avg * ENERGY_DROP_RATIO &&
+            remainingMs < SMART_ZONE_MS
+          ) {
+            triggered = true
+            triggerAutomix(
+              `energy drop: ${(current * 100).toFixed(1)}% < ${(avg * ENERGY_DROP_RATIO * 100).toFixed(1)}%`
+            )
+            return
+          }
+
+          if (energyHistory.length >= 16 && remainingMs < SMART_ZONE_MS) {
+            const recentSlice = energyHistory.slice(-12)
+            const first = recentSlice[0] ?? 0
+            const last = recentSlice[recentSlice.length - 1] ?? first
+            const slope = (last - first) / Math.max(1, recentSlice.length - 1)
+            if (prevSlope > 0.004 && slope < -0.004) {
+              triggered = true
+              triggerAutomix(
+                `peak detected (derivative reversal): slope ${(prevSlope * 1000).toFixed(1)} → ${(slope * 1000).toFixed(1)}`
+              )
+              return
+            }
+            prevSlope = slope
+          }
+
+          if (energyHistory.length >= 16 && remainingMs < SMART_ZONE_MS) {
+            const windowMin = Math.min(...energyHistory)
+            if (current <= windowMin && current < avg * 0.55) {
+              triggered = true
+              triggerAutomix(
+                `local minimum: ${(current * 100).toFixed(1)}% (lowest in ${energyHistory.length * 0.5}s window)`
+              )
+              return
+            }
+          }
+
+          if (energyHistory.length >= 12 && remainingMs < SMART_ZONE_MS) {
+            const recent = energyHistory.slice(-20)
+            const recentAvg = recent.reduce((a, b) => a + b, 0) / Math.max(1, recent.length)
+            const variance =
+              recent.reduce((sum, v) => sum + Math.abs(v - recentAvg), 0) / Math.max(1, recent.length)
+            if (variance < recentAvg * 0.04) {
+              steadyCount++
+            } else {
+              if (steadyCount >= 25) {
+                triggered = true
+                triggerAutomix(
+                  `plateau exit: energy changing after ${(steadyCount * ENERGY_POLL_MS / 1000).toFixed(1)}s stability`
+                )
+                return
+              }
+              steadyCount = 0
+            }
+          }
+
+          if (remainingMs < SMART_ZONE_MS && stream?.isSilent?.()) {
+            triggered = true
+            triggerAutomix('silence detected')
+            return
+          }
+        }, ENERGY_POLL_MS)
+      }, windowDelay)
+
+      this._crossfadeTimer = setTimeout(() => {
+        if (triggered || this._crossfadeToken !== token) return
+        triggered = true
+        triggerAutomix('fallback (no optimal point found)')
+      }, fallbackDelay)
+    } else {
+      const triggerStartCrossfade = () => {
+        if (this._crossfadeTimer) {
+          clearTimeout(this._crossfadeTimer)
+          this._crossfadeTimer = null
+        }
+        logger(
+          'info',
+          'Crossfade',
+          `Crossfade starting for guild ${this.guildId}`,
+          {
+            token,
+            durationMs
+          }
+        )
+        this._startCrossfade(token, durationMs, config, null)
+      }
+
+      this._crossfadeTimer = setTimeout(triggerStartCrossfade, delay)
+    }
   }
 
   /**
@@ -1283,13 +2578,43 @@ export class Player {
   private _startCrossfade(
     token: number,
     durationMs: number,
-    config: { curve: string; mode: CrossfadeMode }
+    config: { curve: string; mode: CrossfadeMode },
+    automixDecision?: AutoMixDecision | null,
+    triggerReason?: string | null
   ): void {
     if (token !== this._crossfadeToken) return
     if (!this.track || !this.nextCrossfadeTrack) return
+    if (this._crossfadeStartRetryToken !== token) {
+      this._crossfadeStartRetryToken = token
+      this._crossfadeStartRetryCount = 0
+    }
+
+    const CROSSFADE_COOLDOWN_MS = 3000
+    const sinceLastCompletion = Date.now() - this._lastCrossfadeCompletedAt
+    if (
+      this._lastCrossfadeCompletedAt > 0 &&
+      sinceLastCompletion < CROSSFADE_COOLDOWN_MS
+    ) {
+      const waitMs = CROSSFADE_COOLDOWN_MS - sinceLastCompletion
+      logger(
+        'debug',
+        'Crossfade',
+        `Crossfade start deferred ${waitMs}ms (cooldown after previous completion) for guild ${this.guildId}`
+      )
+      setTimeout(() => {
+        this._startCrossfade(
+          token,
+          durationMs,
+          config,
+          automixDecision,
+          triggerReason
+        )
+      }, waitMs)
+      return
+    }
 
     logger(
-      'debug',
+      'info',
       'Crossfade',
       `Starting crossfade for guild ${this.guildId}`,
       {
@@ -1300,30 +2625,88 @@ export class Player {
       }
     )
 
-    const audioStream = this.connection?.audioStream as
-      | AudioResource
-      | undefined
+    const audioStream = this._getAudioStream()
     const state = audioStream?.getCrossfadeState?.()
-    if (!audioStream?.startCrossfade || !state?.bufferedMs) {
+    let bufferedMs = state?.bufferedMs ?? 0
+    if (!audioStream || !audioStream.startCrossfade || bufferedMs <= 0) {
+      const canRetry =
+        !!audioStream &&
+        !!this.nextCrossfadePcm &&
+        !!this.nextCrossfadeTrack &&
+        this._crossfadeStartRetryCount < 6
+
+      if (canRetry) {
+        this._crossfadeStartRetryCount += 1
+
+        const crossfadeConfig = this._getCrossfadeConfig()
+        if (crossfadeConfig) {
+          this._crossfadePrepared = false
+          this._prepareCrossfadeBuffer({
+            durationMs: crossfadeConfig.durationMs,
+            minBufferMs: crossfadeConfig.minBufferMs,
+            bufferMs: crossfadeConfig.bufferMs
+          })
+        }
+
+        const retryInMs = 180 + this._crossfadeStartRetryCount * 120
+        logger(
+          'debug',
+          'Crossfade',
+          `Crossfade start waiting for buffer for guild ${this.guildId}`,
+          {
+            token,
+            retry: this._crossfadeStartRetryCount,
+            retryInMs,
+            bufferedMs
+          }
+        )
+        setTimeout(() => {
+          if (token !== this._crossfadeToken) return
+          this._startCrossfade(
+            token,
+            durationMs,
+            config,
+            automixDecision,
+            triggerReason
+          )
+        }, retryInMs)
+        return
+      }
+
       logger(
         'warn',
         'Crossfade',
-        `Crossfade could not start for guild ${this.guildId} (missing buffer).`
+        `Crossfade could not start for guild ${this.guildId} (missing buffer).`,
+        {
+          token,
+          retries: this._crossfadeStartRetryCount,
+          bufferedMs
+        }
       )
       this._clearCrossfade({ clearNext: false, clearPcm: false })
       return
     }
 
-    if (state.bufferedMs < durationMs) {
+    this._crossfadeStartRetryCount = 0
+
+    if (bufferedMs < durationMs) {
+      if (bufferedMs < 2000) {
+        logger(
+          'warn',
+          'Crossfade',
+          `Crossfade skipped for guild ${this.guildId} (buffered ${Math.round(
+            bufferedMs
+          )}ms is too small).`
+        )
+        this._clearCrossfade({ clearNext: false, clearPcm: false })
+        return
+      }
       logger(
-        'warn',
+        'info',
         'Crossfade',
-        `Crossfade skipped for guild ${this.guildId} (buffered ${Math.round(
-          state.bufferedMs
-        )}ms < ${durationMs}ms).`
+        `Crossfade duration capped for guild ${this.guildId} (${durationMs}ms → ${Math.round(bufferedMs)}ms, buffer limit).`
       )
-      this._clearCrossfade({ clearNext: false, clearPcm: false })
-      return
+      durationMs = Math.floor(bufferedMs)
     }
 
     if (this._fadeTimers.trackEnd) {
@@ -1331,8 +2714,183 @@ export class Player {
       this._fadeTimers.trackEnd = null
     }
 
+    if (automixDecision) {
+      logger(
+        'info',
+        'AutoMix',
+        `Blend phase: "${automixDecision.transition}" for guild ${this.guildId}`
+      )
+
+      if (typeof audioStream.setIncomingGain === 'function') {
+        audioStream.setIncomingGain(1.0)
+      }
+
+      if (
+        Number.isFinite(automixDecision.incomingGainMultiplier) &&
+        typeof audioStream.setIncomingGain === 'function'
+      ) {
+        const gain = Math.max(
+          0.5,
+          Math.min(1.5, Number(automixDecision.incomingGainMultiplier))
+        )
+        audioStream.setIncomingGain(gain)
+      }
+
+      if (automixDecision.transition === 'gapless') {
+        durationMs = Math.min(
+          durationMs,
+          automixDecision.transitionDurationMs || 500
+        )
+      } else {
+        if (automixDecision.highpassSweepB) {
+          if (typeof audioStream.setIncomingHighpass === 'function') {
+            audioStream.setIncomingHighpass(
+              true,
+              automixDecision.highpassSweepAlpha
+            )
+          }
+        }
+
+        if (automixDecision.lowpassSweepB) {
+          if (typeof audioStream.setIncomingLowpass === 'function') {
+            audioStream.setIncomingLowpass(
+              true,
+              automixDecision.lowpassSweepAlpha,
+              automixDecision.lowpassSweepCompletionRatio
+            )
+          }
+        }
+
+        if (automixDecision.stereoPanB) {
+          if (typeof audioStream.setIncomingPan === 'function') {
+            audioStream.setIncomingPan(
+              true,
+              automixDecision.incomingPanCompletionRatio
+            )
+          }
+        }
+
+        if (automixDecision.echoB) {
+          if (typeof audioStream.setIncomingEcho === 'function') {
+            audioStream.setIncomingEcho(
+              true,
+              automixDecision.echoB.delay,
+              automixDecision.echoB.mix,
+              automixDecision.echoB.feedback,
+              automixDecision.incomingEchoCompletionRatio
+            )
+          }
+        }
+
+        if (automixDecision.stereoPanA) {
+          if (typeof audioStream.setOutgoingPan === 'function') {
+            audioStream.setOutgoingPan(
+              true,
+              automixDecision.outgoingPanCompletionRatio
+            )
+          }
+        }
+
+        if (automixDecision.tapeStopA) {
+          if (typeof audioStream.tapeTo === 'function') {
+            audioStream.tapeTo(0, 'start', 'exponential')
+            logger(
+              'debug',
+              'AutoMix',
+              `Blend start: tape rate reset (instant) for guild ${this.guildId}`
+            )
+          }
+        }
+        if (automixDecision.scratchA) {
+          if (typeof audioStream.scratchTo === 'function') {
+            audioStream.scratchTo(0, 'start')
+            logger(
+              'debug',
+              'AutoMix',
+              `Blend start: scratch rate reset (instant) for guild ${this.guildId}`
+            )
+          }
+        }
+      }
+    }
+
+    const hasPhysicalReset =
+      automixDecision && (automixDecision.tapeStopA || automixDecision.scratchA)
     if (audioStream.setFadeVolume) {
-      audioStream.setFadeVolume(1.0)
+      if (hasPhysicalReset && typeof audioStream.fadeTo === 'function') {
+        audioStream.setFadeVolume(0.0)
+        audioStream.fadeTo(1.0, Math.min(1200, durationMs * 0.4), 's-curve')
+      } else {
+        audioStream.setFadeVolume(1.0)
+      }
+    }
+
+    const inBridge =
+      typeof audioStream.isBridgeDraining === 'function' &&
+      audioStream.isBridgeDraining()
+    const transition = automixDecision?.transition ?? null
+    const fallbackReason = (triggerReason ?? '').toLowerCase().includes(
+      'fallback'
+    )
+    const fusionLikeTransition =
+      transition === 'fusion_morph' || transition === 'harmonic_weave'
+    if (!inBridge && typeof audioStream.seekToEnergyMatch === 'function') {
+      const energy = audioStream.getMainEnergy?.()
+      if (energy && energy.rms > 0) {
+        let targetRms = energy.rms
+        const hardCap =
+          transition === 'cinema_lift' || transition === 'pulse_tunnel'
+            ? 0.15
+            : transition === 'filter_sweep' ||
+                transition === 'highpass_dissolve' ||
+                transition === 'harmonic_weave' ||
+                transition === 'crossfade_eq'
+              ? 0.18
+              : 0.22
+        targetRms = Math.min(targetRms, hardCap)
+        // For cinematic/Apple-like blends, avoid entering Track B at a very
+        // weak intro frame when transition expects a controlled handoff.
+        if (automixDecision) {
+          const transition = automixDecision.transition
+          if (
+            transition === 'highpass_dissolve' ||
+            transition === 'filter_sweep' ||
+            transition === 'harmonic_weave' ||
+            transition === 'crossfade_eq'
+          ) {
+            const floor =
+              transition === 'crossfade_eq'
+                ? 0.055
+                : transition === 'harmonic_weave'
+                  ? 0.06
+                : 0.065
+            targetRms = Math.max(targetRms, floor)
+          }
+        }
+        const preferNoVocalEntry =
+          transition !== null &&
+          transition !== 'gapless' &&
+          transition !== 'vocal_strip'
+        const strictNoVocalPreference =
+          preferNoVocalEntry &&
+          (
+            fusionLikeTransition ||
+            transition === 'crossfade_eq' ||
+            transition === 'filter_sweep' ||
+            transition === 'highpass_dissolve' ||
+            fallbackReason
+          )
+        const transitionHint =
+          transition !== null
+            ? `${transition}${preferNoVocalEntry ? '|no-vocal-entry' : ''}${strictNoVocalPreference ? '|strict-no-vocal' : ''}${fallbackReason ? '|fallback' : ''}`
+            : null
+        audioStream.seekToEnergyMatch(
+          targetRms,
+          durationMs,
+          transitionHint ?? null,
+          audioStream.getRealtimeBeatState?.() ?? null
+        )
+      }
     }
 
     const started = audioStream.startCrossfade(durationMs, config.curve)
@@ -1354,12 +2912,17 @@ export class Player {
 
     this.nextCrossfadeTrack = null
     this.nextCrossfadeStreamInfo = null
-    this.nextCrossfadeDuration = durationMs
+
+    this.nextCrossfadePcm = null
+    this.nextTrack = null
+    this.nextResource = null
 
     this._emitTrackEnd(EndReasons.CROSSFADE, {
       crossfade: {
         durationMs,
+        curve: config.curve,
         mode: config.mode,
+        transition: automixDecision?.transition ?? null,
         nextTrack: nextTrack
       }
     })
@@ -1367,10 +2930,15 @@ export class Player {
     this.track = nextTrack
     this.holoTrack = null
     this.streamInfo = nextStreamInfo
-    this.position = 0
-    this._lyricsBasePosition = 0
+
+    const energySkipMs = audioStream.getEnergySkipMs?.() ?? 0
+
+    this.position = energySkipMs
+    this._lyricsBasePosition = energySkipMs
     this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
     this._emitTrackStart().catch((err) => this._onError(err))
+    this._crossfadeEndsAt = Date.now() + durationMs
+    this._crossfadeBlendStartedAt = Date.now()
 
     const startPositionMs = this._realPosition()
     this._crossfadeCompletionContext = {
@@ -1406,71 +2974,90 @@ export class Player {
   ): Promise<void> {
     if (token !== this._crossfadeToken) return
 
-    let resource = this.nextCrossfadePcm
-    if (!resource || !this.connection) {
+    if (!this.connection) {
       this._clearCrossfade({ clearNext: false })
       return
     }
 
-    if (!resource.stream) {
+    if (!this.track) {
       this._clearCrossfade({ clearNext: false })
       return
     }
 
-    if (createAudioResource) {
-      resource = createAudioResource(
-        resource.stream as unknown as Readable,
-        'pcm',
-        this.nodelink,
-        this.filters,
-        this.volumePercent / 100,
-        this.audioMixer,
-        false,
-        this.loudnessNormalizer
+    const audioStream = this._getAudioStream()
+    let snapshotPosition: number
+    const consumed = audioStream?.getCrossfadeConsumedNextMs?.() ?? -1
+    if (consumed >= 0) {
+      const energySkip = audioStream?.getEnergySkipMs?.() ?? 0
+      snapshotPosition = energySkip + consumed
+    } else {
+      snapshotPosition = this._realPosition()
+    }
+
+    const trackLen = this.track?.info?.length ?? 0
+    const blendElapsed =
+      this._crossfadeBlendStartedAt > 0
+        ? Date.now() - this._crossfadeBlendStartedAt
+        : 0
+    if (snapshotPosition < blendElapsed * 0.3 && blendElapsed > 2000) {
+      const wallBased = Math.round(blendElapsed)
+      const energySkip = audioStream?.getEnergySkipMs?.() ?? 0
+      const fallback = energySkip + wallBased
+      logger(
+        'warn',
+        'Crossfade',
+        `Position sanity check failed for guild ${this.guildId}: snapshot=${Math.round(snapshotPosition)}ms, ` +
+          `blendElapsed=${blendElapsed}ms → using wall-clock fallback ${fallback}ms`
       )
-      this.nextCrossfadePcm = null
-      this.nextResource = resource
+      snapshotPosition = fallback
+    }
+    if (trackLen > 0 && snapshotPosition > trackLen) {
+      snapshotPosition = trackLen - 1000
     }
 
-    logger(
-      'debug',
-      'Crossfade',
-      `Completing crossfade for guild ${this.guildId}`,
-      {
-        token,
-        previousTrack: previousTrack.info.identifier
-      }
-    )
-
-    const startTime = this.nextCrossfadeDuration
-    this.position = startTime
-    this._lyricsBasePosition = startTime
+    this._lyricsBasePosition = snapshotPosition
     this._lyricsBasePackets = this.connection.statistics?.packetsExpected ?? 0
+    this.position = snapshotPosition
+    this._crossfadeBlendStartedAt = 0
 
-    const currentStream = this.connection.audioStream as AudioResource | null
-    currentStream?.clearCrossfade?.()
+    if (this._preAutomixFilters !== null) {
+      const preFilters = this._preAutomixFilters
+      this._preAutomixFilters = null
+      logger(
+        'debug',
+        'AutoMix',
+        `Restoring pre-automix filters at crossfade completion for guild ${this.guildId}`
+      )
+      if (!this.destroying && this.track) {
+        this.filters = { ...this.filters, filters: {} }
+        this.setFilters({ filters: preFilters } as FiltersState)
+      }
+    }
+
+    this._lastStreamDataTime = Date.now()
+
+    const activeStream = this._getAudioStream()
+    if (typeof activeStream?.setIncomingHighpass === 'function') {
+      activeStream.setIncomingHighpass(false)
+    }
+    if (typeof activeStream?.setIncomingLowpass === 'function') {
+      activeStream.setIncomingLowpass(false)
+    }
+
+    if (typeof activeStream?.setFilterBypass === 'function') {
+      activeStream.setFilterBypass(false)
+    }
 
     this._fading('reset')
 
-    this._isResuming = true
-    this._guardInternalStreamSwap()
-    const oldStream = this.connection.play(resource as unknown)
-    await this.waitEvent(
-      'playerStateChange',
-      (s: VoicePlayerState) => s.status === 'playing'
-    )
-    if (oldStream) {
-      oldStream.destroy()
+    this.nextCrossfadePcm = null
+
+    if (!this._crossfadePrepared) {
+      this.nextCrossfadeResource = null
     }
 
-    if (this.nextCrossfadePcm) {
-      this.nextCrossfadePcm.destroy()
-      this.nextCrossfadePcm = null
-    }
-    this.nextCrossfadeResource = null
-    this._crossfadePrepared = false
     this._crossfadeIgnoreIdle = false
-    this.nextCrossfadeDuration = 0
+
     if (this._crossfadeCompletionWatcher) {
       clearInterval(this._crossfadeCompletionWatcher)
       this._crossfadeCompletionWatcher = null
@@ -1479,14 +3066,38 @@ export class Player {
     this._crossfadeCompletionContext = null
     this._crossfadeCompletionRemainingMs = 0
     this._crossfadeEndsAt = 0
+    this._crossfadePrepared = false
+    this._isResuming = false
+    this._lastCrossfadeCompletedAt = Date.now()
 
-    this._fading('trackEndSchedule', { startPosition: startTime })
+    this._fading('trackEndSchedule', { startPosition: snapshotPosition })
+    this._scheduleCrossfade(snapshotPosition)
+
+    this._sendUpdate()
 
     logger(
       'debug',
       'Crossfade',
       `Crossfade completed for guild ${this.guildId} (previous: ${previousTrack.info.identifier}).`
     )
+
+    if (this._pendingPreload) {
+      const pending = this._pendingPreload
+      this._pendingPreload = null
+      logger(
+        'debug',
+        'Crossfade',
+        `Processing deferred preload for guild ${this.guildId}`,
+        { trackIdentifier: pending.info?.identifier }
+      )
+      this.preload(pending).catch((err) => {
+        logger(
+          'warn',
+          'Crossfade',
+          `Deferred preload failed for guild ${this.guildId}: ${(err as Error).message}`
+        )
+      })
+    }
   }
 
   /**
@@ -1502,8 +3113,19 @@ export class Player {
 
     try {
       const source = this.nodelink.sources.getSource(track.info.sourceName)
-      if (source && typeof source['resolveHoloTrack'] === 'function') {
-        const holoTrack = await source['resolveHoloTrack'](track, {
+      const resolveHoloTrack = (
+        source as {
+          resolveHoloTrack?: (
+            trackPayload: PlayerTrack,
+            options: {
+              fetchChannelInfo?: boolean
+              resolveExternalLinks?: boolean
+            }
+          ) => Promise<PlayerTrack | null>
+        } | null
+      )?.resolveHoloTrack
+      if (typeof resolveHoloTrack === 'function') {
+        const holoTrack = await resolveHoloTrack.call(source, track, {
           fetchChannelInfo: this.nodelink.options.fetchChannelInfo,
           resolveExternalLinks: this.nodelink.options.resolveExternalLinks
         })
@@ -1521,10 +3143,10 @@ export class Player {
    * Calculates the real playback position considering timescale filters.
    */
   private _getTimescale(): { speed: number; rate: number } {
-    const timescale =
-      (this.filters.filters?.timescale as
-        | { speed?: number; rate?: number }
-        | undefined) || {}
+    const filterSettings = this.filters.filters as
+      | { timescale?: { speed?: number; rate?: number } }
+      | undefined
+    const timescale = filterSettings?.timescale || {}
     return {
       speed: typeof timescale.speed === 'number' ? timescale.speed : 1.0,
       rate: typeof timescale.rate === 'number' ? timescale.rate : 1.0
@@ -1532,13 +3154,41 @@ export class Player {
   }
 
   private _realPosition(): number {
-    const timescale = this._getTimescale()
-    const playbackSpeed = timescale.speed * timescale.rate
+    const audioStream = this._getAudioStream()
+
+    if (this._crossfadeCompletionContext) {
+      const consumed = audioStream?.getCrossfadeConsumedNextMs?.() ?? -1
+      if (consumed >= 0) {
+        const energySkip = audioStream?.getEnergySkipMs?.() ?? 0
+        return energySkip + consumed
+      }
+    }
+
+    const playbackSpeed =
+      audioStream?.getEffectiveRate?.() ?? this._getTimescaleSpeed()
 
     const packets =
       this.connection?.statistics?.packetsExpected ?? this._lyricsBasePackets
     const deltaPackets = Math.max(0, packets - this._lyricsBasePackets)
     return this._lyricsBasePosition + deltaPackets * 20 * playbackSpeed
+  }
+
+  private _getTimescaleSpeed(): number {
+    const settings = (this.filters.filters ?? this.filters) as {
+      timescale?: { speed?: number; rate?: number }
+    }
+    const timescale = settings.timescale || {}
+    return (timescale.speed ?? 1.0) * (timescale.rate ?? 1.0)
+  }
+
+  /**
+   * Captures current position and packet count as a new baseline.
+   * Call whenever playback speed changes (filters, tape, scratch).
+   */
+  private _snapshotPosition(): void {
+    if (!this.connection?.audioStream) return
+    this._lyricsBasePosition = this._realPosition()
+    this._lyricsBasePackets = this.connection.statistics?.packetsExpected ?? 0
   }
 
   /**
@@ -1702,7 +3352,11 @@ export class Player {
       threshold > 0 &&
       !this.isUpdatingTrack &&
       !this._isStopping &&
-      this.track
+      this.track &&
+      !this._crossfadeCompletionContext &&
+      !this._isResuming &&
+      !this._crossfadeIgnoreIdle &&
+      !this._isBridgeDrainWithoutPendingNext()
     ) {
       if (this._lastPosition === position) {
         this._stuckTime += this.nodelink.options.playerUpdateInterval
@@ -1811,6 +3465,10 @@ export class Player {
       }
     }
 
+    if (position !== this._lastPosition) {
+      this._lastStreamDataTime = Date.now()
+    }
+
     this._lastPosition = position
     this._syncLyrics()
 
@@ -1845,10 +3503,18 @@ export class Player {
       undefined,
       this._isRecovering
     )
+    const urlDataWithFormats = urlData as TrackUrlResult & {
+      formats?: unknown[]
+    }
     if (!this.track) return false
     this.streamInfo = { ...urlData, trackInfo: this.track.info }
     logger('debug', 'Player', `Got track URL for guild ${this.guildId}`, {
-      urlData
+      urlData: {
+        ...urlData,
+        formats: urlDataWithFormats.formats
+          ? `[${urlDataWithFormats.formats.length} format(s) omitted]`
+          : undefined
+      }
     })
 
     if (urlData.exception) {
@@ -1910,8 +3576,6 @@ export class Player {
     if (this.volumePercent !== 100) {
       resource.setVolume(this.volumePercent / 100)
     }
-    this._lyricsBasePosition = startTime
-    this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
     this._fading('trackStartArm', { resource })
     this._fading('trackEndSchedule', { startPosition: startTime || 0 })
 
@@ -1925,6 +3589,9 @@ export class Player {
       'playerStateChange',
       (s: VoicePlayerState) => s.status === 'playing'
     )
+
+    this._lyricsBasePosition = startTime || 0
+    this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
     return true
   }
 
@@ -1968,6 +3635,20 @@ export class Player {
         })
 
         if (noReplace && this.track && this.connection?.audioStream) {
+          const isAlreadyPlaying =
+            this.track?.info.identifier === info.identifier ||
+            this.nextCrossfadeTrack?.info.identifier === info.identifier
+
+          if (isAlreadyPlaying) {
+            logger(
+              'info',
+              'Player',
+              `play() for guild ${this.guildId} adopted (already playing/transitioning ${info.identifier})`
+            )
+            this.isUpdatingTrack = false
+            return resolve(true)
+          }
+
           logger(
             'debug',
             'Player',
@@ -1978,7 +3659,7 @@ export class Player {
         }
 
         if (this.track) {
-          this._clearCrossfade()
+          this._clearCrossfade({ force: true })
           this._emitTrackEnd(EndReasons.REPLACED)
           this._cleanupCurrentAudioStream('track-replaced')
         }
@@ -2028,7 +3709,16 @@ export class Player {
     if (this.destroying || !this.track) return false
     if (!this.track.info.isSeekable && !this.track.info.isStream) return false
 
-    this._clearCrossfade({ clearNext: true })
+    const hasQueuedNextTrack = !!this.nextTrack && !!this.nextResource
+    const hasPreparedCrossfade =
+      !!this.nextCrossfadeTrack && !!this.nextCrossfadePcm
+    const preserveQueuedTransition = hasQueuedNextTrack || hasPreparedCrossfade
+
+    this._clearCrossfade({
+      clearNext: !preserveQueuedTransition,
+      clearPcm: !hasPreparedCrossfade,
+      force: true
+    })
 
     const seekPosition = position ?? this._realPosition()
 
@@ -2125,9 +3815,6 @@ export class Player {
           position: this.position,
           duration: this.position - startPosition
         })
-        this._lyricsBasePosition = this.position
-        this._lyricsBasePackets =
-          this.connection?.statistics?.packetsExpected ?? 0
         if (this._lyricsMarkerTimer) {
           clearTimeout(this._lyricsMarkerTimer)
           this._lyricsMarkerTimer = null
@@ -2268,13 +3955,14 @@ export class Player {
       'Player',
       `Playing resource for guild ${this.guildId} after source seek`
     )
-    this._lyricsBasePosition = position
-    this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
     this.connection.play(resource as unknown)
     await this.waitEvent(
       'playerStateChange',
       (s: VoicePlayerState) => s.status === 'playing'
     )
+
+    this._lyricsBasePosition = position
+    this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
 
     this._scheduleCrossfade(position)
     return true
@@ -2352,10 +4040,6 @@ export class Player {
       this._fading('seekPrepare', { resource })
       resource.setFilters(this.filters)
 
-      this._lyricsBasePosition = position
-      this._lyricsBasePackets =
-        this.connection?.statistics?.packetsExpected ?? 0
-
       const oldStream = this.connection?.play(resource as unknown)
       await this.waitEvent(
         'playerStateChange',
@@ -2364,6 +4048,10 @@ export class Player {
       if (oldStream) {
         oldStream.destroy()
       }
+
+      this._lyricsBasePosition = position
+      this._lyricsBasePackets =
+        this.connection?.statistics?.packetsExpected ?? 0
 
       this._scheduleCrossfade(position)
       return true
@@ -2487,13 +4175,14 @@ export class Player {
       'Player',
       `Playing resource for guild ${this.guildId} after legacy seek`
     )
-    this._lyricsBasePosition = position
-    this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
     this.connection.play(resource as unknown)
     await this.waitEvent(
       'playerStateChange',
       (s: VoicePlayerState) => s.status === 'playing'
     )
+
+    this._lyricsBasePosition = position
+    this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
 
     this._scheduleCrossfade(position)
     return true
@@ -2546,7 +4235,25 @@ export class Player {
     if (this.destroying) return false
 
     const crossfadeConfig = this._getCrossfadeConfig()
-    const shouldPrepareCrossfade = !!crossfadeConfig && !!this.track
+    const audioStream = this._getAudioStream()
+    const pipelineDead =
+      typeof audioStream?.isFlushed === 'function' && audioStream.isFlushed()
+    const bridgeDraining =
+      typeof audioStream?.isBridgeDraining === 'function' &&
+      audioStream.isBridgeDraining()
+    const shouldPrepareCrossfade =
+      !!crossfadeConfig && !!this.track && !pipelineDead
+
+    logger('debug', 'Crossfade', `preload() called for guild ${this.guildId}`, {
+      hasCrossfadeConfig: !!crossfadeConfig,
+      hasTrack: !!this.track,
+      shouldPrepareCrossfade,
+      pipelineDead,
+      bridgeDraining,
+      crossfadeCompletionActive: !!this._crossfadeCompletionContext,
+      trackIdentifier: payload.info?.identifier,
+      crossfadeDuration: crossfadeConfig?.durationMs ?? 'N/A'
+    })
     const hasPreparedCrossfade =
       !!this.nextCrossfadeTrack && !!this.nextCrossfadePcm
 
@@ -2584,7 +4291,23 @@ export class Player {
       this.nextTrack = null
       this.nextStreamInfo = null
     }
-    this._clearCrossfade({ clearNext: true })
+
+    if (this._crossfadeCompletionContext) {
+      logger(
+        'debug',
+        'Crossfade',
+        `Deferring preload for guild ${this.guildId} — crossfade blend is active (token ${this._crossfadeCompletionContext.token})`,
+        { trackIdentifier: payload.info?.identifier }
+      )
+      this._pendingPreload = payload
+      return true
+    }
+
+    const _bridgeActive =
+      bridgeDraining ||
+      (typeof audioStream?.isBridgeMode === 'function' &&
+        audioStream.isBridgeMode())
+    this._clearCrossfade({ clearNext: true, force: !_bridgeActive })
 
     try {
       const trackInfo = {
@@ -2595,7 +4318,7 @@ export class Player {
       const urlData = await this.nodelink.sources.getTrackUrl(trackInfo)
       if (urlData.exception) return false
 
-      if (crossfadeConfig && this.track) {
+      if (shouldPrepareCrossfade && crossfadeConfig && this.track) {
         logger(
           'debug',
           'Crossfade',
@@ -2614,7 +4337,6 @@ export class Player {
             'Crossfade',
             `Crossfade preload skipped for guild ${this.guildId} (stream mode required).`
           )
-          // Fallback to normal preload
         } else {
           const total =
             this.track.endTime && this.track.endTime > 0
@@ -2627,7 +4349,6 @@ export class Player {
               'Crossfade',
               `Crossfade preload skipped for guild ${this.guildId} (track shorter than ${crossfadeConfig.durationMs}ms).`
             )
-            // Fallback to normal preload
           } else {
             const pcmFetched = await this._fetchPcmResource(
               payload.info,
@@ -2642,9 +4363,7 @@ export class Player {
               ...urlData,
               trackInfo: payload.info
             }
-            this.nextCrossfadeDuration = crossfadeConfig.durationMs
 
-            // Assign to nextResource as well for fallback, but it's raw PCM!
             this.nextResource = pcmFetched.stream
             this.nextTrack = payload
             this.nextStreamInfo = { ...urlData, trackInfo: payload.info }
@@ -2667,7 +4386,6 @@ export class Player {
         }
       }
 
-      // Normal preload (Gapless)
       const fetched = await this._fetchResource(payload.info, urlData, 0)
       if ('exception' in fetched) return false
 
@@ -2680,6 +4398,38 @@ export class Player {
       }
       this.nextResource.setFilters(this.filters)
 
+      if (pipelineDead && !bridgeDraining && this.connection) {
+        logger(
+          'debug',
+          'Player',
+          `Pipeline dead after crossfade — directly starting next track for guild ${this.guildId}`,
+          { nextTrack: payload.info?.identifier }
+        )
+
+        const nextTrack = this.nextTrack
+        const nextStreamInfo = this.nextStreamInfo
+        const resource = this.nextResource
+
+        if (this.track) {
+          this._emitTrackEnd(EndReasons.GAPLESS)
+        }
+
+        this.track = nextTrack
+        this.nextTrack = null
+        this.nextResource = null
+        this.streamInfo = nextStreamInfo
+        this.nextStreamInfo = null
+
+        this.position = 0
+        this._lyricsBasePosition = 0
+        this._lyricsBasePackets =
+          this.connection.statistics?.packetsExpected ?? 0
+
+        this._crossfadeIgnoreIdle = true
+
+        this.connection.play(resource as unknown)
+      }
+
       return true
     } catch (err) {
       const error = err as Error
@@ -2690,6 +4440,49 @@ export class Player {
       )
       return false
     }
+  }
+
+  /**
+   * Clears any queued/preloaded next track and cancels pending crossfade prep.
+   *
+   * @returns True when state was cleared.
+   */
+  public clearNextTrack(): boolean {
+    if (this.destroying) return false
+
+    this._pendingPreload = null
+    const hasActiveCrossfade = !!this._crossfadeCompletionContext
+
+    if (this.nextResource) {
+      this.nextResource.destroy()
+      this.nextResource = null
+    }
+
+    this.nextTrack = null
+    this.nextStreamInfo = null
+
+    if (hasActiveCrossfade) {
+      if (this.nextCrossfadePcm) {
+        this.nextCrossfadePcm.destroy()
+        this.nextCrossfadePcm = null
+      }
+      if (this.nextCrossfadeResource) {
+        this.nextCrossfadeResource.destroy()
+        this.nextCrossfadeResource = null
+      }
+      this.nextCrossfadeTrack = null
+      this.nextCrossfadeStreamInfo = null
+
+      logger(
+        'debug',
+        'Crossfade',
+        `clearNextTrack(): preserving active crossfade for guild ${this.guildId}`
+      )
+      return true
+    }
+
+    this._clearCrossfade({ clearNext: true, force: true })
+    return true
   }
 
   /**
@@ -2709,17 +4502,28 @@ export class Player {
     if (shouldPause) {
       if (this._fading('pause')) {
         this.isPaused = true
+        const pumpCtrl = this._getAudioStream()?.crossfadeController
+        if (typeof pumpCtrl?.setPumpPaused === 'function')
+          pumpCtrl.setPumpPaused(true)
         this.emitEvent(GatewayEvents.PAUSE, { paused: true })
         return true
       }
 
       this.isPaused = true
       this.connection?.pause?.('requested')
+      this._pauseCrossfadeCompletionTimer()
+      const pumpCtrl = this._getAudioStream()?.crossfadeController
+      if (typeof pumpCtrl?.setPumpPaused === 'function')
+        pumpCtrl.setPumpPaused(true)
     } else {
       this.isPaused = false
       this._isResuming = true
       this._fading('resume')
       this.connection?.unpause?.('requested')
+      this._resumeCrossfadeCompletionTimer()
+      const pumpCtrl = this._getAudioStream()?.crossfadeController
+      if (typeof pumpCtrl?.setPumpPaused === 'function')
+        pumpCtrl.setPumpPaused(false)
     }
 
     this.emitEvent(GatewayEvents.PAUSE, { paused: this.isPaused })
@@ -2796,7 +4600,10 @@ export class Player {
    * @param filters - Filter payload that replaces the active filter set.
    * @returns True when filters applied; false if player inactive.
    */
-  public setFilters(filters: FiltersState): boolean {
+  public setFilters(
+    filters: FiltersState,
+    skipCrossfadeResource = false
+  ): boolean {
     if (this.destroying || !this.track) return false
     logger(
       'debug',
@@ -2808,49 +4615,133 @@ export class Player {
     const payload =
       (filters.filters as Record<string, unknown> | undefined) ??
       (filters as Record<string, unknown> | undefined)
+    const filterTransitions = this._getFilterTransitions()
 
-    if (!payload || Object.keys(payload).length === 0) {
-      this.filters = {}
-    } else {
-      const newFilterSettings: Record<string, unknown> = {}
+    const newFilterSettings: Record<string, FilterStateEntry> = {}
 
+    if (payload && Object.keys(payload).length > 0) {
       for (const key in payload) {
         const value = payload[key]
         if (value === null || value === undefined) {
           continue
         }
-        if (key === 'equalizer' && Array.isArray(value)) {
-          newFilterSettings[key] = value
-          continue
-        }
 
-        const existing = (
-          this.filters.filters as Record<string, unknown> | undefined
-        )?.[key]
-        if (
-          existing &&
-          typeof existing === 'object' &&
-          !Array.isArray(existing) &&
-          typeof value === 'object' &&
-          !Array.isArray(value)
-        ) {
-          newFilterSettings[key] = {
-            ...(existing as Record<string, unknown>),
-            ...(value as Record<string, unknown>)
+        if (key === 'equalizer') {
+          if (Array.isArray(value)) {
+            newFilterSettings[key] = { bands: value }
+          } else {
+            newFilterSettings[key] = isObjectRecord(value)
+              ? (value as FilterStateEntry)
+              : { value }
           }
         } else {
-          newFilterSettings[key] = value
+          const existing = (
+            this.filters.filters as Record<string, unknown> | undefined
+          )?.[key]
+          if (
+            existing &&
+            typeof existing === 'object' &&
+            !Array.isArray(existing) &&
+            typeof value === 'object' &&
+            !Array.isArray(value)
+          ) {
+            const merged: Record<string, unknown> = {
+              ...(existing as Record<string, unknown>),
+              ...(value as Record<string, unknown>)
+            }
+            const mergedFilter = merged as FilterStateEntry
+            if (mergedFilter._disabled) {
+              delete mergedFilter._disabled
+            }
+            newFilterSettings[key] = mergedFilter
+          } else {
+            newFilterSettings[key] = {
+              ...(value as Record<string, unknown>)
+            }
+            const newFilter = newFilterSettings[key]
+            if (isObjectRecord(newFilter) && newFilter._disabled) {
+              delete newFilter._disabled
+            }
+          }
+        }
+
+        const filterBlock = newFilterSettings[key]
+        if (
+          filterBlock &&
+          typeof filterBlock === 'object' &&
+          !filterBlock.transition &&
+          filterTransitions?.enabled
+        ) {
+          filterBlock.transition = {
+            durationMs: filterTransitions.durationMs ?? 4000,
+            curve: filterTransitions.curve ?? 'sinusoidal'
+          }
         }
       }
-
-      this.filters = { ...this.filters, filters: newFilterSettings }
     }
 
+    const oldFilters =
+      (this.filters.filters as Record<string, unknown> | undefined) || {}
+    for (const key in oldFilters) {
+      if (!(key in newFilterSettings)) {
+        const existingFilter = oldFilters[key] as FilterStateEntry | undefined
+        if (existingFilter?._disabled === true) continue
+
+        const isTransitionEnabled = filterTransitions?.enabled
+        if (isTransitionEnabled) {
+          newFilterSettings[key] = {
+            _disabled: true,
+            transition: {
+              durationMs: filterTransitions.durationMs ?? 4000,
+              curve: filterTransitions.curve ?? 'sinusoidal'
+            }
+          }
+        }
+      }
+    }
+
+    this.filters = { ...this.filters, filters: newFilterSettings }
+
     if (this.connection?.audioStream) {
+      this._snapshotPosition()
       this.connection.audioStream.setFilters(this.filters)
     }
     this.nextResource?.setFilters(this.filters)
-    this.nextCrossfadeResource?.setFilters(this.filters)
+    if (!skipCrossfadeResource) {
+      this.nextCrossfadeResource?.setFilters(this.filters)
+    }
+
+    const disabledKeys: string[] = []
+    for (const key in newFilterSettings) {
+      const val = newFilterSettings[key]
+      if (val?._disabled === true) {
+        disabledKeys.push(key)
+      }
+    }
+    if (disabledKeys.length > 0) {
+      const maxTransitionMs = Math.max(
+        ...disabledKeys.map((key) => {
+          const val = newFilterSettings[key]
+          const tr = val?.transition
+          return tr?.durationMs ?? 4000
+        })
+      )
+      const cleanupTimer = setTimeout(() => {
+        const current = (this.filters.filters ?? {}) as Record<string, unknown>
+        let changed = false
+        for (const key of disabledKeys) {
+          const entry = current[key] as FilterStateEntry | undefined
+          if (entry?._disabled === true) {
+            delete current[key]
+            changed = true
+          }
+        }
+        if (changed) {
+          this.filters = { ...this.filters, filters: current }
+        }
+      }, maxTransitionMs + 500)
+      cleanupTimer.unref?.()
+    }
 
     this.emitEvent(GatewayEvents.FILTERS_CHANGED, { filters: this.filters })
 
@@ -2964,7 +4855,7 @@ export class Player {
         logger(
           'error',
           'internal',
-          `Failed to destroy connection for guild ${this.guildId}: ${error.message}`
+          `Failed to destroy connection for guild ${this.guildId}: ${error.message} `
         )
       }
     }
@@ -3013,7 +4904,7 @@ export class Player {
 
     if (this.audioMixer.mixLayers.size >= (mixConfig.maxLayersMix ?? 5)) {
       throw new Error(
-        `Maximum number of mix layers (${mixConfig.maxLayersMix}) reached`
+        `Maximum number of mix layers(${mixConfig.maxLayersMix}) reached`
       )
     }
 
@@ -3131,7 +5022,7 @@ export class Player {
           logger(
             'warn',
             'Lyrics',
-            `Failed to load lyrics for guild ${this.guildId}: ${errorMessage}`
+            `Failed to load lyrics for guild ${this.guildId}: ${errorMessage} `
           )
         })
       }
@@ -3275,6 +5166,15 @@ export class Player {
    * Computes current lyrics position based on packets received.
    */
   private _getLyricsPosition(playbackSpeed: number): number {
+    if (this._crossfadeCompletionContext) {
+      const s = this._getAudioStream()
+      const consumed = s?.getCrossfadeConsumedNextMs?.() ?? -1
+      if (consumed >= 0) {
+        const energySkip = s?.getEnergySkipMs?.() ?? 0
+        return energySkip + consumed
+      }
+    }
+
     const stats = this.connection?.statistics
     const packets = stats?.packetsExpected ?? this._lyricsBasePackets
     const deltaPackets = Math.max(0, packets - this._lyricsBasePackets)
@@ -3384,7 +5284,14 @@ export class Player {
           clearTimeout(timers.pause as NodeJS.Timeout)
         }
       }
-      if (timers.stop) clearTimeout(timers.stop)
+      if (timers.stop) {
+        if (typeof timers.stop === 'object' && 'interval' in timers.stop) {
+          clearInterval(timers.stop.interval)
+          if (timers.stop.timeout) clearTimeout(timers.stop.timeout)
+        } else {
+          clearTimeout(timers.stop)
+        }
+      }
       timers.trackEnd = null
       timers.pause = null
       timers.stop = null
@@ -3423,6 +5330,10 @@ export class Player {
     const scratchStyle =
       (section.curve as import('../typings/playback/processing.types.ts').ScratchStyle) ||
       'random'
+
+    if (fadeType === 'tape' || fadeType === 'scratch') {
+      this._snapshotPosition()
+    }
 
     if (action === 'trackStartArm') {
       const resource = payload.resource
@@ -3540,29 +5451,26 @@ export class Player {
         stream.scratchTo?.(section.duration, style)
       }
 
-      // Active monitoring of the ramp completion
       const startTime = Date.now()
       const checkInterval = setInterval(() => {
         const elapsed = Date.now() - startTime
         const isTapeDone = stream.checkTapeRampCompleted?.()
         const isScratchDone = stream.checkScratchEffectCompleted?.()
-        const isRampDone =
-          fadeType === 'scratch'
-            ? !!isScratchDone
-            : fadeType === 'tape' || fadeType === 'both'
-              ? !!isTapeDone
-              : elapsed >= section.duration
+        const effectsDone =
+          (fadeType !== 'tape' || isTapeDone === true) &&
+          (fadeType !== 'scratch' || isScratchDone === true) &&
+          (fadeType !== 'both' ||
+            (isTapeDone === true && isScratchDone === true))
+        const isRampDone = elapsed >= section.duration && effectsDone
         const isTimeUp = elapsed > section.duration + 500 // Safety timeout
 
         if (isRampDone || isTimeUp) {
           clearInterval(checkInterval)
 
-          // Pipeline Drain Delay: Wait for the last frames to clear the Opus encoder and network buffers
-          // Fine-tuned to 300ms to ensure absolute silence in Discord buffer before pausing
           const drainTimeout = setTimeout(() => {
             this.connection?.pause?.('requested')
             timers.pause = null
-          }, 300)
+          }, 750)
 
           const pauseTimer = timers.pause
           if (
@@ -3594,7 +5502,6 @@ export class Player {
         stream.fadeTo?.(1, section.duration, section.curve)
       }
       if (fadeType === 'tape' || fadeType === 'both') {
-        // Force reset to minimum rate before starting the ramp to avoid residuous slow audio
         stream.tapeTo?.(0, 'stop')
         stream.tapeTo?.(section.duration, 'start', section.curve)
       }
@@ -3608,7 +5515,14 @@ export class Player {
     if (action === 'trackStop') {
       const stream = this.connection?.audioStream as AudioResource | undefined
       if (!stream) return false
-      if (timers.stop) clearTimeout(timers.stop)
+      if (timers.stop) {
+        if (typeof timers.stop === 'object' && 'interval' in timers.stop) {
+          clearInterval(timers.stop.interval)
+          if (timers.stop.timeout) clearTimeout(timers.stop.timeout)
+        } else {
+          clearTimeout(timers.stop)
+        }
+      }
 
       if (fadeType === 'volume' || fadeType === 'both') {
         stream.fadeTo?.(0, section.duration, section.curve)
@@ -3625,14 +5539,32 @@ export class Player {
         stream.scratchTo?.(section.duration, style)
       }
 
-      timers.stop = setTimeout(() => {
-        this._isStopping = false
-        this.connection?.stop(EndReasons.STOPPED)
-        if (timers.stop) {
-          clearTimeout(timers.stop)
-          timers.stop = null
+      const startTime = Date.now()
+      const checkInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime
+        const isRampDone = elapsed >= section.duration
+        const isTimeUp = elapsed > section.duration + 500 // Safety timeout
+
+        if (isRampDone || isTimeUp) {
+          clearInterval(checkInterval)
+
+          const drainTimeout = setTimeout(() => {
+            this._isStopping = false
+            this.connection?.stop(EndReasons.STOPPED)
+            timers.stop = null
+          }, 750)
+
+          if (
+            timers.stop &&
+            typeof timers.stop === 'object' &&
+            'interval' in timers.stop
+          ) {
+            timers.stop.timeout = drainTimeout
+          }
         }
-      }, section.duration)
+      }, 10)
+
+      timers.stop = { interval: checkInterval }
       return true
     }
 

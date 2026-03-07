@@ -1,15 +1,12 @@
 import { SAMPLE_RATE } from "../../constants.js";
-import { BaseFilter } from "./BaseFilter.js";
+import { AnimatableFilter } from "./AnimatableFilter.js";
 import { clamp16Bit } from "./dsp/clamp16Bit.js";
+const CHANNELS = 2;
 const BANDS = [
     25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000,
     16000
 ];
-/**
- * 15-band graphic equalizer using IIR filters.
- * @public
- */
-export default class Equalizer extends BaseFilter {
+export default class Equalizer extends AnimatableFilter {
     priority = 5;
     bandGains;
     filtersL;
@@ -20,14 +17,11 @@ export default class Equalizer extends BaseFilter {
         this.filtersL = BANDS.map((freq) => this._createFilter(freq));
         this.filtersR = BANDS.map((freq) => this._createFilter(freq));
     }
-    /**
-     * Creates initial filter coefficients for a frequency band.
-     */
     _createFilter(freq) {
         const omega = (2 * Math.PI * freq) / SAMPLE_RATE;
         const sin = Math.sin(omega);
         const cos = Math.cos(omega);
-        const alpha = sin / (2 * 1); // Q = 1
+        const alpha = sin / (2 * 1);
         const a0 = 1 + alpha;
         return {
             b0: alpha / a0,
@@ -41,20 +35,27 @@ export default class Equalizer extends BaseFilter {
             y2: 0
         };
     }
-    /**
-     * Updates the equalizer settings.
-     * @param settings - Filter settings containing `equalizer`.
-     */
     update(settings) {
         const eq = settings.equalizer || {};
         const bands = eq.bands || [];
+        const defaults = {};
+        for (let i = 0; i < BANDS.length; i++) {
+            defaults[`band_${i}`] = 1.0;
+        }
+        const mappedConfig = { transition: eq.transition };
         for (const band of bands) {
             if (band.band >= 0 && band.band < BANDS.length) {
-                const gain = Math.max(0, Math.min(band.gain + 1.0, 2.0));
-                this.bandGains[band.band] = gain;
+                mappedConfig[`band_${band.band}`] = Math.max(0, Math.min(band.gain + 1.0, 2.0));
             }
         }
-        // Recalculate coefficients for updated bands
+        super.applyAnimatedUpdate({ equalizer: mappedConfig }, 'equalizer', defaults);
+    }
+    onConfigChanged(config) {
+        for (let i = 0; i < BANDS.length; i++) {
+            const val = config[`band_${i}`];
+            if (val !== undefined)
+                this.bandGains[i] = val;
+        }
         for (let i = 0; i < BANDS.length; i++) {
             const freq = BANDS[i];
             const gain = this.bandGains[i];
@@ -84,12 +85,22 @@ export default class Equalizer extends BaseFilter {
             filterR.a2 = a2;
         }
     }
-    /**
-     * Processes a PCM audio buffer.
-     * @param chunk - PCM audio chunk.
-     * @returns The processed PCM audio chunk.
-     */
+    isConfigActive(config) {
+        if (config) {
+            for (let i = 0; i < BANDS.length; i++) {
+                if (Math.abs((config[`band_${i}`] ?? 1.0) - 1.0) > 0.001)
+                    return true;
+            }
+            return false;
+        }
+        for (const gain of this.bandGains) {
+            if (Math.abs(gain - 1.0) > 0.001)
+                return true;
+        }
+        return false;
+    }
     process(chunk) {
+        super.processAnimation(SAMPLE_RATE, chunk.length, CHANNELS);
         for (let i = 0; i < chunk.length; i += 4) {
             let left = chunk.readInt16LE(i);
             let right = chunk.readInt16LE(i + 2);
@@ -124,10 +135,6 @@ export default class Equalizer extends BaseFilter {
         }
         return chunk;
     }
-    /**
-     * Flushes any pending data.
-     * @returns An empty Buffer.
-     */
     flush() {
         for (const filter of this.filtersL) {
             filter.x1 = filter.x2 = filter.y1 = filter.y2 = 0;

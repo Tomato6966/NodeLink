@@ -7,6 +7,7 @@ export interface ChannelMixSettings {
   leftToRight?: number
   rightToLeft?: number
   rightToRight?: number
+  transition?: AnimationTransition
 }
 
 /**
@@ -17,6 +18,7 @@ export interface TimescaleSettings {
   speed?: number
   pitch?: number
   rate?: number
+  transition?: AnimationTransition
 }
 
 /**
@@ -26,6 +28,8 @@ export interface TimescaleSettings {
 export interface TremoloSettings {
   frequency?: number
   depth?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -35,6 +39,8 @@ export interface TremoloSettings {
 export interface VibratoSettings {
   frequency?: number
   depth?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -47,11 +53,21 @@ export interface EqualizerBand {
 }
 
 /**
+ * Filter animation transitions.
+ * @public
+ */
+export interface AnimationTransition {
+  durationMs: number
+  curve?: string
+}
+
+/**
  * Configuration for the Equalizer filter.
  * @public
  */
 export interface EqualizerSettings {
   bands?: EqualizerBand[]
+  transition?: AnimationTransition
 }
 
 /**
@@ -63,6 +79,8 @@ export interface KaraokeSettings {
   monoLevel?: number
   filterBand?: number
   filterWidth?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -73,6 +91,8 @@ export interface EchoSettings {
   delay?: number
   feedback?: number
   mix?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -86,6 +106,8 @@ export interface ReverbSettings {
   dryLevel?: number
   width?: number
   mix?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -101,6 +123,8 @@ export interface DistortionSettings {
   tanScale?: number
   offset?: number
   scale?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -109,6 +133,8 @@ export interface DistortionSettings {
  */
 export interface RotationSettings {
   rotationHz?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -117,6 +143,9 @@ export interface RotationSettings {
  */
 export interface LowPassSettings {
   smoothing?: number
+  targetAlpha?: number
+  logSmoothing?: number
+  transition?: AnimationTransition
 }
 
 /**
@@ -125,6 +154,8 @@ export interface LowPassSettings {
  */
 export interface HighPassSettings {
   smoothing?: number
+  targetAlpha?: number
+  transition?: AnimationTransition
 }
 
 /**
@@ -137,6 +168,8 @@ export interface ChorusSettings {
   feedback?: number
   delay?: number
   mix?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -152,6 +185,8 @@ export interface PhaserSettings {
   stages?: number
   minFrequency?: number
   maxFrequency?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -164,6 +199,8 @@ export interface FlangerSettings {
   feedback?: number
   delay?: number
   mix?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -176,6 +213,8 @@ export interface SpatialSettings {
   z?: number
   depth?: number
   rate?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -189,6 +228,8 @@ export interface CompressorSettings {
   release?: number
   gain?: number
   makeupGain?: number
+  transition?: AnimationTransition
+  alpha?: number
 }
 
 /**
@@ -250,6 +291,14 @@ export interface PhonographSettings {
    * @defaultValue 0.25
    */
   drive?: number
+  /**
+   * Filter parameter transition configuration.
+   */
+  transition?: AnimationTransition
+  /**
+   * Internal fade.
+   */
+  alpha?: number
 }
 
 /**
@@ -312,6 +361,11 @@ export interface FilterInstance {
    * Flushes any pending buffered data.
    */
   flush?: () => Buffer
+
+  /**
+   * Returns true if the filter is currently active or animating back to its disabled state.
+   */
+  isActive?: () => boolean
 }
 
 /**

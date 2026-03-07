@@ -112,7 +112,6 @@ class BufferPool {
       return
     }
 
-    // Always accept if under 75% capacity
     if (this.totalBytes + size > MAX_POOL_SIZE_BYTES * 0.75) {
       const sizes = Array.from(this.pools.keys()).sort((a, b) => b - a)
       for (const s of sizes) {

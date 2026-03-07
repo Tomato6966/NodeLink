@@ -17,6 +17,7 @@ import { ScratchTransformer } from "./ScratchTransformer.js";
 import { FlowController } from "./FlowController.js";
 import { FiltersManager } from "./filtersManager.js";
 import { VolumeTransformer } from "./VolumeTransformer.js";
+import { SilenceDetector } from "./SilenceDetector.js";
 let libSampleRatePromise = null;
 let mp4BoxPromise = null;
 const getMP4Box = async () => {
@@ -254,7 +255,6 @@ async function _buildMp4SeekOptions(url, seekTimeMs) {
     if (!audioTrack) {
         throw new Error('No AAC track found in MP4/M4A');
     }
-    // Make seek meaningful by configuring extraction for this track
     mp4.setExtractionOptions(audioTrack.id, null, { nbSamples: 1 });
     const seekTimeSec = seekTimeMs / 1000;
     const mp4boxFile = mp4;
@@ -273,6 +273,28 @@ async function _buildMp4SeekOptions(url, seekTimeMs) {
         seekTimeSec
     };
 }
+/**
+ * Immutable counter of processed frames.
+ * Ensures the song position in Lavalink doesn't break when using Nightcore/Vaporwave.
+ */
+class PCMFrameCounter extends Transform {
+    totalFrames = 0;
+    sampleRate;
+    bytesPerFrame;
+    constructor(sampleRate = 48000, channels = 2) {
+        super();
+        this.sampleRate = sampleRate;
+        this.bytesPerFrame = channels * 2; // 16-bit PCM (2 bytes per channel)
+    }
+    _transform(chunk, _encoding, callback) {
+        this.totalFrames += chunk.length / this.bytesPerFrame;
+        this.push(chunk);
+        callback();
+    }
+    getConsumedMs() {
+        return (this.totalFrames / this.sampleRate) * 1000;
+    }
+}
 class BaseAudioResource {
     pipes;
     stream;
@@ -288,11 +310,37 @@ class BaseAudioResource {
         voiceStream.setFilters = (filters) => this.setFilters(filters);
         voiceStream.prepareCrossfade = (nextStream, options) => this.prepareCrossfade(nextStream, options);
         voiceStream.startCrossfade = (durationMs, curve) => this.startCrossfade(durationMs, curve);
+        voiceStream.seekToEnergyMatch = (targetRms, crossfadeDurationMs, transitionName, targetBeatState) => this.seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, targetBeatState);
+        voiceStream.setIncomingGain = (multiplier) => this.setIncomingGain(multiplier);
+        voiceStream.setIncomingHighpass = (enabled, peakAlpha) => this.setIncomingHighpass(enabled, peakAlpha);
+        voiceStream.setIncomingLowpass = (enabled, peakAlpha, completionRatio) => this.setIncomingLowpass(enabled, peakAlpha, completionRatio);
+        voiceStream.setIncomingPan = (enabled, completionRatio) => this.setIncomingPan(enabled, completionRatio);
+        voiceStream.setIncomingEcho = (enabled, delayMs, mix, feedback, completionRatio) => this.setIncomingEcho(enabled, delayMs, mix, feedback, completionRatio);
+        voiceStream.setOutgoingPan = (enabled, completionRatio) => this.setOutgoingPan(enabled, completionRatio);
+        voiceStream.setFilterBypass = (bypass) => this.setFilterBypass(bypass);
+        voiceStream.getMainEnergy = () => this.getMainEnergy();
+        voiceStream.getNextTrackOpeningEnergy = () => this.getNextTrackOpeningEnergy();
+        voiceStream.getMainTrackBpm = () => this.getMainTrackBpm();
+        voiceStream.getNextTrackBpm = () => this.getNextTrackBpm();
+        voiceStream.getRealtimeBeatState = () => this.getRealtimeBeatState();
+        voiceStream.getNextTrackBeatState = () => this.getNextTrackBeatState();
+        voiceStream.getMainTrackKey = () => this.getMainTrackKey();
+        voiceStream.getNextTrackKey = () => this.getNextTrackKey();
+        voiceStream.getEnergySkipMs = () => this.getEnergySkipMs();
+        voiceStream.getCrossfadeConsumedNextMs = () => this.getCrossfadeConsumedNextMs();
+        voiceStream.isBridgeMode = () => this.isBridgeMode();
+        voiceStream.isFlushed = () => this.isFlushed();
+        voiceStream.isBridgeDraining = () => this.isBridgeDraining();
+        voiceStream.startShowcaseRecording = (preMs, activeMs, postMs, name) => this.startShowcaseRecording(preMs, activeMs, postMs, name);
         voiceStream.clearCrossfade = () => this.clearCrossfade();
         voiceStream.getCrossfadeState = () => this.getCrossfadeState();
         voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted();
         voiceStream.scratchTo = (durationMs, style) => this.scratchTo(durationMs, style);
         voiceStream.checkScratchEffectCompleted = () => this.checkScratchEffectCompleted();
+        voiceStream.extractCrossfadeBuffer = () => this.extractCrossfadeBuffer();
+        voiceStream.getEffectiveRate = () => this.getEffectiveRate();
+        voiceStream.getRMS = () => this.getRMS();
+        voiceStream.isSilent = () => this.isSilent();
         this.stream = voiceStream;
     }
     _end() {
@@ -325,10 +373,76 @@ class BaseAudioResource {
     startCrossfade(_durationMs, _curve) {
         return false;
     }
+    seekToEnergyMatch(_targetRms, _crossfadeDurationMs, _transitionName, _targetBeatState) { }
+    setIncomingGain(_multiplier) { }
+    setIncomingHighpass(_enabled, _peakAlpha) { }
+    setIncomingLowpass(_enabled, _peakAlpha, _completionRatio) { }
+    setIncomingPan(_enabled, _completionRatio) { }
+    setIncomingEcho(_enabled, _delayMs, _mix, _feedback, _completionRatio) { }
+    setOutgoingPan(_enabled, _completionRatio) { }
+    setFilterBypass(_bypass) { }
     clearCrossfade() { }
     getCrossfadeState() {
         return { active: false, bufferedMs: 0, targetMs: 0, isFinished: false };
     }
+    extractCrossfadeBuffer() {
+        return null;
+    }
+    getEffectiveRate() {
+        return 1.0;
+    }
+    getRMS() {
+        if (!this.pipes)
+            return 0;
+        const silenceDetector = this.pipes.find((p) => p instanceof SilenceDetector);
+        return silenceDetector?.getRMS() ?? 0;
+    }
+    isSilent() {
+        if (!this.pipes)
+            return false;
+        const silenceDetector = this.pipes.find((p) => p instanceof SilenceDetector);
+        return silenceDetector?.isSilent() ?? false;
+    }
+    getRealtimeBeatState() {
+        return null;
+    }
+    getNextTrackBeatState() {
+        return null;
+    }
+    getMainTrackKey() {
+        return null;
+    }
+    getNextTrackKey() {
+        return null;
+    }
+    getMainEnergy() {
+        return null;
+    }
+    getNextTrackOpeningEnergy() {
+        return 0;
+    }
+    getMainTrackBpm() {
+        return null;
+    }
+    getNextTrackBpm() {
+        return null;
+    }
+    getEnergySkipMs() {
+        return 0;
+    }
+    getCrossfadeConsumedNextMs() {
+        return 0;
+    }
+    isBridgeMode() {
+        return false;
+    }
+    isFlushed() {
+        return false;
+    }
+    isBridgeDraining() {
+        return false;
+    }
+    startShowcaseRecording(_preMs, _activeMs, _postMs, _name) { }
     checkTapeRampCompleted() {
         return false;
     }
@@ -348,24 +462,22 @@ class BaseAudioResource {
         if (volumeTransformer) {
             volumeTransformer.setVolume(volume);
         }
-        else {
-            throw new Error('VolumeTransformer not found in the pipeline.');
-        }
     }
     setFilters(filters) {
         if (!this.pipes)
             return;
-        const flowController = this.pipes.find((p) => p instanceof FlowController);
-        if (flowController) {
-            flowController.setFilters(filters);
-            return;
-        }
         const filterManager = this.pipes.find((p) => p instanceof FiltersManager);
         if (filterManager) {
             filterManager.update(filters);
+            return;
         }
-        else {
-            throw new Error('Filters not found in the pipeline.');
+        const flowController = this.pipes.find((p) => p instanceof FlowController);
+        if (flowController) {
+            if (typeof flowController.setFilters === 'function') {
+                ;
+                flowController.setFilters(filters);
+            }
+            return;
         }
     }
     setFadeVolume(volume) {
@@ -379,9 +491,6 @@ class BaseAudioResource {
         const fadeTransformer = this.pipes.find((p) => p instanceof FadeTransformer);
         if (fadeTransformer) {
             fadeTransformer.setGain(volume);
-        }
-        else {
-            throw new Error('FadeTransformer not found in the pipeline.');
         }
     }
     fadeTo(volume, durationMs, curve) {
@@ -1015,9 +1124,7 @@ class AACDecoderStream extends Transform {
                         }
                     }
                 }
-                catch (_decodeErr) {
-                    // Skip bad frame
-                }
+                catch (_decodeErr) { }
                 this.ringBuffer.skip(frameInfo.end);
             }
             callback();
@@ -1241,8 +1348,6 @@ class FMP4ToAACStream extends Transform {
         super(options);
         this.audioConfig = null;
         this.initSegmentProcessed = false;
-        // Quando for true, buffers dados e processa boxes completos (SoundCloud por exemplo)
-        // Quando for false (padrão), espera segmentos completos por chunk (NicoVideo por exemplo)
         this.bufferMode = options.bufferMode || false;
         this.buffer = EMPTY_BUFFER;
         this._streamState = null;
@@ -1252,7 +1357,6 @@ class FMP4ToAACStream extends Transform {
             this.buffer = EMPTY_BUFFER;
             return;
         }
-        // Avoid retaining a large backing store when only a small tail remains.
         if (this.buffer.byteOffset > 0 &&
             (this.buffer.byteOffset >= 256 * 1024 ||
                 this.buffer.buffer.byteLength > this.buffer.length * 4)) {
@@ -1414,7 +1518,6 @@ class FMP4ToAACStream extends Transform {
         }
         return null;
     }
-    // Aqui processa os dados bufferizados, que vai ser retornando quando o bufferMode for true
     _processBuffer() {
         while (this.buffer.length > 0) {
             if (!this._streamState) {
@@ -1487,9 +1590,6 @@ class FMP4ToAACStream extends Transform {
                     }
                 }
                 else if (type === 'ftyp') {
-                    // O ftyp geralmente não contém configuração de áudio, mas às vezes o segmento de inicialização é passado como um único bloco
-                    // Neste parser de streaming, lidamos box por box.
-                    // Podemos ignorar o ftyp aqui, aqui vai aguardar o moov.
                 }
                 else if (type === 'moof') {
                     const sizes = this._parseMoof(body);
@@ -1497,7 +1597,6 @@ class FMP4ToAACStream extends Transform {
                         this._streamState.samples = sizes;
                     }
                     else {
-                        // logger('debug', 'FMP4', 'moof parsed but 0 samples found')
                     }
                 }
                 this._streamState.mode = 'READ_HEADER';
@@ -1610,7 +1709,6 @@ class FMP4ToAACStream extends Transform {
     _transform(chunk, _encoding, callback) {
         try {
             if (this.bufferMode) {
-                // quando bufferMode for true, vai ser modo streaming, ou seja, vai processar o chunk imediatamente
                 if (this.buffer.length === 0)
                     this.buffer = chunk;
                 else if (chunk.length > 0)
@@ -1618,7 +1716,6 @@ class FMP4ToAACStream extends Transform {
                 this._processBuffer();
             }
             else {
-                // quando bufferMode for false, vai ser modo simples, ou seja, vai processar o chunk quando tiver todos os dados
                 if (!this.initSegmentProcessed && chunk.length > 8) {
                     const boxType = chunk.toString('ascii', 4, 8);
                     if (boxType === 'ftyp') {
@@ -1718,6 +1815,7 @@ class FLVToAACStream extends Transform {
 class StreamAudioResource extends BaseAudioResource {
     nodelink;
     crossfadeController = null;
+    frameCounter = null;
     constructor(stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false, enableAGC = true) {
         super();
         this.nodelink = nodelink;
@@ -1776,7 +1874,6 @@ class StreamAudioResource extends BaseAudioResource {
         const _aacStream = stream;
         const streams = [stream];
         if (_isFmp4Format(lowerType)) {
-            // como eu coloquei options = {} no fmp4, ele aceita isso como o bufferMode, se incluir, vai passar true, se nao, vai passar false
             const bufferMode = lowerType.includes('fmp4-buffered');
             const demuxer = new FMP4ToAACStream({ bufferMode });
             streams.push(demuxer);
@@ -1850,6 +1947,8 @@ class StreamAudioResource extends BaseAudioResource {
         return decoder;
     }
     _createOutputPipeline(pcmStream, nodelink, initialFilters, volume, audioMixer = null, enableAGC = true) {
+        const frameCounter = new PCMFrameCounter(AUDIO_CONFIG.sampleRate, AUDIO_CONFIG.channels);
+        this.frameCounter = frameCounter; // Saves the reference to get the time later
         const filters = new FiltersManager(nodelink, initialFilters);
         const volumeTransformer = new VolumeTransformer({
             type: 's16le',
@@ -1874,19 +1973,33 @@ class StreamAudioResource extends BaseAudioResource {
         });
         const crossfadeController = new CrossfadeController(AUDIO_CONFIG.sampleRate, AUDIO_CONFIG.channels);
         this.crossfadeController = crossfadeController;
-        const flowController = new FlowController(filters, volumeTransformer, fadeTransformer, tapeTransformer, scratchTransformer, audioMixer);
+        const silenceDetector = new SilenceDetector({
+            sampleRate: AUDIO_CONFIG.sampleRate,
+            channels: AUDIO_CONFIG.channels,
+            thresholdDb: nodelink.options.audio?.automix?.silenceThresholdDb ?? -40
+        });
+        const flowController = new FlowController(volumeTransformer, fadeTransformer, tapeTransformer, scratchTransformer, audioMixer);
         const opusEncoder = new OpusEncoder({
             rate: AUDIO_CONFIG.sampleRate,
             channels: AUDIO_CONFIG.channels
         });
         opusEncoder.setDTX(false);
+        crossfadeController.filterProcessor = (chunk) => filters.process(chunk);
+        crossfadeController.filterBypassSetter = (bypass) => {
+            filters.bypass = bypass;
+        };
+        crossfadeController.filterStateResetter = () => {
+            filters.resetState();
+        };
         const streams = [
             pcmStream,
+            frameCounter,
+            silenceDetector,
+            filters,
             crossfadeController,
             flowController
         ];
-        this.pipes?.push(crossfadeController, flowController);
-        // Inject Audio Interceptors (Low-level stream manipulation)
+        this.pipes?.push(frameCounter, silenceDetector, filters, crossfadeController, flowController);
         if (nodelink.extensions?.audioInterceptors) {
             for (const interceptorFactory of nodelink.extensions // biome-ignore lint/suspicious/noExplicitAny: dynamic extension types
                 .audioInterceptors) {
@@ -1899,7 +2012,6 @@ class StreamAudioResource extends BaseAudioResource {
                     }
                 }
                 catch (e) {
-                    // Log error but don't break pipeline
                     console.error(`Audio interceptor error: ${e.message}`);
                 }
             }
@@ -1927,8 +2039,62 @@ class StreamAudioResource extends BaseAudioResource {
             return false;
         return this.crossfadeController.startCrossfade(durationMs, curve);
     }
+    seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, targetBeatState) {
+        this.crossfadeController?.seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, targetBeatState);
+    }
+    setIncomingHighpass(enabled, peakAlpha) {
+        this.crossfadeController?.setIncomingHighpass(enabled, peakAlpha);
+    }
+    setIncomingLowpass(enabled, peakAlpha, completionRatio) {
+        this.crossfadeController?.setIncomingLowpass(enabled, peakAlpha, completionRatio);
+    }
+    setFilterBypass(bypass) {
+        this.crossfadeController?.setFilterBypass(bypass);
+    }
+    setIncomingPan(enabled, completionRatio) {
+        this.crossfadeController?.setIncomingPan(enabled, completionRatio);
+    }
+    setIncomingEcho(enabled, delayMs, mix, feedback, completionRatio) {
+        this.crossfadeController?.setIncomingEcho(enabled, delayMs, mix, feedback, completionRatio);
+    }
+    setOutgoingPan(enabled, completionRatio) {
+        this.crossfadeController?.setOutgoingPan(enabled, completionRatio);
+    }
+    getEnergySkipMs() {
+        return this.crossfadeController?.getEnergySkipMs() ?? 0;
+    }
+    setIncomingGain(multiplier) {
+        this.crossfadeController?.setIncomingGain(multiplier);
+    }
+    isBridgeMode() {
+        return this.crossfadeController?.isBridgeMode() ?? false;
+    }
+    isFlushed() {
+        return this.crossfadeController?.isFlushed() ?? false;
+    }
+    isBridgeDraining() {
+        return this.crossfadeController?.isBridgeDraining() ?? false;
+    }
+    getConsumedMs() {
+        return this.frameCounter?.getConsumedMs() ?? 0;
+    }
+    /**
+     * How many ms of Track B audio the CrossfadeController has consumed
+     * from its ring buffer since the last startCrossfade() call.
+     */
+    getCrossfadeConsumedNextMs() {
+        return this.crossfadeController?.getConsumedMs() ?? 0;
+    }
     clearCrossfade() {
         this.crossfadeController?.clear();
+    }
+    startShowcaseRecording(preMs, activeMs, postMs, name) {
+        this.crossfadeController?.startShowcaseRecording(preMs, activeMs, postMs, name);
+    }
+    extractCrossfadeBuffer() {
+        if (!this.crossfadeController)
+            return null;
+        return this.crossfadeController.extractRemainingBuffer();
     }
     getCrossfadeState() {
         return (this.crossfadeController?.getState() ?? {
@@ -1937,6 +2103,35 @@ class StreamAudioResource extends BaseAudioResource {
             targetMs: 0,
             isFinished: false
         });
+    }
+    getMainTrackKey() {
+        return this.crossfadeController?.getMainTrackKey() ?? null;
+    }
+    getNextTrackKey() {
+        return this.crossfadeController?.getNextTrackKey() ?? null;
+    }
+    getMainEnergy() {
+        return this.crossfadeController?.getMainEnergy() ?? null;
+    }
+    getNextTrackOpeningEnergy() {
+        return this.crossfadeController?.getNextTrackOpeningEnergy() ?? 0;
+    }
+    getMainTrackBpm() {
+        return this.crossfadeController?.getMainTrackBpm() ?? null;
+    }
+    getNextTrackBpm() {
+        return this.crossfadeController?.getNextTrackBpm() ?? null;
+    }
+    getRealtimeBeatState() {
+        return this.crossfadeController?.getRealtimeBeatState() ?? null;
+    }
+    getNextTrackBeatState() {
+        return this.crossfadeController?.getNextTrackBeatState() ?? null;
+    }
+    getEffectiveRate() {
+        const filters = this.pipes?.find((p) => p instanceof FiltersManager);
+        const flowController = this.pipes?.find((p) => p instanceof FlowController);
+        return ((filters?.getRate() ?? 1.0) * (flowController?.getEffectiveRate() ?? 1.0));
     }
     checkTapeRampCompleted() {
         if (!this.pipes)
@@ -1987,9 +2182,7 @@ class StreamAudioResource extends BaseAudioResource {
         }
     }
     _setupEventHandlers(inputStream) {
-        inputStream.on('finishBuffering', () => {
-            // Waiting for the pipeline to finish
-        });
+        inputStream.on('finishBuffering', () => { });
         inputStream.on('error', (err) => {
             this.stream?.emit('error', err);
         });

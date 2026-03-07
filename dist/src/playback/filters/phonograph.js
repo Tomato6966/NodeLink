@@ -1,5 +1,5 @@
 import { SAMPLE_RATE } from "../../constants.js";
-import { BaseFilter } from "./BaseFilter.js";
+import { AnimatableFilter } from "./AnimatableFilter.js";
 import { clamp16Bit } from "./dsp/clamp16Bit.js";
 import LFO from "./dsp/lfo.js";
 const MAX_DELAY_MS = 60;
@@ -130,7 +130,7 @@ function softClip(x) {
  * Includes biquad filtering, wow & flutter, early reflections, and mic AGC.
  * @public
  */
-export default class Phonograph extends BaseFilter {
+export default class Phonograph extends AnimatableFilter {
     priority = 10;
     frequency = 0.8;
     depth = 0.25;
@@ -164,35 +164,70 @@ export default class Phonograph extends BaseFilter {
     rng = new XorShift32(0x1a2b3c4d);
     constructor() {
         super();
-        this.recomputeFilters();
+        this.recomputeFilters(1.0);
         this.wowLfo.update(this.frequency, 1);
         this.flutterLfo.update(7.5, 1);
     }
-    recomputeFilters() {
+    recomputeFilters(a) {
         const fs = SAMPLE_RATE;
         const q = Math.SQRT1_2;
-        Biquad.highpass(260, q, fs, this.hp1);
-        Biquad.highpass(260, q, fs, this.hp2);
-        Biquad.lowpass(3300, q, fs, this.lp1);
-        Biquad.lowpass(3300, q, fs, this.lp2);
-        Biquad.peaking(950, 1.1, +7.0, fs, this.peak1);
-        Biquad.peaking(2400, 1.6, +3.5, fs, this.peak2);
+        const hpFreq = 2 + (260 - 2) * a;
+        const lpFreq = 22000 - (22000 - 3300) * a;
+        Biquad.highpass(hpFreq, q, fs, this.hp1);
+        Biquad.highpass(hpFreq, q, fs, this.hp2);
+        Biquad.lowpass(lpFreq, q, fs, this.lp1);
+        Biquad.lowpass(lpFreq, q, fs, this.lp2);
+        Biquad.peaking(950, 1.1, 7.0 * a, fs, this.peak1);
+        Biquad.peaking(2400, 1.6, 3.5 * a, fs, this.peak2);
         Biquad.highpass(1800, q, fs, this.hissHp);
         Biquad.lowpass(6500, q, fs, this.hissLp);
     }
+    targetDepth = 0.25;
+    targetCrackle = 0.18;
+    targetFlutter = 0.18;
+    targetRoom = 0.22;
+    targetMicAgc = 0.25;
+    targetDrive = 0.25;
+    alpha = 1.0;
     update(settings) {
         const phono = settings.phonograph || {};
+        const isDisabled = phono._disabled === true;
         this.frequency = phono.frequency ?? 0.8;
-        this.depth = Math.max(0, Math.min(phono.depth ?? 0.25, 1.0));
-        this.crackle = Math.max(0, Math.min(phono.crackle ?? 0.18, 1.0));
-        this.flutter = Math.max(0, Math.min(phono.flutter ?? 0.18, 1.0));
-        this.room = Math.max(0, Math.min(phono.room ?? 0.22, 1.0));
-        this.micAgc = Math.max(0, Math.min(phono.micAgc ?? 0.25, 1.0));
-        this.drive = Math.max(0, Math.min(phono.drive ?? 0.25, 1.0));
+        this.targetDepth = Math.max(0, Math.min(phono.depth ?? 0.25, 1.0));
+        this.targetCrackle = Math.max(0, Math.min(phono.crackle ?? 0.18, 1.0));
+        this.targetFlutter = Math.max(0, Math.min(phono.flutter ?? 0.18, 1.0));
+        this.targetRoom = Math.max(0, Math.min(phono.room ?? 0.22, 1.0));
+        this.targetMicAgc = Math.max(0, Math.min(phono.micAgc ?? 0.25, 1.0));
+        this.targetDrive = Math.max(0, Math.min(phono.drive ?? 0.25, 1.0));
         this.wowLfo.update(this.frequency, 1);
-        this.flutterLfo.update(7.5, 1);
+        this.flutterLfo.update(4.5, 0.45);
+        const targetAlpha = isDisabled ? 0.0 : 1.0;
+        super.applyAnimatedUpdate({
+            phonograph: {
+                alpha: targetAlpha,
+                transition: phono.transition
+            }
+        }, 'phonograph', { alpha: 0.0 });
+    }
+    onConfigChanged(config) {
+        this.alpha = config['alpha'] ?? 1.0;
+        this.depth = this.targetDepth * this.alpha;
+        this.crackle = this.targetCrackle * this.alpha;
+        this.flutter = this.targetFlutter * this.alpha;
+        this.room = this.targetRoom * this.alpha;
+        this.micAgc = this.targetMicAgc * this.alpha;
+        this.drive = this.targetDrive * this.alpha;
+    }
+    isConfigActive(config) {
+        const a = config ? config['alpha'] : this.alpha;
+        return (a ?? 1.0) > 0.001;
     }
     process(chunk) {
+        super.processAnimation(SAMPLE_RATE, chunk.length, 2);
+        if (this.alpha <= 0.001) {
+            return chunk;
+        }
+        this.recomputeFilters(this.alpha);
         const fs = SAMPLE_RATE;
         const wowMax = this.depth * 0.014 * fs;
         const flutterMax = this.flutter * 0.0022 * fs;

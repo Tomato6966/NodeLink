@@ -200,6 +200,10 @@ export interface AudioResource {
    */
   startCrossfade?: (durationMs: number, curve?: string) => boolean
   /**
+   * Applies a gain multiplier only to incoming Track B during crossfade.
+   */
+  setIncomingGain?: (multiplier: number) => void
+  /**
    * Clears any buffered crossfade data.
    */
   clearCrossfade?: () => void
@@ -212,8 +216,134 @@ export interface AudioResource {
     targetMs: number
     isFinished: boolean
   }
+  /**
+   * Reports the current effective playback rate (combining all filters and effects).
+   */
+  getEffectiveRate?: () => number
+  /**
+   * Extracts left-over crossfade buffer data.
+   */
+  extractCrossfadeBuffer?: () => Buffer | null
+  /**
+   * Returns the current RMS level of the audio stream.
+   */
+  getRMS?: () => number
+  /**
+   * Returns true if the audio stream is currently silent.
+   */
+  isSilent?: () => boolean
   destroy(): void
   stream?: VoiceAudioStream | null
+}
+
+export interface TrackKeyResult {
+  key: string
+  pitchClass: number
+  mode: 'major' | 'minor'
+  camelot: string
+  camelotNum: number
+  confidence: number
+  stability?: number
+  tonalClarity?: number
+  modeAmbiguity?: number
+}
+
+export interface TrackEnergy {
+  rms: number
+}
+
+export interface RealtimeBeatState {
+  timeSec: number
+  bpm: number
+  confidence: number
+  phase: number
+  locked: boolean
+  lastBeatAgeSec: number
+}
+
+export interface ExtendedCrossfadeController {
+  onBridgeDrained?: (() => void) | null
+  onBridgeStarving?: (() => void) | null
+  setPumpPaused?: (paused: boolean) => void
+}
+
+export interface ExtendedAudioStream extends AudioResource {
+  isBridgeDraining?: () => boolean
+  isBridgeMode?: () => boolean
+  isFlushed?: () => boolean
+  crossfadeController?: ExtendedCrossfadeController | null
+  getMainEnergy?: () => TrackEnergy | null
+  getNextTrackOpeningEnergy?: () => number
+  getMainTrackBpm?: () => number | null
+  getNextTrackBpm?: () => number | null
+  getRealtimeBeatState?: () => RealtimeBeatState
+  getNextTrackBeatState?: () => RealtimeBeatState | null
+  getMainTrackKey?: () => TrackKeyResult | null
+  getNextTrackKey?: () => TrackKeyResult | null
+  startShowcaseRecording?: (
+    prerollMs: number,
+    transitionMs: number,
+    tailMs: number,
+    transitionName: string
+  ) => void
+  setFilterBypass?: (enabled: boolean) => void
+  setIncomingHighpass?: (enabled: boolean, alpha?: number) => void
+  setIncomingLowpass?: (
+    enabled: boolean,
+    alpha?: number,
+    completionRatio?: number
+  ) => void
+  setIncomingPan?: (enabled: boolean, completionRatio?: number) => void
+  setIncomingEcho?: (
+    enabled: boolean,
+    delay: number,
+    mix: number,
+    feedback: number,
+    completionRatio?: number
+  ) => void
+  setOutgoingPan?: (enabled: boolean, completionRatio?: number) => void
+  seekToEnergyMatch?: (
+    rms: number,
+    durationMs: number,
+    transition?: string | null,
+    targetBeatState?: RealtimeBeatState | null
+  ) => void
+  getEnergySkipMs?: () => number
+  getCrossfadeConsumedNextMs?: () => number
+}
+
+export interface FilterTransitionsConfig {
+  enabled?: boolean
+  durationMs?: number
+  curve?: string
+}
+
+export interface FilterStateTransition {
+  durationMs?: number
+  curve?: string
+}
+
+export interface FilterStateEntry extends Record<string, unknown> {
+  _disabled?: boolean
+  transition?: FilterStateTransition
+}
+
+export interface DeezerTrackMetadata {
+  bpm?: number | string | null
+  gain?: number | string | null
+  [key: string]: unknown
+}
+
+export interface DeezerApiTrackResponse {
+  bpm?: number | string | null
+  gain?: number | string | null
+  error?: unknown
+  [key: string]: unknown
+}
+
+export type PlayerPluginInfo = Record<string, unknown> & {
+  deezer?: DeezerTrackMetadata
+  deezerMetadata?: DeezerTrackMetadata
 }
 
 /**
@@ -276,7 +406,10 @@ export interface FadeTimers {
     | NodeJS.Timeout
     | { interval: NodeJS.Timeout; timeout?: NodeJS.Timeout }
     | null
-  stop: NodeJS.Timeout | null
+  stop:
+    | NodeJS.Timeout
+    | { interval: NodeJS.Timeout; timeout?: NodeJS.Timeout }
+    | null
 }
 
 /**
@@ -298,6 +431,21 @@ export interface NodeLinkOptions {
     lookaheadMs?: number
     gateThresholdLUFS?: number
     crossfade?: CrossfadeConfig
+    filterTransitions?: FilterTransitionsConfig
+    automix?: {
+      enabled?: boolean
+      mode?: string
+      fallbackBehavior?: string
+      gaplessTrim?: boolean
+      deezerMetadata?: {
+        enabled?: boolean
+        useBpm?: boolean
+        useGain?: boolean
+        maxBpmDiffRatio?: number
+        requestTimeoutMs?: number
+        tempoMatch?: boolean
+      }
+    }
   }
   mix?: {
     enabled?: boolean
@@ -305,6 +453,13 @@ export interface NodeLinkOptions {
     maxLayersMix?: number
     autoCleanup?: boolean
   }
+}
+
+export type AudioOptions = NonNullable<NodeLinkOptions['audio']>
+export type AutomixConfig = NonNullable<AudioOptions['automix']>
+export type DeezerMetadataConfig = NonNullable<AutomixConfig['deezerMetadata']>
+export type AudioOptionsWithTransitions = AudioOptions & {
+  filterTransitions?: FilterTransitionsConfig
 }
 
 /**

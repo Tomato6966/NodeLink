@@ -115,7 +115,10 @@ function validateAccess(nodelink, req, suppliedCode) {
     }
     const remoteAddress = req.socket?.remoteAddress || '';
     if (!endpointConfig.allowExternalPatch && !LOOPBACKS.has(remoteAddress)) {
-        return { ok: false, error: 'External access to profiler endpoint is blocked.' };
+        return {
+            ok: false,
+            error: 'External access to profiler endpoint is blocked.'
+        };
     }
     if (suppliedCode !== endpointConfig.code) {
         return { ok: false, error: 'Invalid profiler code.' };
@@ -184,7 +187,8 @@ function getMasterRuntimeContext(nodelink) {
     const traceEvents = Array.isArray(traceStore.events)
         ? traceStore.events.slice(-200)
         : [];
-    const statsSnapshot = nodelink?.statsManager && typeof nodelink.statsManager.getSnapshot === 'function'
+    const statsSnapshot = nodelink?.statsManager &&
+        typeof nodelink.statsManager.getSnapshot === 'function'
         ? nodelink.statsManager.getSnapshot()
         : null;
     const workerMetrics = nodelink?.workerManager &&
@@ -199,7 +203,8 @@ function getMasterRuntimeContext(nodelink) {
             status: typeof connectionManager.status === 'string'
                 ? connectionManager.status
                 : 'unknown',
-            metrics: connectionManager.metrics && typeof connectionManager.metrics === 'object'
+            metrics: connectionManager.metrics &&
+                typeof connectionManager.metrics === 'object'
                 ? connectionManager.metrics
                 : null
         }
@@ -235,7 +240,9 @@ function getMasterRuntimeContext(nodelink) {
         workerGuildMap: workerManager?.guildToWorker instanceof Map
             ? workerManager.guildToWorker.size
             : null,
-        sourceRequests: sourceManager?.requests instanceof Map ? sourceManager.requests.size : null
+        sourceRequests: sourceManager?.requests instanceof Map
+            ? sourceManager.requests.size
+            : null
     };
     return {
         activeResources: getMasterActiveResources(),
@@ -299,7 +306,11 @@ async function runMasterProfilerCommand(action, payload) {
             ? payload.port
             : 0;
         inspector.open(port, host, payload.exposeWait === true);
-        return { success: true, pid: process.pid, inspectorUrl: inspector.url() || null };
+        return {
+            success: true,
+            pid: process.pid,
+            inspectorUrl: inspector.url() || null
+        };
     }
     if (action === 'closeInspector') {
         inspector.close();
@@ -335,7 +346,11 @@ async function runMasterProfilerCommand(action, payload) {
             startedAt: Date.now(),
             name: sanitizeProfileName(payload.name) || null
         };
-        return { success: true, pid: process.pid, startedAt: activeMasterCpu.startedAt };
+        return {
+            success: true,
+            pid: process.pid,
+            startedAt: activeMasterCpu.startedAt
+        };
     }
     if (action === 'cpuStop') {
         if (!activeMasterCpu) {
@@ -350,7 +365,13 @@ async function runMasterProfilerCommand(action, payload) {
         }
         catch { }
         activeMasterCpu = null;
-        return { success: true, pid: process.pid, startedAt, endedAt: Date.now(), outputPath };
+        return {
+            success: true,
+            pid: process.pid,
+            startedAt,
+            endedAt: Date.now(),
+            outputPath
+        };
     }
     if (action === 'heapSnapshot') {
         const outputPath = await buildProfilerFilePath('heap', 'heapsnapshot', payload.name);
@@ -646,10 +667,7 @@ function detectAnomalies(snapshot, prevById) {
                     message: `${kind} pid ${pid} rss +${deltaRssMB}MB em ${dtSec.toFixed(1)}s`
                 });
             }
-            // Leak heuristic: old_space rises while player count is stable.
-            if (deltaOldMB > 8 &&
-                Math.abs(playersDelta) === 0 &&
-                dtSec >= 5) {
+            if (deltaOldMB > 8 && Math.abs(playersDelta) === 0 && dtSec >= 5) {
                 warnings.push({
                     level: 'warn',
                     type: 'old_space_growth_suspect',

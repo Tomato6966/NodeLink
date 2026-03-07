@@ -1,5 +1,5 @@
 import { SAMPLE_RATE } from "../../constants.js";
-import { BaseFilter } from "./BaseFilter.js";
+import { AnimatableFilter } from "./AnimatableFilter.js";
 import { clamp16Bit } from "./dsp/clamp16Bit.js";
 const MAX_OUTPUT_GAIN = 0.98;
 const SCALE_16 = 32768;
@@ -8,7 +8,7 @@ const INV_16 = 1 / SCALE_16;
  * Applies a karaoke effect by vocal removal/suppression.
  * @public
  */
-export default class Karaoke extends BaseFilter {
+export default class Karaoke extends AnimatableFilter {
     priority = 10;
     level = 0;
     monoLevel = 0;
@@ -117,20 +117,39 @@ export default class Karaoke extends BaseFilter {
         this.hp_a1 = a1;
         this.hp_a2 = a2;
     }
+    targetLevel = 0;
+    targetMonoLevel = 0;
+    alpha = 1.0;
     /**
      * Updates the karaoke settings.
      * @param settings - Filter settings containing `karaoke`.
      */
     update(settings) {
         const k = settings?.karaoke || {};
-        const level = k.level || 0;
-        const monoLevel = k.monoLevel || 0;
+        const isDisabled = k._disabled === true;
+        this.targetLevel = k.level ?? 1.0;
+        this.targetMonoLevel = k.monoLevel ?? 1.0;
+        this.filterBand = k.filterBand ?? 220.0;
+        this.filterWidth = k.filterWidth ?? 100.0;
+        this.updateCoefficients();
+        const targetAlpha = isDisabled ? 0.0 : 1.0;
+        super.applyAnimatedUpdate({
+            karaoke: {
+                alpha: targetAlpha,
+                transition: k.transition
+            }
+        }, 'karaoke', { alpha: 0.0 });
+    }
+    onConfigChanged(config) {
+        this.alpha = config['alpha'] ?? 1.0;
+        const level = this.targetLevel;
+        const monoLevel = this.targetMonoLevel;
         this.level = level <= 0 ? 0 : level >= 1 ? 1 : level;
         this.monoLevel = monoLevel <= 0 ? 0 : monoLevel >= 1 ? 1 : monoLevel;
-        this.filterBand = k.filterBand || 0;
-        this.filterWidth = k.filterWidth || 0;
-        this.updateCoefficients();
-        this._resetFilterState();
+    }
+    isConfigActive(config) {
+        const a = config ? config['alpha'] : this.alpha;
+        return (a ?? 1.0) > 0.001;
     }
     /**
      * Processes a PCM audio buffer.
@@ -138,6 +157,10 @@ export default class Karaoke extends BaseFilter {
      * @returns The processed PCM audio chunk.
      */
     process(chunk) {
+        super.processAnimation(SAMPLE_RATE, chunk.length, 2);
+        if (this.alpha <= 0.001) {
+            return chunk;
+        }
         const level = this.level;
         const monoLevel = this.monoLevel;
         if (!level && !monoLevel)
@@ -165,7 +188,7 @@ export default class Karaoke extends BaseFilter {
             originalEnergy += left * left + right * right;
             if (monoLevel) {
                 const mid = (left + right) * 0.5;
-                const sub = mid * monoLevel;
+                const sub = mid * monoLevel * this.alpha;
                 left -= sub;
                 right -= sub;
             }
@@ -207,8 +230,10 @@ export default class Karaoke extends BaseFilter {
                 hpRy2 = hpRy1;
                 hpRy1 = highRight;
                 const cancelled = highLeft - highRight;
-                left = lowLeft + cancelled * level;
-                right = lowRight + cancelled * level;
+                const outHighL = highLeft + (cancelled * level - highLeft) * this.alpha;
+                const outHighR = highRight + (cancelled * level - highRight) * this.alpha;
+                left = lowLeft + outHighL;
+                right = lowRight + outHighR;
             }
             outLBuf[f] = left;
             outRBuf[f] = right;

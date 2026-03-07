@@ -1,17 +1,19 @@
 import { SAMPLE_RATE } from '../../constants.ts'
 import type { FilterSettings } from '../../typings/playback/filters.types.ts'
-import { BaseFilter } from './BaseFilter.ts'
+import { AnimatableFilter } from './AnimatableFilter.ts'
 import Allpass from './dsp/allpass.ts'
 import { clamp16Bit } from './dsp/clamp16Bit.ts'
 import LFO from './dsp/lfo.ts'
 
+const CHANNELS = 2
 const MAX_STAGES = 12
 
 /**
  * Applies a phaser effect to the audio.
+ * Uses alpha for smooth animated transitions.
  * @public
  */
-export default class Phaser extends BaseFilter {
+export default class Phaser extends AnimatableFilter {
   public priority = 10
   private leftLfo: LFO
   private rightLfo: LFO
@@ -22,6 +24,7 @@ export default class Phaser extends BaseFilter {
   private mix = 0.5
   private minFrequency = 100
   private maxFrequency = 2500
+  private alpha = 0
 
   private leftFilters: Allpass[]
   private rightFilters: Allpass[]
@@ -44,19 +47,43 @@ export default class Phaser extends BaseFilter {
    * @param settings - Filter settings containing `phaser`.
    */
   public override update(settings: FilterSettings): void {
-    const phaserSettings = settings.phaser || {}
+    const p = settings?.phaser || {}
+    const isDisabled = (p as any)._disabled === true
 
-    this.stages = Math.max(2, Math.min(phaserSettings.stages || 4, MAX_STAGES))
-    this.rate = phaserSettings.rate || 0
-    this.depth = Math.max(0, Math.min(phaserSettings.depth ?? 1.0, 1.0))
-    this.feedback = Math.max(0, Math.min(phaserSettings.feedback || 0, 0.9))
-    this.mix = Math.max(0, Math.min(phaserSettings.mix ?? 0.5, 1.0))
+    this.stages = Math.max(2, Math.min(p.stages || 4, MAX_STAGES))
+    this.rate = p.rate || 0
+    this.depth = Math.max(0, Math.min(p.depth ?? 1.0, 1.0))
+    this.feedback = Math.max(0, Math.min(p.feedback || 0, 0.9))
+    this.mix = Math.max(0, Math.min(p.mix ?? 0.5, 1.0))
 
-    this.minFrequency = phaserSettings.minFrequency || 100
-    this.maxFrequency = phaserSettings.maxFrequency || 2500
+    this.minFrequency = p.minFrequency || 100
+    this.maxFrequency = p.maxFrequency || 2500
 
     this.leftLfo.update(this.rate, this.depth)
     this.rightLfo.update(this.rate, this.depth)
+
+    const isActive = this.rate > 0 && this.depth > 0 && this.mix > 0
+    const targetAlpha = isDisabled ? 0.0 : isActive ? 1.0 : 0.0
+
+    super.applyAnimatedUpdate(
+      {
+        phaser: {
+          alpha: targetAlpha,
+          transition: (p as any).transition
+        }
+      },
+      'phaser',
+      { alpha: 0.0 }
+    )
+  }
+
+  protected override onConfigChanged(config: Record<string, number>): void {
+    this.alpha = config['alpha'] ?? 0
+  }
+
+  protected override isConfigActive(config?: Record<string, number>): boolean {
+    const a = config ? config['alpha'] : this.alpha
+    return (a ?? 0) > 0.001
   }
 
   /**
@@ -65,10 +92,13 @@ export default class Phaser extends BaseFilter {
    * @returns The processed PCM audio chunk.
    */
   public override process(chunk: Buffer): Buffer {
-    if (this.rate === 0 || this.depth === 0 || this.mix === 0) {
+    super.processAnimation(SAMPLE_RATE, chunk.length, CHANNELS)
+
+    if (this.alpha <= 0.001) {
       return chunk
     }
 
+    const alpha = this.alpha
     const sweepRange = this.maxFrequency - this.minFrequency
 
     for (let i = 0; i < chunk.length; i += 4) {
@@ -96,7 +126,7 @@ export default class Phaser extends BaseFilter {
         }
       }
       this.lastLeftFeedback = wetLeft
-      const finalLeft = leftSample * (1 - this.mix) + wetLeft * this.mix
+      const phasedLeft = leftSample * (1 - this.mix) + wetLeft * this.mix
 
       let wetRight = rightSample + this.lastRightFeedback * this.feedback
       for (let j = 0; j < this.stages; j++) {
@@ -107,7 +137,10 @@ export default class Phaser extends BaseFilter {
         }
       }
       this.lastRightFeedback = wetRight
-      const finalRight = rightSample * (1 - this.mix) + wetRight * this.mix
+      const phasedRight = rightSample * (1 - this.mix) + wetRight * this.mix
+
+      const finalLeft = leftSample + alpha * (phasedLeft - leftSample)
+      const finalRight = rightSample + alpha * (phasedRight - rightSample)
 
       chunk.writeInt16LE(clamp16Bit(finalLeft), i)
       chunk.writeInt16LE(clamp16Bit(finalRight), i + 2)

@@ -58,6 +58,7 @@ import { ScratchTransformer } from './ScratchTransformer.ts'
 import { FlowController } from './FlowController.ts'
 import { FiltersManager } from './filtersManager.ts'
 import { VolumeTransformer } from './VolumeTransformer.ts'
+import { SilenceDetector } from './SilenceDetector.ts'
 
 type LibSampleRateModule = typeof import('@alexanderolsen/libsamplerate-js')
 let libSampleRatePromise: Promise<LibSampleRateModule> | null = null
@@ -382,7 +383,6 @@ async function _buildMp4SeekOptions(
     throw new Error('No AAC track found in MP4/M4A')
   }
 
-  // Make seek meaningful by configuring extraction for this track
   mp4.setExtractionOptions(audioTrack.id, null, { nbSamples: 1 })
 
   const seekTimeSec = seekTimeMs / 1000
@@ -409,6 +409,36 @@ async function _buildMp4SeekOptions(
   }
 }
 
+/**
+ * Immutable counter of processed frames.
+ * Ensures the song position in Lavalink doesn't break when using Nightcore/Vaporwave.
+ */
+class PCMFrameCounter extends Transform {
+  private totalFrames = 0
+  private sampleRate: number
+  private bytesPerFrame: number
+
+  constructor(sampleRate = 48000, channels = 2) {
+    super()
+    this.sampleRate = sampleRate
+    this.bytesPerFrame = channels * 2 // 16-bit PCM (2 bytes per channel)
+  }
+
+  override _transform(
+    chunk: Buffer,
+    _encoding: BufferEncoding,
+    callback: TransformCallback
+  ): void {
+    this.totalFrames += chunk.length / this.bytesPerFrame
+    this.push(chunk)
+    callback()
+  }
+
+  getConsumedMs(): number {
+    return (this.totalFrames / this.sampleRate) * 1000
+  }
+}
+
 class BaseAudioResource {
   pipes: (Readable | Transform)[] | null
   stream: (VoiceAudioStream & Transform) | null
@@ -432,6 +462,48 @@ class BaseAudioResource {
           }
         ) => boolean
         startCrossfade?: (durationMs: number, curve?: string) => boolean
+        seekToEnergyMatch?: (
+          targetRms: number,
+          crossfadeDurationMs: number,
+          transitionName?: string | null,
+          targetBeatState?: import('../../typings/playback/player.types.ts').RealtimeBeatState | null
+        ) => void
+        setIncomingGain?: (multiplier: number) => void
+        setIncomingHighpass?: (enabled: boolean, peakAlpha?: number) => void
+        setIncomingLowpass?: (
+          enabled: boolean,
+          peakAlpha?: number,
+          completionRatio?: number
+        ) => void
+        setIncomingPan?: (enabled: boolean, completionRatio?: number) => void
+        setIncomingEcho?: (
+          enabled: boolean,
+          delayMs?: number,
+          mix?: number,
+          feedback?: number,
+          completionRatio?: number
+        ) => void
+        setOutgoingPan?: (enabled: boolean, completionRatio?: number) => void
+        setFilterBypass?: (bypass: boolean) => void
+        getMainEnergy?: () => { rms: number; peak: number } | null
+        getNextTrackOpeningEnergy?: () => number
+        getMainTrackBpm?: () => number | null
+        getNextTrackBpm?: () => number | null
+        getRealtimeBeatState?: () => import('../../typings/playback/player.types.ts').RealtimeBeatState | null
+        getNextTrackBeatState?: () => import('../../typings/playback/player.types.ts').RealtimeBeatState | null
+        getMainTrackKey?: () => import('../../typings/playback/player.types.ts').TrackKeyResult | null
+        getNextTrackKey?: () => import('../../typings/playback/player.types.ts').TrackKeyResult | null
+        getEnergySkipMs?: () => number
+        getCrossfadeConsumedNextMs?: () => number
+        isBridgeMode?: () => boolean
+        isFlushed?: () => boolean
+        isBridgeDraining?: () => boolean
+        startShowcaseRecording?: (
+          preMs: number,
+          activeMs: number,
+          postMs: number,
+          name: string
+        ) => void
         clearCrossfade?: () => void
         getCrossfadeState?: () => {
           active: boolean
@@ -444,6 +516,10 @@ class BaseAudioResource {
           style: import('../../typings/playback/processing.types.ts').ScratchStyle
         ) => void
         checkScratchEffectCompleted?: () => boolean
+        extractCrossfadeBuffer?: () => Buffer | null
+        getEffectiveRate?: () => number
+        getRMS?: () => number
+        isSilent?: () => boolean
       }
     voiceStream.setVolume = (volume: number) => this.setVolume(volume)
     voiceStream.setFilters = (filters: FiltersState) => this.setFilters(filters)
@@ -453,6 +529,67 @@ class BaseAudioResource {
     ) => this.prepareCrossfade(nextStream, options)
     voiceStream.startCrossfade = (durationMs: number, curve?: string) =>
       this.startCrossfade(durationMs, curve)
+    voiceStream.seekToEnergyMatch = (
+      targetRms: number,
+      crossfadeDurationMs: number,
+      transitionName?: string | null,
+      targetBeatState?: import('../../typings/playback/player.types.ts').RealtimeBeatState | null
+    ) =>
+      this.seekToEnergyMatch(
+        targetRms,
+        crossfadeDurationMs,
+        transitionName,
+        targetBeatState
+      )
+    voiceStream.setIncomingGain = (multiplier: number) =>
+      this.setIncomingGain(multiplier)
+    voiceStream.setIncomingHighpass = (enabled: boolean, peakAlpha?: number) =>
+      this.setIncomingHighpass(enabled, peakAlpha)
+    voiceStream.setIncomingLowpass = (
+      enabled: boolean,
+      peakAlpha?: number,
+      completionRatio?: number
+    ) => this.setIncomingLowpass(enabled, peakAlpha, completionRatio)
+    voiceStream.setIncomingPan = (enabled: boolean, completionRatio?: number) =>
+      this.setIncomingPan(enabled, completionRatio)
+    voiceStream.setIncomingEcho = (
+      enabled: boolean,
+      delayMs?: number,
+      mix?: number,
+      feedback?: number,
+      completionRatio?: number
+    ) =>
+      this.setIncomingEcho(
+        enabled,
+        delayMs,
+        mix,
+        feedback,
+        completionRatio
+      )
+    voiceStream.setOutgoingPan = (enabled: boolean, completionRatio?: number) =>
+      this.setOutgoingPan(enabled, completionRatio)
+    voiceStream.setFilterBypass = (bypass: boolean) =>
+      this.setFilterBypass(bypass)
+    voiceStream.getMainEnergy = () => this.getMainEnergy()
+    voiceStream.getNextTrackOpeningEnergy = () => this.getNextTrackOpeningEnergy()
+    voiceStream.getMainTrackBpm = () => this.getMainTrackBpm()
+    voiceStream.getNextTrackBpm = () => this.getNextTrackBpm()
+    voiceStream.getRealtimeBeatState = () => this.getRealtimeBeatState()
+    voiceStream.getNextTrackBeatState = () => this.getNextTrackBeatState()
+    voiceStream.getMainTrackKey = () => this.getMainTrackKey()
+    voiceStream.getNextTrackKey = () => this.getNextTrackKey()
+    voiceStream.getEnergySkipMs = () => this.getEnergySkipMs()
+    voiceStream.getCrossfadeConsumedNextMs = () =>
+      this.getCrossfadeConsumedNextMs()
+    voiceStream.isBridgeMode = () => this.isBridgeMode()
+    voiceStream.isFlushed = () => this.isFlushed()
+    voiceStream.isBridgeDraining = () => this.isBridgeDraining()
+    voiceStream.startShowcaseRecording = (
+      preMs: number,
+      activeMs: number,
+      postMs: number,
+      name: string
+    ) => this.startShowcaseRecording(preMs, activeMs, postMs, name)
     voiceStream.clearCrossfade = () => this.clearCrossfade()
     voiceStream.getCrossfadeState = () => this.getCrossfadeState()
     voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted()
@@ -462,6 +599,10 @@ class BaseAudioResource {
     ) => this.scratchTo(durationMs, style)
     voiceStream.checkScratchEffectCompleted = () =>
       this.checkScratchEffectCompleted()
+    voiceStream.extractCrossfadeBuffer = () => this.extractCrossfadeBuffer()
+    voiceStream.getEffectiveRate = () => this.getEffectiveRate()
+    voiceStream.getRMS = () => this.getRMS()
+    voiceStream.isSilent = () => this.isSilent()
     this.stream = voiceStream
   }
 
@@ -514,6 +655,37 @@ class BaseAudioResource {
     return false
   }
 
+  seekToEnergyMatch(
+    _targetRms: number,
+    _crossfadeDurationMs: number,
+    _transitionName?: string | null,
+    _targetBeatState?: import('../../typings/playback/player.types.ts').RealtimeBeatState | null
+  ): void {}
+
+  setIncomingGain(_multiplier: number): void {}
+
+  setIncomingHighpass(_enabled: boolean, _peakAlpha?: number): void {}
+
+  setIncomingLowpass(
+    _enabled: boolean,
+    _peakAlpha?: number,
+    _completionRatio?: number
+  ): void {}
+
+  setIncomingPan(_enabled: boolean, _completionRatio?: number): void {}
+
+  setIncomingEcho(
+    _enabled: boolean,
+    _delayMs?: number,
+    _mix?: number,
+    _feedback?: number,
+    _completionRatio?: number
+  ): void {}
+
+  setOutgoingPan(_enabled: boolean, _completionRatio?: number): void {}
+
+  setFilterBypass(_bypass: boolean): void {}
+
   clearCrossfade(): void {}
 
   getCrossfadeState(): {
@@ -524,6 +696,97 @@ class BaseAudioResource {
   } {
     return { active: false, bufferedMs: 0, targetMs: 0, isFinished: false }
   }
+
+  extractCrossfadeBuffer(): Buffer | null {
+    return null
+  }
+
+  getEffectiveRate(): number {
+    return 1.0
+  }
+
+  getRMS(): number {
+    if (!this.pipes) return 0
+    const silenceDetector = this.pipes.find(
+      (p) => p instanceof SilenceDetector
+    ) as SilenceDetector | undefined
+    return silenceDetector?.getRMS() ?? 0
+  }
+
+  isSilent(): boolean {
+    if (!this.pipes) return false
+    const silenceDetector = this.pipes.find(
+      (p) => p instanceof SilenceDetector
+    ) as SilenceDetector | undefined
+    return silenceDetector?.isSilent() ?? false
+  }
+
+  getRealtimeBeatState():
+    | import('../../typings/playback/player.types.ts').RealtimeBeatState
+    | null {
+    return null
+  }
+
+  getNextTrackBeatState():
+    | import('../../typings/playback/player.types.ts').RealtimeBeatState
+    | null {
+    return null
+  }
+
+  getMainTrackKey():
+    | import('../../typings/playback/player.types.ts').TrackKeyResult
+    | null {
+    return null
+  }
+
+  getNextTrackKey():
+    | import('../../typings/playback/player.types.ts').TrackKeyResult
+    | null {
+    return null
+  }
+
+  getMainEnergy(): { rms: number; peak: number } | null {
+    return null
+  }
+
+  getNextTrackOpeningEnergy(): number {
+    return 0
+  }
+
+  getMainTrackBpm(): number | null {
+    return null
+  }
+
+  getNextTrackBpm(): number | null {
+    return null
+  }
+
+  getEnergySkipMs(): number {
+    return 0
+  }
+
+  getCrossfadeConsumedNextMs(): number {
+    return 0
+  }
+
+  isBridgeMode(): boolean {
+    return false
+  }
+
+  isFlushed(): boolean {
+    return false
+  }
+
+  isBridgeDraining(): boolean {
+    return false
+  }
+
+  startShowcaseRecording(
+    _preMs: number,
+    _activeMs: number,
+    _postMs: number,
+    _name: string
+  ): void {}
 
   checkTapeRampCompleted(): boolean {
     return false
@@ -555,21 +818,11 @@ class BaseAudioResource {
 
     if (volumeTransformer) {
       volumeTransformer.setVolume(volume)
-    } else {
-      throw new Error('VolumeTransformer not found in the pipeline.')
     }
   }
 
   setFilters(filters: FiltersState): void {
     if (!this.pipes) return
-
-    const flowController = this.pipes.find(
-      (p) => p instanceof FlowController
-    ) as FlowController | undefined
-    if (flowController) {
-      flowController.setFilters(filters)
-      return
-    }
 
     const filterManager = this.pipes.find((p) => p instanceof FiltersManager) as
       | FiltersManager
@@ -577,8 +830,18 @@ class BaseAudioResource {
 
     if (filterManager) {
       filterManager.update(filters)
-    } else {
-      throw new Error('Filters not found in the pipeline.')
+      return
+    }
+
+    const flowController = this.pipes.find(
+      (p) => p instanceof FlowController
+    ) as FlowController | undefined
+
+    if (flowController) {
+      if (typeof (flowController as any).setFilters === 'function') {
+        ;(flowController as any).setFilters(filters)
+      }
+      return
     }
   }
 
@@ -599,8 +862,6 @@ class BaseAudioResource {
 
     if (fadeTransformer) {
       fadeTransformer.setGain(volume)
-    } else {
-      throw new Error('FadeTransformer not found in the pipeline.')
     }
   }
 
@@ -1354,9 +1615,7 @@ class AACDecoderStream extends Transform {
               this.push(Buffer.from(pcmInt16.buffer))
             }
           }
-        } catch (_decodeErr) {
-          // Skip bad frame
-        }
+        } catch (_decodeErr) {}
 
         this.ringBuffer.skip(frameInfo.end)
       }
@@ -1653,8 +1912,6 @@ class FMP4ToAACStream extends Transform {
     super(options as TransformOptions)
     this.audioConfig = null
     this.initSegmentProcessed = false
-    // Quando for true, buffers dados e processa boxes completos (SoundCloud por exemplo)
-    // Quando for false (padrão), espera segmentos completos por chunk (NicoVideo por exemplo)
     this.bufferMode = options.bufferMode || false
     this.buffer = EMPTY_BUFFER
     this._streamState = null
@@ -1666,7 +1923,6 @@ class FMP4ToAACStream extends Transform {
       return
     }
 
-    // Avoid retaining a large backing store when only a small tail remains.
     if (
       this.buffer.byteOffset > 0 &&
       (this.buffer.byteOffset >= 256 * 1024 ||
@@ -1841,7 +2097,6 @@ class FMP4ToAACStream extends Transform {
     return null
   }
 
-  // Aqui processa os dados bufferizados, que vai ser retornando quando o bufferMode for true
   _processBuffer(): void {
     while (this.buffer.length > 0) {
       if (!this._streamState) {
@@ -1922,15 +2177,11 @@ class FMP4ToAACStream extends Transform {
             }
           }
         } else if (type === 'ftyp') {
-          // O ftyp geralmente não contém configuração de áudio, mas às vezes o segmento de inicialização é passado como um único bloco
-          // Neste parser de streaming, lidamos box por box.
-          // Podemos ignorar o ftyp aqui, aqui vai aguardar o moov.
         } else if (type === 'moof') {
           const sizes = this._parseMoof(body)
           if (sizes && sizes.length > 0) {
             this._streamState.samples = sizes
           } else {
-            // logger('debug', 'FMP4', 'moof parsed but 0 samples found')
           }
         }
 
@@ -2058,7 +2309,6 @@ class FMP4ToAACStream extends Transform {
   ): void {
     try {
       if (this.bufferMode) {
-        // quando bufferMode for true, vai ser modo streaming, ou seja, vai processar o chunk imediatamente
         if (this.buffer.length === 0) this.buffer = chunk
         else if (chunk.length > 0)
           this.buffer = Buffer.concat(
@@ -2067,7 +2317,6 @@ class FMP4ToAACStream extends Transform {
           )
         this._processBuffer()
       } else {
-        // quando bufferMode for false, vai ser modo simples, ou seja, vai processar o chunk quando tiver todos os dados
         if (!this.initSegmentProcessed && chunk.length > 8) {
           const boxType = chunk.toString('ascii', 4, 8)
           if (boxType === 'ftyp') {
@@ -2189,6 +2438,7 @@ class FLVToAACStream extends Transform {
 class StreamAudioResource extends BaseAudioResource {
   private nodelink: NodeLink
   private crossfadeController: CrossfadeController | null = null
+  private frameCounter: PCMFrameCounter | null = null
 
   constructor(
     stream: Readable,
@@ -2300,7 +2550,6 @@ class StreamAudioResource extends BaseAudioResource {
     const streams: (Readable | Transform)[] = [stream]
 
     if (_isFmp4Format(lowerType)) {
-      // como eu coloquei options = {} no fmp4, ele aceita isso como o bufferMode, se incluir, vai passar true, se nao, vai passar false
       const bufferMode = lowerType.includes('fmp4-buffered')
       const demuxer = new FMP4ToAACStream({ bufferMode })
       streams.push(demuxer)
@@ -2404,6 +2653,12 @@ class StreamAudioResource extends BaseAudioResource {
     audioMixer: AudioMixer | null = null,
     enableAGC = true
   ): void {
+    const frameCounter = new PCMFrameCounter(
+      AUDIO_CONFIG.sampleRate,
+      AUDIO_CONFIG.channels
+    )
+    this.frameCounter = frameCounter // Saves the reference to get the time later
+
     const filters = new FiltersManager(nodelink, initialFilters)
     const volumeTransformer = new VolumeTransformer({
       type: 's16le',
@@ -2432,14 +2687,20 @@ class StreamAudioResource extends BaseAudioResource {
     )
     this.crossfadeController = crossfadeController
 
+    const silenceDetector = new SilenceDetector({
+      sampleRate: AUDIO_CONFIG.sampleRate,
+      channels: AUDIO_CONFIG.channels,
+      thresholdDb:
+        (nodelink.options.audio as any)?.automix?.silenceThresholdDb ?? -40
+    })
+
     const flowController = new FlowController(
-      filters,
       volumeTransformer,
       fadeTransformer,
       tapeTransformer,
       scratchTransformer,
       audioMixer
-    )
+    ) as any
 
     const opusEncoder = new OpusEncoder({
       rate: AUDIO_CONFIG.sampleRate,
@@ -2448,14 +2709,31 @@ class StreamAudioResource extends BaseAudioResource {
 
     opusEncoder.setDTX(false)
 
+    crossfadeController.filterProcessor = (chunk: Buffer) =>
+      filters.process(chunk)
+    crossfadeController.filterBypassSetter = (bypass: boolean) => {
+      filters.bypass = bypass
+    }
+    crossfadeController.filterStateResetter = () => {
+      filters.resetState()
+    }
+
     const streams: Transform[] = [
       pcmStream,
+      frameCounter,
+      silenceDetector,
+      filters,
       crossfadeController,
       flowController
     ]
-    this.pipes?.push(crossfadeController, flowController)
+    this.pipes?.push(
+      frameCounter,
+      silenceDetector,
+      filters,
+      crossfadeController,
+      flowController
+    )
 
-    // Inject Audio Interceptors (Low-level stream manipulation)
     if (nodelink.extensions?.audioInterceptors) {
       for (const interceptorFactory of nodelink.extensions // biome-ignore lint/suspicious/noExplicitAny: dynamic extension types
         .audioInterceptors as any[]) {
@@ -2469,7 +2747,6 @@ class StreamAudioResource extends BaseAudioResource {
             this.pipes?.push(interceptorStream)
           }
         } catch (e) {
-          // Log error but don't break pipeline
           console.error(`Audio interceptor error: ${(e as Error).message}`)
         }
       }
@@ -2506,8 +2783,117 @@ class StreamAudioResource extends BaseAudioResource {
     )
   }
 
+  override seekToEnergyMatch(
+    targetRms: number,
+    crossfadeDurationMs: number,
+    transitionName?: string | null,
+    targetBeatState?: import('../../typings/playback/player.types.ts').RealtimeBeatState | null
+  ): void {
+    this.crossfadeController?.seekToEnergyMatch(
+      targetRms,
+      crossfadeDurationMs,
+      transitionName,
+      targetBeatState
+    )
+  }
+
+  override setIncomingHighpass(enabled: boolean, peakAlpha?: number): void {
+    this.crossfadeController?.setIncomingHighpass(enabled, peakAlpha)
+  }
+
+  override setIncomingLowpass(
+    enabled: boolean,
+    peakAlpha?: number,
+    completionRatio?: number
+  ): void {
+    this.crossfadeController?.setIncomingLowpass(
+      enabled,
+      peakAlpha,
+      completionRatio
+    )
+  }
+
+  override setFilterBypass(bypass: boolean): void {
+    this.crossfadeController?.setFilterBypass(bypass)
+  }
+
+  override setIncomingPan(enabled: boolean, completionRatio?: number): void {
+    this.crossfadeController?.setIncomingPan(enabled, completionRatio)
+  }
+
+  override setIncomingEcho(
+    enabled: boolean,
+    delayMs?: number,
+    mix?: number,
+    feedback?: number,
+    completionRatio?: number
+  ): void {
+    this.crossfadeController?.setIncomingEcho(
+      enabled,
+      delayMs,
+      mix,
+      feedback,
+      completionRatio
+    )
+  }
+
+  override setOutgoingPan(enabled: boolean, completionRatio?: number): void {
+    this.crossfadeController?.setOutgoingPan(enabled, completionRatio)
+  }
+
+  override getEnergySkipMs(): number {
+    return this.crossfadeController?.getEnergySkipMs() ?? 0
+  }
+
+  override setIncomingGain(multiplier: number): void {
+    this.crossfadeController?.setIncomingGain(multiplier)
+  }
+
+  override isBridgeMode(): boolean {
+    return this.crossfadeController?.isBridgeMode() ?? false
+  }
+
+  override isFlushed(): boolean {
+    return this.crossfadeController?.isFlushed() ?? false
+  }
+
+  override isBridgeDraining(): boolean {
+    return this.crossfadeController?.isBridgeDraining() ?? false
+  }
+
+  getConsumedMs(): number {
+    return this.frameCounter?.getConsumedMs() ?? 0
+  }
+
+  /**
+   * How many ms of Track B audio the CrossfadeController has consumed
+   * from its ring buffer since the last startCrossfade() call.
+   */
+  override getCrossfadeConsumedNextMs(): number {
+    return this.crossfadeController?.getConsumedMs() ?? 0
+  }
+
   override clearCrossfade(): void {
     this.crossfadeController?.clear()
+  }
+
+  override startShowcaseRecording(
+    preMs: number,
+    activeMs: number,
+    postMs: number,
+    name: string
+  ): void {
+    this.crossfadeController?.startShowcaseRecording(
+      preMs,
+      activeMs,
+      postMs,
+      name
+    )
+  }
+
+  override extractCrossfadeBuffer(): Buffer | null {
+    if (!this.crossfadeController) return null
+    return this.crossfadeController.extractRemainingBuffer()
   }
 
   override getCrossfadeState(): {
@@ -2523,6 +2909,58 @@ class StreamAudioResource extends BaseAudioResource {
         targetMs: 0,
         isFinished: false
       }
+    )
+  }
+
+  override getMainTrackKey():
+    | import('../../typings/playback/player.types.ts').TrackKeyResult
+    | null {
+    return this.crossfadeController?.getMainTrackKey() ?? null
+  }
+
+  override getNextTrackKey():
+    | import('../../typings/playback/player.types.ts').TrackKeyResult
+    | null {
+    return this.crossfadeController?.getNextTrackKey() ?? null
+  }
+
+  override getMainEnergy(): { rms: number; peak: number } | null {
+    return this.crossfadeController?.getMainEnergy() ?? null
+  }
+
+  override getNextTrackOpeningEnergy(): number {
+    return this.crossfadeController?.getNextTrackOpeningEnergy() ?? 0
+  }
+
+  override getMainTrackBpm(): number | null {
+    return this.crossfadeController?.getMainTrackBpm() ?? null
+  }
+
+  override getNextTrackBpm(): number | null {
+    return this.crossfadeController?.getNextTrackBpm() ?? null
+  }
+
+  override getRealtimeBeatState():
+    | import('../../typings/playback/player.types.ts').RealtimeBeatState
+    | null {
+    return this.crossfadeController?.getRealtimeBeatState() ?? null
+  }
+
+  override getNextTrackBeatState():
+    | import('../../typings/playback/player.types.ts').RealtimeBeatState
+    | null {
+    return this.crossfadeController?.getNextTrackBeatState() ?? null
+  }
+
+  override getEffectiveRate(): number {
+    const filters = this.pipes?.find((p) => p instanceof FiltersManager) as
+      | FiltersManager
+      | undefined
+    const flowController = this.pipes?.find(
+      (p) => p instanceof FlowController
+    ) as FlowController | undefined
+    return (
+      (filters?.getRate() ?? 1.0) * (flowController?.getEffectiveRate() ?? 1.0)
     )
   }
 
@@ -2596,9 +3034,7 @@ class StreamAudioResource extends BaseAudioResource {
   }
 
   _setupEventHandlers(inputStream: Readable): void {
-    inputStream.on('finishBuffering', () => {
-      // Waiting for the pipeline to finish
-    })
+    inputStream.on('finishBuffering', () => {})
 
     inputStream.on('error', (err: Error) => {
       this.stream?.emit('error', err)

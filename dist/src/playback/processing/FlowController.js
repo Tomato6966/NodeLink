@@ -6,7 +6,6 @@ const EMPTY_BUFFER = Buffer.alloc(0);
  * @public
  */
 export class FlowController extends Transform {
-    filters;
     volume;
     fade;
     tape;
@@ -16,16 +15,14 @@ export class FlowController extends Transform {
     pendingLength;
     /**
      * Creates a new FlowController.
-     * @param filters - The FiltersManager instance.
      * @param volume - The VolumeTransformer instance.
      * @param fade - The FadeTransformer instance.
      * @param tape - The TapeTransformer instance.
      * @param scratch - The ScratchTransformer instance.
      * @param audioMixer - Optional AudioMixer instance.
      */
-    constructor(filters, volume, fade, tape, scratch, audioMixer = null) {
+    constructor(volume, fade, tape, scratch, audioMixer = null) {
         super({ highWaterMark: FRAME_SIZE * 4 });
-        this.filters = filters;
         this.volume = volume;
         this.fade = fade;
         this.tape = tape;
@@ -36,7 +33,6 @@ export class FlowController extends Transform {
     }
     _processFrame(frame) {
         let output = frame;
-        output = this.filters.process(output);
         output = this.tape.process(output);
         output = this.scratch.process(output);
         output = this.volume.process(output);
@@ -48,9 +44,7 @@ export class FlowController extends Transform {
                 const layerChunks = this.audioMixer.readLayerChunks(output.length);
                 output = this.audioMixer.mixBuffers(output, layerChunks);
             }
-            catch (_error) {
-                // Ignore mixing errors in flow
-            }
+            catch (_error) { }
         }
         this.push(output);
     }
@@ -62,11 +56,10 @@ export class FlowController extends Transform {
         this.volume.setVolume(volume);
     }
     /**
-     * Updates the audio filters.
-     * @param filters - New filters state.
+     * Calculates the combined playback rate of internal effects (tape, scratch).
      */
-    setFilters(filters) {
-        this.filters.update(filters);
+    getEffectiveRate() {
+        return this.tape.getRate() * this.scratch.getRate();
     }
     /**
      * Sets the fade gain immediately.
@@ -137,11 +130,6 @@ export class FlowController extends Transform {
             ? this.pendingBuffer.subarray(0, this.pendingLength)
             : EMPTY_BUFFER;
         this.pendingLength = 0;
-        const flushed = this.filters.flush();
-        if (flushed.length > 0) {
-            remaining =
-                remaining.length > 0 ? Buffer.concat([remaining, flushed]) : flushed;
-        }
         if (remaining.length > 0) {
             remaining = this.tape.process(remaining);
             remaining = this.scratch.process(remaining);
@@ -154,9 +142,7 @@ export class FlowController extends Transform {
                     const layerChunks = this.audioMixer.readLayerChunks(remaining.length);
                     remaining = this.audioMixer.mixBuffers(remaining, layerChunks);
                 }
-                catch (_error) {
-                    // Ignore mixing errors in flow
-                }
+                catch (_error) { }
             }
             const finalRemainder = remaining.length % 4;
             if (finalRemainder > 0) {
@@ -165,10 +151,8 @@ export class FlowController extends Transform {
             if (remaining.length > 0)
                 this.push(remaining);
         }
-        // Drain loop: Continue producing silence frames while effects are active.
-        // This ensures trackEnd scratch effects are fully audible even after source EOF.
         const silence = Buffer.alloc(FRAME_SIZE, 0);
-        let drainLimit = 150; // ~1.2s safety limit
+        let drainLimit = 150;
         while ((this.scratch.isActive() || this.tape.isActive()) &&
             drainLimit-- > 0) {
             this._processFrame(silence);

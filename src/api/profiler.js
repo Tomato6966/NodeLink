@@ -111,7 +111,9 @@ function summarizeHeapSamplingProfile(profile, limit = null) {
   }
 
   visit(head)
-  const entries = Array.from(aggregates.values()).sort((a, b) => b.bytes - a.bytes)
+  const entries = Array.from(aggregates.values()).sort(
+    (a, b) => b.bytes - a.bytes
+  )
   if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0) {
     return entries.slice(0, limit)
   }
@@ -126,7 +128,10 @@ function validateAccess(nodelink, req, suppliedCode) {
 
   const remoteAddress = req.socket?.remoteAddress || ''
   if (!endpointConfig.allowExternalPatch && !LOOPBACKS.has(remoteAddress)) {
-    return { ok: false, error: 'External access to profiler endpoint is blocked.' }
+    return {
+      ok: false,
+      error: 'External access to profiler endpoint is blocked.'
+    }
   }
 
   if (suppliedCode !== endpointConfig.code) {
@@ -203,7 +208,8 @@ function getMasterRuntimeContext(nodelink) {
     ? traceStore.events.slice(-200)
     : []
   const statsSnapshot =
-    nodelink?.statsManager && typeof nodelink.statsManager.getSnapshot === 'function'
+    nodelink?.statsManager &&
+    typeof nodelink.statsManager.getSnapshot === 'function'
       ? nodelink.statsManager.getSnapshot()
       : null
   const workerMetrics =
@@ -221,7 +227,8 @@ function getMasterRuntimeContext(nodelink) {
             ? connectionManager.status
             : 'unknown',
         metrics:
-          connectionManager.metrics && typeof connectionManager.metrics === 'object'
+          connectionManager.metrics &&
+          typeof connectionManager.metrics === 'object'
             ? connectionManager.metrics
             : null
       }
@@ -266,7 +273,9 @@ function getMasterRuntimeContext(nodelink) {
         ? workerManager.guildToWorker.size
         : null,
     sourceRequests:
-      sourceManager?.requests instanceof Map ? sourceManager.requests.size : null
+      sourceManager?.requests instanceof Map
+        ? sourceManager.requests.size
+        : null
   }
 
   return {
@@ -334,7 +343,11 @@ async function runMasterProfilerCommand(action, payload) {
         ? payload.port
         : 0
     inspector.open(port, host, payload.exposeWait === true)
-    return { success: true, pid: process.pid, inspectorUrl: inspector.url() || null }
+    return {
+      success: true,
+      pid: process.pid,
+      inspectorUrl: inspector.url() || null
+    }
   }
 
   if (action === 'closeInspector') {
@@ -376,7 +389,11 @@ async function runMasterProfilerCommand(action, payload) {
       name: sanitizeProfileName(payload.name) || null
     }
 
-    return { success: true, pid: process.pid, startedAt: activeMasterCpu.startedAt }
+    return {
+      success: true,
+      pid: process.pid,
+      startedAt: activeMasterCpu.startedAt
+    }
   }
 
   if (action === 'cpuStop') {
@@ -398,7 +415,13 @@ async function runMasterProfilerCommand(action, payload) {
     } catch {}
     activeMasterCpu = null
 
-    return { success: true, pid: process.pid, startedAt, endedAt: Date.now(), outputPath }
+    return {
+      success: true,
+      pid: process.pid,
+      startedAt,
+      endedAt: Date.now(),
+      outputPath
+    }
   }
 
   if (action === 'heapSnapshot') {
@@ -545,7 +568,8 @@ async function runWorkerProfilerCommand(manager, workers, action, payload) {
     if (item.status === 'fulfilled') return item.value
     return {
       ...identity,
-      error: item.reason instanceof Error ? item.reason.message : String(item.reason)
+      error:
+        item.reason instanceof Error ? item.reason.message : String(item.reason)
     }
   })
 }
@@ -607,7 +631,11 @@ async function collectAllSequence(nodelink, payload) {
   const before = await collectActionSnapshot(nodelink, 'status', payload)
   const gc = await collectActionSnapshot(nodelink, 'forceGc', payload)
   const afterGc = await collectActionSnapshot(nodelink, 'status', payload)
-  const heapSnapshot = await collectActionSnapshot(nodelink, 'heapSnapshot', payload)
+  const heapSnapshot = await collectActionSnapshot(
+    nodelink,
+    'heapSnapshot',
+    payload
+  )
 
   return {
     action: 'all',
@@ -631,9 +659,17 @@ async function collectAllocationTopSites(nodelink, payload) {
       ? Math.min(120000, Math.max(1000, Math.floor(payload.durationMs)))
       : 10000
 
-  const started = await collectActionSnapshot(nodelink, 'heapSamplingStart', payload)
+  const started = await collectActionSnapshot(
+    nodelink,
+    'heapSamplingStart',
+    payload
+  )
   await new Promise((resolve) => setTimeout(resolve, durationMs))
-  const stopped = await collectActionSnapshot(nodelink, 'heapSamplingStop', payload)
+  const stopped = await collectActionSnapshot(
+    nodelink,
+    'heapSamplingStop',
+    payload
+  )
 
   return {
     action: 'allocTop',
@@ -656,7 +692,8 @@ function extractProcesses(snapshot) {
       id: `master:${snapshot.master.pid}`,
       pid: snapshot.master.pid,
       memory: snapshot.master.memory,
-      heapSpaces: snapshot.master.heapSpaces || snapshot.master.runtime?.heapSpaces || []
+      heapSpaces:
+        snapshot.master.heapSpaces || snapshot.master.runtime?.heapSpaces || []
     })
   }
 
@@ -747,12 +784,7 @@ function detectAnomalies(snapshot, prevById) {
         })
       }
 
-      // Leak heuristic: old_space rises while player count is stable.
-      if (
-        deltaOldMB > 8 &&
-        Math.abs(playersDelta) === 0 &&
-        dtSec >= 5
-      ) {
+      if (deltaOldMB > 8 && Math.abs(playersDelta) === 0 && dtSec >= 5) {
         warnings.push({
           level: 'warn',
           type: 'old_space_growth_suspect',
@@ -870,7 +902,9 @@ async function handleSseStream(nodelink, req, res, parsedUrl, payload) {
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
       res.write(`event: error\n`)
-      res.write(`data: ${JSON.stringify({ message: msg, timestamp: Date.now() })}\n\n`)
+      res.write(
+        `data: ${JSON.stringify({ message: msg, timestamp: Date.now() })}\n\n`
+      )
     }
   }
 

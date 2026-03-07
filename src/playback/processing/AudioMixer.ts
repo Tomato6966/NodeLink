@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { EventEmitter } from 'node:events'
+import { Readable } from 'node:stream'
 import type { VoiceAudioStream } from '@performanc/voice'
 import type { PlayerTrack } from '../../typings/playback/player.types.ts'
 import type {
@@ -14,13 +14,15 @@ interface ExtendedVoiceStream extends VoiceAudioStream {
   destroyed: boolean
 }
 
-const LAYER_BUFFER_SIZE = 1024 * 1024 // 1MB per layer (~5 seconds of PCM)
+const LAYER_BUFFER_SIZE = 1024 * 1024
 const EMPTY_BUFFER = Buffer.alloc(0)
+const FRAME_SIZE = 3840
 
 /**
  * Mixer that allows layering multiple audio streams over a main PCM stream.
+ * Acts now as a continuous river (readable stream)
  */
-export class AudioMixer extends EventEmitter {
+export class AudioMixer extends Readable {
   public mixLayers: Map<string, MixLayer>
   private maxLayers: number
   private defaultVolume: number
@@ -32,12 +34,35 @@ export class AudioMixer extends EventEmitter {
    * @param config - Mixer configuration.
    */
   constructor(config: AudioMixerConfig = {}) {
-    super()
+    super({ highWaterMark: FRAME_SIZE * 4 })
+
     this.mixLayers = new Map()
     this.maxLayers = config.maxLayersMix || 5
     this.defaultVolume = config.defaultVolume || 0.8
     this.autoCleanup = config.autoCleanup !== false
     this.enabled = config.enabled !== false
+  }
+
+  override _read(size: number): void {
+    const targetSize = FRAME_SIZE
+
+    if (this.mixLayers.size === 0 || !this.enabled) {
+      this.push(Buffer.alloc(targetSize))
+      return
+    }
+
+    const chunks = this.readLayerChunks(targetSize)
+
+    if (chunks.size === 0) {
+      this.push(Buffer.alloc(targetSize))
+      return
+    }
+
+    const baseBuffer = Buffer.alloc(targetSize)
+
+    const mixedBuffer = this.mixBuffers(baseBuffer, chunks)
+
+    this.push(mixedBuffer)
   }
 
   /**
@@ -96,6 +121,7 @@ export class AudioMixer extends EventEmitter {
           sample += ((layer.view[i] ?? 0) * layer.volume) | 0
         }
       }
+
       outputView[i] = sample < -32768 ? -32768 : sample > 32767 ? 32767 : sample
     }
 
@@ -202,7 +228,7 @@ export class AudioMixer extends EventEmitter {
 
       if (layer.ringBuffer.length < safeSize) {
         if (layer.finishedFeeding && layer.ringBuffer.length === 0) {
-          this.removeLayer(id, 'FINISHED')
+          if (this.autoCleanup) this.removeLayer(id, 'FINISHED')
         }
         continue
       }
@@ -247,7 +273,7 @@ export class AudioMixer extends EventEmitter {
     }
     layer.ringBuffer.dispose()
     this.mixLayers.delete(id)
-    this.emit('mixEnded', { id, reason })
+    this.emit('mixEnded', { id, reason, track: layer.track })
     return true
   }
 

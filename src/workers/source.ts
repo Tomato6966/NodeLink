@@ -186,7 +186,6 @@ if (isMainThread) {
         `Micro-worker ${threadNumber} exited with code ${code}${loadInfo}`
       )
 
-      // Respawn worker if below minimum
       if (workerPool.length < initialThreadCount && !process.exitCode) {
         setTimeout(() => {
           if (workerPool.length < maxThreadCount) {
@@ -500,11 +499,8 @@ if (isMainThread) {
    */
   try {
     process.send?.({ type: 'ready', pid: process.pid })
-  } catch {
-    // Ignore send failures (e.g., when not forked)
-  }
+  } catch {}
 
-  // Periodic cleanup of stale sockets and memory
   const CLEANUP_INTERVAL = 60000
   const SOCKET_IDLE_MS = 120000
   const socketLastUsed: Map<string, number> = new Map()
@@ -512,7 +508,6 @@ if (isMainThread) {
   setInterval(() => {
     const now = Date.now()
 
-    // Clean up idle sockets
     for (const [path, lastUsed] of socketLastUsed) {
       if (now - lastUsed > SOCKET_IDLE_MS) {
         const socket = sockets.get(path)
@@ -526,7 +521,6 @@ if (isMainThread) {
       }
     }
 
-    // Force GC if available and memory is high
     if (global.gc) {
       const mem = process.memoryUsage()
       const heapPressure = mem.heapUsed / mem.heapTotal
@@ -1093,7 +1087,6 @@ if (isMainThread) {
     return { success: false, error: `Unsupported profiler action: ${action}` }
   }
 
-  // Notify parent that worker is ready
   ;(parentPort as MessagePort).postMessage({ type: 'ready' })
 
   /**
@@ -1108,9 +1101,6 @@ if (isMainThread) {
     socketPath: string,
     chunk: Buffer
   ): void => {
-    // Allocate a fresh, non-resizable ArrayBuffer to guarantee transferability.
-    // Buffer.buffer may return a pool-backed or resizable ArrayBuffer that V8
-    // rejects in the postMessage transfer list.
     const ab = new ArrayBuffer(chunk.byteLength)
     new Uint8Array(ab).set(
       new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength)

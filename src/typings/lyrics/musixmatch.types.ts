@@ -61,8 +61,6 @@ export interface NodelinkInstanceForMusixmatch {
   credentialManager: CredentialManager
 }
 
-// ─── API Response Types ─────────────────────────────────────────────
-
 /**
  * Musixmatch API message header
  * @public
@@ -103,8 +101,6 @@ export interface MxmTokenMessage {
 export interface MxmTokenResponse {
   message?: MxmTokenMessage
 }
-
-// ─── Track Types ────────────────────────────────────────────────────
 
 /**
  * Genre information within a track
@@ -196,8 +192,6 @@ export interface MxmTrackItem {
   track?: MxmTrack
 }
 
-// ─── Search Types ───────────────────────────────────────────────────
-
 /**
  * Search endpoint response body
  * @public
@@ -222,8 +216,6 @@ export interface MxmSearchMessage {
 export interface MxmSearchResponse {
   message?: MxmSearchMessage
 }
-
-// ─── Lyrics Types ───────────────────────────────────────────────────
 
 /**
  * Lyrics metadata and content
@@ -270,8 +262,6 @@ export interface MxmLyricsMessage {
 export interface MxmLyricsResponse {
   message?: MxmLyricsMessage
 }
-
-// ─── Subtitle Types ─────────────────────────────────────────────────
 
 /**
  * Time information for a subtitle line
@@ -353,8 +343,6 @@ export interface MxmSubtitleResponse {
   message?: MxmSubtitleMessage
 }
 
-// ─── Macro Types ────────────────────────────────────────────────────
-
 /**
  * Collection of macro API calls
  * @public
@@ -429,8 +417,6 @@ export type MxmResponseBody =
   | MxmSearchBody
   | MxmLyricsBody
   | MxmSubtitleBody
-
-// ─── Internal Types ─────────────────────────────────────────────────
 
 /**
  * Token data with expiration

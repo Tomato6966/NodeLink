@@ -1,4 +1,4 @@
-import type { IncomingHttpHeaders } from 'node:http'
+import { IncomingHttpHeaders } from 'node:http'
 import type { NodelinkConfig } from '../config/config.types.ts'
 
 /**

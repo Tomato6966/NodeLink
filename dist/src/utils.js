@@ -969,7 +969,7 @@ const generateRandomLetters = (length) => Array.from(crypto.randomBytes(length),
  * Supported formats:
  * - `Name/Version`
  * - `Name/Version (Tag/2024-01-01)`
- * - `Name/Version (https://example.com)`
+ * - `Name/Version (https:
  * @param agent - Client-Name header value.
  * @returns Parsed client info or null when invalid.
  * @public
@@ -1337,9 +1337,7 @@ async function makeRequest(urlString, options, nodelink) {
                 const url = new URL(urlString);
                 http2FailedHosts.add(url.host);
             }
-            catch {
-                // ignore url parsing failure
-            }
+            catch { }
             resolve(http1makeRequest(urlString, { ...options, localAddress }));
         };
         try {
@@ -1654,9 +1652,7 @@ function applyEnvOverrides(config, prefix = 'NODELINK') {
                     if (Array.isArray(parsedArray))
                         newValue = parsedArray;
                 }
-                catch {
-                    // ignore parse errors
-                }
+                catch { }
                 if (!newValue) {
                     const splitValue = envValue
                         .split(',')

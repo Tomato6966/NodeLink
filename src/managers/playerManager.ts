@@ -45,6 +45,7 @@ interface WorkerManagerLike {
 type PlayerInterceptorAction =
   | 'play'
   | 'preload'
+  | 'clearNextTrack'
   | 'stop'
   | 'pause'
   | 'seek'
@@ -557,6 +558,24 @@ export default class PlayerManager {
 
     const player = this.getLocalPlayerOrThrow(this.getPlayerKey(guildId))
     return player.preload(trackPayload)
+  }
+
+  /**
+   * Clears any queued/preloaded next track for the guild player.
+   */
+  async clearNextTrack(
+    guildId: string
+  ): Promise<boolean | PlayerCommandResponse> {
+    const interception = await this._runInterceptors('clearNextTrack', guildId)
+    if (interception?.handled)
+      return interception.result as PlayerCommandResponse
+
+    if (this.isCluster) {
+      return this.runClusterPlayerCommand(guildId, 'clearNextTrack', [])
+    }
+
+    const player = this.getLocalPlayerOrThrow(this.getPlayerKey(guildId))
+    return player.clearNextTrack()
   }
 
   /**

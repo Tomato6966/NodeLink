@@ -57,7 +57,7 @@ export class ScratchTransformer extends Transform {
     super()
     this.sampleRate = options.sampleRate ?? 48000
     this.channels = options.channels ?? 2
-    // 5 seconds of buffer to allow for long backspins or slow movements.
+
     this.maxBufferSize = this.sampleRate * this.channels * 5
     this.inputBuffer = new Float32Array(this.maxBufferSize)
   }
@@ -71,7 +71,14 @@ export class ScratchTransformer extends Transform {
     const duration = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 500
     this._lastEffectCompleted = false
 
-    // Allow true instant reset/arm behavior when duration is explicitly zero.
+    if (style === 'start' && this.inputWritePos > 0) {
+      const latencySamples = 1024 * this.channels
+      this.inputReadPos = Math.max(
+        this.channels,
+        this.inputWritePos - latencySamples
+      )
+    }
+
     if (duration === 0) {
       this.currentRate = style === 'start' ? 1.0 : 0.0
       this.state = null
@@ -79,8 +86,6 @@ export class ScratchTransformer extends Transform {
       return
     }
 
-    // If 'random' is selected, we provide a seed to the rate calculator
-    // to diversify the movement.
     this.state = {
       style,
       durationMs: duration,
@@ -110,6 +115,10 @@ export class ScratchTransformer extends Transform {
     return false
   }
 
+  public getRate(): number {
+    return this.currentRate
+  }
+
   /**
    * Core math for rate modulation. Simulates the physics of a DJ's hand.
    * @param t - Progress of the effect (0.0 to 1.0).
@@ -121,35 +130,29 @@ export class ScratchTransformer extends Transform {
     let style = state.style
 
     if (style === 'random') {
-      // Map random to a transitional style based on target
       style = state.targetRate > 0 ? 'start' : s > 0.5 ? 'backspin' : 'wash'
     }
 
     switch (style) {
       case 'wash':
-        // Fast deceleration with a "friction bounce" at the end.
-        if (t < 0.6) return state.startRate * (1 - t / 0.6) ** 2.5
-        // Mechanical bounce: stronger oscillation to be audible.
+        if (t < 0.6) return state.startRate * Math.pow(1 - t / 0.6, 2.5)
+
         return Math.sin((t - 0.6) * 25) * (0.4 + s * 0.2) * (1 - t)
 
       case 'backspin':
-        // Rapidly spins the record backwards.
-        if (t < 0.15) return state.startRate * (1 - t * 6.6) // Cross zero fast
-        if (t < 0.8) return -3.0 - s * 5.0 * (1 - t) // Higher speed reverse
-        return -0.8 * (1 - t) // Slow down to stop
+        if (t < 0.15) return state.startRate * (1 - t * 6.6)
+        if (t < 0.8) return -3.0 - s * 5.0 * (1 - t)
+        return -0.8 * (1 - t)
 
       case 'baby':
-        // Rhythmic forward/backward oscillation (the classic 'wicka-wicka').
         return Math.cos(t * Math.PI * (5 + s * 3)) * (1 - t)
 
       case 'start':
-        // Initial push: More dramatic acceleration.
-        if (t < 0.5) return (t / 0.5) ** 2 * 1.5 // Quadratic ramp to 1.5x speed
-        return 1.5 - ((t - 0.5) / 0.5) * 0.5 // Settle back to 1.0
+        if (t < 0.5) return Math.pow(t / 0.5, 2) * 1.5
+        return 1.5 - ((t - 0.5) / 0.5) * 0.5
 
       case 'stop':
-        // Standard vinyl brake simulation.
-        return state.startRate * (1 - t ** 2.2)
+        return state.startRate * (1 - Math.pow(t, 2.2))
 
       default:
         return 1 - t
@@ -183,12 +186,10 @@ export class ScratchTransformer extends Transform {
     const incomingSamples = chunk.length / 2
     const incomingFrames = incomingSamples / this.channels
 
-    // Ensure the ring buffer has space, compacting history if necessary.
     if (this.inputWritePos + incomingSamples > this.maxBufferSize) {
       this._compact()
     }
 
-    // Convert Int16 to Float32 for internal processing.
     for (let i = 0; i < incomingSamples; i++) {
       this.inputBuffer[this.inputWritePos++] = chunk.readInt16LE(i * 2) / 32767
     }
@@ -196,16 +197,12 @@ export class ScratchTransformer extends Transform {
     const outI16 = new Int16Array(incomingSamples)
     const frameDurationMs = 1000 / this.sampleRate
 
-    // Initial Buffering: If we are at the very start of the track,
-    // let the buffer fill a bit before we start reading at 1.0.
-    // This provides "future" samples for movements > 1.0.
-    const latencyFrames = 1024 // ~21ms at 48kHz
+    const latencyFrames = 1024
     if (
       !this.state &&
       this.currentRate === 1.0 &&
       this.inputWritePos < latencyFrames * this.channels * 2
     ) {
-      // Just pass through and keep read head at 0 until we have some slack
       this.inputReadPos = 0
       return chunk
     }
@@ -224,18 +221,14 @@ export class ScratchTransformer extends Transform {
         }
       }
 
-      // If rate is negligible and no effect is active, fill with silence.
       if (Math.abs(this.currentRate) < 0.01 && !this.state) {
         for (let c = 0; c < this.channels; c++)
           outI16[f * this.channels + c] = 0
         continue
       }
 
-      // High-quality Cubic Hermite Spline Interpolation for resampling.
       const iPos = Math.floor(this.inputReadPos / this.channels) * this.channels
 
-      // Ensure we have enough neighbors for the cubic algorithm.
-      // We clamp to inputWritePos - channels * 3 to avoid reading junk data.
       const safeIPos = Math.max(
         this.channels,
         Math.min(this.inputWritePos - this.channels * 3, iPos)
@@ -261,10 +254,8 @@ export class ScratchTransformer extends Transform {
         )
       }
 
-      // Update the read position (supports negative movement).
       this.inputReadPos += this.currentRate * this.channels
 
-      // Clamp read position to stored history.
       if (this.inputReadPos < this.channels) this.inputReadPos = this.channels
       if (this.inputReadPos >= this.inputWritePos)
         this.inputReadPos = this.inputWritePos - 1

@@ -30,7 +30,6 @@ export class TapeTransformer extends Transform {
   private tape: TapeState | null = null
   private _lastRampCompleted = false
 
-  // Input buffer for resampling (sliding window)
   private inputBuffer: Float32Array
   private inputReadPos = 0
   private inputWritePos = 0
@@ -40,7 +39,7 @@ export class TapeTransformer extends Transform {
     super()
     this.sampleRate = options.sampleRate ?? 48000
     this.channels = options.channels ?? 2
-    // 10 seconds buffer to handle extreme deceleration and pipeline jitter
+
     this.maxBufferSize = this.sampleRate * this.channels * 10
     this.inputBuffer = new Float32Array(this.maxBufferSize)
   }
@@ -58,6 +57,11 @@ export class TapeTransformer extends Transform {
   ): void {
     const duration = Number.isFinite(durationMs) ? Math.max(0, durationMs) : 0
     this._lastRampCompleted = false
+
+    if (type === 'start' && this.inputWritePos > 0) {
+      const latencySamples = 1024 * this.channels
+      this.inputReadPos = Math.max(0, this.inputWritePos - latencySamples)
+    }
 
     if (duration === 0) {
       this.currentRate = type === 'start' ? 1.0 : 0.01
@@ -86,6 +90,10 @@ export class TapeTransformer extends Transform {
       return true
     }
     return false
+  }
+
+  public getRate(): number {
+    return this.currentRate
   }
 
   private _getCurveValue(t: number, curve: FadeCurve): number {

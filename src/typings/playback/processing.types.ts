@@ -80,6 +80,7 @@ export interface IScratchTransformer extends Transform {
   process(chunk: Buffer): Buffer
   isActive(): boolean
   checkEffectCompleted(): boolean
+  getRate(): number
 }
 
 /**
@@ -90,6 +91,7 @@ export interface ITapeTransformer extends Transform {
   process(chunk: Buffer): Buffer
   isActive(): boolean
   checkRampCompleted(): boolean
+  getRate(): number
 }
 
 /**
@@ -99,6 +101,7 @@ export interface IFiltersManager extends Transform {
   update(filters: unknown): void
   process(chunk: Buffer): Buffer
   flush(): Buffer
+  getRate(): number
 }
 
 /**

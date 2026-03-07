@@ -1,15 +1,21 @@
 import type { FilterSettings } from '../../typings/playback/filters.types.ts'
-import { BaseFilter } from './BaseFilter.ts'
+import { AnimatableFilter } from './AnimatableFilter.ts'
 import { clamp16Bit } from './dsp/clamp16Bit.ts'
 import LFO from './dsp/lfo.ts'
+import { SAMPLE_RATE } from '../../constants.ts'
+
+const CHANNELS = 2
 
 /**
  * Rotates audio between left and right channels at a specific frequency.
+ * Uses an alpha property for smooth fade-in/out transitions.
  * @public
  */
-export default class Rotation extends BaseFilter {
+export default class Rotation extends AnimatableFilter {
   public priority = 10
   private lfo: LFO
+  private rotationHz = 0
+  private alpha = 0
 
   constructor() {
     super()
@@ -21,8 +27,35 @@ export default class Rotation extends BaseFilter {
    * @param settings - Filter settings containing `rotation`.
    */
   public override update(settings: FilterSettings): void {
-    const { rotationHz = 0 } = settings.rotation || {}
-    this.lfo.update(rotationHz, 1)
+    const r = settings?.rotation || {}
+    const isDisabled = (r as any)._disabled === true
+
+    this.rotationHz = r.rotationHz ?? 0
+    if (this.rotationHz > 0.001) {
+      this.lfo.update(this.rotationHz, 1)
+    }
+
+    const targetAlpha = isDisabled ? 0.0 : this.rotationHz > 0.001 ? 1.0 : 0.0
+
+    super.applyAnimatedUpdate(
+      {
+        rotation: {
+          alpha: targetAlpha,
+          transition: (r as any).transition
+        }
+      },
+      'rotation',
+      { alpha: 0.0 }
+    )
+  }
+
+  protected override onConfigChanged(config: Record<string, number>): void {
+    this.alpha = config['alpha'] ?? 0
+  }
+
+  protected override isConfigActive(config?: Record<string, number>): boolean {
+    const a = config ? config['alpha'] : this.alpha
+    return (a ?? 0) > 0.001
   }
 
   /**
@@ -31,24 +64,28 @@ export default class Rotation extends BaseFilter {
    * @returns The processed PCM audio chunk.
    */
   public override process(chunk: Buffer): Buffer {
-    if (this.lfo.frequency === 0) {
+    super.processAnimation(SAMPLE_RATE, chunk.length, CHANNELS)
+
+    if (this.alpha <= 0.001) {
       return chunk
     }
+
+    const alpha = this.alpha
 
     for (let i = 0; i < chunk.length; i += 4) {
       const lfoValue = this.lfo.getValue()
 
-      const leftFactor = (1 - lfoValue) / 2
-      const rightFactor = (1 + lfoValue) / 2
+      const leftFactor = Math.sqrt((1 - lfoValue) / 2)
+      const rightFactor = Math.sqrt((1 + lfoValue) / 2)
 
-      const currentLeftSample = chunk.readInt16LE(i)
-      const currentRightSample = chunk.readInt16LE(i + 2)
+      const currentLeft = chunk.readInt16LE(i)
+      const currentRight = chunk.readInt16LE(i + 2)
 
-      const newLeftSample = currentLeftSample * leftFactor
-      const newRightSample = currentRightSample * rightFactor
+      const newLeft = currentLeft * (1 - alpha + alpha * leftFactor)
+      const newRight = currentRight * (1 - alpha + alpha * rightFactor)
 
-      chunk.writeInt16LE(clamp16Bit(newLeftSample), i)
-      chunk.writeInt16LE(clamp16Bit(newRightSample), i + 2)
+      chunk.writeInt16LE(clamp16Bit(newLeft), i)
+      chunk.writeInt16LE(clamp16Bit(newRight), i + 2)
     }
 
     return chunk

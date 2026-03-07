@@ -1,21 +1,24 @@
 import { SAMPLE_RATE } from "../../constants.js";
-import { BaseFilter } from "./BaseFilter.js";
+import { AnimatableFilter } from "./AnimatableFilter.js";
 import { clamp16Bit } from "./dsp/clamp16Bit.js";
 import DelayLine from "./dsp/delay.js";
 import LFO from "./dsp/lfo.js";
+const CHANNELS = 2;
 const MAX_DELAY_MS = 30;
 const bufferSize = Math.ceil((SAMPLE_RATE * MAX_DELAY_MS) / 1000);
 /**
  * Applies a spatial audio effect through cross-channel delay and modulation.
+ * Uses alpha for smooth animated transitions.
  * @public
  */
-export default class Spatial extends BaseFilter {
+export default class Spatial extends AnimatableFilter {
     priority = 10;
     leftDelay;
     rightDelay;
     lfo;
     depth = 0;
     rate = 0;
+    alpha = 0;
     constructor() {
         super();
         this.leftDelay = new DelayLine(bufferSize);
@@ -27,10 +30,26 @@ export default class Spatial extends BaseFilter {
      * @param settings - Filter settings containing `spatial`.
      */
     update(settings) {
-        const spatialSettings = settings.spatial || {};
-        this.depth = Math.max(0, Math.min(spatialSettings.depth || 0, 1.0));
-        this.rate = spatialSettings.rate || 0;
+        const s = settings?.spatial || {};
+        const isDisabled = s._disabled === true;
+        this.depth = Math.max(0, Math.min(s.depth || 0, 1.0));
+        this.rate = s.rate || 0;
         this.lfo.update(this.rate, 1.0);
+        const isActive = this.depth > 0;
+        const targetAlpha = isDisabled ? 0.0 : isActive ? 1.0 : 0.0;
+        super.applyAnimatedUpdate({
+            spatial: {
+                alpha: targetAlpha,
+                transition: s.transition
+            }
+        }, 'spatial', { alpha: 0.0 });
+    }
+    onConfigChanged(config) {
+        this.alpha = config['alpha'] ?? 0;
+    }
+    isConfigActive(config) {
+        const a = config ? config['alpha'] : this.alpha;
+        return (a ?? 0) > 0.001;
     }
     /**
      * Processes a PCM audio buffer.
@@ -38,9 +57,11 @@ export default class Spatial extends BaseFilter {
      * @returns The processed PCM audio chunk.
      */
     process(chunk) {
-        if (this.depth === 0) {
+        super.processAnimation(SAMPLE_RATE, chunk.length, CHANNELS);
+        if (this.alpha <= 0.001) {
             return chunk;
         }
+        const alpha = this.alpha;
         const wet = this.depth * 0.5;
         const dry = 1.0 - wet;
         const feedback = -0.3;
@@ -54,8 +75,10 @@ export default class Spatial extends BaseFilter {
             const delayedRight = this.rightDelay.read(delayTimeR);
             this.leftDelay.write(clamp16Bit(leftSample + delayedLeft * feedback));
             this.rightDelay.write(clamp16Bit(rightSample + delayedRight * feedback));
-            const newLeft = leftSample * dry + delayedRight * wet;
-            const newRight = rightSample * dry + delayedLeft * wet;
+            const spatialLeft = leftSample * dry + delayedRight * wet;
+            const spatialRight = rightSample * dry + delayedLeft * wet;
+            const newLeft = leftSample + alpha * (spatialLeft - leftSample);
+            const newRight = rightSample + alpha * (spatialRight - rightSample);
             chunk.writeInt16LE(clamp16Bit(newLeft), i);
             chunk.writeInt16LE(clamp16Bit(newRight), i + 2);
         }

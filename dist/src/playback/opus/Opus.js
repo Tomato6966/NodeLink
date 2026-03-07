@@ -56,7 +56,7 @@ const _createInstance = (rate, channels, app) => {
             Encoder.Application[app.toUpperCase()] ??
                 // biome-ignore lint/complexity/useLiteralKeys: index signature requires bracket access
                 Encoder.Application['VOIP'] ??
-                2048; // 2048 is VOIP for opusscript
+                2048;
     }
     return { instance: new Encoder(rate, channels, type), lib };
 };

@@ -21,10 +21,29 @@ const VALID_RESAMPLING_QUALITIES = new Set([
     'zero',
     'linear'
 ]);
-const VALID_FADING_CURVES = new Set(['linear', 'exponential', 'sinusoidal']);
-const VALID_FADING_TYPES = new Set(['volume', 'tape', 'both']);
+const VALID_FADING_CURVES = new Set([
+    'linear',
+    'exponential',
+    'sinusoidal',
+    'logarithmic',
+    's-curve',
+    'random',
+    'baby',
+    'start',
+    'stop',
+    'backspin',
+    'wash'
+]);
+const VALID_FADING_TYPES = new Set(['volume', 'tape', 'both', 'scratch']);
 const VALID_CROSSFADE_CURVES = new Set(['linear', 'sine', 'sinusoidal']);
 const VALID_CROSSFADE_MODES = new Set(['preload', 'stream']);
+const VALID_AUTOMIX_MODES = new Set([
+    'smart',
+    'fusion',
+    'dj_fx',
+    'radio',
+    'turntable'
+]);
 const VALID_VOICE_FORMATS = new Set(['opus', 'pcm_s16le']);
 const VALID_ROUTE_STRATEGIES = new Set([
     'RotateOnBan',
@@ -33,8 +52,8 @@ const VALID_ROUTE_STRATEGIES = new Set([
 ]);
 const VALID_METRICS_AUTH_TYPES = new Set(['Bearer', 'Basic']);
 export default class ConfigValidationManager {
-    warnings = [];
     options;
+    warnings = [];
     constructor(options) {
         this.options = options;
     }
@@ -193,9 +212,9 @@ export default class ConfigValidationManager {
             if (ducking) {
                 rules.push(this.booleanRule('audio.fading.ducking.enabled', () => ducking.enabled), this.nonNegativeIntRule('audio.fading.ducking.duration', () => ducking.duration), this.enumRule('audio.fading.ducking.curve', () => ducking.curve, VALID_FADING_CURVES), {
                     path: 'audio.fading.ducking.targetVolume',
-                    expected: 'number between 0 and 1 (inclusive)',
+                    expected: 'number >= 0',
                     get: () => ducking.targetVolume,
-                    validate: (v) => typeof v === 'number' && v >= 0 && v <= 1
+                    validate: (v) => typeof v === 'number' && v >= 0
                 });
             }
         }
@@ -219,6 +238,19 @@ export default class ConfigValidationManager {
                 });
             }
         }
+        const automix = audio?.automix;
+        if (automix) {
+            rules.push(this.booleanRule('audio.automix.enabled', () => automix.enabled), this.enumRule('audio.automix.mode', () => automix.mode, VALID_AUTOMIX_MODES), this.nonEmptyStringRule('audio.automix.fallbackBehavior', () => automix.fallbackBehavior), this.booleanRule('audio.automix.gaplessTrim', () => automix.gaplessTrim));
+            const deezerMetadata = automix.deezerMetadata;
+            if (deezerMetadata) {
+                rules.push(this.booleanRule('audio.automix.deezerMetadata.enabled', () => deezerMetadata.enabled), this.booleanRule('audio.automix.deezerMetadata.useBpm', () => deezerMetadata.useBpm), this.booleanRule('audio.automix.deezerMetadata.useGain', () => deezerMetadata.useGain), this.booleanRule('audio.automix.deezerMetadata.tempoMatch', () => deezerMetadata.tempoMatch), this.positiveIntRule('audio.automix.deezerMetadata.requestTimeoutMs', () => deezerMetadata.requestTimeoutMs), {
+                    path: 'audio.automix.deezerMetadata.maxBpmDiffRatio',
+                    expected: 'number > 0 and <= 1',
+                    get: () => deezerMetadata.maxBpmDiffRatio,
+                    validate: (v) => typeof v === 'number' && v > 0 && v <= 1
+                });
+            }
+        }
         this.runRules(rules);
     }
     validatePlayback() {
@@ -226,7 +258,6 @@ export default class ConfigValidationManager {
         const rules = [
             this.intRangeRule('playerUpdateInterval', () => this.options.playerUpdateInterval, 250, 60000),
             this.positiveIntRule('statsUpdateInterval', () => this.options.statsUpdateInterval),
-            this.positiveIntRule('eventTimeoutMs', () => this.options.eventTimeoutMs),
             {
                 path: 'trackStuckThresholdMs',
                 expected: 'integer >= 1000 (milliseconds)',
@@ -240,6 +271,9 @@ export default class ConfigValidationManager {
                 validate: (v) => Number.isInteger(v) && v > trackStuck
             }
         ];
+        if (this.options.eventTimeoutMs !== undefined) {
+            rules.push(this.positiveIntRule('eventTimeoutMs', () => this.options.eventTimeoutMs));
+        }
         this.runRules(rules);
     }
     validateSources() {
@@ -263,7 +297,9 @@ export default class ConfigValidationManager {
         }
         if (applemusic?.enabled) {
             rules.push(this.nonNegativeIntRule('sources.applemusic.playlistLoadLimit', () => applemusic.playlistLoadLimit), this.nonNegativeIntRule('sources.applemusic.albumLoadLimit', () => applemusic.albumLoadLimit), this.positiveIntRule('sources.applemusic.playlistPageLoadConcurrency', () => applemusic.playlistPageLoadConcurrency), this.positiveIntRule('sources.applemusic.albumPageLoadConcurrency', () => applemusic.albumPageLoadConcurrency));
-            this.warnIfPlaceholder('sources.applemusic.mediaApiToken', applemusic.mediaApiToken);
+            this.warnIfPlaceholder('sources.applemusic.mediaApiToken', applemusic.mediaApiToken !== 'token_here'
+                ? applemusic.mediaApiToken
+                : '');
         }
         if (tidal?.enabled) {
             rules.push(this.nonNegativeIntRule('sources.tidal.playlistLoadLimit', () => tidal.playlistLoadLimit), this.positiveIntRule('sources.tidal.playlistPageLoadConcurrency', () => tidal.playlistPageLoadConcurrency));
@@ -274,7 +310,7 @@ export default class ConfigValidationManager {
                     get: () => tidal.token,
                     validate: (v) => typeof v === 'string' && (v === '' || v.trim().length > 0)
                 });
-                this.warnIfPlaceholder('sources.tidal.token', tidal.token);
+                this.warnIfPlaceholder('sources.tidal.token', tidal.token !== 'token_here' ? tidal.token : '');
             }
         }
         if (audius?.enabled) {
@@ -347,7 +383,15 @@ export default class ConfigValidationManager {
         }
         const gaana = sources.gaana;
         if (gaana?.enabled) {
-            rules.push(this.nonNegativeIntRule('sources.gaana.playlistLoadLimit', () => gaana.playlistLoadLimit), this.nonNegativeIntRule('sources.gaana.albumLoadLimit', () => gaana.albumLoadLimit), this.nonNegativeIntRule('sources.gaana.artistLoadLimit', () => gaana.artistLoadLimit));
+            if (gaana.playlistLoadLimit !== undefined) {
+                rules.push(this.nonNegativeIntRule('sources.gaana.playlistLoadLimit', () => gaana.playlistLoadLimit));
+            }
+            if (gaana.albumLoadLimit !== undefined) {
+                rules.push(this.nonNegativeIntRule('sources.gaana.albumLoadLimit', () => gaana.albumLoadLimit));
+            }
+            if (gaana.artistLoadLimit !== undefined) {
+                rules.push(this.nonNegativeIntRule('sources.gaana.artistLoadLimit', () => gaana.artistLoadLimit));
+            }
         }
         const flowery = sources.flowery;
         if (flowery?.enabled) {
@@ -545,9 +589,9 @@ export default class ConfigValidationManager {
             this.booleanRule('mix.autoCleanup', () => mix.autoCleanup),
             {
                 path: 'mix.defaultVolume',
-                expected: 'number between 0 and 1 (inclusive)',
+                expected: 'number >= 0',
                 get: () => mix.defaultVolume,
-                validate: (v) => typeof v === 'number' && v >= 0 && v <= 1
+                validate: (v) => typeof v === 'number' && v >= 0
             }
         ];
         this.runRules(rules);

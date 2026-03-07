@@ -295,6 +295,19 @@ export default class PlayerManager {
         return player.preload(trackPayload);
     }
     /**
+     * Clears any queued/preloaded next track for the guild player.
+     */
+    async clearNextTrack(guildId) {
+        const interception = await this._runInterceptors('clearNextTrack', guildId);
+        if (interception?.handled)
+            return interception.result;
+        if (this.isCluster) {
+            return this.runClusterPlayerCommand(guildId, 'clearNextTrack', []);
+        }
+        const player = this.getLocalPlayerOrThrow(this.getPlayerKey(guildId));
+        return player.clearNextTrack();
+    }
+    /**
      * Stops playback for the guild player.
      */
     async stop(guildId) {

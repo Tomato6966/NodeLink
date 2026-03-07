@@ -171,7 +171,6 @@ export default class TrackCacheManager {
       this.save()
       return null
     }
-    // Refresh insertion order so hot keys are less likely to be evicted first.
     this.cache.delete(key)
     this.cache.set(key, entry)
     return entry.value as T

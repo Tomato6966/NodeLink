@@ -1,15 +1,17 @@
 import { SAMPLE_RATE } from "../../constants.js";
-import { BaseFilter } from "./BaseFilter.js";
+import { AnimatableFilter } from "./AnimatableFilter.js";
 import { clamp16Bit } from "./dsp/clamp16Bit.js";
 import DelayLine from "./dsp/delay.js";
 import LFO from "./dsp/lfo.js";
+const CHANNELS = 2;
 const MAX_DELAY_MS = 50;
 const bufferSize = Math.ceil((SAMPLE_RATE * MAX_DELAY_MS) / 1000);
 /**
  * Applies a chorus effect to the audio.
+ * Uses alpha for smooth animated transitions.
  * @public
  */
-export default class Chorus extends BaseFilter {
+export default class Chorus extends AnimatableFilter {
     priority = 10;
     lfos;
     delays;
@@ -18,6 +20,7 @@ export default class Chorus extends BaseFilter {
     delay = 25;
     mix = 0.5;
     feedback = 0;
+    alpha = 0;
     constructor() {
         super();
         this.lfos = [
@@ -47,12 +50,13 @@ export default class Chorus extends BaseFilter {
      * @param settings - Filter settings containing `chorus`.
      */
     update(settings) {
-        const chorusSettings = settings.chorus || {};
-        this.rate = chorusSettings.rate || 0;
-        this.depth = Math.max(0, Math.min(chorusSettings.depth || 0, 1.0));
-        this.delay = Math.max(1, Math.min(chorusSettings.delay || 25, MAX_DELAY_MS - 5));
-        this.mix = Math.max(0, Math.min(chorusSettings.mix ?? 0.5, 1.0));
-        this.feedback = Math.max(0, Math.min(chorusSettings.feedback || 0, 0.95));
+        const c = settings?.chorus || {};
+        const isDisabled = c._disabled === true;
+        this.rate = c.rate || 0;
+        this.depth = Math.max(0, Math.min(c.depth || 0, 1.0));
+        this.delay = Math.max(1, Math.min(c.delay || 25, MAX_DELAY_MS - 5));
+        this.mix = Math.max(0, Math.min(c.mix ?? 0.5, 1.0));
+        this.feedback = Math.max(0, Math.min(c.feedback || 0, 0.95));
         const rate2 = this.rate * 1.1;
         const lfos = this.lfos;
         if (lfos[0])
@@ -63,6 +67,21 @@ export default class Chorus extends BaseFilter {
             lfos[2].update(rate2, this.depth);
         if (lfos[3])
             lfos[3].update(rate2, this.depth);
+        const isActive = this.rate > 0 && this.depth > 0 && this.mix > 0;
+        const targetAlpha = isDisabled ? 0.0 : isActive ? 1.0 : 0.0;
+        super.applyAnimatedUpdate({
+            chorus: {
+                alpha: targetAlpha,
+                transition: c.transition
+            }
+        }, 'chorus', { alpha: 0.0 });
+    }
+    onConfigChanged(config) {
+        this.alpha = config['alpha'] ?? 0;
+    }
+    isConfigActive(config) {
+        const a = config ? config['alpha'] : this.alpha;
+        return (a ?? 0) > 0.001;
     }
     /**
      * Processes a PCM audio buffer.
@@ -70,9 +89,11 @@ export default class Chorus extends BaseFilter {
      * @returns The processed PCM audio chunk.
      */
     process(chunk) {
-        if (this.rate === 0 || this.depth === 0 || this.mix === 0) {
+        super.processAnimation(SAMPLE_RATE, chunk.length, CHANNELS);
+        if (this.alpha <= 0.001) {
             return chunk;
         }
+        const alpha = this.alpha;
         const delayWidth = this.depth * (SAMPLE_RATE * 0.004);
         const centerDelaySamples = this.delay * (SAMPLE_RATE / 1000);
         const centerDelaySamples2 = centerDelaySamples * 1.2;
@@ -105,8 +126,10 @@ export default class Chorus extends BaseFilter {
             const delayed2R = delays[3].read(delay2R);
             const wetLeft = (delayed1L + delayed2L) * 0.5;
             const wetRight = (delayed1R + delayed2R) * 0.5;
-            const finalLeft = leftSample * (1 - this.mix) + wetLeft * this.mix;
-            const finalRight = rightSample * (1 - this.mix) + wetRight * this.mix;
+            const chorusLeft = leftSample * (1 - this.mix) + wetLeft * this.mix;
+            const chorusRight = rightSample * (1 - this.mix) + wetRight * this.mix;
+            const finalLeft = leftSample + alpha * (chorusLeft - leftSample);
+            const finalRight = rightSample + alpha * (chorusRight - rightSample);
             delays[0].write(clamp16Bit(leftSample + delayed1L * this.feedback));
             delays[1].write(clamp16Bit(rightSample + delayed1R * this.feedback));
             delays[2].write(clamp16Bit(leftSample + delayed2L * this.feedback));

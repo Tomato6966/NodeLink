@@ -1,6 +1,9 @@
 import type { FilterSettings } from '../../typings/playback/filters.types.ts'
-import { BaseFilter } from './BaseFilter.ts'
+import { AnimatableFilter } from './AnimatableFilter.ts'
 import { clamp16Bit } from './dsp/clamp16Bit.ts'
+import { SAMPLE_RATE } from '../../constants.ts'
+
+const CHANNELS = 2
 
 // biome-ignore lint/style/useExponentiationOperator: <Math.pow is more readable here>
 const dbToGain = (db: number): number => Math.pow(10, db / 20)
@@ -9,15 +12,17 @@ const gainToDb = (gain: number): number =>
 
 /**
  * Applies dynamic range compression to audio.
+ * Uses alpha for smooth animated transitions.
  * @public
  */
-export default class Compressor extends BaseFilter {
+export default class Compressor extends AnimatableFilter {
   public priority = 11
   private threshold = -24
   private ratio = 4
   private attack = 0.01
   private release = 0.1
   private makeupGain = 0
+  private alpha = 0
 
   private envelope = 0
 
@@ -26,13 +31,36 @@ export default class Compressor extends BaseFilter {
    * @param settings - Filter settings containing `compressor`.
    */
   public override update(settings: FilterSettings): void {
-    const comp = settings.compressor || {}
+    const comp = settings?.compressor || {}
+    const isDisabled = (comp as any)._disabled === true
 
     this.threshold = comp.threshold ?? -24
     this.ratio = Math.max(1, comp.ratio ?? 4)
     this.attack = Math.max(0.001, comp.attack ?? 0.01)
     this.release = Math.max(0.01, comp.release ?? 0.1)
     this.makeupGain = comp.makeupGain ?? 0
+
+    const targetAlpha = isDisabled ? 0.0 : 1.0
+
+    super.applyAnimatedUpdate(
+      {
+        compressor: {
+          alpha: targetAlpha,
+          transition: (comp as any).transition
+        }
+      },
+      'compressor',
+      { alpha: 0.0 }
+    )
+  }
+
+  protected override onConfigChanged(config: Record<string, number>): void {
+    this.alpha = config['alpha'] ?? 0
+  }
+
+  protected override isConfigActive(config?: Record<string, number>): boolean {
+    const a = config ? config['alpha'] : this.alpha
+    return (a ?? 0) > 0.001
   }
 
   /**
@@ -41,6 +69,13 @@ export default class Compressor extends BaseFilter {
    * @returns The processed PCM audio chunk.
    */
   public override process(chunk: Buffer): Buffer {
+    super.processAnimation(SAMPLE_RATE, chunk.length, CHANNELS)
+
+    if (this.alpha <= 0.001) {
+      return chunk
+    }
+
+    const alpha = this.alpha
     const attackCoef = Math.exp(-1 / (this.attack * 44100))
     const releaseCoef = Math.exp(-1 / (this.release * 44100))
     const makeupGain = dbToGain(this.makeupGain)
@@ -66,8 +101,10 @@ export default class Compressor extends BaseFilter {
 
       const gain = dbToGain(reductionDb) * makeupGain
 
-      chunk.writeInt16LE(clamp16Bit(left * gain * 32768), i)
-      chunk.writeInt16LE(clamp16Bit(right * gain * 32768), i + 2)
+      const effectiveGain = 1.0 + alpha * (gain - 1.0)
+
+      chunk.writeInt16LE(clamp16Bit(left * effectiveGain * 32768), i)
+      chunk.writeInt16LE(clamp16Bit(right * effectiveGain * 32768), i + 2)
     }
 
     return chunk

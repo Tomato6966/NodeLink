@@ -37,6 +37,10 @@ const FILTER_CLASSES = {
     flanger: Flanger,
     phonograph: Phonograph
 };
+const CANONICAL_KEY_MAP = {};
+for (const key in FILTER_CLASSES) {
+    CANONICAL_KEY_MAP[key.toLowerCase()] = key;
+}
 /**
  * Manages the active filter chain and applies it to PCM buffers.
  * @example
@@ -50,6 +54,16 @@ export class FiltersManager extends Transform {
     nodelink;
     activeFilters;
     filterInstances;
+    /**
+     * When true, _transform passes chunks through without processing.
+     * Used by CrossfadeController to avoid double-processing: the upstream
+     * _transform would advance stateful filter buffers (echo delay lines,
+     * reverb decay) with Track A data while filterProcessor separately
+     * processes Track B — causing cross-contamination and 2x state advance.
+     */
+    bypass = false;
+    /** Stores the last raw update payload so resetState() can re-apply. */
+    _lastRawFilters = {};
     /**
      * Creates a new filter manager.
      * @param nodelink - NodeLink context for extensions.
@@ -73,21 +87,38 @@ export class FiltersManager extends Transform {
      * @param filters - Filter settings (supports `{ filters: {...} }` or direct map).
      */
     update(filters) {
-        this.activeFilters = [];
+        this._lastRawFilters = filters;
         const settings = this._normalizeFilters(filters);
+        const normalizedSettings = {};
         for (const name in settings) {
-            const config = settings[name];
+            const canonical = CANONICAL_KEY_MAP[name.toLowerCase()] ?? name.toLowerCase();
+            normalizedSettings[canonical] = settings[name];
+        }
+        const updatedKeys = new Set();
+        for (const name in normalizedSettings) {
+            const config = normalizedSettings[name];
             if (!config)
                 continue;
+            updatedKeys.add(name);
             if (FILTER_CLASSES[name] && !this.filterInstances[name]) {
                 this.filterInstances[name] = new FILTER_CLASSES[name]();
             }
             const instance = this.filterInstances[name];
-            if (instance) {
+            if (instance && typeof instance.update === 'function') {
+                instance.update(normalizedSettings);
+            }
+        }
+        this.activeFilters = [];
+        for (const name in this.filterInstances) {
+            const instance = this.filterInstances[name];
+            if (!instance)
+                continue;
+            if (updatedKeys.has(name)) {
                 this.activeFilters.push(instance);
-                if (typeof instance.update === 'function') {
-                    instance.update(settings);
-                }
+            }
+            else if (typeof instance.isActive === 'function' &&
+                instance.isActive()) {
+                this.activeFilters.push(instance);
             }
         }
         this.activeFilters.sort((a, b) => (a.priority ?? 99) - (b.priority ?? 99));
@@ -97,10 +128,14 @@ export class FiltersManager extends Transform {
      * @param chunk - PCM audio chunk.
      */
     process(chunk) {
+        if (this.bypass)
+            return chunk;
         if (this.activeFilters.length === 0)
             return chunk;
         let processed = chunk;
         for (const filter of this.activeFilters) {
+            if (typeof filter.isActive === 'function' && !filter.isActive())
+                continue;
             processed = filter.process(processed);
         }
         return processed;
@@ -126,7 +161,57 @@ export class FiltersManager extends Transform {
             return flushedChunks[0];
         return Buffer.concat(flushedChunks, totalLength);
     }
+    /**
+     * Returns the current playback rate from the timescale filter.
+     * When bypass is active, the timescale filter is not processing audio
+     * so the effective rate is always 1.0 regardless of the filter's
+     * configured value.
+     */
+    getRate() {
+        if (this.bypass)
+            return 1.0;
+        const timescale = this.filterInstances['timescale'];
+        return timescale?.getRate?.() ?? 1.0;
+    }
+    /**
+     * Hard-resets the entire filter chain: flushes state buffers, deletes
+     * standard filter instances, and clears the active list.
+     *
+     * Unlike the previous implementation, this does NOT re-apply
+     * _lastRawFilters.  Re-applying was causing zombie filter instances:
+     * the old automix filters (lowpass, echo, reverb, etc.) got re-created
+     * with fresh transition timers.  When _completeCrossfade later called
+     * update({}), these zombies survived via isActive()===true (animation
+     * still pending), leaking 4+ seconds of dying filters onto Track C
+     * (the "filtro retardatário" bug).
+     *
+     * Standard filter instances (listed in FILTER_CLASSES) are deleted
+     * outright and will be re-created on demand by update() when the
+     * player sets new filters.  Extension filters (from plugins) are
+     * preserved but flushed.
+     *
+     * Called by CrossfadeController when the blend finishes (bypass goes
+     * ON immediately before this, so no audio flows through filters).
+     */
+    resetState() {
+        for (const name in this.filterInstances) {
+            const instance = this.filterInstances[name];
+            if (instance && typeof instance.flush === 'function') {
+                instance.flush();
+            }
+            if (name in FILTER_CLASSES) {
+                delete this.filterInstances[name];
+            }
+        }
+        this._lastRawFilters = {};
+        this.activeFilters = [];
+    }
     _transform(chunk, _encoding, callback) {
+        if (this.bypass) {
+            this.push(chunk);
+            callback();
+            return;
+        }
         this.push(this.process(chunk));
         callback();
     }

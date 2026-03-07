@@ -1,5 +1,5 @@
-import type { Buffer } from 'node:buffer'
 import type { Readable } from 'node:stream'
+import type { Buffer } from 'node:buffer'
 import type { VoiceConnection } from '@performanc/voice'
 import type { Decoder as OpusDecoder } from '../../playback/opus/Opus.ts'
 

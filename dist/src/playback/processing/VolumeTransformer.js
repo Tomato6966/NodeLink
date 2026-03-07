@@ -21,7 +21,7 @@ export class VolumeTransformer extends Transform {
     lookaheadSamples;
     lookaheadBuffer;
     lookaheadIndex;
-    lookaheadFull; // Kept for type compatibility
+    lookaheadFull;
     currentVolume;
     targetVolume;
     startVolume;

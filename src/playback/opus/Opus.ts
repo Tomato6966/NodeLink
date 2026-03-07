@@ -1,6 +1,8 @@
-import type { Buffer } from 'node:buffer'
+import { Buffer } from 'node:buffer'
 import { createRequire } from 'node:module'
 import { Transform } from 'node:stream'
+
+import { bufferPool } from '../structs/BufferPool.ts'
 import type {
   OpusApplication,
   OpusDecoderInstance,
@@ -8,7 +10,6 @@ import type {
   OpusInstanceResult,
   OpusLibrary
 } from '../../typings/playback/opus.types.ts'
-import { bufferPool } from '../structs/BufferPool.ts'
 
 const require = createRequire(import.meta.url)
 
@@ -81,7 +82,7 @@ const _createInstance = (
       Encoder.Application[app.toUpperCase()] ??
       // biome-ignore lint/complexity/useLiteralKeys: index signature requires bracket access
       Encoder.Application['VOIP'] ??
-      2048 // 2048 is VOIP for opusscript
+      2048
   }
 
   return { instance: new Encoder(rate, channels, type), lib }

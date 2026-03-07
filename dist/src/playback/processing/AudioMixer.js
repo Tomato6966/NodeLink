@@ -1,12 +1,14 @@
 import { randomBytes } from 'node:crypto';
-import { EventEmitter } from 'node:events';
+import { Readable } from 'node:stream';
 import { RingBuffer } from "../structs/RingBuffer.js";
-const LAYER_BUFFER_SIZE = 1024 * 1024; // 1MB per layer (~5 seconds of PCM)
+const LAYER_BUFFER_SIZE = 1024 * 1024;
 const EMPTY_BUFFER = Buffer.alloc(0);
+const FRAME_SIZE = 3840;
 /**
  * Mixer that allows layering multiple audio streams over a main PCM stream.
+ * Acts now as a continuous river (readable stream)
  */
-export class AudioMixer extends EventEmitter {
+export class AudioMixer extends Readable {
     mixLayers;
     maxLayers;
     defaultVolume;
@@ -17,12 +19,27 @@ export class AudioMixer extends EventEmitter {
      * @param config - Mixer configuration.
      */
     constructor(config = {}) {
-        super();
+        super({ highWaterMark: FRAME_SIZE * 4 });
         this.mixLayers = new Map();
         this.maxLayers = config.maxLayersMix || 5;
         this.defaultVolume = config.defaultVolume || 0.8;
         this.autoCleanup = config.autoCleanup !== false;
         this.enabled = config.enabled !== false;
+    }
+    _read(size) {
+        const targetSize = FRAME_SIZE;
+        if (this.mixLayers.size === 0 || !this.enabled) {
+            this.push(Buffer.alloc(targetSize));
+            return;
+        }
+        const chunks = this.readLayerChunks(targetSize);
+        if (chunks.size === 0) {
+            this.push(Buffer.alloc(targetSize));
+            return;
+        }
+        const baseBuffer = Buffer.alloc(targetSize);
+        const mixedBuffer = this.mixBuffers(baseBuffer, chunks);
+        this.push(mixedBuffer);
     }
     /**
      * Ensures a buffer is treated as Int16Array, handling alignment.
@@ -151,7 +168,8 @@ export class AudioMixer extends EventEmitter {
                 continue;
             if (layer.ringBuffer.length < safeSize) {
                 if (layer.finishedFeeding && layer.ringBuffer.length === 0) {
-                    this.removeLayer(id, 'FINISHED');
+                    if (this.autoCleanup)
+                        this.removeLayer(id, 'FINISHED');
                 }
                 continue;
             }
@@ -191,7 +209,7 @@ export class AudioMixer extends EventEmitter {
         }
         layer.ringBuffer.dispose();
         this.mixLayers.delete(id);
-        this.emit('mixEnded', { id, reason });
+        this.emit('mixEnded', { id, reason, track: layer.track });
         return true;
     }
     /**

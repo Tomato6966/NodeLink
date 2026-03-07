@@ -6,11 +6,11 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     }
     return path;
 };
+import net from 'node:net';
+import os from 'node:os';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import inspector from 'node:inspector';
-import net from 'node:net';
-import os from 'node:os';
 import { resolve as resolvePath } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
@@ -53,9 +53,7 @@ hndl.enable();
 try {
     os.setPriority(os.constants.priority.PRIORITY_HIGH);
 }
-catch (_e) {
-    // Ignore errors
-}
+catch (_e) { }
 let config;
 const resolveRootConfigUrl = (fileName) => pathToFileURL(resolvePath(process.cwd(), fileName)).href;
 try {
@@ -70,7 +68,7 @@ const HIBERNATION_ENABLED = config.cluster?.hibernation?.enabled !== false;
 const HIBERNATION_TIMEOUT = config.cluster?.hibernation?.timeoutMs || 20 * 60 * 1000;
 initLogger(config);
 const players = new Map();
-const guildQueues = new Map(); // guildId -> { queue: [], processing: false }
+const guildQueues = new Map();
 const activeStreams = new Map();
 const streamLifecycle = {
     created: 0,
@@ -1408,7 +1406,6 @@ async function processQueue(queueKey) {
         nodelink.connectionManager.start();
         startTimers(false);
     }
-    // Execute Worker Interceptors
     const interceptors = nodelink.extensions.workerInterceptors;
     if (interceptors && interceptors.length > 0) {
         for (const interceptor of interceptors) {

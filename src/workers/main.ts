@@ -1,8 +1,8 @@
+import net from 'node:net'
+import os from 'node:os'
 import fs from 'node:fs'
 import fsPromises from 'node:fs/promises'
 import inspector from 'node:inspector'
-import net from 'node:net'
-import os from 'node:os'
 import { resolve as resolvePath } from 'node:path'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { pathToFileURL } from 'node:url'
@@ -11,13 +11,13 @@ import v8 from 'node:v8'
 import { GatewayEvents } from '../constants.ts'
 import ConnectionManager from '../managers/connectionManager.ts'
 import CredentialManager from '../managers/credentialManager.ts'
-import type LyricsManager from '../managers/lyricsManager.ts'
-import type MeaningManager from '../managers/meaningManager.ts'
 import PluginManager from '../managers/pluginManager.ts'
 import RoutePlannerManager from '../managers/routePlannerManager.ts'
 import SourceManager from '../managers/sourceManager.ts'
 import StatsManager from '../managers/statsManager.ts'
 import TrackCacheManager from '../managers/trackCacheManager.ts'
+import type LyricsManager from '../managers/lyricsManager.ts'
+import type MeaningManager from '../managers/meaningManager.ts'
 import { getWebmOpusProfilerStats } from '../playback/demuxers/WebmOpus.ts'
 import { bufferPool } from '../playback/structs/BufferPool.ts'
 import type { TrackInfoExtended } from '../typings/playback/player.types.ts'
@@ -86,9 +86,7 @@ hndl.enable()
 
 try {
   os.setPriority(os.constants.priority.PRIORITY_HIGH)
-} catch (_e: unknown) {
-  // Ignore errors
-}
+} catch (_e: unknown) {}
 
 let config: NodeLinkConfig
 const resolveRootConfigUrl = (fileName: string): string =>
@@ -109,7 +107,7 @@ const HIBERNATION_TIMEOUT =
 initLogger(config as any)
 
 const players = new Map<string, WorkerPlayer>()
-const guildQueues = new Map<string, GuildQueueEntry>() // guildId -> { queue: [], processing: false }
+const guildQueues = new Map<string, GuildQueueEntry>()
 const activeStreams = new Map<string, ActiveStreamEntry>()
 const streamLifecycle = {
   created: 0,
@@ -1912,7 +1910,6 @@ async function processQueue(queueKey: string): Promise<void> {
     startTimers(false)
   }
 
-  // Execute Worker Interceptors
   const interceptors = nodelink.extensions.workerInterceptors
   if (interceptors && interceptors.length > 0) {
     for (const interceptor of interceptors) {

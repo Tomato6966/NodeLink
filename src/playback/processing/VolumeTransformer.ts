@@ -28,7 +28,7 @@ export class VolumeTransformer extends Transform implements IVolumeTransformer {
   private readonly lookaheadSamples: number
   private readonly lookaheadBuffer: Int16Array
   private lookaheadIndex: number
-  public lookaheadFull: boolean // Kept for type compatibility
+  public lookaheadFull: boolean
   private currentVolume: number
   private targetVolume: number
   private startVolume: number

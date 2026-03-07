@@ -1,6 +1,6 @@
 import { SAMPLE_RATE } from '../../constants.ts'
 import type { FilterSettings } from '../../typings/playback/filters.types.ts'
-import { BaseFilter } from './BaseFilter.ts'
+import { AnimatableFilter } from './AnimatableFilter.ts'
 import { clamp16Bit } from './dsp/clamp16Bit.ts'
 import { resample } from './timescale/resampler.ts'
 import TimeStretch from './timescale/timeStretch.ts'
@@ -62,7 +62,7 @@ const floatToInt16Buffer = (input: Float32Array): Buffer => {
  * Modulates playback speed, pitch, and rate.
  * @public
  */
-export default class Timescale extends BaseFilter {
+export default class Timescale extends AnimatableFilter {
   public priority = 1
   private speed = 1.0
   private pitch = 1.0
@@ -90,18 +90,17 @@ export default class Timescale extends BaseFilter {
    * @param settings - Filter settings containing `timescale`.
    */
   public override update(settings: FilterSettings): void {
-    const timescaleSettings = settings.timescale || {}
+    super.applyAnimatedUpdate(settings, 'timescale', {
+      speed: 1.0,
+      pitch: 1.0,
+      rate: 1.0
+    })
+  }
 
-    const speed =
-      typeof timescaleSettings.speed === 'number'
-        ? timescaleSettings.speed
-        : 1.0
-    const pitch =
-      typeof timescaleSettings.pitch === 'number'
-        ? timescaleSettings.pitch
-        : 1.0
-    const rate =
-      typeof timescaleSettings.rate === 'number' ? timescaleSettings.rate : 1.0
+  protected override onConfigChanged(config: Record<string, number>): void {
+    const speed = config['speed'] ?? 1.0
+    const pitch = config['pitch'] ?? 1.0
+    const rate = config['rate'] ?? 1.0
 
     const bypass = speed === 1.0 && pitch === 1.0 && rate === 1.0
     const silence = speed <= 0 || pitch <= 0 || rate <= 0
@@ -114,7 +113,7 @@ export default class Timescale extends BaseFilter {
     this._silence = silence
 
     if (this._bypass || this._silence) {
-      this._reset()
+      if (!this._bypass) this._reset()
       return
     }
 
@@ -134,6 +133,17 @@ export default class Timescale extends BaseFilter {
     if (this._usesStretch) {
       this._timeStretch.setTempo(this._effectiveTempo)
     }
+  }
+
+  protected override isConfigActive(): boolean {
+    return !this._bypass
+  }
+
+  /**
+   * Returns the current effective playback rate.
+   */
+  public getRate(): number {
+    return this.speed * this.rate
   }
 
   /**
@@ -173,6 +183,8 @@ export default class Timescale extends BaseFilter {
    * @returns The processed PCM audio chunk.
    */
   public override process(chunk: Buffer): Buffer {
+    super.processAnimation(SAMPLE_RATE, chunk.length, CHANNELS)
+
     if (this._bypass) return chunk
     if (this._silence) return EMPTY_BUFFER
     if (!chunk || chunk.length === 0) return EMPTY_BUFFER

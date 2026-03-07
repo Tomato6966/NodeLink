@@ -1,7 +1,6 @@
-import { validator } from '../validators.ts'
 import { decodeTrack, logger, sendErrorResponse } from '../utils.ts'
+import { validator } from '../validators.ts'
 
-// Use unknown -> any in fastest-validator
 const filtersSchema = { type: 'any', optional: true }
 
 const voiceStateSchema = {
@@ -27,7 +26,7 @@ const updatePlayerTrackSchema = {
 
 const updatePlayerSchema = validator.compile({
   track: { ...updatePlayerTrackSchema, optional: true },
-  nextTrack: { ...updatePlayerTrackSchema, optional: true },
+  nextTrack: { ...updatePlayerTrackSchema, optional: true, nullable: true },
   encodedTrack: { type: 'string', nullable: true, optional: true },
   position: { type: 'number', min: 0, optional: true },
   endTime: { type: 'number', min: 0, nullable: true, optional: true },
@@ -75,11 +74,13 @@ const sanitizeFadingConfig = (raw) => {
   }
 
   if (!raw || typeof raw !== 'object') return safe
+
   safe.enabled = raw.enabled === true
 
   const updateSection = (key) => {
     const section = raw[key]
     if (!section || typeof section !== 'object') return
+
     if (Number.isFinite(section.duration)) {
       safe[key].duration = Math.max(0, section.duration)
     }
@@ -128,8 +129,8 @@ const sanitizeCrossfadeConfig = (raw) => {
   }
 
   if (!raw || typeof raw !== 'object') return safe
-  safe.enabled = raw.enabled === true
 
+  safe.enabled = raw.enabled === true
   if (Number.isFinite(raw.duration)) {
     safe.duration = Math.max(0, raw.duration)
   }
@@ -145,6 +146,7 @@ const sanitizeCrossfadeConfig = (raw) => {
   if (Number.isFinite(raw.bufferMs)) {
     safe.bufferMs = Math.max(0, raw.bufferMs)
   }
+  safe.triggerNow = raw.triggerNow === true
 
   return safe
 }
@@ -157,7 +159,6 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
   }
 
   const validation = pathSchema(pathParams)
-
   if (validation !== true) {
     const errorMessage = validation?.[0]?.message || 'Invalid path parameters'
     logger('warn', 'PlayerUpdate', `Invalid path parameters: ${errorMessage}`)
@@ -173,7 +174,6 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
   const { sessionId, guildId } = pathParams
   const session = nodelink.sessions.get(sessionId)
-
   if (!session) {
     return sendErrorResponse(
       req,
@@ -241,7 +241,6 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
       if (req.method === 'PATCH') {
         const bodyValidation = updatePlayerSchema(req.body)
-
         if (bodyValidation !== true) {
           const errorMessage = bodyValidation?.[0]?.message || 'Invalid payload'
           logger(
@@ -260,11 +259,9 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         }
 
         const payload = req.body
-
         const queryValidation = queryParamsSchema({
           noReplace: parsedUrl.searchParams.get('noReplace')
         })
-
         if (queryValidation !== true) {
           return sendErrorResponse(
             req,
@@ -278,53 +275,20 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
 
         const noReplace = parsedUrl.searchParams.get('noReplace') === 'true'
 
-        logger(
-          'debug',
-          'PlayerUpdate',
-          `Received payload for guild ${guildId}:`,
-          payload
-        )
-
         await session.players.create(guildId)
 
         if (payload.voice) {
-          const { endpoint, token, sessionId: voiceSessionId } = payload.voice
-          const currentPlayer = session.players.get(guildId)
-          if (
-            currentPlayer &&
-            currentPlayer.voice?.endpoint === endpoint &&
-            currentPlayer.voice?.token === token &&
-            currentPlayer.voice?.sessionId === voiceSessionId
-          ) {
-            logger(
-              'debug',
-              'PlayerUpdate',
-              `Voice payload for guild ${this.guildId} is identical. Skipping.`
-            )
-          } else {
-            logger(
-              'debug',
-              'PlayerUpdate',
-              `Updating voice for guild ${guildId}`
-            )
-            await session.players.updateVoice(guildId, payload.voice)
-          }
+          await session.players.updateVoice(guildId, payload.voice)
         }
 
         let trackToPlay = null
         let stopPlayer = false
         const userData = payload.track?.userData
-
         const trackPayload = payload.track
         const nextTrackPayload = payload.nextTrack
         const legacyEncodedTrack = payload.encodedTrack
 
         if (legacyEncodedTrack) {
-          logger(
-            'warn',
-            'PlayerUpdate',
-            'The `encodedTrack` field is deprecated. Use `track.encoded` instead.'
-          )
           return sendErrorResponse(
             req,
             res,
@@ -359,18 +323,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               }
             }
           } else if (trackPayload.identifier) {
-            logger(
-              'debug',
-              'PlayerUpdate',
-              `Resolving identifier: ${trackPayload.identifier}`
-            )
-
             if (!nodelink.loadTrack) {
-              logger(
-                'error',
-                'PlayerUpdate',
-                'nodelink.loadTrack is not implemented!'
-              )
               return sendErrorResponse(
                 req,
                 res,
@@ -382,7 +335,6 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             }
 
             const loadResult = await nodelink.loadTrack(trackPayload.identifier)
-
             if (loadResult.loadType === 'track') {
               trackToPlay = {
                 encoded: loadResult.data.encoded,
@@ -395,6 +347,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
                 loadResult.loadType === 'empty'
                   ? 'Track identifier resolved to no tracks.'
                   : `Track identifier resolved to ${loadResult.loadType}, expected 'track'.`
+
               return sendErrorResponse(
                 req,
                 res,
@@ -405,29 +358,14 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
               )
             }
           }
-        } else if (legacyEncodedTrack !== undefined) {
-          if (legacyEncodedTrack === null) {
-            stopPlayer = true
-          } else {
-            const decodedTrack = decodeTrack(legacyEncodedTrack)
-            if (!decodedTrack) {
-              return sendErrorResponse(
-                req,
-                res,
-                400,
-                'Bad Request',
-                'The provided track is invalid.',
-                parsedUrl.pathname
-              )
-            }
-            trackToPlay = {
-              encoded: legacyEncodedTrack,
-              info: decodedTrack.info
-            }
-          }
         }
 
-        if (nextTrackPayload) {
+        const shouldClearNextTrack =
+          nextTrackPayload === null || nextTrackPayload?.encoded === null
+
+        if (shouldClearNextTrack) {
+          await session.players.clearNextTrack(guildId)
+        } else if (nextTrackPayload) {
           let trackToPreload = null
 
           if (nextTrackPayload.encoded !== undefined) {
@@ -443,68 +381,33 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
                 userData: nextTrackPayload.userData
               }
             }
-          } else if (nextTrackPayload.identifier) {
-            if (nodelink.loadTrack) {
-              const loadResult = await nodelink.loadTrack(
-                nextTrackPayload.identifier
-              )
-              if (loadResult.loadType === 'track') {
-                trackToPreload = {
-                  encoded: loadResult.data.encoded,
-                  info: loadResult.data.info,
-                  audioTrackId:
-                    nextTrackPayload.language ||
-                    nextTrackPayload.audioTrackId ||
-                    null,
-                  userData: nextTrackPayload.userData
-                }
+          } else if (nextTrackPayload.identifier && nodelink.loadTrack) {
+            const loadResult = await nodelink.loadTrack(
+              nextTrackPayload.identifier
+            )
+            if (loadResult.loadType === 'track') {
+              trackToPreload = {
+                encoded: loadResult.data.encoded,
+                info: loadResult.data.info,
+                audioTrackId:
+                  nextTrackPayload.language ||
+                  nextTrackPayload.audioTrackId ||
+                  null,
+                userData: nextTrackPayload.userData
               }
             }
           }
 
           if (trackToPreload) {
-            logger(
-              'debug',
-              'PlayerUpdate',
-              `Preloading track for guild ${guildId}:`,
-              { track: trackToPreload.info }
-            )
             await session.players.preload(guildId, trackToPreload)
           }
         }
 
         if (stopPlayer) {
-          const player = session.players.get(guildId)
-          if (player?.isUpdatingTrack) {
-            logger(
-              'debug',
-              'PlayerUpdate',
-              `Player for guild ${guildId} is updating. Waiting before stopping.`
-            )
-            let attempts = 0
-            const maxAttempts = 10
-            while (player.isUpdatingTrack && attempts < maxAttempts) {
-              await new Promise((resolve) => setTimeout(resolve, 100))
-              attempts++
-            }
-            if (player.isUpdatingTrack) {
-              logger(
-                'warn',
-                'PlayerUpdate',
-                `Player for guild ${guildId} still updating. Forcing stop.`
-              )
-            }
-          }
           await session.players.stop(guildId)
         }
 
         if (trackToPlay) {
-          logger(
-            'debug',
-            'PlayerUpdate',
-            `Playing track for guild ${guildId}:`,
-            { track: trackToPlay.info, noReplace }
-          )
           await session.players.play(guildId, {
             ...trackToPlay,
             userData,
@@ -515,38 +418,15 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
         }
 
         if (payload.volume !== undefined) {
-          logger(
-            'debug',
-            'PlayerUpdate',
-            `Setting volume to ${payload.volume} for guild ${guildId}`
-          )
           await session.players.volume(guildId, payload.volume)
         }
-
         if (payload.paused !== undefined) {
-          logger(
-            'debug',
-            'PlayerUpdate',
-            `Setting paused to ${payload.paused} for guild ${guildId}`
-          )
           await session.players.pause(guildId, payload.paused)
         }
-
         if (payload.position !== undefined && !trackToPlay) {
-          logger(
-            'debug',
-            'PlayerUpdate',
-            `Seeking to ${payload.position}ms for guild ${guildId}`
-          )
           await session.players.seek(guildId, payload.position)
         }
-
         if (payload.endTime !== undefined) {
-          logger(
-            'debug',
-            'PlayerUpdate',
-            `Setting endTime to ${payload.endTime}ms for guild ${guildId}`
-          )
           const playerState = await session.players.toJSON(guildId)
           await session.players.seek(
             guildId,
@@ -554,39 +434,29 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
             payload.endTime
           )
         }
-
         if (payload.filters !== undefined) {
-          logger(
-            'debug',
-            'PlayerUpdate',
-            `Applying filters for guild ${guildId}:`,
-            payload.filters
-          )
           await session.players.setFilters(guildId, payload)
         }
-
         if (payload.fading !== undefined) {
-          logger('debug', 'PlayerUpdate', `Setting fading for guild ${guildId}`)
-          const sanitizedFading = sanitizeFadingConfig(payload.fading)
-          await session.players.setFading(guildId, sanitizedFading)
-        }
-
-        if (payload.crossfade !== undefined) {
-          logger(
-            'debug',
-            'PlayerUpdate',
-            `Setting crossfade for guild ${guildId}`
+          await session.players.setFading(
+            guildId,
+            sanitizeFadingConfig(payload.fading)
           )
+        }
+        if (payload.crossfade !== undefined) {
           const sanitizedCrossfade = sanitizeCrossfadeConfig(payload.crossfade)
           await session.players.setCrossfade(guildId, sanitizedCrossfade)
+          if (sanitizedCrossfade.triggerNow) {
+            const player = session.players.get(guildId)
+            if (player) {
+              const duration = Number.isFinite(payload.crossfade.duration)
+                ? payload.crossfade.duration
+                : undefined
+              await player.triggerCrossfade(duration)
+            }
+          }
         }
-
         if (payload.loudnessNormalizer !== undefined) {
-          logger(
-            'debug',
-            'PlayerUpdate',
-            `Setting loudnessNormalizer to ${payload.loudnessNormalizer} for guild ${guildId}`
-          )
           await session.players.setLoudnessNormalizer(
             guildId,
             payload.loudnessNormalizer
@@ -610,6 +480,7 @@ async function handler(nodelink, req, res, sendResponse, parsedUrl) {
           parsedUrl.pathname
         )
       }
+
       logger(
         'error',
         'PlayerUpdate',

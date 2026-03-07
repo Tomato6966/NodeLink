@@ -1,12 +1,16 @@
 import type { FilterSettings } from '../../typings/playback/filters.types.ts'
-import { BaseFilter } from './BaseFilter.ts'
+import { AnimatableFilter } from './AnimatableFilter.ts'
 import { clamp16Bit } from './dsp/clamp16Bit.ts'
+import { SAMPLE_RATE } from '../../constants.ts'
+
+const CHANNELS = 2
 
 /**
  * Applies various distortion effects (sin, cos, tan, etc.).
+ * Uses alpha for smooth animated transitions.
  * @public
  */
-export default class Distortion extends BaseFilter {
+export default class Distortion extends AnimatableFilter {
   public priority = 10
   private sinOffset = 0
   private sinScale = 1
@@ -16,13 +20,15 @@ export default class Distortion extends BaseFilter {
   private tanScale = 1
   private offset = 0
   private scale = 1
+  private alpha = 0
 
   /**
    * Updates the distortion settings.
    * @param settings - Filter settings containing `distortion`.
    */
   public override update(settings: FilterSettings): void {
-    const dist = settings.distortion || {}
+    const dist = settings?.distortion || {}
+    const isDisabled = (dist as any)._disabled === true
 
     this.sinOffset = dist.sinOffset ?? 0
     this.sinScale = dist.sinScale ?? 1
@@ -32,15 +38,8 @@ export default class Distortion extends BaseFilter {
     this.tanScale = dist.tanScale ?? 1
     this.offset = dist.offset ?? 0
     this.scale = dist.scale ?? 1
-  }
 
-  /**
-   * Processes a PCM audio buffer.
-   * @param chunk - PCM audio chunk.
-   * @returns The processed PCM audio chunk.
-   */
-  public override process(chunk: Buffer): Buffer {
-    if (
+    const isActive = !(
       this.sinOffset === 0 &&
       this.sinScale === 1 &&
       this.cosOffset === 0 &&
@@ -49,9 +48,44 @@ export default class Distortion extends BaseFilter {
       this.tanScale === 1 &&
       this.offset === 0 &&
       this.scale === 1
-    ) {
+    )
+
+    const targetAlpha = isDisabled ? 0.0 : isActive ? 1.0 : 0.0
+
+    super.applyAnimatedUpdate(
+      {
+        distortion: {
+          alpha: targetAlpha,
+          transition: (dist as any).transition
+        }
+      },
+      'distortion',
+      { alpha: 0.0 }
+    )
+  }
+
+  protected override onConfigChanged(config: Record<string, number>): void {
+    this.alpha = config['alpha'] ?? 0
+  }
+
+  protected override isConfigActive(config?: Record<string, number>): boolean {
+    const a = config ? config['alpha'] : this.alpha
+    return (a ?? 0) > 0.001
+  }
+
+  /**
+   * Processes a PCM audio buffer.
+   * @param chunk - PCM audio chunk.
+   * @returns The processed PCM audio chunk.
+   */
+  public override process(chunk: Buffer): Buffer {
+    super.processAnimation(SAMPLE_RATE, chunk.length, CHANNELS)
+
+    if (this.alpha <= 0.001) {
       return chunk
     }
+
+    const alpha = this.alpha
 
     for (let i = 0; i < chunk.length; i += 2) {
       const sample = chunk.readInt16LE(i) / 32768
@@ -64,7 +98,9 @@ export default class Distortion extends BaseFilter {
 
       processed = Math.max(-1, Math.min(1, processed))
 
-      chunk.writeInt16LE(clamp16Bit(processed * 32768), i)
+      const out = sample + alpha * (processed - sample)
+
+      chunk.writeInt16LE(clamp16Bit(out * 32768), i)
     }
 
     return chunk

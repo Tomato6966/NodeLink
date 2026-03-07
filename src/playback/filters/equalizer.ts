@@ -1,42 +1,20 @@
 import { SAMPLE_RATE } from '../../constants.ts'
 import type { FilterSettings } from '../../typings/playback/filters.types.ts'
-import { BaseFilter } from './BaseFilter.ts'
+import { AnimatableFilter } from './AnimatableFilter.ts'
 import { clamp16Bit } from './dsp/clamp16Bit.ts'
+
+const CHANNELS = 2
 
 const BANDS = [
   25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000,
   16000
 ]
 
-/**
- * 15-band graphic equalizer using IIR filters.
- * @public
- */
-export default class Equalizer extends BaseFilter {
+export default class Equalizer extends AnimatableFilter {
   public priority = 5
   private bandGains: number[]
-  private filtersL: Array<{
-    b0: number
-    b1: number
-    b2: number
-    a1: number
-    a2: number
-    x1: number
-    x2: number
-    y1: number
-    y2: number
-  }>
-  private filtersR: Array<{
-    b0: number
-    b1: number
-    b2: number
-    a1: number
-    a2: number
-    x1: number
-    x2: number
-    y1: number
-    y2: number
-  }>
+  private filtersL: Array<any>
+  private filtersR: Array<any>
 
   constructor() {
     super()
@@ -45,14 +23,11 @@ export default class Equalizer extends BaseFilter {
     this.filtersR = BANDS.map((freq) => this._createFilter(freq))
   }
 
-  /**
-   * Creates initial filter coefficients for a frequency band.
-   */
   private _createFilter(freq: number) {
     const omega = (2 * Math.PI * freq) / SAMPLE_RATE
     const sin = Math.sin(omega)
     const cos = Math.cos(omega)
-    const alpha = sin / (2 * 1) // Q = 1
+    const alpha = sin / (2 * 1)
 
     const a0 = 1 + alpha
     return {
@@ -68,22 +43,38 @@ export default class Equalizer extends BaseFilter {
     }
   }
 
-  /**
-   * Updates the equalizer settings.
-   * @param settings - Filter settings containing `equalizer`.
-   */
   public override update(settings: FilterSettings): void {
     const eq = settings.equalizer || {}
     const bands = eq.bands || []
 
+    const defaults: Record<string, number> = {}
+    for (let i = 0; i < BANDS.length; i++) {
+      defaults[`band_${i}`] = 1.0
+    }
+
+    const mappedConfig: Record<string, any> = { transition: eq.transition }
     for (const band of bands) {
       if (band.band >= 0 && band.band < BANDS.length) {
-        const gain = Math.max(0, Math.min(band.gain + 1.0, 2.0))
-        this.bandGains[band.band] = gain
+        mappedConfig[`band_${band.band}`] = Math.max(
+          0,
+          Math.min(band.gain + 1.0, 2.0)
+        )
       }
     }
 
-    // Recalculate coefficients for updated bands
+    super.applyAnimatedUpdate(
+      { equalizer: mappedConfig },
+      'equalizer',
+      defaults
+    )
+  }
+
+  protected override onConfigChanged(config: Record<string, number>): void {
+    for (let i = 0; i < BANDS.length; i++) {
+      const val = config[`band_${i}`]
+      if (val !== undefined) this.bandGains[i] = val
+    }
+
     for (let i = 0; i < BANDS.length; i++) {
       const freq = BANDS[i]
       const gain = this.bandGains[i]
@@ -119,12 +110,23 @@ export default class Equalizer extends BaseFilter {
     }
   }
 
-  /**
-   * Processes a PCM audio buffer.
-   * @param chunk - PCM audio chunk.
-   * @returns The processed PCM audio chunk.
-   */
+  protected override isConfigActive(config?: Record<string, number>): boolean {
+    if (config) {
+      for (let i = 0; i < BANDS.length; i++) {
+        if (Math.abs((config[`band_${i}`] ?? 1.0) - 1.0) > 0.001) return true
+      }
+      return false
+    }
+
+    for (const gain of this.bandGains) {
+      if (Math.abs(gain - 1.0) > 0.001) return true
+    }
+    return false
+  }
+
   public override process(chunk: Buffer): Buffer {
+    super.processAnimation(SAMPLE_RATE, chunk.length, CHANNELS)
+
     for (let i = 0; i < chunk.length; i += 4) {
       let left = chunk.readInt16LE(i)
       let right = chunk.readInt16LE(i + 2)
@@ -167,10 +169,6 @@ export default class Equalizer extends BaseFilter {
     return chunk
   }
 
-  /**
-   * Flushes any pending data.
-   * @returns An empty Buffer.
-   */
   public override flush(): Buffer {
     for (const filter of this.filtersL) {
       filter.x1 = filter.x2 = filter.y1 = filter.y2 = 0

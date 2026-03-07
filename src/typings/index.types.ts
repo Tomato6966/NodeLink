@@ -6,10 +6,10 @@ import type {
   ApiMiddlewareExtension,
   ApiRouteExtension
 } from './api/api.types.ts'
-import type { WorkerMetricsEntry } from './api/stats.types.ts'
 import type { NodelinkConfig } from './config/config.types.ts'
-import type { PlayerVoiceState } from './playback/player.types.ts'
 import type { ClientInfo } from './shared.types.js'
+import type { PlayerVoiceState } from './playback/player.types.ts'
+import type { WorkerMetricsEntry } from './api/stats.types.ts'
 
 /**
  * Data associated with a Bun WebSocket connection
