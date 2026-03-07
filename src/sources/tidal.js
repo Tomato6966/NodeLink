@@ -1,3 +1,8 @@
+/**
+ * Now uses hifi api for direct streaming (if available )
+ * credits: https://github.com/binimum/hifi-api/
+ */
+
 import path from 'node:path'
 import {
   encodeTrack,
@@ -29,7 +34,7 @@ export default class TidalSource {
     this.searchTerms = ['tdsearch']
     this.recommendationTerm = ['tdrec']
     this.patterns = [
-      /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix)\/(?<id>[a-zA-Z0-9-]+)(?:\?.*)?$/
+      /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix|artist)\/(?<id>[a-zA-Z0-9-]+)(?:\/[a-zA-Z0-9/_-]*)?(?:\?.*)?$/
     ]
     this.priority = 90
     this.token = this.config?.token
@@ -38,8 +43,11 @@ export default class TidalSource {
     this.playlistPageLoadConcurrency =
       this.config?.playlistPageLoadConcurrency ?? 5
     this.tokenCachePath = path.join(process.cwd(), '.cache', 'tidal_token.json')
-  }
+    this.hifiApis = (this.config?.hifiApis ?? []).map((u) => u.replace(/\/$/, ""))
+    this.hifiQualities = this.config?.hifiQualities ?? ["HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"]
 
+  }
+  
   async setup() {
     if (this.token && this.token !== 'token_here') return true
 
@@ -129,8 +137,13 @@ export default class TidalSource {
     if (!match) {
       return { loadType: 'empty', data: {} }
     }
+    let { type, id } = match.groups
 
-    const { type, id } = match.groups
+    const nestedTrack = url.match(/\/album\/[a-zA-Z0-9-]+\/track\/(?<trackId>[a-zA-Z0-9-]+)/)
+    if (nestedTrack) {
+      type = "track"
+      id = nestedTrack.groups.trackId
+    }
 
     try {
       switch (type) {
@@ -227,6 +240,34 @@ export default class TidalSource {
             }
           }
         }
+        case 'artist': {
+  if (!this.hifiApis.length) {
+    logger('warn', 'Tidal', `No hifi APIs configured, cannot load artist ${id}`)
+    return { loadType: 'empty', data: {} }
+  }
+
+  const baseUrl = this.hifiApis[0]
+  logger('debug', 'Tidal', `Fetching artist data via hifi for: ${id}`)
+
+  const [infoRes, tracksRes] = await Promise.all([
+    http1makeRequest(`${baseUrl}/artist/?id=${id}`, {}),
+    http1makeRequest(`${baseUrl}/artist/?f=${id}&skip_tracks=true`, {})
+  ])
+
+  if (tracksRes.error || tracksRes.statusCode !== 200 || !tracksRes.body?.tracks?.length) {
+    logger('warn', 'Tidal', `hifi artist tracks fetch failed for ${id}: ${tracksRes.error?.message ?? tracksRes.statusCode}`)
+    return { loadType: 'empty', data: {} }
+  }
+
+  const name = infoRes.body?.artist?.name ?? `Artist ${id}`
+  const tracks = tracksRes.body.tracks.map((item) => this._parseTrack(item)).filter(Boolean)
+  logger('debug', 'Tidal', `Loaded ${tracks.length} tracks for artist "${name}"`)
+
+  return {
+    loadType: 'playlist',
+    data: { info: { name, selectedTrack: 0 }, tracks }
+  }
+          }
       }
       return { loadType: 'empty', data: {} }
     } catch (e) {
@@ -300,75 +341,113 @@ export default class TidalSource {
       pluginInfo: {}
     }
   }
+  
+  async _getHifiStreamUrl(trackId) {
+  if (!this.hifiApis.length) {
+    logger('warn', 'Tidal', 'No hifi APIs configured, skipping direct stream')
+    return null
+  }
 
-  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
-    const query = `${decodedTrack.title} ${decodedTrack.author}`
-
-    try {
-      let searchResult
-
-      if (decodedTrack.isrc) {
-        searchResult = await this.nodelink.sources.search(
-          'youtube',
-          `"${decodedTrack.isrc}"`,
-          'ytmsearch'
-        )
-        if (
-          searchResult.loadType !== 'search' ||
-          searchResult.data.length === 0
-        ) {
-          searchResult = null
+  for (const baseUrl of this.hifiApis) {
+    for (const quality of this.hifiQualities) {
+      const url = `${baseUrl}/track/?id=${trackId}&quality=${quality}`
+      logger('debug', 'Tidal', `Trying hifi: ${url}`)
+      try {
+        const { body, error, statusCode } = await http1makeRequest(url, {})
+        if (error || statusCode !== 200 || !body) {
+          logger('debug', 'Tidal', `  ✗ ${quality} @ ${baseUrl} → ${error?.message ?? statusCode}`)
+          continue
         }
+
+        const rawManifest = body?.data?.manifest
+        if (!rawManifest) {
+          logger('debug', 'Tidal', `  ✗ ${quality} @ ${baseUrl} → no manifest field`)
+          continue
+        }
+
+        const manifest = JSON.parse(Buffer.from(rawManifest, 'base64').toString('utf8'))
+        const streamUrl = manifest?.urls?.[0]
+        if (!streamUrl) {
+          logger('debug', 'Tidal', `  ✗ ${quality} @ ${baseUrl} → no URL in manifest`)
+          continue
+        }
+
+        const mimeType = manifest.mimeType ?? ''
+        const format = mimeType.includes('flac') ? 'flac' : 'mp4'
+
+        logger('debug', 'Tidal', `  ✓ Direct stream: quality=${quality} format=${format} codec=${manifest.codecs} api=${baseUrl}`)
+        return { url: streamUrl, quality, format }
+      } catch (e) {
+        logger('debug', 'Tidal', `  ✗ ${quality} @ ${baseUrl} → ${e.message}`)
+      }
+    }
+  }
+
+  logger('warn', 'Tidal', `All hifi APIs exhausted for track ${trackId}, will mirror`)
+  return null
+  }
+  
+  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+    try {
+      logger('debug', 'Tidal', `Attempting direct hifi for: ${decodedTrack.title} [${decodedTrack.identifier}]`)
+      const direct = await this._getHifiStreamUrl(decodedTrack.identifier)
+
+      if (direct) {
+        return { url: direct.url, protocol: 'https', format: direct.format }
+      }
+
+      logger('debug', 'Tidal', `Falling back to YouTube mirror for: ${decodedTrack.title}`)
+      const query = `${decodedTrack.title} ${decodedTrack.author}`
+
+      let searchResult
+      if (decodedTrack.isrc) {
+        searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch')
+        if (searchResult.loadType !== 'search' || searchResult.data.length === 0) searchResult = null
       }
 
       if (!searchResult) {
-        searchResult = await this.nodelink.sources.search(
-          'youtube',
-          query,
-          'ytmsearch'
-        )
+        searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch')
       }
 
-      if (
-        searchResult.loadType !== 'search' ||
-        searchResult.data.length === 0
-      ) {
+      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
         searchResult = await this.nodelink.sources.searchWithDefault(query)
       }
 
-      if (
-        searchResult.loadType !== 'search' ||
-        searchResult.data.length === 0
-      ) {
-        return {
-          exception: {
-            message: 'No matching track found on default source.',
-            severity: 'common'
-          }
-        }
+      if (searchResult.loadType !== 'search' || searchResult.data.length === 0) {
+        return { exception: { message: 'No matching track found on default source.', severity: 'common' } }
       }
 
       const bestMatch = getBestMatch(searchResult.data, decodedTrack)
       if (!bestMatch) {
-        return {
-          exception: {
-            message: 'No suitable alternative found after filtering.',
-            severity: 'common'
-          }
-        }
+        return { exception: { message: 'No suitable alternative found after filtering.', severity: 'common' } }
       }
 
       const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info, itag, forceRefresh)
       return { newTrack: bestMatch, ...streamInfo }
     } catch (e) {
-      logger('error', 'Tidal', `Failed to mirror track: ${e.message}`)
+      logger('error', 'Tidal', `getTrackUrl failed for "${decodedTrack.title}": ${e.message}`)
       return { exception: { message: e.message, severity: 'fault' } }
     }
   }
 
-  async loadStream(_track, _url, _protocol, _additionalData) {
-    throw new Error(
-      'Tidal source uses mirroring and does not load streams directly.'
-    )
+  async loadStream(decodedTrack, url, protocol, additionalData) {
+    try {
+      const { stream, error, statusCode } = await makeRequest(url, {
+        method: 'GET',
+        streamOnly: true
+      })
+
+      if (error || (statusCode !== 200 && statusCode !== 206)) {
+        const msg = error?.message ?? `Status ${statusCode}`
+        logger('error', 'Tidal', `Stream fetch failed for ${decodedTrack.title}: ${msg}`)
+        return { exception: { message: msg, severity: 'fault', cause: 'Upstream' } }
+      }
+
+      logger('debug', 'Tidal', `Streaming ${decodedTrack.title} directly`)
+      return { stream }
+    } catch (e) {
+      logger('error', 'Tidal', `loadStream error for ${decodedTrack.title}: ${e.message}`)
+      return { exception: { message: e.message, severity: 'fault' } }
+    }
   }
 }
