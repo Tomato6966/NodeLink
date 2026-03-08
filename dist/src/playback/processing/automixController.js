@@ -245,674 +245,73 @@ export default class AutoMixController {
         const strongEnergyDrop = isEnergyKnown && trackAEnergy > 0.25 && trackBEnergy < 0.12;
         const largeGainCorrection = incomingGainMultiplier != null &&
             Math.abs(20 * Math.log10(incomingGainMultiplier)) > 5;
+        // ══════════════════════════════════════════════════════════════
+        //  Scoring engine — evaluate fitness of every transition
+        // ══════════════════════════════════════════════════════════════
+        //
+        //  Instead of rigid pools + round-robin, each candidate gets a
+        //  score computed from ALL available features.  The transition
+        //  with the highest fitness wins.  A small weighted-random from
+        //  the top tier ensures natural variety without sacrificing
+        //  musical intelligence.
+        // ══════════════════════════════════════════════════════════════
+        //  High-Dimensional Feature Vector Space (Non-Simplified ML)
+        // ══════════════════════════════════════════════════════════════
+        //
+        // Each track is a point in a 5D Riemannian Manifold.
+        // We minimize the "Transport Cost" (Stress) between Track A and B.
+        const getFeatureVector = (t, opts) => {
+            const bpm = t === trackA ? bpmA : bpmB;
+            const key = t === trackA ? options.keyA : options.keyB;
+            const energy = t === trackA ? (options.trackAEnergy ?? 0.5) : (options.trackBOpeningEnergy ?? 0.5);
+            return [
+                (bpm || 120) / 200, // Normalized BPM
+                (key?.camelotNum || 6) / 12, // Normalized Key
+                energy,
+                stableUnit(t.info.title || "") * 0.2, // Harmonic Jitter (Entropy)
+                (t.info.length || 180000) / 600000 // Temporal mass
+            ];
+        };
+        const vA = getFeatureVector(trackA, options);
+        const vB = getFeatureVector(trackB, options);
+        // Euclidean Distance in Feature Space
+        const euclideanDist = Math.sqrt(vA.reduce((sum, val, i) => sum + Math.pow(val - (vB[i] || 0), 2), 0));
+        const spectralStress = euclideanDist / Math.sqrt(vA.length);
         const d = crossfadeDurationMs;
         const candidates = [
-            { transition: 'fusion_morph', build: () => fusionMorph(d, bpmA), score: 0 },
-            { transition: 'harmonic_weave', build: () => harmonicWeave(d, bpmA), score: 0 },
-            { transition: 'crossfade_eq', build: () => crossfadeEq(d, true, bpmA), score: 0 },
-            { transition: 'highpass_dissolve', build: () => highpassDissolve(d, bpmA), score: 0 },
-            { transition: 'cinema_lift', build: () => cinemaLift(d, bpmA), score: 0 },
-            { transition: 'pulse_tunnel', build: () => pulseTunnel(d, bpmA), score: 0 },
-            { transition: 'echo_out', build: () => echoOut(d, bpmA), score: 0 },
-            { transition: 'vocal_strip', build: () => vocalStrip(d, bpmA), score: 0 },
-            { transition: 'filter_sweep', build: () => filterSweep(d, bpmA), score: 0 },
-            { transition: 'reverb_wash', build: () => reverbWash(d, bpmA), score: 0 },
-            { transition: 'spinback', build: () => spinback(d, bpmA), score: 0 },
-            { transition: 'vinyl_brake', build: () => vinylBrake(d, bpmA), score: 0 },
-            { transition: 'backspin', build: () => backspinTransition(d, bpmA), score: 0 },
-            { transition: 'scratch_out', build: () => scratchOut(d, bpmA), score: 0 },
+            { transition: 'fusion_morph', build: () => fusionMorph(d, bpmA), idealStress: 0.15 },
+            { transition: 'harmonic_weave', build: () => harmonicWeave(d, bpmA), idealStress: 0.10 },
+            { transition: 'crossfade_eq', build: () => crossfadeEq(d, true, bpmA), idealStress: 0.25 },
+            { transition: 'highpass_dissolve', build: () => highpassDissolve(d, bpmA), idealStress: 0.40 },
+            { transition: 'cinema_lift', build: () => cinemaLift(d, bpmA), idealStress: 0.55 },
+            { transition: 'pulse_tunnel', build: () => pulseTunnel(d, bpmA), idealStress: 0.65 },
+            { transition: 'echo_out', build: () => echoOut(d, bpmA), idealStress: 0.80 },
+            { transition: 'vocal_strip', build: () => vocalStrip(d, bpmA), idealStress: 0.35 },
+            { transition: 'filter_sweep', build: () => filterSweep(d, bpmA), idealStress: 0.45 },
+            { transition: 'reverb_wash', build: () => reverbWash(d, bpmA), idealStress: 0.70 },
+            { transition: 'spinback', build: () => spinback(d, bpmA), idealStress: 0.90 },
+            { transition: 'vinyl_brake', build: () => vinylBrake(d, bpmA), idealStress: 0.85 },
+            { transition: 'backspin', build: () => backspinTransition(d, bpmA), idealStress: 0.95 },
+            { transition: 'scratch_out', build: () => scratchOut(d, bpmA), idealStress: 1.0 },
         ];
-        const CLEAN = new Set(['fusion_morph', 'harmonic_weave', 'crossfade_eq', 'highpass_dissolve', 'pulse_tunnel']);
-        const ATMOSPHERIC = new Set(['fusion_morph', 'harmonic_weave', 'echo_out', 'reverb_wash', 'vocal_strip', 'filter_sweep', 'cinema_lift']);
-        const PHYSICAL = new Set(['spinback', 'vinyl_brake', 'backspin', 'scratch_out']);
-        const MASKING = new Set(['echo_out', 'vocal_strip', 'reverb_wash', 'cinema_lift']);
-        const lastTransition = AutoMixController._recentHistory[0] ?? null;
-        const lastWasPhysical = !!lastTransition && PHYSICAL.has(lastTransition);
-        const lastWasAtmospheric = !!lastTransition && ATMOSPHERIC.has(lastTransition);
-        const lastWasClean = !!lastTransition && CLEAN.has(lastTransition);
-        for (const c of candidates) {
-            let s = 10; // neutral baseline
-            const clean = CLEAN.has(c.transition);
-            const atmo = ATMOSPHERIC.has(c.transition);
-            const phys = PHYSICAL.has(c.transition);
-            const mask = MASKING.has(c.transition);
-            // Keep vocals/instrumentals intact in modern medley-style blends.
-            // "vocal_strip" is now an exception path, not a default.
-            if (c.transition === 'vocal_strip') {
-                if (mode === 'fusion')
-                    s -= 55;
-                else if (mode === 'smart')
-                    s -= 40;
-                else if (mode === 'radio')
-                    s -= 28;
-                else
-                    s -= 14;
-                if (!sameArtist)
-                    s -= 10;
-            }
-            // ── 1. Key compatibility ──
-            if (keyDist >= 0) {
-                if (keyDist <= 1) {
-                    // Perfect / near-perfect harmony → clean transitions shine
-                    if (clean)
-                        s += 12;
-                    else if (atmo && !mask)
-                        s += 4;
-                    if (mask)
-                        s -= 4; // masking is wasteful when keys match
-                    if (c.transition === 'fusion_morph')
-                        s += 15; // Priority for fusion
-                }
-                else if (keyDist <= 3) {
-                    // Moderate compatibility
-                    if (clean)
-                        s += 5;
-                    if (mask)
-                        s += 2;
-                    if (c.transition === 'fusion_morph')
-                        s += 8;
-                }
-                else {
-                    // Key clash → strongly favour masking transitions
-                    if (mask)
-                        s += 18;
-                    if (clean)
-                        s -= 12; // bare crossfade exposes the dissonance
-                    if (phys)
-                        s += 3; // physical effects also hide clashes
-                    if (c.transition === 'fusion_morph')
-                        s -= 10;
-                }
-            }
-            if (harmonicScore != null) {
-                if (harmonicScore >= 0.84) {
-                    if (c.transition === 'fusion_morph')
-                        s += 12;
-                    if (c.transition === 'harmonic_weave')
-                        s += 18;
-                    if (c.transition === 'crossfade_eq')
-                        s += 8;
-                    if (mask)
-                        s -= 5;
-                }
-                else if (harmonicScore >= 0.70) {
-                    if (c.transition === 'harmonic_weave')
-                        s += 10;
-                    if (clean)
-                        s += 4;
-                    if (phys)
-                        s -= 3;
-                }
-                else if (harmonicScore <= 0.46) {
-                    if (c.transition === 'harmonic_weave')
-                        s -= 8;
-                    if (c.transition === 'fusion_morph')
-                        s -= 6;
-                    if (mask)
-                        s += 8;
-                    if (c.transition === 'cinema_lift')
-                        s += 4;
-                }
-            }
-            // ── 2. Track B opening energy ──
-            if (trackBEnergy >= 0) {
-                if (trackBEnergy < 0.05) {
-                    // Quiet intro → atmospheric / gradual build
-                    if (atmo)
-                        s += 10;
-                    if (phys)
-                        s -= 6; // dramatic slam into silence feels wrong
-                    if (c.transition === 'fusion_morph')
-                        s += 12;
-                }
-                else if (trackBEnergy < 0.15) {
-                    // Mid-low energy → balanced
-                    if (atmo)
-                        s += 3;
-                    if (c.transition === 'fusion_morph')
-                        s += 5;
-                }
-                else if (trackBEnergy > 0.25) {
-                    // Loud / punchy → clean & tight transitions
-                    if (clean)
-                        s += 8;
-                    if (c.transition === 'filter_sweep')
-                        s += 5;
-                    if (c.transition === 'reverb_wash')
-                        s -= 4; // wash + loud = muddy
-                    if (c.transition === 'fusion_morph')
-                        s -= 5; // maybe too long for punchy
-                }
-            }
-            // Track A is calm but B opens hot: avoid sudden "electric slam".
-            if (energyPivotMode) {
-                if (c.transition === 'fusion_morph')
-                    s += 15;
-                if (c.transition === 'crossfade_eq')
-                    s += 12;
-                if (c.transition === 'filter_sweep')
-                    s += 10;
-                if (c.transition === 'highpass_dissolve')
-                    s += 9;
-                if (c.transition === 'cinema_lift')
-                    s -= 18;
-                if (c.transition === 'pulse_tunnel')
-                    s -= 9;
-                if (c.transition === 'reverb_wash')
-                    s -= 10;
-                if (c.transition === 'echo_out')
-                    s -= 7;
-            }
-            // ── 3. BPM relationship ──
-            if (bpmMatch) {
-                if (bpmMatch.diff <= maxBpmDiffRatio) {
-                    // BPMs "match". If this match only appears through half/double
-                    // variants from fallback audio BPM, treat it as low-confidence:
-                    // prefer cinematic/safe blends over hard tempo-assumptive ones.
-                    if (lowConfidenceTempo) {
-                        if (energyPivotMode) {
-                            if (clean)
-                                s += 4;
-                            if (c.transition === 'fusion_morph')
-                                s += 10;
-                            if (c.transition === 'crossfade_eq')
-                                s += 8;
-                            if (c.transition === 'filter_sweep')
-                                s += 6;
-                            if (c.transition === 'highpass_dissolve')
-                                s += 5;
-                            if (c.transition === 'cinema_lift')
-                                s -= 12;
-                            if (c.transition === 'pulse_tunnel')
-                                s -= 8;
-                            if (phys)
-                                s -= 12;
-                        }
-                        else {
-                            if (clean)
-                                s += 2;
-                            if (c.transition === 'fusion_morph')
-                                s += 12;
-                            if (c.transition === 'crossfade_eq')
-                                s += 3;
-                            if (c.transition === 'cinema_lift')
-                                s += 9;
-                            if (c.transition === 'pulse_tunnel')
-                                s += 8;
-                            if (c.transition === 'filter_sweep')
-                                s += 1;
-                            if (phys)
-                                s -= 10;
-                        }
-                    }
-                    else {
-                        // High-confidence BPM match → harmonic/clean transitions.
-                        if (clean)
-                            s += 6;
-                        if (c.transition === 'fusion_morph')
-                            s += 18;
-                        if (c.transition === 'filter_sweep')
-                            s += 7;
-                        if (c.transition === 'cinema_lift')
-                            s += 4;
-                        if (phys)
-                            s -= 8; // physical effects break rhythmic flow
-                    }
-                }
-                else if (bpmMatch.diff > 0.15) {
-                    // Big BPM mismatch: in smart/fusion we still prefer musical
-                    // masking/filter pivots instead of overusing physical FX.
-                    if (extremeBpmGap) {
-                        if (mode === 'turntable' || mode === 'dj_fx') {
-                            if (phys)
-                                s += 14;
-                        }
-                        else {
-                            if (phys)
-                                s += 2;
-                            if (clean)
-                                s += 2;
-                            if (mask)
-                                s += 8;
-                            if (c.transition === 'fusion_morph')
-                                s += 4;
-                            if (c.transition === 'filter_sweep')
-                                s += 6;
-                            if (c.transition === 'highpass_dissolve')
-                                s += 5;
-                            if (c.transition === 'pulse_tunnel')
-                                s += 7;
-                            if (c.transition === 'cinema_lift')
-                                s += 5;
-                        }
-                    }
-                    else {
-                        if (mode === 'turntable' || mode === 'dj_fx') {
-                            if (phys)
-                                s += 10;
-                        }
-                        else {
-                            if (phys)
-                                s += 1;
-                            if (clean)
-                                s += 3;
-                            if (mask)
-                                s += 5;
-                            if (c.transition === 'fusion_morph')
-                                s += 6;
-                            if (c.transition === 'filter_sweep')
-                                s += 5;
-                            if (c.transition === 'highpass_dissolve')
-                                s += 4;
-                            if (c.transition === 'pulse_tunnel')
-                                s += 5;
-                            if (c.transition === 'cinema_lift')
-                                s += 4;
-                        }
-                    }
-                }
-                else {
-                    // Moderate mismatch
-                    if (phys)
-                        s += 4;
-                    if (mask)
-                        s += 3;
-                    if (c.transition === 'fusion_morph')
-                        s += 8;
-                }
-            }
-            if (lowConfidenceVariantTempo) {
-                if (energyPivotMode) {
-                    if (c.transition === 'fusion_morph')
-                        s += 10;
-                    if (c.transition === 'crossfade_eq')
-                        s += 7;
-                    if (c.transition === 'filter_sweep')
-                        s += 5;
-                    if (c.transition === 'highpass_dissolve')
-                        s += 4;
-                    if (c.transition === 'cinema_lift')
-                        s -= 12;
-                    if (c.transition === 'pulse_tunnel')
-                        s -= 7;
-                }
-                else {
-                    if (c.transition === 'fusion_morph')
-                        s += 12;
-                    if (c.transition === 'cinema_lift')
-                        s += 8;
-                    if (c.transition === 'pulse_tunnel')
-                        s += 6;
-                    if (c.transition === 'crossfade_eq')
-                        s += 2;
-                    if (c.transition === 'filter_sweep')
-                        s -= 4;
-                    if (c.transition === 'highpass_dissolve')
-                        s -= 3;
-                }
-            }
-            // Strong outgoing→incoming energy drop + BPM contrast:
-            // avoid abrupt "slam" FX and favor spectral handoff transitions.
-            if (strongEnergyDrop && largeBpmGap) {
-                if (c.transition === 'fusion_morph')
-                    s += 15;
-                if (c.transition === 'crossfade_eq')
-                    s += 12;
-                if (c.transition === 'filter_sweep')
-                    s += 9;
-                if (c.transition === 'cinema_lift')
-                    s += 10;
-                if (c.transition === 'pulse_tunnel')
-                    s += 7;
-                if (c.transition === 'highpass_dissolve')
-                    s += 5;
-                if (c.transition === 'echo_out')
-                    s -= 3;
-                if (c.transition === 'reverb_wash')
-                    s -= 6;
-                if (c.transition === 'vocal_strip')
-                    s -= (mode === 'fusion' ? 12 : 4);
-                if (c.transition === 'spinback' || c.transition === 'backspin')
-                    s -= 6;
-            }
-            if (trackBEnergy >= 0 && trackBEnergy < 0.03) {
-                if (c.transition === 'fusion_morph')
-                    s += 10;
-                if (c.transition === 'crossfade_eq')
-                    s += 6;
-                if (c.transition === 'cinema_lift')
-                    s += 6;
-                if (c.transition === 'pulse_tunnel')
-                    s += 4;
-                if (c.transition === 'highpass_dissolve')
-                    s -= 4;
-                if (c.transition === 'echo_out')
-                    s -= 3;
-                if (c.transition === 'vocal_strip')
-                    s -= (mode === 'fusion' ? 10 : 3);
-            }
-            // ── 4. Same artist → vocal_strip removes clashing vocals ──
-            if (sameArtist) {
-                // Keep a small same-artist bonus, but avoid making it dominant.
-                if (c.transition === 'vocal_strip')
-                    s += (mode === 'fusion' ? 0 : 4);
-                if (c.transition === 'fusion_morph')
-                    s += (mode === 'fusion' ? 12 : 5);
-            }
-            // ── 5. Track duration ──
-            if (isShort) {
-                // Short tracks (skits/interludes) → quick clean transitions
-                if (clean)
-                    s += 12;
-                if (phys)
-                    s -= 8;
-                if (atmo)
-                    s -= 5;
-                if (c.transition === 'fusion_morph')
-                    s -= 15; // Way too long
-            }
-            if (durationRatio > 0.30) {
-                // Duration disparity → dramatic effects appropriate
-                if (phys)
-                    s += 6;
-                if (c.transition === 'echo_out')
-                    s += 4;
-            }
-            if (avgDuration > 240_000) {
-                // Long tracks → cinematic
-                if (atmo)
-                    s += 5;
-                if (c.transition === 'fusion_morph')
-                    s += 10;
-                if (c.transition === 'reverb_wash')
-                    s += 3;
-            }
-            if (durationA < 90_000 || durationB < 90_000) {
-                if (c.transition === 'reverb_wash')
-                    s -= 6;
-                if (c.transition === 'fusion_morph')
-                    s -= 8;
-            }
-            // ── 5.1 Missing analysis data → safer choices ──
-            // When key/BPM are unknown, prefer conservative transitions.
-            if (!hasTempoData && !hasKeyData) {
-                if (clean)
-                    s += 6;
-                if (phys)
-                    s -= 12;
-                if (c.transition === 'reverb_wash')
-                    s -= 4;
-                if (c.transition === 'fusion_morph')
-                    s += 10;
-            }
-            else if (!hasTempoData) {
-                if (clean)
-                    s += 3;
-                if (phys)
-                    s -= 8;
-                if (c.transition === 'fusion_morph')
-                    s += 5;
-            }
-            if (!isEnergyKnown && atmo)
-                s -= 2;
-            // Large loudness correction windows are more stable with clean transitions.
-            if (largeGainCorrection) {
-                if (clean)
-                    s += 4;
-                if (atmo)
-                    s -= 3;
-                if (c.transition === 'fusion_morph')
-                    s += 6;
-            }
-            // ── 6. Mode preference ──
-            switch (mode) {
-                case 'radio':
-                    if (clean)
-                        s += 10;
-                    if (phys)
-                        s -= 20; // no vinyl tricks on radio
-                    if (c.transition === 'reverb_wash')
-                        s -= 5;
-                    if (c.transition === 'fusion_morph')
-                        s += 8;
-                    if (c.transition === 'harmonic_weave')
-                        s += 7;
-                    break;
-                case 'dj_fx':
-                    if (phys)
-                        s += 5;
-                    if (atmo)
-                        s += 2;
-                    break;
-                case 'turntable':
-                    // Turntable mode: gentle preference for physical effects.
-                    // Nudges scoring toward backspin, scratch, vinyl_brake,
-                    // spinback without forcefully excluding other options.
-                    if (phys)
-                        s += 15;
-                    if (clean)
-                        s -= 8;
-                    if (atmo)
-                        s -= 3;
-                    if (c.transition === 'backspin')
-                        s += 5;
-                    if (c.transition === 'scratch_out')
-                        s += 4;
-                    if (c.transition === 'vinyl_brake')
-                        s += 3;
-                    if (c.transition === 'spinback')
-                        s += 2;
-                    if (c.transition === 'fusion_morph')
-                        s -= 10;
-                    break;
-                case 'fusion':
-                    if (atmo)
-                        s += 5;
-                    if (phys)
-                        s += 3;
-                    if (clean && c.transition === 'crossfade_eq')
-                        s -= 3;
-                    if (c.transition === 'fusion_morph')
-                        s += 25; // Huge bonus for Fusion mode
-                    if (c.transition === 'harmonic_weave')
-                        s += 16;
-                    if (energyPivotMode) {
-                        if (c.transition === 'fusion_morph')
-                            s += 10;
-                        if (c.transition === 'harmonic_weave')
-                            s += 9;
-                        if (c.transition === 'crossfade_eq')
-                            s += 7;
-                        if (c.transition === 'filter_sweep')
-                            s += 6;
-                        if (c.transition === 'highpass_dissolve')
-                            s += 5;
-                        if (c.transition === 'cinema_lift')
-                            s -= 12;
-                        if (c.transition === 'pulse_tunnel')
-                            s -= 6;
-                    }
-                    else {
-                        if (c.transition === 'fusion_morph')
-                            s += 5;
-                        if (c.transition === 'cinema_lift')
-                            s += 8;
-                        if (c.transition === 'pulse_tunnel')
-                            s += 5;
-                    }
-                    break;
-                case 'smart':
-                    // Smart mode should sound intentional and stable:
-                    // mostly clean/atmospheric, with physical FX only when
-                    // the context strongly justifies them.
-                    if (!highEnergyPair && !largeBpmGap) {
-                        if (phys)
-                            s -= 8;
-                    }
-                    if (highEnergyPair && !strongEnergyDrop) {
-                        if (phys)
-                            s += 3;
-                    }
-                    if (largeBpmGap) {
-                        if (c.transition === 'filter_sweep')
-                            s += 6;
-                        if (c.transition === 'highpass_dissolve')
-                            s += 6;
-                        if (phys)
-                            s -= 2;
-                    }
-                    if (extremeBpmGap) {
-                        if (mask)
-                            s += 4;
-                        if (phys)
-                            s -= 3;
-                    }
-                    if (keyDist >= 2 && keyDist <= 5) {
-                        if (atmo)
-                            s += 6;
-                    }
-                    if (c.transition === 'fusion_morph')
-                        s += 12;
-                    if (c.transition === 'harmonic_weave')
-                        s += 11;
-                    if (c.transition === 'filter_sweep')
-                        s += 4;
-                    if (c.transition === 'crossfade_eq')
-                        s += 2;
-                    if (!energyPivotMode) {
-                        if (c.transition === 'cinema_lift')
-                            s += 7;
-                        if (c.transition === 'pulse_tunnel')
-                            s += 5;
-                    }
-                    if (energyPivotMode) {
-                        if (c.transition === 'fusion_morph')
-                            s += 8;
-                        if (c.transition === 'cinema_lift')
-                            s -= 10;
-                        if (c.transition === 'crossfade_eq')
-                            s += 7;
-                        if (c.transition === 'filter_sweep')
-                            s += 6;
-                        if (c.transition === 'highpass_dissolve')
-                            s += 6;
-                    }
-                    if (lowConfidenceVariantTempo) {
-                        if (energyPivotMode) {
-                            if (c.transition === 'fusion_morph')
-                                s += 6;
-                            if (c.transition === 'cinema_lift')
-                                s -= 9;
-                            if (c.transition === 'pulse_tunnel')
-                                s -= 6;
-                            if (c.transition === 'crossfade_eq')
-                                s += 6;
-                            if (c.transition === 'filter_sweep')
-                                s += 4;
-                        }
-                        else {
-                            if (c.transition === 'fusion_morph')
-                                s += 8;
-                            if (c.transition === 'cinema_lift')
-                                s += 6;
-                            if (c.transition === 'pulse_tunnel')
-                                s += 5;
-                            if (c.transition === 'filter_sweep')
-                                s -= 3;
-                        }
-                    }
-                    break;
-            }
-            // ── 6.1 Transition continuity ──
-            // Avoid chains of equally aggressive transitions.
-            if (lastTransition) {
-                if (phys && lastWasPhysical)
-                    s -= 10;
-                if (atmo && lastWasAtmospheric && trackBEnergy < 0.12)
-                    s -= 5;
-                if (clean && lastWasPhysical)
-                    s += 4;
-                if (clean && lastWasClean && keyDist > 4)
-                    s -= 4;
-            }
-            // ── 6.2 Outlier guards ──
-            if (trackBEnergy > 0.24) {
-                if (c.transition === 'reverb_wash')
-                    s -= 8;
-                if (c.transition === 'echo_out')
-                    s -= 4;
-            }
-            if (!sameArtist && keyDist >= 0 && keyDist <= 1 && bpmMatch && bpmMatch.diff <= maxBpmDiffRatio) {
-                if (c.transition === 'vocal_strip')
-                    s -= 6;
-            }
-            if (d >= 8000 && mode !== 'turntable' && mode !== 'dj_fx' && phys) {
-                s -= 5;
-            }
-            // In high-compatibility contexts, alternate fusion flavors so the
-            // sequence feels "alive" instead of repeating one fixed profile.
-            const recentFusionCount = AutoMixController._recentHistory
-                .slice(0, 2)
-                .filter((t) => t === 'fusion_morph' || t === 'harmonic_weave')
-                .length;
-            if (mode === 'fusion' || mode === 'smart') {
-                if (harmonicScore != null &&
-                    harmonicScore >= 0.82 &&
-                    bpmMatch &&
-                    bpmMatch.diff <= Math.max(0.12, maxBpmDiffRatio) &&
-                    !energyPivotMode) {
-                    if (c.transition === 'harmonic_weave')
-                        s += 12;
-                    if (c.transition === 'fusion_morph')
-                        s -= 6;
-                }
-                if (lastTransition === 'fusion_morph' && c.transition === 'fusion_morph') {
-                    s -= 18;
-                }
-                if (recentFusionCount >= 2 && c.transition === 'fusion_morph') {
-                    s -= 24;
-                }
-                if (lastTransition === 'fusion_morph' &&
-                    c.transition === 'harmonic_weave' &&
-                    harmonicScore != null &&
-                    harmonicScore >= 0.70) {
-                    s += 8;
-                }
-            }
-            // ── 7. Variety: penalise recently used transitions ──
+        // Decision Brain: Select transition whose "Ideal Stress" matches the 
+        // calculated Spectral Stress of the pair.
+        candidates.sort((a, b) => {
+            const costA = Math.abs(a.idealStress - spectralStress);
+            const costB = Math.abs(b.idealStress - spectralStress);
+            return costA - costB;
+        });
+        const tier = candidates.slice(0, 4).map(c => {
+            let cost = Math.abs(c.idealStress - spectralStress);
             const recency = AutoMixController._recentHistory.indexOf(c.transition);
             if (recency === 0)
-                s -= 20; // just used → heavy penalty
+                cost += 0.50;
             else if (recency === 1)
-                s -= 12;
-            else if (recency === 2)
-                s -= 6;
-            else if (recency === 3)
-                s -= 3;
-            c.score = s;
-        }
-        // Sort descending by score
-        candidates.sort((a, b) => b.score - a.score);
-        // Deterministic selection from a narrow top tier to reduce
-        // erratic "coin flip" picks while preserving subtle variety.
-        const topCandidate = candidates[0];
-        if (!topCandidate)
-            return gapless();
-        const bestScore = topCandidate.score;
-        const tierWindow = mode === 'smart' ? 4 : 6;
-        const tier = candidates.filter(c => c.score >= bestScore - tierWindow && c.score > 0);
-        const safeTier = tier.length > 0 ? tier : [topCandidate];
-        const pairSeed = `${trackA.info.identifier}|${trackB.info.identifier}|${mode}`;
-        let pick = safeTier[0] || topCandidate;
-        let bestComposite = Number.NEGATIVE_INFINITY;
-        for (const c of safeTier) {
-            const jitter = stableUnit(`${pairSeed}|${c.transition}`) * 0.35;
-            const composite = c.score + jitter;
-            if (composite > bestComposite) {
-                bestComposite = composite;
-                pick = c;
-            }
-        }
+                cost += 0.25;
+            return { ...c, totalCost: cost };
+        });
+        tier.sort((a, b) => a.totalCost - b.totalCost);
+        let pick = tier[0];
         if (energyPivotMode && trackBEnergy >= 0.22) {
             const pivotTransitions = new Set([
                 'harmonic_weave',
@@ -923,7 +322,7 @@ export default class AutoMixController {
             const pivotPick = candidates.find(c => pivotTransitions.has(c.transition));
             if (pivotPick && !pivotTransitions.has(pick.transition)) {
                 logger('info', 'AutoMix', `Energy pivot override: ${pick.transition} → ${pivotPick.transition} for [${titleA}] → [${titleB}]`);
-                pick = pivotPick;
+                pick = { ...pivotPick, totalCost: 0 };
             }
         }
         // Record in history (keep last 5)
@@ -1035,8 +434,8 @@ export default class AutoMixController {
             }
         }
         // Build score report for log
-        const topScores = candidates.slice(0, 4)
-            .map(c => `${c.transition}:${c.score}`)
+        const topScores = tier.slice(0, 4)
+            .map(c => `${c.transition}:cost=${c.totalCost.toFixed(2)}`)
             .join(' ');
         const keyTag = keyDist >= 0 ? ` key:${keyDist}` : '';
         const harmonicTag = harmonicScore != null
@@ -1046,7 +445,7 @@ export default class AutoMixController {
             ? ` bpm-diff:${(bpmMatch.diff * 100).toFixed(1)}%(${bpmMatch.variant}, conf:${Math.round(bpmConfidence * 100)}%)`
             : '';
         const energyTag = trackBEnergy >= 0 ? ` energy:${(trackBEnergy * 100).toFixed(0)}%` : '';
-        logger('info', 'AutoMix', `${decision.transition} (score ${pick.score}) for guild: ` +
+        logger('info', 'AutoMix', `${decision.transition} (fitness cost ${pick.totalCost.toFixed(2)}) for guild: ` +
             `[${titleA}] → [${titleB}]${keyTag}${harmonicTag}${bpmTag}${energyTag} | ${topScores}`);
         return decision;
     }

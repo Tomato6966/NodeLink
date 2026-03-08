@@ -1185,7 +1185,7 @@ class MP4ToAACStream extends Transform {
         }
         this._initPromise = (async () => {
             const mp4Box = await getMP4Box();
-            this.mp4boxFile = mp4Box.createFile();
+            this.mp4boxFile = mp4Box.createFile(true);
             this._setupMP4BoxHandlers();
         })();
         await this._initPromise;
@@ -1258,27 +1258,32 @@ class MP4ToAACStream extends Transform {
         this.push(sampleData);
     }
     _getAudioConfig(track) {
-        const samplingIndex = SAMPLE_RATES.indexOf(track.audio.sample_rate);
-        if (samplingIndex === -1) {
-            throw new Error('Unsupported sample rate for ADTS');
-        }
         let profile = 2;
+        let adtsSampleRate = track.audio.sample_rate;
         if (track.codec) {
             const codecParts = (String(track.codec) || '').split('.');
             if (codecParts.length >= 3) {
                 const objectType = Number.parseInt(codecParts[2] || '0', 10);
                 if (objectType === 5 || objectType === 29) {
+                    // HE-AAC/HE-AACv2 stores the output rate on the track, but ADTS must
+                    // advertise the core AAC-LC rate (typically half of the output rate).
                     profile = 2;
+                    adtsSampleRate = Math.max(SAMPLE_RATES[SAMPLE_RATES.length - 1] ?? 7350, Math.floor(track.audio.sample_rate / 2));
                 }
                 else {
                     profile = objectType;
                 }
             }
         }
+        const samplingIndex = SAMPLE_RATES.indexOf(adtsSampleRate);
+        if (samplingIndex === -1) {
+            throw new Error('Unsupported sample rate for ADTS');
+        }
         return {
             profile,
             samplingIndex,
-            channelCount: track.audio.channel_count
+            channelCount: track.audio.channel_count,
+            sampleRate: adtsSampleRate
         };
     }
     async _transform(chunk, _encoding, callback) {
