@@ -398,7 +398,9 @@ export default {
             token: 'token_here', //manually | or "token_here" to get a token automatically, get from tidal web player devtools; using login google account
             countryCode: 'US',
             playlistLoadLimit: 2, // 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
-            playlistPageLoadConcurrency: 5 // How many pages to load simultaneously
+            playlistPageLoadConcurrency: 5, // How many pages to load simultaneously
+            hifiApis: [""], // optional, but required for direflct streaming, artist resolving host: https://github.com/binimum/hifi-api/
+            hifiQualities: ["HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"] //tried sequentially until one works (only used if hifiApis is set)
         },
         pandora: {
             enabled: true,
@@ -493,9 +495,9 @@ export default {
         fading: {
             enabled: false, // Master switch for all fades
             // type meanings:
-            // volume = only amplitude fades, tape = pitch/speed ramps, both = simultaneous fade and ramp
+            // volume = only amplitude fades, tape = pitch/speed ramps, both = simultaneous fade and ramp, scratch = physical vinyl simulation
             // curve meanings:
-            // linear = constant rate, exponential = slow start then faster, sinusoidal = smooth s-curve
+            // linear = constant rate, exponential = slow start then faster, sinusoidal = smooth s-curve, start/wash/stop/random/baby = scratch specific movements
             trackStart: {
                 // Effect when a new track begins
                 duration: 0, // ms

@@ -33,8 +33,17 @@ const VALID_RESAMPLING_QUALITIES = new Set([
   'zero',
   'linear'
 ])
-const VALID_FADING_CURVES = new Set(['linear', 'exponential', 'sinusoidal'])
-const VALID_FADING_TYPES = new Set(['volume', 'tape', 'both'])
+const VALID_FADING_CURVES = new Set([
+  'linear',
+  'exponential',
+  'sinusoidal',
+  'start',
+  'wash',
+  'stop',
+  'random',
+  'baby'
+])
+const VALID_FADING_TYPES = new Set(['volume', 'tape', 'both', 'scratch'])
 const VALID_CROSSFADE_CURVES = new Set(['linear', 'sine', 'sinusoidal'])
 const VALID_CROSSFADE_MODES = new Set(['preload', 'stream'])
 const VALID_VOICE_FORMATS = new Set(['opus', 'pcm_s16le'])
@@ -572,7 +581,8 @@ export default class ConfigValidationManager {
 
       this.warnIfPlaceholder(
         'sources.applemusic.mediaApiToken',
-        applemusic.mediaApiToken
+        applemusic.mediaApiToken,
+        ['token_here']
       )
     }
 
@@ -596,7 +606,9 @@ export default class ConfigValidationManager {
           validate: (v: string) =>
             typeof v === 'string' && (v === '' || v.trim().length > 0)
         })
-        this.warnIfPlaceholder('sources.tidal.token', tidal.token)
+        this.warnIfPlaceholder('sources.tidal.token', tidal.token, [
+          'token_here'
+        ])
       }
     }
 
@@ -1139,8 +1151,16 @@ export default class ConfigValidationManager {
       .map((f) => this.booleanRule(`filters.enabled.${f}`, filters.enabled[f]))
   }
 
-  private warnIfPlaceholder(path: string, value: unknown): void {
-    if (typeof value === 'string' && KNOWN_PLACEHOLDERS.has(value)) {
+  private warnIfPlaceholder(
+    path: string,
+    value: unknown,
+    except: string[] = []
+  ): void {
+    if (
+      typeof value === 'string' &&
+      KNOWN_PLACEHOLDERS.has(value) &&
+      !except.includes(value)
+    ) {
       this.warnings.push({
         path,
         message: `Value "${value}" looks like an unfilled placeholder. The source may fail to authenticate at runtime.`

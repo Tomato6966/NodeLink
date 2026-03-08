@@ -495,9 +495,9 @@ export default {
     fading: {
       enabled: false, // Master switch for all fades
       // type meanings:
-      // volume = only amplitude fades, tape = pitch/speed ramps, both = simultaneous fade and ramp
+      // volume = only amplitude fades, tape = pitch/speed ramps, both = simultaneous fade and ramp, scratch = physical vinyl simulation
       // curve meanings:
-      // linear = constant rate, exponential = slow start then faster, sinusoidal = smooth s-curve
+      // linear = constant rate, exponential = slow start then faster, sinusoidal = smooth s-curve, start/wash/stop/random/baby = scratch specific movements
       trackStart: {
         // Effect when a new track begins
         duration: 0, // ms
