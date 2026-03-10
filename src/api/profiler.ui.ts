@@ -1,13 +1,48 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type {
+  ApiNodelinkServer,
+  ApiRequest,
+  ApiResponse,
+  ApiRouteModule,
+  ApiSendResponse
+} from '../typings/api/api.types.ts'
 import { sendErrorResponse } from '../utils.ts'
 
 const LOOPBACKS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-function loadUiCss() {
+/**
+ * Normalized profiler endpoint configuration.
+ */
+interface ProfilerEndpointConfig {
+  /**
+   * Whether profiler routes are enabled.
+   */
+  patchEnabled: boolean
+
+  /**
+   * Whether non-loopback clients may reach the profiler routes.
+   */
+  allowExternalPatch: boolean
+
+  /**
+   * Shared secret required to open the profiler UI.
+   */
+  code: string
+}
+
+/**
+ * Loads the CSS bundle used by the profiler UI page.
+ *
+ * The loader checks authored and compiled locations first and falls back to a
+ * tiny inline stylesheet when none of them are available.
+ *
+ * @returns CSS source used by the generated HTML page.
+ */
+function loadUiCss(): string {
   const candidates = [
     path.resolve(process.cwd(), 'src/profiler/ui.css'),
     path.resolve(process.cwd(), 'dist/src/profiler/ui.css'),
@@ -29,7 +64,15 @@ function loadUiCss() {
 
 const uiCss = loadUiCss()
 
-function getEndpointConfig(nodelink) {
+/**
+ * Reads the profiler endpoint access configuration from the runtime options.
+ *
+ * @param nodelink - Router-facing NodeLink runtime.
+ * @returns Explicit configuration with fallback secret and boolean flags.
+ */
+function getEndpointConfig(
+  nodelink: ApiNodelinkServer
+): ProfilerEndpointConfig {
   const endpoint = nodelink.options?.cluster?.endpoint || {}
   const code =
     typeof endpoint.code === 'string' && endpoint.code.length > 0
@@ -43,7 +86,16 @@ function getEndpointConfig(nodelink) {
   }
 }
 
-function buildPage(code) {
+/**
+ * Builds the complete profiler UI HTML page.
+ *
+ * The page embeds the access code directly into the client bootstrap so all
+ * follow-up requests and socket connections reuse the validated secret.
+ *
+ * @param code - Profiler access code already validated by the route.
+ * @returns Full HTML document served by the endpoint.
+ */
+function buildPage(code: string): string {
   const safeCode = JSON.stringify(code)
   return `<!doctype html>
 <html lang="en">
@@ -2013,7 +2065,7 @@ function buildPage(code) {
         for (const row of (data.snippet || [])) {
           const n = String(row.number).padStart(5, ' ')
           const hitClass = row.number === data.line ? 'snippet-line-hit' : ''
-          out.push('<span class=\"' + hitClass + '\">' + n + ' | ' + String(row.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>')
+          out.push('<span class="' + hitClass + '">' + n + ' | ' + String(row.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>')
         }
         snippet.innerHTML = out.join('\\n')
       } catch (e) {
@@ -2316,7 +2368,29 @@ function buildPage(code) {
 </html>`
 }
 
-async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
+/**
+ * Serves the standalone profiler UI page.
+ *
+ * Access is restricted to loopback clients unless external profiler access is
+ * explicitly enabled, and the request must include the configured profiler
+ * code.
+ *
+ * @param nodelink - Router-facing NodeLink runtime.
+ * @param req - Incoming API request.
+ * @param res - Outgoing API response.
+ * @param _sendResponse - Router helper, unused because this route writes the
+ * HTML response directly.
+ * @param parsedUrl - Parsed request URL.
+ * @returns Nothing. The HTML page or an error response is sent as a side
+ * effect.
+ */
+async function handler(
+  nodelink: ApiNodelinkServer,
+  req: ApiRequest,
+  res: ApiResponse,
+  _sendResponse: ApiSendResponse,
+  parsedUrl: URL
+): Promise<void> {
   const endpointConfig = getEndpointConfig(nodelink)
   if (!endpointConfig.patchEnabled) {
     return sendErrorResponse(
@@ -2361,7 +2435,9 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
   res.end(html)
 }
 
-export default {
+const profilerUiRoute: ApiRouteModule = {
   handler,
   methods: ['GET']
 }
+
+export default profilerUiRoute
