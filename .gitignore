@@ -24,4 +24,6 @@
 !docker-compose.yml
 !scripts
 !scripts/**
-!sea-config.json
+!tsconfig.json
+!dist
+!dist/**

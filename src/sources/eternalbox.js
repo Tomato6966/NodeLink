@@ -1,6 +1,6 @@
 import { PassThrough, Readable } from 'node:stream'
 import * as MP4Box from 'mp4box'
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, http1makeRequest, logger } from '../utils.ts'
 
 const SAMPLE_RATES = Object.freeze([
   96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025,

@@ -1,5 +1,17 @@
 import { Transform } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, getVersion, http1makeRequest, logger } from '../utils.ts'
+
+const DEFAULT_HTTP_USER_AGENT = `NodeLink/${getVersion()} (https://github.com/PerformanC/NodeLink)`
+
+const extractUrlExtension = (rawUrl) => {
+  const sanitized = String(rawUrl || '')
+    .split('?')[0]
+    .split('#')[0]
+  const lastSlash = sanitized.lastIndexOf('/')
+  const lastDot = sanitized.lastIndexOf('.')
+  if (lastDot === -1 || lastDot < lastSlash) return ''
+  return sanitized.slice(lastDot + 1).toLowerCase()
+}
 
 class IcyMetadataTransform extends Transform {
   constructor(metaInt, onMetadata) {
@@ -75,7 +87,10 @@ class IcyMetadataTransform extends Transform {
           }
 
           if (this.metaBytes >= this.pendingMetaLength) {
-            const raw = Buffer.concat(this.metaChunks, this.pendingMetaLength).toString('utf8')
+            const raw = Buffer.concat(
+              this.metaChunks,
+              this.pendingMetaLength
+            ).toString('utf8')
             this._emitMetadata(raw)
             this.audioBytesRemaining = this.metaInt
             this.pendingMetaLength = null
@@ -92,6 +107,7 @@ class IcyMetadataTransform extends Transform {
 export default class HttpSource {
   constructor(nodelink) {
     this.nodelink = nodelink
+    this.config = nodelink.options.sources?.http || {}
     this.searchTerms = []
     this.priority = 10
   }
@@ -106,6 +122,8 @@ export default class HttpSource {
 
   async resolve(url) {
     try {
+      const userAgent = this.config.userAgent || DEFAULT_HTTP_USER_AGENT
+      const requestHeaders = { 'User-Agent': userAgent }
       const validAudioPrefixes = ['audio/', 'video/']
       const validApplicationTypes = ['application/octet-stream']
       const isValidMediaType = (contentType) =>
@@ -113,7 +131,10 @@ export default class HttpSource {
         validApplicationTypes.includes(contentType) ||
         contentType === ''
 
-      let data = await http1makeRequest(url, { method: 'HEAD' })
+      let data = await http1makeRequest(url, {
+        method: 'HEAD',
+        headers: requestHeaders
+      })
       const headContentType = data.headers?.['content-type'] || ''
       const headOk =
         !data.error &&
@@ -123,7 +144,8 @@ export default class HttpSource {
       if (!headOk) {
         const getData = await http1makeRequest(url, {
           method: 'GET',
-          streamOnly: true
+          streamOnly: true,
+          headers: requestHeaders
         })
         if (getData?.stream) getData.stream.destroy()
         data = getData
@@ -175,7 +197,10 @@ export default class HttpSource {
   }
 
   buildTrack(url, headers, isStream) {
-    const title = headers['icy-name'] || 'Unknown'
+    const title =
+      headers['icy-name'] ||
+      headers['content-disposition'].split('filename="')[1].split('"')[0] ||
+      'Unknown'
     const description = headers['icy-description'] || ''
     const genre = headers['icy-genre'] || ''
     const stationUrl = headers['icy-url'] || url
@@ -185,6 +210,20 @@ export default class HttpSource {
       icyBr || audioInfo?.split(';')?.[0]?.split('=')?.[1] || 0,
       10
     )
+
+    let artworkUrl = null
+    if (
+      url.startsWith('https://cdn.discordapp.com') &&
+      headers['content-type']?.includes('video/')
+    ) {
+      const cleanedUrl = url.endsWith('&') ? url.slice(0, -1) : url
+      const base = cleanedUrl.replace(
+        'https://cdn.discordapp.com',
+        'https://media.discordapp.net'
+      )
+      const separator = base.includes('?') ? '&' : '?'
+      artworkUrl = `${base}${separator}format=webp` // will choose webp over jpeg, since its discord's default format ig.
+    }
 
     const track = {
       identifier: url,
@@ -207,6 +246,7 @@ export default class HttpSource {
         bitrate,
         genre,
         stationUrl,
+        artworkUrl,
         icyBr,
         audioInfo
       }
@@ -219,11 +259,13 @@ export default class HttpSource {
 
   async loadStream(_decodedTrack, url) {
     try {
+      const userAgent = this.config.userAgent || DEFAULT_HTTP_USER_AGENT
       const opts = {
         method: 'GET',
         streamOnly: true,
         headers: {
-          'Icy-MetaData': '1'
+          'Icy-MetaData': '1',
+          'User-Agent': userAgent
         }
       }
       const response = await http1makeRequest(url, opts)
@@ -231,6 +273,11 @@ export default class HttpSource {
 
       const headers = response.headers || {}
       const contentType = headers['content-type'] || ''
+      const extensionType =
+        !contentType || contentType === 'application/octet-stream'
+          ? extractUrlExtension(url)
+          : ''
+      const resolvedType = extensionType || contentType
       const httpStream = response.stream
 
       let outputStream = httpStream
@@ -267,7 +314,7 @@ export default class HttpSource {
         logger('error', 'HTTP Source', `Stream error: ${err.message}`)
       })
 
-      return { stream: outputStream, type: contentType }
+      return { stream: outputStream, type: resolvedType }
     } catch (err) {
       logger('error', 'Sources', `Failed to load http stream: ${err.message}`)
       return { exception: { message: err.message, severity: 'common' } }

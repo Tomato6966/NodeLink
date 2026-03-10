@@ -1,12 +1,18 @@
 import { PassThrough } from 'node:stream'
-import { http1makeRequest, logger, makeRequest } from '../../utils.js'
-import HLSHandler from '../../playback/hls/HLSHandler.js'
+import {
+  getBestMatch,
+  http1makeRequest,
+  logger,
+  makeRequest
+} from '../../utils.ts'
+import HLSHandler from '../../playback/hls/HLSHandler.ts'
 import CipherManager from './CipherManager.js'
 import Android from './clients/Android.js'
 import AndroidVR from './clients/AndroidVR.js'
 import IOS from './clients/IOS.js'
 import Music from './clients/Music.js'
 import TV from './clients/TV.js'
+import TVCast from './clients/TVCast.js'
 import Web from './clients/Web.js'
 import WebEmbedded from './clients/WebEmbedded.js'
 import WebRemix from './clients/Web_Remix.js'
@@ -41,6 +47,7 @@ export default class YouTubeSource {
     this.cipherManager = new CipherManager(nodelink)
     this.liveChat = new YouTubeLiveChat(nodelink, this)
     this.activeStreams = new Map()
+    this.mirrorFallbackInFlight = new Set()
     this.ytContext = {
       client: {
         screenDensityFloat: 1,
@@ -66,6 +73,7 @@ export default class YouTubeSource {
       Music,
       WebRemix,
       TV,
+      TVCast,
       Web,
       WebEmbedded
     }
@@ -114,6 +122,7 @@ export default class YouTubeSource {
     }
 
     if (this.oauth) this.oauth.cleanup?.()
+    this.cipherManager?.cleanup?.()
   }
 
   async _fetchVisitorData() {
@@ -337,10 +346,17 @@ export default class YouTubeSource {
 
       if (
         (!automixRes || automixRes.loadType !== 'playlist') &&
-        (this.clients.TV || this.clients.WebRemix)
+        (this.clients.TV || this.clients.TVCast || this.clients.WebRemix)
       ) {
         try {
-          automixRes = await this.clients.TV.resolve(
+          const tvClient = this.clients.TV || this.clients.TVCast
+          const clientName = this.clients.TV ? 'TV' : 'TVCast'
+          logger(
+            'debug',
+            'YouTube',
+            `Attempting recommendations with ${clientName} client`
+          )
+          automixRes = await tvClient.resolve(
             `https://www.youtube.com/playlist?list=${automixId}`,
             'youtube',
             this.ytContext,
@@ -911,6 +927,13 @@ export default class YouTubeSource {
       return this.getTrackUrl(fallbackTrack, itag)
     }
 
+    const mirrored = await this._tryMirrorSourceTrackUrl(
+      decodedTrack,
+      itag,
+      forceRefresh
+    )
+    if (mirrored) return mirrored
+
     logger(
       'error',
       'YouTube',
@@ -924,6 +947,134 @@ export default class YouTubeSource {
         errors: clientErrors
       }
     }
+  }
+
+  async _tryMirrorSourceTrackUrl(decodedTrack, itag, forceRefresh = false) {
+    const key = `${decodedTrack?.identifier || ''}:${decodedTrack?.title || ''}:${decodedTrack?.author || ''}`
+    if (this.mirrorFallbackInFlight.has(key)) return null
+    const blockedFallbackSources = new Set([
+      'amazonmusic',
+      'anghami',
+      'applemusic',
+      'eternalbox',
+      'flowery',
+      'genius',
+      'google-tts',
+      'http',
+      'instagram',
+      'kwai',
+      'lastfm',
+      'lazypytts',
+      'letrasmus',
+      'local',
+      'pandora',
+      'pinterest',
+      'pipertts',
+      'reddit',
+      'rss',
+      'shazam',
+      'songlink',
+      'spotify',
+      'telegram',
+      'tidal',
+      'twitch',
+      'tumblr',
+      'twitter',
+      'vimeo'
+    ])
+
+    const configuredFallbackSources = Array.isArray(this.config?.fallbackSources)
+      ? this.config.fallbackSources
+      : []
+    const defaultSources = Array.isArray(this.nodelink.options.defaultSearchSource)
+      ? this.nodelink.options.defaultSearchSource
+      : [this.nodelink.options.defaultSearchSource]
+
+    const fallbackOrder = [
+      ...configuredFallbackSources,
+      ...defaultSources,
+      'soundcloud',
+      'deezer',
+      'jiosaavn',
+      'qobuz',
+      'gaana',
+      'vkmusic',
+      'yandexmusic',
+      'audiomack',
+      'bandcamp',
+      'audius',
+      'mixcloud',
+      'bilibili',
+      'bluesky',
+      'nicovideo'
+    ].filter(
+      (name, index, arr) => {
+        const source = this.nodelink.sources?.getSource(name)
+        return (
+        typeof name === 'string' &&
+        name.length > 0 &&
+        arr.indexOf(name) === index &&
+        !['youtube', 'ytmusic'].includes(name) &&
+        !blockedFallbackSources.has(name) &&
+        this.nodelink.options?.sources?.[name]?.enabled &&
+        source &&
+        typeof source.search === 'function' &&
+        typeof source.getTrackUrl === 'function'
+        )
+      }
+    )
+
+    if (fallbackOrder.length === 0) return null
+
+    const query = `${decodedTrack?.title || ''} ${decodedTrack?.author || ''}`.trim()
+    if (!query) return null
+
+    this.mirrorFallbackInFlight.add(key)
+    try {
+      for (const fallbackSource of fallbackOrder) {
+        try {
+          const search = await this.nodelink.sources.search(fallbackSource, query)
+          if (
+            !search ||
+            search.loadType !== 'search' ||
+            !Array.isArray(search.data) ||
+            search.data.length === 0
+          ) {
+            continue
+          }
+
+          const bestMatch = getBestMatch(search.data, decodedTrack)
+          const bestInfo = bestMatch?.info
+          if (!bestInfo || ['youtube', 'ytmusic'].includes(bestInfo.sourceName)) {
+            continue
+          }
+
+          const stream = await this.nodelink.sources.getTrackUrl(
+            bestInfo,
+            itag,
+            forceRefresh
+          )
+          if (!stream?.exception) {
+            logger(
+              'warn',
+              'YouTube',
+              `Fallback source succeeded via ${bestInfo.sourceName} for "${bestInfo.title}".`
+            )
+            return { ...stream, newTrack: bestMatch }
+          }
+        } catch (e) {
+          logger(
+            'debug',
+            'YouTube',
+            `Fallback source ${fallbackSource} failed: ${e.message}`
+          )
+        }
+      }
+    } finally {
+      this.mirrorFallbackInFlight.delete(key)
+    }
+
+    return null
   }
 
   async loadStream(decodedTrack, url, protocol, additionalData) {

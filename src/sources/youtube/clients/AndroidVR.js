@@ -1,4 +1,4 @@
-import { logger, makeRequest } from '../../../utils.js'
+import { logger, makeRequest } from '../../../utils.ts'
 import {
   BaseClient,
   buildTrack,
@@ -15,9 +15,9 @@ export default class AndroidVR extends BaseClient {
     return {
       client: {
         clientName: 'ANDROID_VR',
-        clientVersion: '1.71.26',
+        clientVersion: '1.72.34',
         userAgent:
-          'com.google.android.apps.youtube.vr.oculus/1.71.26 (Linux; U; Android 15; eureka-user Build/AP4A.250205.002) gzip',
+          'Mozilla/5.0 (X11; Linux x86_64; Quest 3) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/39.3.0.11.46.766180192 Chrome/136.0.7103.177 VR Safari/537.36,gzip(gfe);GoogleHypersonic',
         deviceMake: 'Google',
         osName: 'Android',
         osVersion: '15',

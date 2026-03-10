@@ -1,4 +1,4 @@
-import { logger, makeRequest } from '../../../utils.js'
+import { logger, makeRequest } from '../../../utils.ts'
 import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.js'
 
 export default class TV extends BaseClient {
@@ -12,7 +12,7 @@ export default class TV extends BaseClient {
         clientName: 'TVHTML5',
         clientVersion: '7.20260113.16.00',
         userAgent:
-          'Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36 CrKey/1.54.248666',
+          'Mozilla/5.0 (Fuchsia) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36 CrKey/1.56.500000',
         hl: context.client.hl,
         gl: context.client.gl
       },

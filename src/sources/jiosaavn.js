@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger, getBestMatch, } from '../utils.js'
-import { desEcbDecryptBase64ToUtf8 } from '../decrypters/des-ecb.js'
+import { encodeTrack, http1makeRequest, logger, getBestMatch, } from '../utils.ts'
+import { desEcbDecryptBase64ToUtf8 } from '../decrypters/des-ecb.ts'
 
 const API_BASE = 'https://www.jiosaavn.com/api.php'
 const J_BUFFER = Buffer.from('38346591')
@@ -235,7 +235,8 @@ export default class JioSaavnSource {
   async loadStream(_track, url, _protocol, _additionalData) {
     const { stream, error, statusCode } = await http1makeRequest(url, {
       method: 'GET',
-      streamOnly: true
+      streamOnly: true,
+      proxy: this.config.proxy
     })
 
     if (error || statusCode !== 200) {
@@ -284,7 +285,8 @@ export default class JioSaavnSource {
 
     const { body, error, statusCode } = await http1makeRequest(url.toString(), {
       method: 'GET',
-      headers: HEADERS
+      headers: HEADERS,
+      proxy: this.config.proxy
     })
 
     if (error || statusCode !== 200) {

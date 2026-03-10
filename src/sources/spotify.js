@@ -3,7 +3,7 @@ import {
   getBestMatch,
   http1makeRequest,
   logger
-} from '../utils.js'
+} from '../utils.ts'
 import { fetchCanvas } from '../modules/spotifyCanvas.js'
 import { getLocalToken } from '../modules/spotifyAuth.js'
 
@@ -854,40 +854,62 @@ export default class SpotifySource {
 
   async getRecommendations(query) {
     try {
-      if (this.externalAuthUrl || this.anonymousToken) {
-        let trackId = query
-        if (!/^[a-zA-Z0-9]{22}$/.test(query) && !query.includes('=')) {
-          const searchResult = await this.search(query, 'spsearch', 'track')
-          if (searchResult.loadType === 'search' && searchResult.data.length > 0) {
-            trackId = searchResult.data[0].info.identifier
+      const token = this.anonymousToken || this.accessToken
+      if (!token) return { loadType: 'empty', data: {} }
+
+      let trackId = query
+      if (query.includes('seed_tracks=')) {
+        trackId = query.split('seed_tracks=')[1].split('&')[0]
+      }
+
+      if (!/^[a-zA-Z0-9]{22}$/.test(trackId) && !query.includes('=')) {
+        const searchResult = await this.search(query, 'spsearch', 'track')
+        if (searchResult.loadType === 'search' && searchResult.data.length > 0) {
+          trackId = searchResult.data[0].info.identifier
+        }
+      }
+
+      if (/^[a-zA-Z0-9]{22}$/.test(trackId)) {
+        try {
+          const { body: rjson, statusCode } = await http1makeRequest(
+            `${SPOTIFY_CLIENT_API_URL}/inspiredby-mix/v2/seed_to_playlist/spotify:track:${trackId}?response-format=json`,
+            {
+              headers: { Authorization: `Bearer ${token}` },
+              disableBodyCompression: true
+            }
+          )
+
+          if (statusCode === 200 && rjson?.mediaItems?.length > 0) {
+            const playlistId = rjson.mediaItems[0].uri.split(':')[2]
+            return this._resolvePlaylist(playlistId)
           }
+        } catch (e) {
+          logger('debug', 'Spotify', `inspiredby-mix failed: ${e.message}`)
         }
 
-        if (/^[a-zA-Z0-9]{22}$/.test(trackId)) {
-          const data = await this._internalApiRequest(QUERIES.getRecommendations, {
-            uri: `spotify:track:${trackId}`,
-            limit: 20
-          })
+        const data = await this._internalApiRequest(QUERIES.getRecommendations, {
+          uri: `spotify:track:${trackId}`,
+          limit: 20
+        })
 
-          const items = data?.internalLinkRecommenderTrack?.items || data?.seoRecommendedTrack?.items
-          if (items?.length > 0) {
-            const tracks = items
-              .map((it) => this._buildTrackFromInternal(it.content?.data || it.data))
-              .filter(Boolean)
+        const items = data?.internalLinkRecommenderTrack?.items || data?.seoRecommendedTrack?.items
+        if (items?.length > 0) {
+          const tracks = items
+            .map((it) => this._buildTrackFromInternal(it.content?.data || it.data))
+            .filter(Boolean)
 
-            return {
-              loadType: 'playlist',
-              data: {
-                info: { name: 'Spotify Recommendations', selectedTrack: 0 },
-                pluginInfo: { type: 'recommendations' },
-                tracks
-              }
+          return {
+            loadType: 'playlist',
+            data: {
+              info: { name: 'Spotify Recommendations', selectedTrack: 0 },
+              pluginInfo: { type: 'recommendations' },
+              tracks
             }
           }
         }
       }
 
-      if (query.startsWith('mix:') || !query.includes('=')) {
+      if (query.startsWith('mix:') || (!query.includes('=') && !query.includes(':'))) {
         let seedType = 'track'
         let seed = query
 
@@ -922,9 +944,6 @@ export default class SpotifySource {
           }
         }
 
-        const token = this.anonymousToken || this.accessToken
-        if (!token) throw new Error('No token available for mix request')
-
         const { body: rjson, statusCode } = await http1makeRequest(
           `${SPOTIFY_CLIENT_API_URL}/inspiredby-mix/v2/seed_to_playlist/spotify:${seedType}:${seed}?response-format=json`,
           {
@@ -941,24 +960,26 @@ export default class SpotifySource {
         if (query.startsWith('mix:')) return { loadType: 'empty', data: {} }
       }
 
-      const data = await this._apiRequest(
-        `/recommendations?${query.includes('=') ? query : `seed_tracks=${query}`}`
-      )
-      if (!data || !data.tracks || data.tracks.length === 0) {
-        return { loadType: 'empty', data: {} }
-      }
-
-      const tracks = data.tracks
-        .map((item) => this._buildTrack(item))
-        .filter(Boolean)
-      return {
-        loadType: 'playlist',
-        data: {
-          info: { name: 'Spotify Recommendations', selectedTrack: 0 },
-          pluginInfo: { type: 'recommendations' },
-          tracks
+      if (this.accessToken) {
+        const data = await this._apiRequest(
+          `/recommendations?${query.includes('=') ? query : `seed_tracks=${query}`}`
+        )
+        if (data?.tracks?.length > 0) {
+          const tracks = data.tracks
+            .map((item) => this._buildTrack(item))
+            .filter(Boolean)
+          return {
+            loadType: 'playlist',
+            data: {
+              info: { name: 'Spotify Recommendations', selectedTrack: 0 },
+              pluginInfo: { type: 'recommendations' },
+              tracks
+            }
+          }
         }
       }
+
+      return { loadType: 'empty', data: {} }
     } catch (e) {
       return { exception: { message: e.message, severity: 'fault' } }
     }
@@ -1180,8 +1201,9 @@ export default class SpotifySource {
               this.mobileToken
             )
             if (canvasRes?.data?.canvasesList?.[0]) {
-              track.pluginInfo.canvas = canvasRes.data
-              this.nodelink.trackCacheManager.set('spotify-canvas', id, canvasRes.data, 1000 * 60 * 60 * 12)
+              const compactCanvas = { canvasesList: [canvasRes.data.canvasesList[0]] }
+              track.pluginInfo.canvas = compactCanvas
+              this.nodelink.trackCacheManager.set('spotify-canvas', id, compactCanvas, 1000 * 60 * 60 * 12)
             }
           }
         }
@@ -1229,8 +1251,9 @@ export default class SpotifySource {
               this.mobileToken
             )
             if (canvasRes?.data?.canvasesList?.[0]) {
-              track.pluginInfo.canvas = canvasRes.data
-              this.nodelink.trackCacheManager.set('spotify-canvas', id, canvasRes.data, 1000 * 60 * 60 * 12)
+              const compactCanvas = { canvasesList: [canvasRes.data.canvasesList[0]] }
+              track.pluginInfo.canvas = compactCanvas
+              this.nodelink.trackCacheManager.set('spotify-canvas', id, compactCanvas, 1000 * 60 * 60 * 12)
             }
           }
         }

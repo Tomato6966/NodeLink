@@ -1,4 +1,4 @@
-import { http1makeRequest, logger, encodeTrack , getBestMatch} from '../utils.js'
+import { http1makeRequest, logger, encodeTrack , getBestMatch} from '../utils.ts'
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
 

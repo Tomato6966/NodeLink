@@ -1,5 +1,5 @@
 import crypto from 'node:crypto'
-import { http1makeRequest, logger } from '../utils.js'
+import { http1makeRequest, logger } from '../utils.ts'
 
 const ENCODED_SECRETS = [
   { secret: ',7/*F("rLJ2oxaKL^f+E1xvP@N', version: 61 },

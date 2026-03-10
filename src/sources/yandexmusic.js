@@ -1,6 +1,6 @@
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
-import { encodeTrack, getBestMatch, http1makeRequest, logger } from '../utils.js'
+import { encodeTrack, getBestMatch, http1makeRequest, logger } from '../utils.ts'
 
 const API_BASE = 'https://api.music.yandex.net'
 const USER_AGENT = 'Yandex-Music-API'
@@ -232,7 +232,8 @@ export default class YandexMusicSource {
       const response = await http1makeRequest(url, {
         method: 'GET',
         streamOnly: true,
-        localAddress: this.nodelink.routePlanner?.getIP()
+        localAddress: this.nodelink.routePlanner?.getIP(),
+        proxy: this.config.proxy
       })
 
       if (response.error || (response.statusCode && response.statusCode !== 200 && response.statusCode !== 206)) {
@@ -599,7 +600,8 @@ export default class YandexMusicSource {
         'User-Agent': USER_AGENT,
         'X-Yandex-Music-Client': CLIENT_HEADER
       },
-      localAddress: this.nodelink.routePlanner?.getIP()
+      localAddress: this.nodelink.routePlanner?.getIP(),
+      proxy: this.config.proxy
     })
 
     if (statusCode !== 200) {

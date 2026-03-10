@@ -1,4 +1,4 @@
-import { logger, makeRequest } from '../../../utils.js'
+import { logger, makeRequest } from '../../../utils.ts'
 import {
   BaseClient,
   buildTrack,
@@ -15,9 +15,9 @@ export default class WebRemix extends BaseClient {
     return {
       client: {
         clientName: 'WEB_REMIX',
-        clientVersion: '1.20260121.03.00',
+        clientVersion: '1.20260302.03.01',
         userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
         hl: context.client.hl,
         gl: context.client.gl,
         visitorData: context.client.visitorData
@@ -27,13 +27,17 @@ export default class WebRemix extends BaseClient {
     }
   }
 
+  requirePlayerScript() {
+    return false
+  }
+
   async search(query, type, context) {
     const sourceName = 'ytmusic'
 
-    let params = 'EgWKAQIIAWoQEAMQBBAFEBAQCRAKEBUQEQ%3D%3D' // Default (Tracks)
-    if (type === 'playlist') params = 'EgeKAQQoAEABahAQAxAEEAUQEBAJEAoQFRAR'
-    if (type === 'album') params = 'EgWKAQIYAWoQEAMQBBAFEBAQCRAKEBUQEQ%3D%3D'
-    if (type === 'artist') params = 'EgWKAQIgAWoQEAMQBBAFEBAQCRAKEBUQEQ%3D%3D'
+    let params = 'EgWKAQIIAWoSEAMQBRAEEAkQChAVEBAQDhAR' // Default (Tracks)
+    if (type === 'playlist') params = 'EgeKAQQoAEABahIQAxAFEAQQCRAKEBUQEBAOEBE%3D'
+    if (type === 'album') params = 'EgWKAQIYAWoSEAMQBRAEEAkQChAVEBAQDhAR'
+    if (type === 'artist') params = 'EgWKAQIgAWoSEAMQBRAEEAkQChAVEBAQDhAR'
 
     const requestBody = {
       context: this.getClient(context),

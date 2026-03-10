@@ -1,0 +1,567 @@
+import path from 'node:path';
+import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
+const API_BASE = 'https://amp-api.music.apple.com/v1';
+const MAX_PAGE_ITEMS = 300;
+const BATCH_SIZE_DEFAULT = 5;
+const _CACHE_VALIDITY_DAYS = 7;
+export default class AppleMusicSource {
+    constructor(nodelink) {
+        this.nodelink = nodelink;
+        this.config = nodelink.options;
+        this.searchTerms = ['amsearch'];
+        this.patterns = [
+            /https?:\/\/(?:www\.)?music\.apple\.com\/([a-z]{2})?\/?(album|playlist|artist|song)\/[^/]+\/([a-zA-Z0-9\-.]+)(?:\?i=(\d+))?/
+        ];
+        this.priority = 95;
+        this.mediaApiToken = null;
+        this.tokenOrigin = null;
+        this.tokenExpiry = null;
+        this.country = 'US';
+        this.playlistPageLimit = 0;
+        this.albumPageLimit = 0;
+        this.playlistPageLoadConcurrency = BATCH_SIZE_DEFAULT;
+        this.albumPageLoadConcurrency = BATCH_SIZE_DEFAULT;
+        this.allowExplicit = true;
+        this.tokenInitialized = false;
+        this.settingUp = false;
+        this.tokenCachePath = path.join(process.cwd(), '.cache', 'applemusic_token.json');
+    }
+    async setup() {
+        if (this.settingUp)
+            return true;
+        this.settingUp = true;
+        try {
+            const appleMusicConfig = this.config.sources?.applemusic || {};
+            this.country = appleMusicConfig.market || 'US';
+            this.playlistPageLimit = appleMusicConfig.playlistLoadLimit ?? 0;
+            this.albumPageLimit = appleMusicConfig.albumLoadLimit ?? 0;
+            this.playlistPageLoadConcurrency =
+                appleMusicConfig.playlistPageLoadConcurrency ?? BATCH_SIZE_DEFAULT;
+            this.albumPageLoadConcurrency =
+                appleMusicConfig.albumPageLoadConcurrency ?? BATCH_SIZE_DEFAULT;
+            this.allowExplicit = appleMusicConfig.allowExplicit ?? true;
+            if (this.tokenInitialized && this._isTokenValid()) {
+                return true;
+            }
+            const cachedToken = this.nodelink.credentialManager.get('apple_media_api_token');
+            if (cachedToken) {
+                this.mediaApiToken = cachedToken;
+                this._parseToken(this.mediaApiToken);
+                if (this._isTokenValid()) {
+                    logger('info', 'AppleMusic', 'Loaded valid token from CredentialManager.');
+                    this.tokenInitialized = true;
+                    return true;
+                }
+            }
+            const configToken = appleMusicConfig.mediaApiToken;
+            if (configToken && configToken !== 'token_here') {
+                this.mediaApiToken = configToken;
+                this._parseToken(this.mediaApiToken);
+                if (this._isTokenValid()) {
+                    logger('info', 'AppleMusic', 'Loaded valid token from config file.');
+                    this.nodelink.credentialManager.set('apple_media_api_token', this.mediaApiToken, this.tokenExpiry - Date.now());
+                    this.tokenInitialized = true;
+                    return true;
+                }
+            }
+            const oldToken = this.mediaApiToken;
+            const newToken = await this._fetchNewToken();
+            if (newToken) {
+                if (oldToken && newToken === oldToken) {
+                    logger('warn', 'AppleMusic', 'Fetched a new token, but it is the same as the old one. The token might be long-lived or the fetching method needs an update.');
+                }
+                this.mediaApiToken = newToken;
+                this._parseToken(this.mediaApiToken);
+                this.nodelink.credentialManager.set('apple_media_api_token', this.mediaApiToken, this.tokenExpiry - Date.now());
+                this.tokenInitialized = true;
+                return true;
+            }
+            logger('warn', 'AppleMusic', 'Failed to obtain a valid Media API token. Source will be disabled for this session.');
+            this.tokenInitialized = false;
+            return false;
+        }
+        catch (error) {
+            logger('error', 'AppleMusic', `Critical error during setup: ${error.message}`);
+            return false;
+        }
+        finally {
+            this.settingUp = false;
+        }
+    }
+    async _fetchNewToken() {
+        try {
+            logger('info', 'AppleMusic', 'Attempting to fetch a new Media API token...');
+            const { body: html, statusCode } = await http1makeRequest('https://music.apple.com/us/browse');
+            if (statusCode !== 200) {
+                throw new Error(`Failed to fetch HTML: ${statusCode}`);
+            }
+            const scriptTagMatch = html.match(/<script\s+type="module"\s+crossorigin\s+src="([^"]+)"/);
+            const scriptTag = scriptTagMatch?.[1];
+            if (!scriptTag) {
+                throw new Error('Module script tag not found in Apple Music HTML.');
+            }
+            const scriptUrl = `https://music.apple.com${scriptTag}`;
+            const { body: jsData, statusCode: jsStatus } = await http1makeRequest(scriptUrl);
+            if (jsStatus !== 200) {
+                throw new Error(`Failed to fetch JS from ${scriptUrl}: ${jsStatus}`);
+            }
+            const tokenMatch = jsData.match(/(?<token>(ey[\w-]+)\.([\w-]+)\.([\w-]+))/);
+            const accessToken = tokenMatch?.groups?.token;
+            if (accessToken) {
+                logger('info', 'AppleMusic', 'Successfully fetched a new Media API token.');
+                return accessToken;
+            }
+            else {
+                throw new Error('Access token not found in JS file.');
+            }
+        }
+        catch (error) {
+            logger('error', 'AppleMusic', `Failed to fetch new token: ${error.message}`);
+            return null;
+        }
+    }
+    _isTokenValid() {
+        if (!this.tokenExpiry)
+            return true;
+        return Date.now() < this.tokenExpiry - 10000;
+    }
+    _parseToken(token) {
+        try {
+            const parts = token.split('.');
+            if (parts.length < 2)
+                return;
+            const payloadB64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+            const padded = payloadB64 + '='.repeat((4 - (payloadB64.length % 4)) % 4);
+            const json = JSON.parse(Buffer.from(padded, 'base64').toString('utf-8'));
+            this.tokenOrigin = json.root_https_origin || null;
+            this.tokenExpiry = json.exp ? json.exp * 1000 : null;
+        }
+        catch {
+            this.tokenOrigin = null;
+            this.tokenExpiry = null;
+        }
+    }
+    async _apiRequest(path) {
+        if (!this.tokenInitialized || !this._isTokenValid()) {
+            const ok = await this.setup();
+            if (!ok)
+                throw new Error('AppleMusic token unavailable');
+        }
+        const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
+        try {
+            const { body, statusCode } = await http1makeRequest(url, {
+                headers: {
+                    Authorization: `Bearer ${this.mediaApiToken}`,
+                    Accept: 'application/json',
+                    Origin: 'https://music.apple.com',
+                    Referer: 'https://music.apple.com/'
+                }
+            });
+            if (statusCode === 401) {
+                this.tokenInitialized = false;
+                await this.setup();
+                return this._apiRequest(path);
+            }
+            if (statusCode < 200 || statusCode >= 300) {
+                logger('error', 'AppleMusic', `API error ${statusCode} for ${url}`);
+                return null;
+            }
+            return body;
+        }
+        catch (error) {
+            logger('error', 'AppleMusic', `apiRequest error: ${error.message}`);
+            return null;
+        }
+    }
+    _extractVideoUrl(attributes) {
+        if (!attributes?.editorialVideo)
+            return null;
+        const ev = attributes.editorialVideo;
+        return (ev.motionDetailSquare?.video ||
+            ev.motionDetailTall?.video ||
+            ev.motionSquareVideo1x1?.video ||
+            ev.motionArtistFullscreen16x9?.video ||
+            ev.motionArtistSquare1x1?.video ||
+            ev.motionArtistSquare?.video ||
+            ev.motionArtistFullscreen?.video ||
+            null);
+    }
+    _buildTrack(item, artworkOverride = null, videoOverride = null) {
+        if (!item?.id)
+            return null;
+        const attributes = item.attributes || {};
+        const artwork = artworkOverride || this._parseArtwork(attributes.artwork);
+        const isExplicit = attributes.contentRating === 'explicit';
+        let trackUri = attributes.url || '';
+        if (trackUri) {
+            trackUri += `${trackUri.includes('?') ? '&' : '?'}explicit=${isExplicit}`;
+        }
+        const artistUrl = item.artistUrl || null;
+        const albumName = attributes.albumName || null;
+        let albumUrl = null;
+        if (trackUri) {
+            const paramIndex = trackUri.indexOf('?');
+            albumUrl = paramIndex === -1 ? null : trackUri.substring(0, paramIndex);
+        }
+        const previewUrl = attributes.previews?.[0]?.url || null;
+        const hlsVideoUrl = videoOverride || this._extractVideoUrl(attributes);
+        const trackInfo = {
+            identifier: item.id,
+            isSeekable: true,
+            author: attributes.artistName || 'Unknown',
+            length: attributes.durationInMillis ?? 0,
+            isStream: false,
+            position: 0,
+            title: attributes.name || 'Unknown',
+            uri: trackUri,
+            artworkUrl: artwork,
+            isrc: attributes.isrc || null,
+            sourceName: 'applemusic'
+        };
+        const pluginInfo = {};
+        if (albumName)
+            pluginInfo.albumName = albumName;
+        if (albumUrl)
+            pluginInfo.albumUrl = albumUrl;
+        if (artistUrl)
+            pluginInfo.artistUrl = artistUrl;
+        if (previewUrl)
+            pluginInfo.previewUrl = previewUrl;
+        if (hlsVideoUrl)
+            pluginInfo.hlsVideoUrl = hlsVideoUrl;
+        return {
+            encoded: encodeTrack(trackInfo),
+            info: trackInfo,
+            pluginInfo
+        };
+    }
+    _parseArtwork(artworkData) {
+        if (!artworkData?.url)
+            return null;
+        return artworkData.url
+            .replace('{w}', artworkData.width)
+            .replace('{h}', artworkData.height);
+    }
+    async search(query, sourceName, searchType = 'track') {
+        try {
+            const limit = this.config.maxSearchResults || 10;
+            const encodedQuery = encodeURIComponent(query);
+            const typeMap = {
+                track: 'songs',
+                album: 'albums',
+                playlist: 'playlists',
+                artist: 'artists'
+            };
+            const apiType = typeMap[searchType] || 'songs';
+            const data = await this._apiRequest(`/catalog/${this.country}/search?term=${encodedQuery}&limit=${limit}&types=${apiType}&extend=artistUrl,editorialVideo`);
+            const results = [];
+            if (searchType === 'track') {
+                const songs = data?.results?.songs?.data || [];
+                for (const item of songs) {
+                    const track = this._buildTrack(item);
+                    if (track)
+                        results.push(track);
+                }
+            }
+            else if (searchType === 'album' && data?.results?.albums?.data) {
+                for (const album of data.results.albums.data) {
+                    if (!album?.id)
+                        continue;
+                    const artwork = this._parseArtwork(album.attributes?.artwork);
+                    const video = this._extractVideoUrl(album.attributes);
+                    const info = {
+                        title: album.attributes?.name || 'Unknown Album',
+                        author: album.attributes?.artistName || 'Unknown Artist',
+                        length: 0,
+                        identifier: album.id,
+                        isSeekable: true,
+                        isStream: false,
+                        uri: album.attributes?.url || '',
+                        artworkUrl: artwork,
+                        isrc: null,
+                        sourceName: 'applemusic',
+                        position: 0
+                    };
+                    results.push({
+                        encoded: encodeTrack(info),
+                        info,
+                        pluginInfo: {
+                            type: 'album',
+                            trackCount: album.attributes?.trackCount || null,
+                            hlsVideoUrl: video
+                        }
+                    });
+                }
+            }
+            else if (searchType === 'playlist' && data?.results?.playlists?.data) {
+                for (const playlist of data.results.playlists.data) {
+                    if (!playlist?.id)
+                        continue;
+                    const artwork = this._parseArtwork(playlist.attributes?.artwork);
+                    const video = this._extractVideoUrl(playlist.attributes);
+                    const info = {
+                        title: playlist.attributes?.name || 'Unknown Playlist',
+                        author: playlist.attributes?.curatorName || 'Apple Music',
+                        length: 0,
+                        identifier: playlist.id,
+                        isSeekable: true,
+                        isStream: false,
+                        uri: playlist.attributes?.url || '',
+                        artworkUrl: artwork,
+                        isrc: null,
+                        sourceName: 'applemusic',
+                        position: 0
+                    };
+                    results.push({
+                        encoded: encodeTrack(info),
+                        info,
+                        pluginInfo: {
+                            type: 'playlist',
+                            trackCount: playlist.attributes?.trackCount || null,
+                            hlsVideoUrl: video
+                        }
+                    });
+                }
+            }
+            else if (searchType === 'artist' && data?.results?.artists?.data) {
+                for (const artist of data.results.artists.data) {
+                    if (!artist?.id)
+                        continue;
+                    const artwork = this._parseArtwork(artist.attributes?.artwork);
+                    const video = this._extractVideoUrl(artist.attributes);
+                    const info = {
+                        title: artist.attributes?.name || 'Unknown Artist',
+                        author: 'Apple Music',
+                        length: 0,
+                        identifier: artist.id,
+                        isSeekable: false,
+                        isStream: false,
+                        uri: artist.attributes?.url || '',
+                        artworkUrl: artwork,
+                        isrc: null,
+                        sourceName: 'applemusic',
+                        position: 0
+                    };
+                    results.push({
+                        encoded: encodeTrack(info),
+                        info,
+                        pluginInfo: { type: 'artist', hlsVideoUrl: video }
+                    });
+                }
+            }
+            if (results.length === 0) {
+                return { loadType: 'empty', data: {} };
+            }
+            return { loadType: 'search', data: results };
+        }
+        catch (error) {
+            return { exception: { message: error.message, severity: 'fault' } };
+        }
+    }
+    async resolve(url) {
+        try {
+            const urlMatch = this.patterns[0].exec(url);
+            if (!urlMatch)
+                return { loadType: 'empty', data: {} };
+            const country = urlMatch[1]?.toUpperCase();
+            const type = urlMatch[2];
+            const id = urlMatch[3];
+            const altTrackId = urlMatch[4];
+            switch (type) {
+                case 'song':
+                    return await this._resolveTrack(id, country);
+                case 'album':
+                    return altTrackId
+                        ? await this._resolveTrack(altTrackId, country)
+                        : await this._resolveAlbum(id, country);
+                case 'playlist':
+                    return await this._resolvePlaylist(id, country);
+                case 'artist':
+                    return await this._resolveArtist(id, country);
+            }
+        }
+        catch (error) {
+            return { exception: { message: error.message, severity: 'fault' } };
+        }
+    }
+    async _resolveTrack(id, country = this.country) {
+        const data = await this._apiRequest(`/catalog/${country}/songs/${id}?extend=artistUrl,editorialVideo&include=albums`);
+        if (!data?.data?.[0]) {
+            return { exception: { message: 'Track not found.', severity: 'common' } };
+        }
+        const song = data.data[0];
+        let video = this._extractVideoUrl(song.attributes);
+        if (!video && song.relationships?.albums?.data?.[0]?.id) {
+            const albumId = song.relationships.albums.data[0].id;
+            const albumData = await this._apiRequest(`/catalog/${country}/albums/${albumId}?extend=editorialVideo`);
+            if (albumData?.data?.[0]) {
+                video = this._extractVideoUrl(albumData.data[0].attributes);
+            }
+        }
+        return { loadType: 'track', data: this._buildTrack(song, null, video) };
+    }
+    async _resolveAlbum(id, country = this.country) {
+        const albumData = await this._apiRequest(`/catalog/${country}/albums/${id}?extend=artistUrl,editorialVideo`);
+        if (!albumData?.data?.[0]) {
+            return { exception: { message: 'Album not found.', severity: 'common' } };
+        }
+        const album = albumData.data[0];
+        const editorialVideo = this._extractVideoUrl(album.attributes);
+        const baseTracks = album.relationships?.tracks?.data || [];
+        const total = album.relationships?.tracks?.meta?.total || baseTracks.length;
+        const extra = await this._paginate(`/catalog/${country}/albums/${id}/tracks`, total, this.albumPageLimit);
+        const all = [...baseTracks, ...extra];
+        const artwork = this._parseArtwork(album.attributes?.artwork);
+        const tracks = all
+            .map((item) => this._buildTrack({
+            id: item.id,
+            attributes: {
+                ...item.attributes,
+                artwork: album.attributes.artwork
+            }
+        }, artwork, editorialVideo))
+            .filter(Boolean);
+        return {
+            loadType: 'playlist',
+            data: {
+                info: { name: album.attributes.name, selectedTrack: 0 },
+                tracks
+            }
+        };
+    }
+    async _resolvePlaylist(id, country = this.country) {
+        const playlistResponse = await this._apiRequest(`/catalog/${country}/playlists/${id}?extend=editorialVideo`);
+        if (!playlistResponse?.data?.[0]) {
+            return {
+                exception: { message: 'Playlist not found.', severity: 'common' }
+            };
+        }
+        const playlist = playlistResponse.data[0];
+        const editorialVideo = this._extractVideoUrl(playlist.attributes);
+        const baseTracks = playlist.relationships?.tracks?.data || [];
+        const total = playlist.relationships?.tracks?.meta?.total || baseTracks.length;
+        const extra = await this._paginate(`/catalog/${country}/playlists/${id}/tracks?extend=artistUrl`, total, this.playlistPageLimit);
+        const all = [...baseTracks, ...extra];
+        const artwork = this._parseArtwork(playlist.attributes.artwork);
+        const tracks = all
+            .map((item) => this._buildTrack(item, artwork, editorialVideo))
+            .filter(Boolean);
+        return {
+            loadType: 'playlist',
+            data: {
+                info: { name: playlist.attributes.name, selectedTrack: 0 },
+                tracks
+            }
+        };
+    }
+    async _resolveArtist(id, country = this.country) {
+        const artistInfo = await this._apiRequest(`/catalog/${country}/artists/${id}?extend=editorialVideo`);
+        if (!artistInfo?.data?.[0]) {
+            return { exception: { message: 'Artist not found.', severity: 'common' } };
+        }
+        const artistObj = artistInfo.data[0];
+        const artwork = this._parseArtwork(artistObj.attributes?.artwork);
+        const editorialVideo = this._extractVideoUrl(artistObj.attributes);
+        const topTracksData = await this._apiRequest(`/catalog/${country}/artists/${id}/view/top-songs`);
+        if (!topTracksData?.data) {
+            return { exception: { message: 'Artist top songs not found.', severity: 'common' } };
+        }
+        const artistName = artistObj.attributes?.name || 'Artist';
+        const tracks = topTracksData.data
+            .map((trackData) => this._buildTrack(trackData, artwork, editorialVideo))
+            .filter(Boolean);
+        return {
+            loadType: 'playlist',
+            data: {
+                info: { name: `${artistName}'s Top Tracks`, selectedTrack: 0 },
+                tracks
+            }
+        };
+    }
+    async _paginate(basePath, totalItems, maxPages) {
+        const results = [];
+        const pages = Math.ceil(totalItems / MAX_PAGE_ITEMS);
+        let allowed = pages;
+        if (maxPages > 0)
+            allowed = Math.min(pages, maxPages);
+        const promises = [];
+        for (let index = 1; index < allowed; index++) {
+            const offset = index * MAX_PAGE_ITEMS;
+            const path = `${basePath}${basePath.includes('?') ? '&' : '?'}limit=${MAX_PAGE_ITEMS}&offset=${offset}`;
+            promises.push(this._apiRequest(path));
+        }
+        if (promises.length === 0)
+            return results;
+        const batchSize = this.playlistPageLoadConcurrency;
+        for (let i = 0; i < promises.length; i += batchSize) {
+            const batch = promises.slice(i, i + batchSize);
+            try {
+                const pageResults = await Promise.all(batch);
+                for (const page of pageResults) {
+                    if (page?.data)
+                        results.push(...page.data);
+                }
+            }
+            catch (e) {
+                logger('warn', 'AppleMusic', `Failed to fetch a batch of pages: ${e.message}`);
+            }
+        }
+        return results;
+    }
+    async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+        let isExplicit = false;
+        if (decodedTrack.uri) {
+            try {
+                const url = new URL(decodedTrack.uri);
+                isExplicit = url.searchParams.get('explicit') === 'true';
+            }
+            catch (_error) {
+                // Ignore malformed URI
+            }
+        }
+        const query = this._buildSearchQuery(decodedTrack, isExplicit);
+        try {
+            let searchResult;
+            if (decodedTrack.isrc) {
+                searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch');
+                if (searchResult.loadType !== 'search' ||
+                    searchResult.data.length === 0) {
+                    searchResult = null;
+                }
+            }
+            if (!searchResult) {
+                searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch');
+            }
+            if (searchResult.loadType !== 'search' ||
+                searchResult.data.length === 0) {
+                searchResult = await this.nodelink.sources.searchWithDefault(query);
+            }
+            if (searchResult.loadType !== 'search' ||
+                searchResult.data.length === 0) {
+                return {
+                    exception: { message: 'No alternative found.', severity: 'fault' }
+                };
+            }
+            const bestMatch = getBestMatch(searchResult.data, decodedTrack, {
+                allowExplicit: this.allowExplicit
+            });
+            if (!bestMatch) {
+                return {
+                    exception: { message: 'No suitable match.', severity: 'fault' }
+                };
+            }
+            const stream = await this.nodelink.sources.getTrackUrl(bestMatch.info, itag, forceRefresh);
+            return { newTrack: bestMatch, ...stream };
+        }
+        catch (error) {
+            return { exception: { message: error.message, severity: 'fault' } };
+        }
+    }
+    _buildSearchQuery(track, isExplicit) {
+        let searchQuery = `${track.title} ${track.author}`;
+        if (isExplicit) {
+            searchQuery += this.allowExplicit ? ' official video' : ' clean version';
+        }
+        return searchQuery;
+    }
+}

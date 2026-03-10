@@ -4,7 +4,7 @@ import {
   getBestMatch,
   http1makeRequest,
   logger
-} from '../utils.js'
+} from '../utils.ts'
 
 const API_URL = 'https://www.qobuz.com/api.json/0.2'
 const WEB_PLAYER_BASE_URL = 'https://play.qobuz.com'

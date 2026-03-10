@@ -3,7 +3,7 @@ import { Buffer } from 'node:buffer'
 import path from 'node:path'
 import { appendFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { logger } from '../../../utils.js'
+import { logger } from '../../../utils.ts'
 import { poTokenManager } from './potoken.js'
 import {
   UMPPartId,

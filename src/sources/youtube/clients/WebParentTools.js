@@ -1,4 +1,4 @@
-import { makeRequest } from '../../../utils.js'
+import { makeRequest } from '../../../utils.ts'
 import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.js'
 
 export default class WebParentTools extends BaseClient {

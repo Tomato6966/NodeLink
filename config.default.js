@@ -9,6 +9,14 @@ export default {
     enabled: true, // active cluster (or use env CLUSTER_ENABLED)
     workers: 0, // 0 => uses os.cpus().length, or specify a number (1 = 2 processes total: master + 1 worker)
     minWorkers: 1, // Minimum workers to keep alive (improves availability during bursts)
+    runtime: {
+      workerMaxOldSpaceMb: 0, // 0 disables override; set >0 to pass --max-old-space-size to playback workers
+      workerExposeGc: false, // If true, adds --expose-gc to playback workers
+      workerExecArgv: [], // Extra Node.js args for playback workers (e.g. ['--trace-gc'])
+      sourceWorkerMaxOldSpaceMb: 0, // 0 disables override; set >0 to pass --max-old-space-size to source workers
+      sourceWorkerExposeGc: false, // If true, adds --expose-gc to source workers
+      sourceWorkerExecArgv: [] // Extra Node.js args for source workers
+    },
     specializedSourceWorker: {
       enabled: true, // If true, source loading (search, lyrics, etc.) is delegated to dedicated workers to prevent voice worker lag
       count: 1, // Number of separate process clusters for source operations
@@ -108,7 +116,12 @@ export default {
     vkmusic: {
       enabled: true,
       userToken: '', // (optional) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> response -> access_token
-      userCookie: '' // (required without userToken) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> request -> cookie (copy full cookie header)
+      userCookie: '', // (required without userToken) get from vk in browser devtools -> reqs POST /?act=web_token HTTP/2 - headers -> request -> cookie (copy full cookie header)
+      proxy: {
+        url: '',
+        username: '',
+        password: ''
+      }
     },
     amazonmusic: {
       enabled: true
@@ -171,7 +184,8 @@ export default {
       basePath: './local-music/'
     },
     http: {
-      enabled: true
+      enabled: true,
+      userAgent: '' // Optional: defaults to NodeLink/<version> (https://github.com/PerformanC/NodeLink)
     },
     eternalbox: {
       enabled: true,
@@ -237,19 +251,35 @@ export default {
       speed: 1.0,
       enforceConfig: false
     },
+    lazypytts: {
+      enabled: true,
+      service: 'Cerence',
+      voice: 'Luciana',
+      maxTextLength: 3000,
+      enforceConfig: false
+    },
     jiosaavn: {
       enabled: true,
       playlistLoadLimit: 50,
-      artistLoadLimit: 20
+      artistLoadLimit: 20,
+      proxy: {
+        url: '',
+        username: '',
+        password: ''
+      }
       // "secretKey": "38346591" // Optional, defaults to standard key
     },
     gaana: {
       enabled: true,
-      apiUrl: 'https://gaana.1lucas1apk.fun/api', // if you want to host your server https://github.com/notdeltaxd/Gaana-API
       streamQuality: 'high',
       playlistLoadLimit: 100,
       albumLoadLimit: 100,
-      artistLoadLimit: 100
+      artistLoadLimit: 100,
+      proxy: {
+        url: '', // The HTTP/HTTPS proxy to use
+        username: '', // Optional username
+        password: '' // Optional password
+      }
     },
     'google-tts': {
       enabled: true,
@@ -276,11 +306,28 @@ export default {
       getOAuthToken: false,
       hl: 'en',
       gl: 'US',
+      fallbackSources: [
+        'soundcloud',
+        'deezer',
+        'jiosaavn',
+        'qobuz',
+        'gaana',
+        'vkmusic',
+        'yandexmusic',
+        'audiomack',
+        'bandcamp',
+        'audius',
+        'mixcloud',
+        'bilibili',
+        'bluesky',
+        'nicovideo'
+      ], // Internal fallback chain when YouTube stream URL fails
       clients: {
         search: ['Android'], // Clients used for searching tracks
         playback: [
           'AndroidVR',
           'TV',
+          'TVCast',
           'WebEmbedded',
           'WebParentTools',
           'Web',
@@ -289,6 +336,7 @@ export default {
         resolve: [
           'AndroidVR',
           'TV',
+          'TVCast',
           'WebEmbedded',
           'WebParentTools',
           'IOS',
@@ -325,7 +373,7 @@ export default {
       albumLoadLimit: 1, // 0 means no limit (loads all tracks), 1 = 50 tracks, 2 = 100 tracks, etc.
       albumPageLoadConcurrency: 5, // How many pages to load simultaneously
       allowExplicit: true, // If true plays the explicit version of the song, If false plays the Non-Explicit version of the song. Normal songs are not affected.
-      sp_dc: '' // fot getting mobile token (optional) get from spotify in browser devtools -> Application -> Cookies -> sp_dc (requered for canvas)
+      sp_dc: '' // fot getting mobile token (optional) get from spotify in browser devtools -> Application -> Cookies -> sp_dc (required for canvas)
     },
     applemusic: {
       enabled: true,
@@ -350,7 +398,9 @@ export default {
       token: 'token_here', //manually | or "token_here" to get a token automatically, get from tidal web player devtools; using login google account
       countryCode: 'US',
       playlistLoadLimit: 2, // 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
-      playlistPageLoadConcurrency: 5 // How many pages to load simultaneously
+      playlistPageLoadConcurrency: 5, // How many pages to load simultaneously
+      hifiApis: [""],   // optional, but required for direflct streaming, artist resolving host: https://github.com/binimum/hifi-api/
+      hifiQualities: ["HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"] //tried sequentially until one works (only used if hifiApis is set)
     },
     pandora: {
       enabled: true,
@@ -378,7 +428,8 @@ export default {
       allowExplicit: true
     },
     lastfm: {
-      enabled: true
+      enabled: true,
+      apiKey: '', // You can get the api key from: https://www.last.fm/api/account/create
     },
     netease: {
       enabled: true
@@ -393,7 +444,12 @@ export default {
       allowExplicit: true,
       artistLoadLimit: 1, // 0 = no limit, 1 = 10 tracks, 2 = 20 tracks, etc.
       albumLoadLimit: 1, // 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
-      playlistLoadLimit: 1 // 0 = no limit, 1 = 100 tracks, 2 = 200 tracks, etc.
+      playlistLoadLimit: 1, // 0 = no limit, 1 = 100 tracks, 2 = 200 tracks, etc.
+      proxy: {
+        url: '',
+        username: '',
+        password: ''
+      }
     }
   },
   lyrics: {
@@ -407,6 +463,9 @@ export default {
     musixmatch: {
       enabled: true
       // signatureSecret: ''
+    },
+    deezer: {
+      enabled: true
     },
     lrclib: {
       enabled: true
@@ -433,33 +492,66 @@ export default {
     quality: 'high', // high, medium, low, lowest
     encryption: 'aead_aes256_gcm_rtpsize',
     resamplingQuality: 'best', // best, medium, fastest, zero order holder, linear
+    loudnessNormalizer: false, // Enable/disable AGC globally
+    lookaheadMs: 5, // Limiter lookahead buffer in milliseconds
+    gateThresholdLUFS: -60, // Silence threshold for AGC gate
     fading: {
-      enabled: false,
+      enabled: false, // Master switch for all fades
+      // type meanings:
+      // volume = only amplitude fades, tape = pitch/speed ramps, both = simultaneous fade and ramp, scratch = physical vinyl simulation
       // curve meanings:
-      // linear = constant rate, exponential = slow start then faster,
-      // logarithmic = fast start then slower, s-curve = smooth start/end
+      // linear = constant rate, exponential = slow start then faster, sinusoidal = smooth s-curve, start/wash/stop/random/baby = scratch specific movements
       trackStart: {
-        duration: 0,
-        curve: 'linear'
+        // Effect when a new track begins
+        duration: 0, // ms
+        curve: 'linear',
+        type: 'volume' // volume, tape, both
       },
       trackEnd: {
+        // Effect triggered automatically before track finishes
         duration: 0,
-        curve: 'linear'
+        curve: 'linear',
+        type: 'volume'
       },
       trackStop: {
+        // Effect when manually stopping or skipping
         duration: 0,
-        curve: 'linear'
+        curve: 'linear',
+        type: 'volume'
       },
       seek: {
+        // Effect applied after a seek operation
         duration: 0,
-        curve: 'linear'
+        curve: 'linear',
+        type: 'volume'
+      },
+      pause: {
+        // Effect applied when pausing playback
+        duration: 0,
+        curve: 'sinusoidal',
+        type: 'tape'
+      },
+      resume: {
+        // Effect applied when resuming from pause
+        duration: 0,
+        curve: 'sinusoidal',
+        type: 'tape'
       },
       ducking: {
+        // Partial fade out for overlay events (e.g., TTS, notifications)
         enabled: false,
-        duration: 0,
-        targetVolume: 0.3,
+        duration: 0, // ms
+        targetVolume: 0.3, // Volume multiplier (0.3 = 30%)
         curve: 'linear'
       }
+    },
+    crossfade: {
+      enabled: false,
+      duration: 0, // Crossfade duration in milliseconds
+      curve: 'sinusoidal', // linear | sine | sinusoidal
+      mode: 'preload', // preload or stream
+      minBufferMs: 250, // Minimum buffered PCM before crossfade starts
+      bufferMs: 0 // 0 = auto (use duration)
     }
   },
   voiceReceive: {
