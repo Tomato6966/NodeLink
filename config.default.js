@@ -163,7 +163,7 @@ export default {
       enabled: true
     },
     soundcloud: {
-      enabled: true,
+      enabled: true
       // clientId: ""
     },
     local: {
@@ -207,7 +207,7 @@ export default {
     },
     vimeo: {
       // Note: not 100% of the songs are currently working (but most should.), because i need to code a different extractor for every year (2010, 2011, etc. not all are done)
-      enabled: true,
+      enabled: true
     },
     iheartradio: {
       enabled: true
@@ -251,7 +251,7 @@ export default {
       albumLoadLimit: 100,
       artistLoadLimit: 100
     },
-    "google-tts": {
+    'google-tts': {
       enabled: true,
       language: 'en-US'
     },
@@ -261,7 +261,7 @@ export default {
     // https://github.com/OHF-Voice/piper1-gpl/tree/main?tab=readme-ov-file
     pipertts: {
       enabled: false, // Disabled by default. Enable it to use Piper TTS.
-      url: 'http://localhost:5000', // URL of your Piper TTS server
+      url: 'http://localhost:5000' // URL of your Piper TTS server
       // Optional settings (defaults from Piper):
       // voice: 'en_US-lessac-medium',
       // speaker: 0,
@@ -278,11 +278,25 @@ export default {
       gl: 'US',
       clients: {
         search: ['Android'], // Clients used for searching tracks
-        playback: ['AndroidVR', 'TV', 'WebEmbedded', 'WebParentTools', 'Web', 'IOS'], // Clients used for playback/streaming
-        resolve: ['AndroidVR', 'TV', 'WebEmbedded', 'WebParentTools', 'IOS', 'Web'], // Clients used for resolving detailed track information (channel, external links, etc.)
+        playback: [
+          'AndroidVR',
+          'TV',
+          'WebEmbedded',
+          'WebParentTools',
+          'Web',
+          'IOS'
+        ], // Clients used for playback/streaming
+        resolve: [
+          'AndroidVR',
+          'TV',
+          'WebEmbedded',
+          'WebParentTools',
+          'IOS',
+          'Web'
+        ], // Clients used for resolving detailed track information (channel, external links, etc.)
         settings: {
           TV: {
-            refreshToken: [""] // You can use a string "token" or an array ["token1", "token2"] for rotation/fallback
+            refreshToken: [''] // You can use a string "token" or an array ["token1", "token2"] for rotation/fallback
           }
         }
       },
@@ -364,6 +378,9 @@ export default {
       allowExplicit: true
     },
     lastfm: {
+      enabled: true
+    },
+    netease: {
       enabled: true
     },
     letrasmus: {
