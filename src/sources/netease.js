@@ -1,6 +1,6 @@
 /*
  * Made by: https://github.com/southctrl
- * I've added support for ncsearch!
+ * I've added support for ntsearch!
  */
 
 import {
@@ -19,15 +19,20 @@ const NETEASE_PLAYLIST_PATTERN =
 const NETEASE_ARTIST_PATTERN =
   /^https?:\/\/(?:www\.)?music\.163\.com\/?#?\/artist\?id=(\d+)/
 
-const BASE_API = 'https://music.163.com/api'
 const STREAM_URL = 'https://music.163.com/song/media/outer/url?id='
 
-const HEADERS = {
+const ANDROID_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+  Referer: 'http://music.163.com',
+  'Content-Type': 'application/x-www-form-urlencoded',
+  Cookie: 'appver=2.0.2; os=pc;'
+}
+
+const GET_HEADERS = {
   'User-Agent':
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  Referer: 'https://music.163.com',
+  Referer: 'http://music.163.com',
   Accept: 'application/json, text/plain, */*',
-  'Accept-Language': 'en-US,en;q=0.9',
   'Accept-Encoding': 'identity'
 }
 
@@ -42,7 +47,7 @@ export default class NeteaseSource {
       NETEASE_ARTIST_PATTERN
     ]
     this.priority = 45
-    this.searchTerms = ['ncsearch']
+    this.searchTerms = ['ntsearch']
     this.maxSearchResults = nodelink.options.maxSearchResults || 10
   }
 
@@ -62,33 +67,44 @@ export default class NeteaseSource {
 
   async search(query, _sourceTerm, searchType = 'track') {
     try {
-      const typeMap = {
-        track: 1,
-        album: 10,
-        artist: 100,
-        playlist: 1000
-      }
+      const typeMap = { track: 1, album: 10, artist: 100, playlist: 1000 }
       const type = typeMap[searchType] ?? 1
 
-      const url =
-        `${BASE_API}/search/get?s=${encodeURIComponent(query)}` +
-        `&type=${type}&limit=${this.maxSearchResults}&offset=0`
+      const postBody = `s=${encodeURIComponent(query)}&limit=${this.maxSearchResults}&type=${type}&offset=0`
 
-      const { body, statusCode, error } = await http1makeRequest(url, {
-        method: 'GET',
-        headers: HEADERS
-      })
+      const { body, statusCode, error } = await http1makeRequest(
+        'https://music.163.com/api/search/get/',
+        {
+          method: 'POST',
+          body: postBody,
+          disableBodyCompression: true,
+          headers: {
+            ...ANDROID_HEADERS,
+            'Content-Length': String(Buffer.byteLength(postBody))
+          }
+        }
+      )
 
-      if (error || statusCode !== 200 || !body) {
+      const parsedBody =
+        typeof body === 'string'
+          ? (() => {
+              try {
+                return JSON.parse(body)
+              } catch {
+                return null
+              }
+            })()
+          : body
+      if (error || statusCode !== 200 || !parsedBody) {
         return {
           exception: {
-            message: `Netease search failed: ${error?.message || statusCode}`,
+            message: `Netease search failed: ${statusCode}`,
             severity: 'fault'
           }
         }
       }
 
-      const results = this._mapSearchResults(body, searchType)
+      const results = this._mapSearchResults(parsedBody, searchType)
       return results.length
         ? { loadType: 'search', data: results }
         : { loadType: 'empty', data: {} }
@@ -100,24 +116,17 @@ export default class NeteaseSource {
   async resolve(url) {
     try {
       const trackMatch = url.match(NETEASE_TRACK_PATTERN)
-      if (trackMatch) {
-        return await this._resolveTrack(trackMatch[1], url)
-      }
+      if (trackMatch) return await this._resolveTrack(trackMatch[1], url)
 
       const albumMatch = url.match(NETEASE_ALBUM_PATTERN)
-      if (albumMatch) {
-        return await this._resolveAlbum(albumMatch[1], url)
-      }
+      if (albumMatch) return await this._resolveAlbum(albumMatch[1], url)
 
       const playlistMatch = url.match(NETEASE_PLAYLIST_PATTERN)
-      if (playlistMatch) {
+      if (playlistMatch)
         return await this._resolvePlaylist(playlistMatch[1], url)
-      }
 
       const artistMatch = url.match(NETEASE_ARTIST_PATTERN)
-      if (artistMatch) {
-        return await this._resolveArtist(artistMatch[1], url)
-      }
+      if (artistMatch) return await this._resolveArtist(artistMatch[1], url)
 
       return { loadType: 'empty', data: {} }
     } catch (e) {
@@ -128,8 +137,8 @@ export default class NeteaseSource {
 
   async _resolveTrack(id, originalUrl) {
     const { body, statusCode, error } = await http1makeRequest(
-      `${BASE_API}/song/detail/?id=${id}&ids=[${id}]`,
-      { method: 'GET', headers: HEADERS }
+      `https://music.163.com/api/song/detail/?id=${id}&ids=[${id}]`,
+      { method: 'GET', headers: GET_HEADERS }
     )
 
     if (error || statusCode !== 200 || !body) {
@@ -146,7 +155,6 @@ export default class NeteaseSource {
 
     const song = songs[0]
     const track = this._buildTrackResult(song, originalUrl)
-
     logger(
       'info',
       'Netease',
@@ -157,8 +165,8 @@ export default class NeteaseSource {
 
   async _resolveAlbum(id, originalUrl) {
     const { body, statusCode, error } = await http1makeRequest(
-      `${BASE_API}/album?id=${id}`,
-      { method: 'GET', headers: HEADERS }
+      `https://music.163.com/api/album?id=${id}`,
+      { method: 'GET', headers: GET_HEADERS }
     )
 
     if (error || statusCode !== 200 || !body) {
@@ -197,8 +205,8 @@ export default class NeteaseSource {
 
   async _resolvePlaylist(id, originalUrl) {
     const { body, statusCode, error } = await http1makeRequest(
-      `${BASE_API}/playlist/detail?id=${id}`,
-      { method: 'GET', headers: HEADERS }
+      `https://music.163.com/api/playlist/detail?id=${id}`,
+      { method: 'GET', headers: GET_HEADERS }
     )
 
     if (error || statusCode !== 200 || !body) {
@@ -236,8 +244,8 @@ export default class NeteaseSource {
 
   async _resolveArtist(id, originalUrl) {
     const { body, statusCode, error } = await http1makeRequest(
-      `${BASE_API}/artist/top?id=${id}&limit=${this.maxSearchResults}&offset=0&total=false`,
-      { method: 'GET', headers: HEADERS }
+      `https://music.163.com/api/artist/top?id=${id}&limit=${this.maxSearchResults}&offset=0&total=false`,
+      { method: 'GET', headers: GET_HEADERS }
     )
 
     if (error || statusCode !== 200 || !body) {
@@ -312,10 +320,9 @@ export default class NeteaseSource {
       )
     }
 
-    // Default: tracks
     const songs = result?.songs || []
     return songs.map((song) =>
-      this._buildTrackResult(song, `https://music.163.com/#/song?id=${song.id}`)
+      this._buildTrackResult(song, `https://music.163.com/song?id=${song.id}`)
     )
   }
 
@@ -332,7 +339,7 @@ export default class NeteaseSource {
       isStream: false,
       position: 0,
       title: song.name,
-      uri: uri || `https://music.163.com/#/song?id=${song.id}`,
+      uri: uri || `https://music.163.com/song?id=${song.id}`,
       artworkUrl,
       isrc: null,
       sourceName: 'netease'
@@ -364,7 +371,6 @@ export default class NeteaseSource {
   }
 
   _getArtists(song) {
-    // Netease can have multiple artists in an array, so we join them with commas
     const list = song.artists || song.ar || []
     if (list.length) return list.map((a) => a.name).join(', ')
     return song.artist?.name || 'Unknown'
@@ -376,13 +382,11 @@ export default class NeteaseSource {
         decodedTrack?.pluginInfo?.neteaseId || decodedTrack?.identifier
 
       if (neteaseId && /^\d+$/.test(neteaseId)) {
-        // Netease provides direct MP3 URLs for tracks, so we can return that immediately
         const streamUrl = `${STREAM_URL}${neteaseId}.mp3`
         logger('info', 'Netease', `Returning stream URL for id ${neteaseId}`)
         return { url: streamUrl, protocol: 'https' }
       }
 
-      // If we don't have a valid Netease ID, we can attempt to find a matching track on YouTube as a fallback
       const query = `${decodedTrack.title} ${decodedTrack.author}`.trim()
       let searchResult = await this.nodelink.sources.search(
         'youtube',
