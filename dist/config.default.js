@@ -431,6 +431,9 @@ export default {
             enabled: true,
             apiKey: '', // You can get the api key from: https://www.last.fm/api/account/create
         },
+        netease: {
+            enabled: true
+        },
         letrasmus: {
             enabled: true
         },
