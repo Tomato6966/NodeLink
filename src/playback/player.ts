@@ -4687,15 +4687,16 @@ export class Player {
         const existingFilter = oldFilters[key] as FilterStateEntry | undefined
         if (existingFilter?._disabled === true) continue
 
-        const isTransitionEnabled = filterTransitions?.enabled
-        if (isTransitionEnabled) {
-          newFilterSettings[key] = {
-            _disabled: true,
-            transition: {
-              durationMs: filterTransitions.durationMs ?? 4000,
-              curve: filterTransitions.curve ?? 'sinusoidal'
-            }
-          }
+        newFilterSettings[key] = {
+          _disabled: true,
+          ...(filterTransitions?.enabled
+            ? {
+                transition: {
+                  durationMs: filterTransitions.durationMs ?? 4000,
+                  curve: filterTransitions.curve ?? 'sinusoidal'
+                }
+              }
+            : {})
         }
       }
     }
@@ -4719,15 +4720,11 @@ export class Player {
       }
     }
     if (disabledKeys.length > 0) {
-      const maxTransitionMs = Math.max(
-        ...disabledKeys.map((key) => {
-          const val = newFilterSettings[key]
-          const tr = val?.transition
-          return tr?.durationMs ?? 4000
-        })
-      )
-      const cleanupTimer = setTimeout(() => {
-        const current = (this.filters.filters ?? {}) as Record<string, unknown>
+      const cleanupDisabledFilters = () => {
+        const current = { ...(this.filters.filters ?? {}) } as Record<
+          string,
+          unknown
+        >
         let changed = false
         for (const key of disabledKeys) {
           const entry = current[key] as FilterStateEntry | undefined
@@ -4739,8 +4736,23 @@ export class Player {
         if (changed) {
           this.filters = { ...this.filters, filters: current }
         }
-      }, maxTransitionMs + 500)
-      cleanupTimer.unref?.()
+      }
+
+      const maxTransitionMs = Math.max(
+        ...disabledKeys.map((key) => {
+          const val = newFilterSettings[key]
+          const tr = val?.transition
+          return tr?.durationMs ?? 0
+        })
+      )
+      if (maxTransitionMs <= 0) {
+        cleanupDisabledFilters()
+      } else {
+        const cleanupTimer = setTimeout(() => {
+          cleanupDisabledFilters()
+        }, maxTransitionMs + 500)
+        cleanupTimer.unref?.()
+      }
     }
 
     this.emitEvent(GatewayEvents.FILTERS_CHANGED, { filters: this.filters })

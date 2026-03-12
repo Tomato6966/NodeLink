@@ -8,6 +8,7 @@ import {
   encodeTrack,
   getBestMatch,
   http1makeRequest,
+  makeRequest,
   logger
 } from '../utils.ts'
 
