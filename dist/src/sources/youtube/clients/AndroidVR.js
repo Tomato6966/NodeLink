@@ -8,7 +8,7 @@ export default class AndroidVR extends BaseClient {
         return {
             client: {
                 clientName: 'ANDROID_VR',
-                clientVersion: '1.72.34',
+                clientVersion: '1.65.10',
                 userAgent: 'Mozilla/5.0 (X11; Linux x86_64; Quest 3) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/39.3.0.11.46.766180192 Chrome/136.0.7103.177 VR Safari/537.36,gzip(gfe);GoogleHypersonic',
                 deviceMake: 'Google',
                 osName: 'Android',

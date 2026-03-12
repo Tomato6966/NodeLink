@@ -586,6 +586,7 @@ export class Player {
         this.holoTrack = null;
         this.isPaused = false;
         this.position = 0;
+        this._lastStreamDataTime = 0;
         this.currentLyrics = null;
         this.lyricsLineIndex = -1;
         this._fading('reset');
@@ -2475,6 +2476,7 @@ export class Player {
                     this._emitTrackEnd(EndReasons.REPLACED);
                     this._cleanupCurrentAudioStream('track-replaced');
                 }
+                this._lastStreamDataTime = 0;
                 this.track = { encoded, info, endTime, userData, audioTrackId };
                 this._fading('reset');
                 if (!this.voice.endpoint || !this.voice.token) {
@@ -3184,16 +3186,17 @@ export class Player {
                 const existingFilter = oldFilters[key];
                 if (existingFilter?._disabled === true)
                     continue;
-                const isTransitionEnabled = filterTransitions?.enabled;
-                if (isTransitionEnabled) {
-                    newFilterSettings[key] = {
-                        _disabled: true,
-                        transition: {
-                            durationMs: filterTransitions.durationMs ?? 4000,
-                            curve: filterTransitions.curve ?? 'sinusoidal'
+                newFilterSettings[key] = {
+                    _disabled: true,
+                    ...(filterTransitions?.enabled
+                        ? {
+                            transition: {
+                                durationMs: filterTransitions.durationMs ?? 4000,
+                                curve: filterTransitions.curve ?? 'sinusoidal'
+                            }
                         }
-                    };
-                }
+                        : {})
+                };
             }
         }
         this.filters = { ...this.filters, filters: newFilterSettings };
@@ -3213,13 +3216,8 @@ export class Player {
             }
         }
         if (disabledKeys.length > 0) {
-            const maxTransitionMs = Math.max(...disabledKeys.map((key) => {
-                const val = newFilterSettings[key];
-                const tr = val?.transition;
-                return tr?.durationMs ?? 4000;
-            }));
-            const cleanupTimer = setTimeout(() => {
-                const current = (this.filters.filters ?? {});
+            const cleanupDisabledFilters = () => {
+                const current = { ...(this.filters.filters ?? {}) };
                 let changed = false;
                 for (const key of disabledKeys) {
                     const entry = current[key];
@@ -3231,8 +3229,21 @@ export class Player {
                 if (changed) {
                     this.filters = { ...this.filters, filters: current };
                 }
-            }, maxTransitionMs + 500);
-            cleanupTimer.unref?.();
+            };
+            const maxTransitionMs = Math.max(...disabledKeys.map((key) => {
+                const val = newFilterSettings[key];
+                const tr = val?.transition;
+                return tr?.durationMs ?? 0;
+            }));
+            if (maxTransitionMs <= 0) {
+                cleanupDisabledFilters();
+            }
+            else {
+                const cleanupTimer = setTimeout(() => {
+                    cleanupDisabledFilters();
+                }, maxTransitionMs + 500);
+                cleanupTimer.unref?.();
+            }
         }
         this.emitEvent(GatewayEvents.FILTERS_CHANGED, { filters: this.filters });
         return true;

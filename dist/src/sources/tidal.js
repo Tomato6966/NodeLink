@@ -3,7 +3,7 @@
  * credits: https://github.com/binimum/hifi-api/
  */
 import path from 'node:path';
-import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
+import { encodeTrack, getBestMatch, http1makeRequest, makeRequest, logger } from "../utils.js";
 const API_BASE = 'https://api.tidal.com/v1/';
 const CACHE_VALIDITY_DAYS = 7;
 const TIDAL_ASSET_URL = 'https://tidal.com/assets/index-CJ0DsMmf.js';

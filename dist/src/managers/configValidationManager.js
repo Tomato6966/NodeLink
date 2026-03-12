@@ -1,5 +1,4 @@
 const KNOWN_PLACEHOLDERS = new Set([
-    'token_here',
     'your_token_here',
     'changeme',
     'change_me',
@@ -101,11 +100,20 @@ export default class ConfigValidationManager {
         const rules = [
             this.booleanRule('cluster.enabled', cluster.enabled)
         ];
-        if (cluster.enabled !== true)
+        if (typeof cluster.enabled !== 'boolean')
             return rules;
-        rules.push(this.nonNegativeIntRule('cluster.workers', workers), this.nonNegativeIntRule('cluster.minWorkers', cluster.minWorkers), this.crossFieldIntRule('cluster.minWorkers', cluster.minWorkers, workers, 'cluster.workers', workers === 0
-            ? 'auto-scaled workers'
-            : `<= cluster.workers (${workers})`, (v, dep) => dep === 0 || v <= dep), this.positiveIntRule('cluster.commandTimeout', cluster.commandTimeout), this.positiveIntRule('cluster.fastCommandTimeout', cluster.fastCommandTimeout), this.nonNegativeIntRule('cluster.maxRetries', cluster.maxRetries));
+        if (cluster.enabled === false)
+            return rules;
+        rules.push(this.nonNegativeIntRule('cluster.workers', workers), this.nonNegativeIntRule('cluster.minWorkers', cluster.minWorkers), {
+            path: 'cluster.minWorkers',
+            expected: workers === 0
+                ? 'integer (auto-scaled workers, any value allowed)'
+                : `integer <= cluster.workers (${workers})`,
+            value: cluster.minWorkers,
+            validate: (v) => Number.isInteger(v) &&
+                Number.isInteger(workers) &&
+                (workers === 0 || v <= workers)
+        }, this.positiveIntRule('cluster.commandTimeout', cluster.commandTimeout), this.positiveIntRule('cluster.fastCommandTimeout', cluster.fastCommandTimeout), this.nonNegativeIntRule('cluster.maxRetries', cluster.maxRetries));
         if (cluster.hibernation) {
             rules.push(this.booleanRule('cluster.hibernation.enabled', cluster.hibernation.enabled), this.positiveIntRule('cluster.hibernation.timeoutMs', cluster.hibernation.timeoutMs));
         }
@@ -115,7 +123,7 @@ export default class ConfigValidationManager {
         }
         const runtime = cluster.runtime;
         if (runtime) {
-            rules.push(this.nonNegativeIntRule('cluster.runtime.workerMaxOldSpaceMb', runtime.workerMaxOldSpaceMb), this.nonNegativeIntRule('cluster.runtime.sourceWorkerMaxOldSpaceMb', runtime.sourceWorkerMaxOldSpaceMb), this.booleanRule('cluster.runtime.workerExposeGc', runtime.workerExposeGc), this.booleanRule('cluster.runtime.sourceWorkerExposeGc', runtime.sourceWorkerExposeGc));
+            rules.push(this.nonNegativeIntRule('cluster.runtime.workerMaxOldSpaceMb', runtime.workerMaxOldSpaceMb), this.nonNegativeIntRule('cluster.runtime.sourceWorkerMaxOldSpaceMb', runtime.sourceWorkerMaxOldSpaceMb), this.booleanRule('cluster.runtime.workerExposeGc', runtime.workerExposeGc), this.booleanRule('cluster.runtime.sourceWorkerExposeGc', runtime.sourceWorkerExposeGc), this.stringArrayRule('cluster.runtime.workerExecArgv', runtime.workerExecArgv), this.stringArrayRule('cluster.runtime.sourceWorkerExecArgv', runtime.sourceWorkerExecArgv));
         }
         const scaling = cluster.scaling;
         if (scaling) {
@@ -129,14 +137,7 @@ export default class ConfigValidationManager {
                 expected: 'number between 0 and 1 (exclusive)',
                 value: scaling.cpuPenaltyLimit,
                 validate: (v) => typeof v === 'number' && v > 0 && v < 1
-            }, {
-                path: 'cluster.scaling.scaleDownThreshold',
-                expected: `number < cluster.scaling.scaleUpThreshold (${scaling.scaleUpThreshold})`,
-                value: scaling.scaleDownThreshold,
-                validate: (v) => typeof scaling.scaleUpThreshold === 'number' &&
-                    typeof v === 'number' &&
-                    v < scaling.scaleUpThreshold
-            }, {
+            }, this.floatMustBeBelow('cluster.scaling.scaleDownThreshold', scaling.scaleDownThreshold, scaling.scaleUpThreshold, 'cluster.scaling.scaleUpThreshold'), {
                 path: 'cluster.scaling.targetUtilization',
                 expected: `number between scaleDownThreshold (${scaling.scaleDownThreshold}) and scaleUpThreshold (${scaling.scaleUpThreshold})`,
                 value: scaling.targetUtilization,
@@ -197,16 +198,11 @@ export default class ConfigValidationManager {
         const crossfade = audio?.crossfade;
         if (crossfade) {
             rules.push(this.booleanRule('audio.crossfade.enabled', crossfade.enabled), this.nonNegativeIntRule('audio.crossfade.duration', crossfade.duration), this.enumRule('audio.crossfade.curve', crossfade.curve, VALID_CROSSFADE_CURVES), this.enumRule('audio.crossfade.mode', crossfade.mode, VALID_CROSSFADE_MODES), this.nonNegativeIntRule('audio.crossfade.minBufferMs', crossfade.minBufferMs), this.nonNegativeIntRule('audio.crossfade.bufferMs', crossfade.bufferMs));
-            if (crossfade.enabled) {
-                rules.push({
-                    path: 'audio.crossfade.duration',
-                    expected: 'integer > 0 when audio.crossfade.enabled is true',
-                    value: crossfade.duration,
-                    validate: (v) => Number.isInteger(v) && v > 0
-                });
-            }
             if (crossfade.bufferMs !== 0) {
-                rules.push(this.crossFieldIntRule('audio.crossfade.minBufferMs', crossfade.minBufferMs, crossfade.bufferMs, 'audio.crossfade.bufferMs', `integer <= audio.crossfade.bufferMs (${crossfade.bufferMs})`, (v, dep) => v <= dep));
+                rules.push(this.intMustNotExceed('audio.crossfade.minBufferMs', crossfade.minBufferMs, crossfade.bufferMs, 'audio.crossfade.bufferMs'));
+            }
+            else if (crossfade.enabled && crossfade.duration > 0) {
+                rules.push(this.intMustNotExceed('audio.crossfade.minBufferMs', crossfade.minBufferMs, crossfade.duration, 'audio.crossfade.duration'));
             }
         }
         return rules;
@@ -228,7 +224,7 @@ export default class ConfigValidationManager {
                 value: trackStuck,
                 validate: (v) => Number.isInteger(v) && v >= 1000
             },
-            this.crossFieldIntRule('zombieThresholdMs', this.options.zombieThresholdMs, trackStuck, 'trackStuckThresholdMs', `integer > trackStuckThresholdMs (${trackStuck})`, (v, dep) => v > dep)
+            this.intMustExceed('zombieThresholdMs', this.options.zombieThresholdMs, trackStuck, 'trackStuckThresholdMs')
         ];
     }
     validateSources() {
@@ -287,117 +283,205 @@ export default class ConfigValidationManager {
                 rules.push(this.booleanRule(`sources.${name}.enabled`, sources[name].enabled));
             }
         }
-        const { spotify, applemusic, tidal, jiosaavn, audius } = sources;
-        if (spotify?.enabled) {
-            rules.push(this.nonNegativeIntRule('sources.spotify.playlistLoadLimit', spotify.playlistLoadLimit), this.nonNegativeIntRule('sources.spotify.albumLoadLimit', spotify.albumLoadLimit), this.positiveIntRule('sources.spotify.playlistPageLoadConcurrency', spotify.playlistPageLoadConcurrency), this.positiveIntRule('sources.spotify.albumPageLoadConcurrency', spotify.albumPageLoadConcurrency), {
-                path: 'sources.spotify.credentials',
-                expected: 'clientId and clientSecret must be set together',
-                value: Boolean(spotify.clientId) === Boolean(spotify.clientSecret),
-                validate: (v) => v === true
-            });
-            if (spotify.externalAuthUrl) {
-                rules.push(this.urlRule('sources.spotify.externalAuthUrl', spotify.externalAuthUrl));
-            }
-            this.warnIfPlaceholder('sources.spotify.clientId', spotify.clientId);
-            this.warnIfPlaceholder('sources.spotify.clientSecret', spotify.clientSecret);
+        rules.push(...this.validateSourceSpotify(sources.spotify), ...this.validateSourceAppleMusic(sources.applemusic), ...this.validateSourceTidal(sources.tidal), ...this.validateSourceAudius(sources.audius), ...this.validateSourceJiosaavn(sources.jiosaavn), ...this.validateSourceEternalbox(sources.eternalbox), ...this.validateSourceYoutube(sources.youtube), ...this.validateSourcePipertts(sources.pipertts), ...this.validateSourcePandora(sources.pandora), ...this.validateSourceQobuz(sources.qobuz), ...this.validateSourceLastfm(sources.lastfm), ...this.validateSourceBilibili(sources.bilibili), ...this.validateSourceYandexMusic(sources.yandexmusic), ...this.validateSourceGaana(sources.gaana), ...this.validateSourceFlowery(sources.flowery), ...this.validateSourceLazypytts(sources.lazypytts));
+        return rules;
+    }
+    validateSourceSpotify(spotify) {
+        if (!spotify?.enabled)
+            return [];
+        const rules = [
+            this.nonNegativeIntRule('sources.spotify.playlistLoadLimit', spotify.playlistLoadLimit),
+            this.nonNegativeIntRule('sources.spotify.albumLoadLimit', spotify.albumLoadLimit),
+            this.positiveIntRule('sources.spotify.playlistPageLoadConcurrency', spotify.playlistPageLoadConcurrency),
+            this.positiveIntRule('sources.spotify.albumPageLoadConcurrency', spotify.albumPageLoadConcurrency),
+            {
+                path: 'sources.spotify.clientId',
+                expected: 'non-empty string when sources.spotify.clientSecret is set',
+                value: spotify.clientId,
+                validate: (v) => !spotify.clientSecret ||
+                    (typeof v === 'string' && v.trim().length > 0)
+            },
+            {
+                path: 'sources.spotify.clientSecret',
+                expected: 'non-empty string when sources.spotify.clientId is set',
+                value: spotify.clientSecret,
+                validate: (v) => !spotify.clientId || (typeof v === 'string' && v.trim().length > 0)
+            },
+            this.placeholderWarningRule('sources.spotify.clientId', spotify.clientId),
+            this.placeholderWarningRule('sources.spotify.clientSecret', spotify.clientSecret)
+        ];
+        if (spotify.externalAuthUrl) {
+            rules.push(this.urlRule('sources.spotify.externalAuthUrl', spotify.externalAuthUrl));
         }
-        if (applemusic?.enabled) {
-            rules.push(this.nonNegativeIntRule('sources.applemusic.playlistLoadLimit', applemusic.playlistLoadLimit), this.nonNegativeIntRule('sources.applemusic.albumLoadLimit', applemusic.albumLoadLimit), this.positiveIntRule('sources.applemusic.playlistPageLoadConcurrency', applemusic.playlistPageLoadConcurrency), this.positiveIntRule('sources.applemusic.albumPageLoadConcurrency', applemusic.albumPageLoadConcurrency));
-            this.warnIfPlaceholder('sources.applemusic.mediaApiToken', applemusic.mediaApiToken, ['token_here']);
-        }
-        if (tidal?.enabled) {
-            rules.push(this.nonNegativeIntRule('sources.tidal.playlistLoadLimit', tidal.playlistLoadLimit), this.positiveIntRule('sources.tidal.playlistPageLoadConcurrency', tidal.playlistPageLoadConcurrency));
-            if (tidal.token !== undefined) {
-                rules.push({
-                    path: 'sources.tidal.token',
-                    expected: 'string (non-whitespace if provided)',
-                    value: tidal.token,
-                    validate: (v) => typeof v === 'string' && (v === '' || v.trim().length > 0)
-                });
-                this.warnIfPlaceholder('sources.tidal.token', tidal.token, [
-                    'token_here'
-                ]);
-            }
-        }
-        if (audius?.enabled) {
+        return rules;
+    }
+    validateSourceAppleMusic(applemusic) {
+        if (!applemusic?.enabled)
+            return [];
+        return [
+            this.nonNegativeIntRule('sources.applemusic.playlistLoadLimit', applemusic.playlistLoadLimit),
+            this.nonNegativeIntRule('sources.applemusic.albumLoadLimit', applemusic.albumLoadLimit),
+            this.positiveIntRule('sources.applemusic.playlistPageLoadConcurrency', applemusic.playlistPageLoadConcurrency),
+            this.positiveIntRule('sources.applemusic.albumPageLoadConcurrency', applemusic.albumPageLoadConcurrency),
+            this.placeholderWarningRule('sources.applemusic.mediaApiToken', applemusic.mediaApiToken, ['token_here'])
+        ];
+    }
+    validateSourceTidal(tidal) {
+        if (!tidal?.enabled)
+            return [];
+        const rules = [
+            this.nonNegativeIntRule('sources.tidal.playlistLoadLimit', tidal.playlistLoadLimit),
+            this.positiveIntRule('sources.tidal.playlistPageLoadConcurrency', tidal.playlistPageLoadConcurrency)
+        ];
+        if (tidal.token !== undefined) {
             rules.push({
+                path: 'sources.tidal.token',
+                expected: 'string (non-whitespace if provided)',
+                value: tidal.token,
+                validate: (v) => typeof v === 'string' && (v === '' || v.trim().length > 0)
+            }, this.placeholderWarningRule('sources.tidal.token', tidal.token, [
+                'token_here'
+            ]));
+        }
+        return rules;
+    }
+    validateSourceAudius(audius) {
+        if (!audius?.enabled)
+            return [];
+        return [
+            {
                 path: 'sources.audius.appName',
                 expected: 'string',
                 value: audius.appName,
                 validate: (v) => v === undefined || typeof v === 'string'
-            }, {
+            },
+            {
                 path: 'sources.audius.apiKey',
                 expected: 'string',
                 value: audius.apiKey,
                 validate: (v) => v === undefined || typeof v === 'string'
-            }, {
+            },
+            {
                 path: 'sources.audius.apiSecret',
                 expected: 'string',
                 value: audius.apiSecret,
                 validate: (v) => v === undefined || typeof v === 'string'
-            }, this.nonNegativeIntRule('sources.audius.playlistLoadLimit', audius.playlistLoadLimit), this.nonNegativeIntRule('sources.audius.albumLoadLimit', audius.albumLoadLimit));
-        }
-        if (jiosaavn?.enabled) {
-            rules.push(this.nonNegativeIntRule('sources.jiosaavn.playlistLoadLimit', jiosaavn.playlistLoadLimit), this.nonNegativeIntRule('sources.jiosaavn.artistLoadLimit', jiosaavn.artistLoadLimit), this.crossFieldIntRule('sources.jiosaavn.playlistLoadLimit', jiosaavn.playlistLoadLimit, jiosaavn.artistLoadLimit, 'sources.jiosaavn.artistLoadLimit', `0 (no limit) or integer >= artistLoadLimit (${jiosaavn.artistLoadLimit})`, (v, dep) => v === 0 || v >= dep));
-        }
-        const eternalbox = sources.eternalbox;
-        if (eternalbox?.enabled) {
-            rules.push(this.urlRule('sources.eternalbox.baseUrl', eternalbox.baseUrl), this.positiveIntRule('sources.eternalbox.searchResults', eternalbox.searchResults), this.positiveIntRule('sources.eternalbox.maxBranches', eternalbox.maxBranches), this.nonNegativeIntRule('sources.eternalbox.cacheMaxBytes', eternalbox.cacheMaxBytes), this.booleanRule('sources.eternalbox.enrichSpotify', eternalbox.enrichSpotify), this.booleanRule('sources.eternalbox.includeAnalysis', eternalbox.includeAnalysis), this.booleanRule('sources.eternalbox.eternalStream', eternalbox.eternalStream), this.booleanRule('sources.eternalbox.infiniteStream', eternalbox.infiniteStream), this.nonNegativeIntRule('sources.eternalbox.maxReconnects', eternalbox.maxReconnects), this.positiveIntRule('sources.eternalbox.reconnectDelayMs', eternalbox.reconnectDelayMs), {
+            },
+            this.nonNegativeIntRule('sources.audius.playlistLoadLimit', audius.playlistLoadLimit),
+            this.nonNegativeIntRule('sources.audius.albumLoadLimit', audius.albumLoadLimit),
+            this.placeholderWarningRule('sources.audius.apiKey', audius.apiKey),
+            this.placeholderWarningRule('sources.audius.apiSecret', audius.apiSecret)
+        ];
+    }
+    validateSourceJiosaavn(jiosaavn) {
+        if (!jiosaavn?.enabled)
+            return [];
+        return [
+            this.nonNegativeIntRule('sources.jiosaavn.playlistLoadLimit', jiosaavn.playlistLoadLimit),
+            this.nonNegativeIntRule('sources.jiosaavn.artistLoadLimit', jiosaavn.artistLoadLimit)
+        ];
+    }
+    validateSourceEternalbox(eternalbox) {
+        if (!eternalbox?.enabled)
+            return [];
+        return [
+            this.urlRule('sources.eternalbox.baseUrl', eternalbox.baseUrl),
+            this.positiveIntRule('sources.eternalbox.searchResults', eternalbox.searchResults),
+            this.positiveIntRule('sources.eternalbox.maxBranches', eternalbox.maxBranches),
+            this.nonNegativeIntRule('sources.eternalbox.cacheMaxBytes', eternalbox.cacheMaxBytes),
+            this.booleanRule('sources.eternalbox.enrichSpotify', eternalbox.enrichSpotify),
+            this.booleanRule('sources.eternalbox.includeAnalysis', eternalbox.includeAnalysis),
+            this.booleanRule('sources.eternalbox.eternalStream', eternalbox.eternalStream),
+            this.booleanRule('sources.eternalbox.infiniteStream', eternalbox.infiniteStream),
+            this.nonNegativeIntRule('sources.eternalbox.maxReconnects', eternalbox.maxReconnects),
+            this.positiveIntRule('sources.eternalbox.reconnectDelayMs', eternalbox.reconnectDelayMs),
+            {
                 path: 'sources.eternalbox.minRandomBranchChance',
                 expected: 'number between 0 and 1 (inclusive)',
                 value: eternalbox.minRandomBranchChance,
                 validate: (v) => typeof v === 'number' && v >= 0 && v <= 1
-            }, {
+            },
+            {
                 path: 'sources.eternalbox.maxRandomBranchChance',
                 expected: 'number between 0 and 1 (inclusive)',
                 value: eternalbox.maxRandomBranchChance,
                 validate: (v) => typeof v === 'number' && v >= 0 && v <= 1
-            }, {
-                path: 'sources.eternalbox.minRandomBranchChance',
-                expected: `number <= maxRandomBranchChance (${eternalbox.maxRandomBranchChance})`,
-                value: eternalbox.minRandomBranchChance,
-                validate: (v) => v <= eternalbox.maxRandomBranchChance
-            });
-        }
-        const youtube = sources.youtube;
-        if (youtube?.enabled && youtube.cipher?.url !== undefined) {
-            rules.push(this.urlRule('sources.youtube.cipher.url', youtube.cipher.url));
-        }
-        const pipertts = sources.pipertts;
-        if (pipertts?.enabled) {
-            rules.push(this.urlRule('sources.pipertts.url', pipertts.url));
-        }
-        const pandora = sources.pandora;
-        if (pandora?.enabled && pandora.remoteTokenUrl) {
-            rules.push(this.urlRule('sources.pandora.remoteTokenUrl', pandora.remoteTokenUrl));
-        }
-        const qobuz = sources.qobuz;
-        if (qobuz?.enabled) {
-            this.warnIfPlaceholder('sources.qobuz.userToken', qobuz.userToken);
-        }
-        const yandexmusic = sources.yandexmusic;
-        if (yandexmusic?.enabled) {
-            rules.push(this.nonNegativeIntRule('sources.yandexmusic.artistLoadLimit', yandexmusic.artistLoadLimit), this.nonNegativeIntRule('sources.yandexmusic.albumLoadLimit', yandexmusic.albumLoadLimit), this.nonNegativeIntRule('sources.yandexmusic.playlistLoadLimit', yandexmusic.playlistLoadLimit));
-            this.warnIfPlaceholder('sources.yandexmusic.accessToken', yandexmusic.accessToken);
-        }
-        const gaana = sources.gaana;
-        if (gaana?.enabled) {
-            rules.push(this.nonNegativeIntRule('sources.gaana.playlistLoadLimit', gaana.playlistLoadLimit), this.nonNegativeIntRule('sources.gaana.albumLoadLimit', gaana.albumLoadLimit), this.nonNegativeIntRule('sources.gaana.artistLoadLimit', gaana.artistLoadLimit));
-        }
-        const flowery = sources.flowery;
-        if (flowery?.enabled) {
-            rules.push({
-                path: 'sources.flowery.speed',
-                expected: 'number > 0',
-                value: flowery.speed,
-                validate: (v) => typeof v === 'number' && v > 0
-            }, this.nonNegativeIntRule('sources.flowery.silence', flowery.silence), this.booleanRule('sources.flowery.translate', flowery.translate), this.booleanRule('sources.flowery.enforceConfig', flowery.enforceConfig));
-        }
-        const lazypytts = sources.lazypytts;
-        if (lazypytts?.enabled) {
-            rules.push(this.positiveIntRule('sources.lazypytts.maxTextLength', lazypytts.maxTextLength), this.booleanRule('sources.lazypytts.enforceConfig', lazypytts.enforceConfig));
-        }
-        return rules;
+            },
+            this.floatMustNotExceed('sources.eternalbox.minRandomBranchChance', eternalbox.minRandomBranchChance, eternalbox.maxRandomBranchChance, 'sources.eternalbox.maxRandomBranchChance')
+        ];
+    }
+    validateSourceYoutube(youtube) {
+        if (!youtube?.enabled || youtube.cipher?.url === undefined)
+            return [];
+        return [this.urlRule('sources.youtube.cipher.url', youtube.cipher.url)];
+    }
+    validateSourcePipertts(pipertts) {
+        if (!pipertts?.enabled)
+            return [];
+        return [this.urlRule('sources.pipertts.url', pipertts.url)];
+    }
+    validateSourcePandora(pandora) {
+        if (!pandora?.enabled || !pandora.remoteTokenUrl)
+            return [];
+        return [
+            this.urlRule('sources.pandora.remoteTokenUrl', pandora.remoteTokenUrl)
+        ];
+    }
+    validateSourceQobuz(qobuz) {
+        if (!qobuz?.enabled)
+            return [];
+        return [
+            this.placeholderWarningRule('sources.qobuz.userToken', qobuz.userToken)
+        ];
+    }
+    validateSourceLastfm(lastfm) {
+        if (!lastfm?.enabled)
+            return [];
+        return [this.placeholderWarningRule('sources.lastfm.apiKey', lastfm.apiKey)];
+    }
+    validateSourceBilibili(bilibili) {
+        if (!bilibili?.enabled)
+            return [];
+        return [
+            this.placeholderWarningRule('sources.bilibili.sessdata', bilibili.sessdata)
+        ];
+    }
+    validateSourceYandexMusic(yandexmusic) {
+        if (!yandexmusic?.enabled)
+            return [];
+        return [
+            this.nonNegativeIntRule('sources.yandexmusic.artistLoadLimit', yandexmusic.artistLoadLimit),
+            this.nonNegativeIntRule('sources.yandexmusic.albumLoadLimit', yandexmusic.albumLoadLimit),
+            this.nonNegativeIntRule('sources.yandexmusic.playlistLoadLimit', yandexmusic.playlistLoadLimit),
+            this.placeholderWarningRule('sources.yandexmusic.accessToken', yandexmusic.accessToken)
+        ];
+    }
+    validateSourceGaana(gaana) {
+        if (!gaana?.enabled)
+            return [];
+        return [
+            this.nonNegativeIntRule('sources.gaana.playlistLoadLimit', gaana.playlistLoadLimit),
+            this.nonNegativeIntRule('sources.gaana.albumLoadLimit', gaana.albumLoadLimit),
+            this.nonNegativeIntRule('sources.gaana.artistLoadLimit', gaana.artistLoadLimit)
+        ];
+    }
+    validateSourceFlowery(flowery) {
+        if (!flowery?.enabled)
+            return [];
+        return [
+            this.positiveNumberRule('sources.flowery.speed', flowery.speed),
+            this.nonNegativeIntRule('sources.flowery.silence', flowery.silence),
+            this.booleanRule('sources.flowery.translate', flowery.translate),
+            this.booleanRule('sources.flowery.enforceConfig', flowery.enforceConfig)
+        ];
+    }
+    validateSourceLazypytts(lazypytts) {
+        if (!lazypytts?.enabled)
+            return [];
+        return [
+            this.positiveIntRule('sources.lazypytts.maxTextLength', lazypytts.maxTextLength),
+            this.booleanRule('sources.lazypytts.enforceConfig', lazypytts.enforceConfig)
+        ];
     }
     validateSearch() {
         const rules = [
@@ -469,7 +553,7 @@ export default class ConfigValidationManager {
             if (prevSection !== null && prevCfg !== null) {
                 const capturedPrevSection = prevSection;
                 const capturedPrevCfg = prevCfg;
-                rules.push(this.crossFieldIntRule(`rateLimit.${section}.maxRequests`, cfg.maxRequests, capturedPrevCfg.maxRequests, `rateLimit.${capturedPrevSection}.maxRequests`, `integer <= rateLimit.${capturedPrevSection}.maxRequests (${capturedPrevCfg.maxRequests})`, (v, dep) => v <= dep));
+                rules.push(this.intMustNotExceed(`rateLimit.${section}.maxRequests`, cfg.maxRequests, capturedPrevCfg.maxRequests, `rateLimit.${capturedPrevSection}.maxRequests`), this.intMustNotExceed(`rateLimit.${section}.timeWindowMs`, cfg.timeWindowMs, capturedPrevCfg.timeWindowMs, `rateLimit.${capturedPrevSection}.timeWindowMs`));
             }
             prevSection = section;
             prevCfg = cfg;
@@ -534,24 +618,7 @@ export default class ConfigValidationManager {
             this.positiveIntRule('connection.timeout', connection.timeout)
         ];
         if (connection.thresholds) {
-            rules.push({
-                path: 'connection.thresholds.bad',
-                expected: 'number > 0 (Mbps)',
-                value: connection.thresholds.bad,
-                validate: (v) => typeof v === 'number' && v > 0
-            }, {
-                path: 'connection.thresholds.average',
-                expected: 'number > 0 (Mbps)',
-                value: connection.thresholds.average,
-                validate: (v) => typeof v === 'number' && v > 0
-            }, {
-                path: 'connection.thresholds.bad',
-                expected: `number < connection.thresholds.average (${connection.thresholds.average})`,
-                value: connection.thresholds.bad,
-                validate: (v) => typeof connection.thresholds.average === 'number' &&
-                    typeof v === 'number' &&
-                    v < connection.thresholds.average
-            });
+            rules.push(this.positiveNumberRule('connection.thresholds.bad', connection.thresholds.bad), this.positiveNumberRule('connection.thresholds.average', connection.thresholds.average), this.floatMustBeBelow('connection.thresholds.bad', connection.thresholds.bad, connection.thresholds.average, 'connection.thresholds.average'));
         }
         return rules;
     }
@@ -594,7 +661,39 @@ export default class ConfigValidationManager {
     }
     validateFilters() {
         const filters = this.options.filters;
-        if (!filters?.enabled)
+        if (filters === undefined)
+            return [];
+        if (filters === null || typeof filters !== 'object') {
+            return [
+                {
+                    path: 'filters',
+                    expected: 'object with an enabled key',
+                    value: filters,
+                    validate: () => false
+                }
+            ];
+        }
+        if (!('enabled' in filters)) {
+            return [
+                {
+                    path: 'filters.enabled',
+                    expected: 'object of filter flags',
+                    value: undefined,
+                    validate: () => false
+                }
+            ];
+        }
+        if (filters.enabled === null || typeof filters.enabled !== 'object') {
+            return [
+                {
+                    path: 'filters.enabled',
+                    expected: 'object of filter flags',
+                    value: filters.enabled,
+                    validate: () => false
+                }
+            ];
+        }
+        if (Object.keys(filters.enabled).length === 0)
             return [];
         const filterFields = [
             'tremolo',
@@ -616,15 +715,23 @@ export default class ConfigValidationManager {
             .filter((f) => filters.enabled[f] !== undefined)
             .map((f) => this.booleanRule(`filters.enabled.${f}`, filters.enabled[f]));
     }
-    warnIfPlaceholder(path, value, except = []) {
-        if (typeof value === 'string' &&
-            KNOWN_PLACEHOLDERS.has(value) &&
-            !except.includes(value)) {
-            this.warnings.push({
-                path,
-                message: `Value "${value}" looks like an unfilled placeholder. The source may fail to authenticate at runtime.`
-            });
-        }
+    placeholderWarningRule(path, value, except = []) {
+        return {
+            path,
+            expected: 'non-placeholder value',
+            value,
+            validate: (v) => {
+                if (typeof v === 'string' &&
+                    KNOWN_PLACEHOLDERS.has(v) &&
+                    !except.includes(v)) {
+                    this.warnings.push({
+                        path,
+                        message: `Value "${v}" looks like an unfilled placeholder. The source may fail to authenticate at runtime.`
+                    });
+                }
+                return true;
+            }
+        };
     }
     nonNegativeIntRule(path, value) {
         return {
@@ -683,8 +790,14 @@ export default class ConfigValidationManager {
             validate: (v) => {
                 if (typeof v !== 'string' || v.trim().length === 0)
                     return false;
+                if (v !== v.trim()) {
+                    this.warnings.push({
+                        path,
+                        message: `URL value has leading or trailing whitespace. This may cause issues at runtime.`
+                    });
+                }
                 try {
-                    const url = new URL(v);
+                    const url = new URL(v.trim());
                     return url.protocol === 'http:' || url.protocol === 'https:';
                 }
                 catch {
@@ -693,14 +806,56 @@ export default class ConfigValidationManager {
             }
         };
     }
-    crossFieldIntRule(path, value, dependency, _dependencyPath, expected, compare) {
+    intMustExceed(path, value, dependency, dependencyPath) {
         return {
             path,
-            expected,
+            expected: `integer > ${dependencyPath} (${dependency})`,
             value,
-            validate: (v) => Number.isInteger(v) &&
-                Number.isInteger(dependency) &&
-                compare(v, dependency)
+            validate: (v) => Number.isInteger(v) && Number.isInteger(dependency) && v > dependency
+        };
+    }
+    intMustNotExceed(path, value, dependency, dependencyPath) {
+        return {
+            path,
+            expected: `integer <= ${dependencyPath} (${dependency})`,
+            value,
+            validate: (v) => Number.isInteger(v) && Number.isInteger(dependency) && v <= dependency
+        };
+    }
+    floatMustNotExceed(path, value, dependency, dependencyPath) {
+        return {
+            path,
+            expected: `number <= ${dependencyPath} (${dependency})`,
+            value,
+            validate: (v) => typeof v === 'number' &&
+                typeof dependency === 'number' &&
+                v <= dependency
+        };
+    }
+    floatMustBeBelow(path, value, dependency, dependencyPath) {
+        return {
+            path,
+            expected: `number < ${dependencyPath} (${dependency})`,
+            value,
+            validate: (v) => typeof v === 'number' &&
+                typeof dependency === 'number' &&
+                v < dependency
+        };
+    }
+    positiveNumberRule(path, value) {
+        return {
+            path,
+            expected: 'number > 0',
+            value,
+            validate: (v) => typeof v === 'number' && v > 0
+        };
+    }
+    stringArrayRule(path, value) {
+        return {
+            path,
+            expected: 'array of strings',
+            value,
+            validate: (v) => Array.isArray(v) && v.every((item) => typeof item === 'string')
         };
     }
 }

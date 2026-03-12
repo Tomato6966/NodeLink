@@ -883,6 +883,7 @@ export class Player {
     this.holoTrack = null
     this.isPaused = false
     this.position = 0
+    this._lastStreamDataTime = 0
     this.currentLyrics = null
     this.lyricsLineIndex = -1
     this._fading('reset')
@@ -3664,6 +3665,7 @@ export class Player {
           this._cleanupCurrentAudioStream('track-replaced')
         }
 
+        this._lastStreamDataTime = 0
         this.track = { encoded, info, endTime, userData, audioTrackId }
         this._fading('reset')
 
