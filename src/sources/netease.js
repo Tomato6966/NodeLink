@@ -8,7 +8,7 @@ import {
   getBestMatch,
   http1makeRequest,
   logger
-} from '../utils.js'
+} from '../utils.ts'
 
 const NETEASE_TRACK_PATTERN =
   /^https?:\/\/(?:www\.)?music\.163\.com\/?#?\/song\?id=(\d+)/

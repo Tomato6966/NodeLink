@@ -2,7 +2,7 @@
  * Made by: https://github.com/southctrl
  * I've added support for ntsearch!
  */
-import { encodeTrack, getBestMatch, http1makeRequest, logger } from '../utils.js';
+import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
 const NETEASE_TRACK_PATTERN = /^https?:\/\/(?:www\.)?music\.163\.com\/?#?\/song\?id=(\d+)/;
 const NETEASE_ALBUM_PATTERN = /^https?:\/\/(?:www\.)?music\.163\.com\/?#?\/album\?id=(\d+)/;
 const NETEASE_PLAYLIST_PATTERN = /^https?:\/\/(?:www\.)?music\.163\.com\/?#?\/playlist\?id=(\d+)/;
