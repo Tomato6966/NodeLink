@@ -144,6 +144,11 @@ export interface SpotifySourceConfig extends SourceConfigBase {
    * Album load limit
    */
   albumLoadLimit: number
+
+  /**
+   * Whether Spotify playlist local files should be included
+   */
+  allowLocalFiles: boolean
 }
 
 /**

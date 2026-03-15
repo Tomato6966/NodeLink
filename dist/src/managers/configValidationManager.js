@@ -294,6 +294,7 @@ export default class ConfigValidationManager {
             this.nonNegativeIntRule('sources.spotify.albumLoadLimit', spotify.albumLoadLimit),
             this.positiveIntRule('sources.spotify.playlistPageLoadConcurrency', spotify.playlistPageLoadConcurrency),
             this.positiveIntRule('sources.spotify.albumPageLoadConcurrency', spotify.albumPageLoadConcurrency),
+            this.booleanRule('sources.spotify.allowLocalFiles', spotify.allowLocalFiles),
             {
                 path: 'sources.spotify.clientId',
                 expected: 'non-empty string when sources.spotify.clientSecret is set',

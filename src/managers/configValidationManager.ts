@@ -562,6 +562,10 @@ export default class ConfigValidationManager {
         'sources.spotify.albumPageLoadConcurrency',
         spotify.albumPageLoadConcurrency
       ),
+      this.booleanRule(
+        'sources.spotify.allowLocalFiles',
+        spotify.allowLocalFiles
+      ),
       {
         path: 'sources.spotify.clientId',
         expected: 'non-empty string when sources.spotify.clientSecret is set',

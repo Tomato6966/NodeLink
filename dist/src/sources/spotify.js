@@ -39,7 +39,8 @@ export default class SpotifySource {
         this.searchTerms = ['spsearch'];
         this.recommendationTerm = ['sprec'];
         this.patterns = [
-            /https?:\/\/(?:open\.)?spotify\.com\/(?:intl-[a-zA-Z]{2}\/)?(track|album|playlist|artist|episode|show)\/([a-zA-Z0-9]+)/
+            /https?:\/\/(?:open\.)?spotify\.com\/(?:intl-[a-zA-Z]{2}\/)?(track|album|playlist|artist|episode|show)\/([a-zA-Z0-9]+)/,
+            /https?:\/\/(?:open\.)?spotify\.com\/(?:intl-[a-zA-Z]{2}\/)?local\/[^?#]+/
         ];
         this.priority = 95;
         this.accessToken = null;
@@ -54,6 +55,7 @@ export default class SpotifySource {
         this.market = 'US';
         this.tokenInitialized = false;
         this.allowExplicit = true;
+        this.allowLocalFiles = false;
         this.anonymousToken = null;
         this.mobileToken = null;
         this.spDc = null;
@@ -62,17 +64,28 @@ export default class SpotifySource {
         this.accessToken = this.nodelink.credentialManager.get('spotify_access_token');
         this.anonymousToken = this.nodelink.credentialManager.get('spotify_anonymous_token');
         this.mobileToken = this.nodelink.credentialManager.get('spotify_mobile_token');
-        const hasOfficialConfig = this.config.sources.spotify?.clientId &&
-            this.config.sources.spotify?.clientSecret;
-        const hasAnonymousConfig = this.config.sources.spotify?.externalAuthUrl ||
-            this.config.sources.spotify?.sp_dc;
+        const spotifyConfig = this.config.sources.spotify || {};
+        this.clientId = spotifyConfig.clientId;
+        this.clientSecret = spotifyConfig.clientSecret;
+        this.externalAuthUrl = spotifyConfig.externalAuthUrl;
+        this.spDc = spotifyConfig.sp_dc;
+        this.playlistLoadLimit = spotifyConfig.playlistLoadLimit ?? 0;
+        this.playlistPageLoadConcurrency =
+            spotifyConfig.playlistPageLoadConcurrency ?? BATCH_SIZE_DEFAULT;
+        this.albumLoadLimit = spotifyConfig.albumLoadLimit ?? 0;
+        this.albumPageLoadConcurrency =
+            spotifyConfig.albumPageLoadConcurrency ?? BATCH_SIZE_DEFAULT;
+        this.market = spotifyConfig.market || 'US';
+        this.allowExplicit = spotifyConfig.allowExplicit ?? true;
+        this.allowLocalFiles = spotifyConfig.allowLocalFiles ?? false;
+        const hasOfficialConfig = this.clientId && this.clientSecret;
+        const hasAnonymousConfig = this.externalAuthUrl || this.spDc;
         const missingOfficial = hasOfficialConfig && !this.accessToken;
         const missingAnonymous = hasAnonymousConfig && !this.anonymousToken;
         if (!missingOfficial && !missingAnonymous) {
             if (this.accessToken || this.anonymousToken) {
                 this.tokenInitialized = true;
-                if (this.config.sources.spotify?.sp_dc) {
-                    this.spDc = this.config.sources.spotify.sp_dc;
+                if (this.spDc) {
                     if (!this.mobileToken)
                         await this._refreshMobileToken();
                 }
@@ -80,21 +93,6 @@ export default class SpotifySource {
             }
         }
         try {
-            this.clientId = this.config.sources.spotify?.clientId;
-            this.clientSecret = this.config.sources.spotify?.clientSecret;
-            this.externalAuthUrl = this.config.sources.spotify?.externalAuthUrl;
-            this.spDc = this.config.sources.spotify?.sp_dc;
-            this.playlistLoadLimit =
-                this.config.sources.spotify?.playlistLoadLimit ?? 0;
-            this.playlistPageLoadConcurrency =
-                this.config.sources.spotify?.playlistPageLoadConcurrency ??
-                    BATCH_SIZE_DEFAULT;
-            this.albumLoadLimit = this.config.sources.spotify?.albumLoadLimit ?? 0;
-            this.albumPageLoadConcurrency =
-                this.config.sources.spotify?.albumPageLoadConcurrency ??
-                    BATCH_SIZE_DEFAULT;
-            this.market = this.config.sources.spotify?.market || 'US';
-            this.allowExplicit = this.config.sources.spotify?.allowExplicit ?? true;
             if (!this.externalAuthUrl && !this.spDc && (!this.clientId || !this.clientSecret)) {
                 logger('warn', 'Spotify', 'Neither externalAuthUrl, sp_dc nor Client ID/Secret provided. Disabling source.');
                 return false;
@@ -462,8 +460,187 @@ export default class SpotifySource {
         }
         return allItems;
     }
+    _getInternalTrackAuthor(item, fallback = 'Unknown') {
+        return (item?.artists?.items
+            ?.map((artist) => artist.profile?.name || artist.name)
+            .filter(Boolean)
+            .join(', ') ||
+            item?.firstArtist?.items?.[0]?.profile?.name ||
+            item?.otherArtists?.items
+                ?.map((artist) => artist.profile?.name || artist.name)
+                .filter(Boolean)
+                .join(', ') ||
+            fallback);
+    }
+    _isLocalTrack(item, wrapper = null) {
+        return (item?.is_local === true ||
+            item?.pluginInfo?.isLocal === true ||
+            item?.pluginInfo?.localFile === true ||
+            wrapper?.is_local === true ||
+            item?.uri?.startsWith('spotify:local:') ||
+            item?.identifier === 'local');
+    }
+    _decodeLocalTrackUri(uri) {
+        if (!uri?.startsWith('spotify:local:'))
+            return null;
+        const [author, album, title, durationSeconds] = uri
+            .slice('spotify:local:'.length)
+            .split(':')
+            .map((part) => decodeURIComponent(part.replace(/\+/g, ' ')));
+        const length = Number.parseInt(durationSeconds || '', 10);
+        return {
+            author: author || 'Unknown',
+            album: album || null,
+            title: title || null,
+            length: Number.isFinite(length) ? length * 1000 : 0
+        };
+    }
+    _decodeLocalUrl(url) {
+        try {
+            const parsedUrl = new URL(url);
+            const pathParts = parsedUrl.pathname
+                .split('/')
+                .filter(Boolean)
+                .map((part) => decodeURIComponent(part));
+            const localIndex = pathParts.indexOf('local');
+            if (localIndex === -1)
+                return null;
+            const [author, album, title, durationSeconds] = pathParts.slice(localIndex + 1);
+            const length = Number.parseInt(durationSeconds || '', 10);
+            return {
+                author: author || 'Unknown',
+                album: album || null,
+                title: title || null,
+                length: Number.isFinite(length) ? length * 1000 : 0
+            };
+        }
+        catch (_e) {
+            return null;
+        }
+    }
+    _buildLocalTrackSearchTerm(item) {
+        if (item?.uri?.includes('open.spotify.com/local/')) {
+            return item.uri;
+        }
+        if (item?.uri?.startsWith('spotify:local:')) {
+            const localPath = item.uri
+                .slice('spotify:local:'.length)
+                .split(':')
+                .map((part) => encodeURIComponent(decodeURIComponent(part.replace(/\+/g, ' '))))
+                .join('/');
+            return `https://open.spotify.com/local/${localPath}`;
+        }
+        const decodedLocal = this._decodeLocalTrackUri(item?.uri);
+        const author = decodedLocal?.author ||
+            item?.artists?.map((artist) => artist.name).join(', ') ||
+            this._getInternalTrackAuthor(item, null);
+        return [
+            decodedLocal?.title || item?.name,
+            author,
+            decodedLocal?.album
+        ]
+            .filter(Boolean)
+            .join(' ');
+    }
+    async _searchLocalTrack(item) {
+        if (!this.allowLocalFiles || (!this.externalAuthUrl && !this.anonymousToken)) {
+            return null;
+        }
+        const searchTerm = this._buildLocalTrackSearchTerm(item);
+        if (!searchTerm)
+            return null;
+        try {
+            const data = await this._internalApiRequest(QUERIES.searchDesktop, {
+                searchTerm,
+                offset: 0,
+                limit: 1,
+                numberOfTopResults: 1,
+                includeAudiobooks: false,
+                includeArtistHasConcertsField: false,
+                includePreReleases: false
+            });
+            return data?.searchV2?.tracksV2?.items?.[0]?.item?.data || null;
+        }
+        catch (e) {
+            logger('debug', 'Spotify', `Failed to match Spotify local file "${item?.name || item?.uri || 'unknown'}": ${e.message}`);
+            return null;
+        }
+    }
+    async _buildLocalTrack(item) {
+        if (!this.allowLocalFiles)
+            return null;
+        const matchedTrack = await this._searchLocalTrack(item);
+        const decodedLocal = this._decodeLocalTrackUri(item?.uri) || this._decodeLocalUrl(item?.uri);
+        const trackInfo = {
+            identifier: 'local',
+            isSeekable: true,
+            author: this._getInternalTrackAuthor(matchedTrack, null) ||
+                matchedTrack?.artists?.map((artist) => artist.name).join(', ') ||
+                decodedLocal?.author ||
+                item?.artists?.map((artist) => artist.name).join(', ') ||
+                this._getInternalTrackAuthor(item, null) ||
+                'Unknown',
+            length: matchedTrack?.duration?.totalMilliseconds ||
+                matchedTrack?.trackDuration?.totalMilliseconds ||
+                matchedTrack?.duration_ms ||
+                item?.duration?.totalMilliseconds ||
+                item?.trackDuration?.totalMilliseconds ||
+                item?.duration_ms ||
+                decodedLocal?.length ||
+                0,
+            isStream: false,
+            position: 0,
+            title: matchedTrack?.name || decodedLocal?.title || item?.name,
+            uri: null,
+            artworkUrl: matchedTrack?.albumOfTrack?.coverArt?.sources?.[0]?.url ||
+                matchedTrack?.album?.images?.[0]?.url ||
+                item?.albumOfTrack?.coverArt?.sources?.[0]?.url ||
+                item?.album?.images?.[0]?.url ||
+                null,
+            isrc: null,
+            sourceName: 'spotify'
+        };
+        if (!trackInfo.title)
+            return null;
+        return {
+            encoded: encodeTrack(trackInfo),
+            info: trackInfo,
+            pluginInfo: { localFile: true }
+        };
+    }
+    async _resolveLocalTrack(url) {
+        if (!this.allowLocalFiles) {
+            return {
+                exception: {
+                    message: 'Spotify local files are disabled. Enable sources.spotify.allowLocalFiles to resolve them.',
+                    severity: 'common'
+                }
+            };
+        }
+        const decodedLocal = this._decodeLocalUrl(url);
+        const localTrack = await this._buildLocalTrack({
+            name: decodedLocal?.title,
+            uri: url,
+            duration_ms: decodedLocal?.length || 0,
+            artists: decodedLocal?.author
+                ? decodedLocal.author.split(', ').map((name) => ({ name }))
+                : []
+        });
+        if (!localTrack) {
+            return {
+                exception: {
+                    message: 'Spotify local file could not be resolved.',
+                    severity: 'common'
+                }
+            };
+        }
+        return {
+            loadType: 'track',
+            data: localTrack
+        };
+    }
     _buildTrackFromInternal(item, artworkUrl = null) {
-        if (!item?.uri)
+        if (!item?.uri || this._isLocalTrack(item))
             return null;
         const id = item.uri.split(':').pop();
         const isExplicit = item.contentRating?.label === 'EXPLICIT' || item.explicit === true;
@@ -472,10 +649,7 @@ export default class SpotifySource {
         const trackInfo = {
             identifier: id,
             isSeekable: true,
-            author: item.artists?.items?.map((a) => a.profile?.name || a.name).join(', ') ||
-                item.firstArtist?.items[0]?.profile?.name ||
-                item.otherArtists.items.map((a) => a.profile.name).join(', ') ||
-                'Unknown',
+            author: this._getInternalTrackAuthor(item),
             length: item.duration?.totalMilliseconds ||
                 item.trackDuration?.totalMilliseconds ||
                 0,
@@ -497,7 +671,7 @@ export default class SpotifySource {
         };
     }
     _buildTrack(item, artworkUrl = null) {
-        if (!item?.id)
+        if (!item?.id || this._isLocalTrack(item))
             return null;
         const isExplicit = item.explicit || false;
         let trackUri = item.external_urls?.spotify || '';
@@ -930,6 +1104,9 @@ export default class SpotifySource {
     }
     async resolve(url) {
         try {
+            if (this.patterns[1].test(url)) {
+                return await this._resolveLocalTrack(url);
+            }
             const match = url.match(this.patterns[0]);
             if (!match)
                 return { loadType: 'empty', data: {} };
@@ -1118,22 +1295,36 @@ export default class SpotifySource {
                     allItems.push(...additionalItems);
                 }
                 const trackIds = allItems
-                    .map((it) => it.itemV2?.data?.uri?.split(':').pop())
+                    .map((it) => it.itemV2?.data)
+                    .filter((item) => item?.uri && !this._isLocalTrack(item))
+                    .map((item) => item.uri.split(':').pop())
                     .filter(Boolean);
-                let tracks = [];
+                let fullTrackMap = new Map();
                 const hasOfficial = this.clientId && this.clientSecret;
                 if (hasOfficial && trackIds.length > 0) {
                     const fullTracks = await this._fetchFullTracks(trackIds);
                     if (fullTracks.length > 0) {
-                        tracks = fullTracks
-                            .map((t) => this._buildTrack(t))
-                            .filter(Boolean);
+                        fullTrackMap = new Map(fullTracks.map((track) => [track.id, track]));
                     }
                 }
-                if (tracks.length === 0) {
-                    tracks = allItems
-                        .map((item) => this._buildTrackFromInternal(item.itemV2?.data))
-                        .filter(Boolean);
+                const tracks = [];
+                for (const playlistItem of allItems) {
+                    const item = playlistItem.itemV2?.data;
+                    if (!item)
+                        continue;
+                    if (this._isLocalTrack(item)) {
+                        const localTrack = await this._buildLocalTrack(item);
+                        if (localTrack)
+                            tracks.push(localTrack);
+                        continue;
+                    }
+                    const id = item.uri?.split(':').pop();
+                    const fullTrack = id ? fullTrackMap.get(id) : null;
+                    const builtTrack = fullTrack
+                        ? this._buildTrack(fullTrack)
+                        : this._buildTrackFromInternal(item);
+                    if (builtTrack)
+                        tracks.push(builtTrack);
                 }
                 return {
                     loadType: 'playlist',
@@ -1152,7 +1343,7 @@ export default class SpotifySource {
                 };
             }
         }
-        const fields = 'name,tracks(items(track(id,name,artists,duration_ms,external_urls,external_ids,explicit,album(images))),total)';
+        const fields = 'name,tracks(items(is_local,track(id,name,artists,duration_ms,external_urls,external_ids,explicit,album(images),uri)),total)';
         const playlistData = await this._apiRequest(`/playlists/${id}?fields=${fields}&market=${this.market}`);
         if (!playlistData) {
             return {
@@ -1164,15 +1355,22 @@ export default class SpotifySource {
             allItems.push(...playlistData.tracks.items);
         }
         const totalTracks = playlistData.tracks.total;
-        const additionalFields = 'items(track(id,name,artists,duration_ms,external_urls,external_ids,explicit,album(images)))';
+        const additionalFields = 'items(is_local,track(id,name,artists,duration_ms,external_urls,external_ids,explicit,album(images),uri))';
         const additionalItems = await this._fetchPaginatedData(`/playlists/${id}/tracks?fields=${additionalFields}&market=${this.market}`, totalTracks, 100, this.playlistLoadLimit, this.playlistPageLoadConcurrency);
         allItems.push(...additionalItems);
-        const tracks = allItems
-            .map((item) => {
+        const tracks = [];
+        for (const item of allItems) {
             const track = item.track || item;
-            return this._buildTrack(track);
-        })
-            .filter(Boolean);
+            if (this._isLocalTrack(track, item)) {
+                const localTrack = await this._buildLocalTrack(track);
+                if (localTrack)
+                    tracks.push(localTrack);
+                continue;
+            }
+            const builtTrack = this._buildTrack(track);
+            if (builtTrack)
+                tracks.push(builtTrack);
+        }
         logger('info', 'Spotify', `Loaded ${tracks.length} of ${totalTracks} tracks from playlist "${playlistData.name}".`);
         return {
             loadType: 'playlist',

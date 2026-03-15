@@ -373,6 +373,7 @@ export default {
             albumLoadLimit: 1, // 0 means no limit (loads all tracks), 1 = 50 tracks, 2 = 100 tracks, etc.
             albumPageLoadConcurrency: 5, // How many pages to load simultaneously
             allowExplicit: true, // If true plays the explicit version of the song, If false plays the Non-Explicit version of the song. Normal songs are not affected.
+            allowLocalFiles: false, // If true, Spotify playlist local files are kept as placeholder tracks so they can still be searched and played through fallback sources.
             sp_dc: '' // fot getting mobile token (optional) get from spotify in browser devtools -> Application -> Cookies -> sp_dc (required for canvas)
         },
         applemusic: {
