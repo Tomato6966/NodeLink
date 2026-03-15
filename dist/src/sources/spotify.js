@@ -80,9 +80,10 @@ export default class SpotifySource {
         this.allowLocalFiles = spotifyConfig.allowLocalFiles ?? false;
         const hasOfficialConfig = this.clientId && this.clientSecret;
         const hasAnonymousConfig = this.externalAuthUrl || this.spDc;
+        const shouldRefreshOfficialToken = !!hasOfficialConfig;
         const missingOfficial = hasOfficialConfig && !this.accessToken;
         const missingAnonymous = hasAnonymousConfig && !this.anonymousToken;
-        if (!missingOfficial && !missingAnonymous) {
+        if (!shouldRefreshOfficialToken && !missingOfficial && !missingAnonymous) {
             if (this.accessToken || this.anonymousToken) {
                 this.tokenInitialized = true;
                 if (this.spDc) {
@@ -257,7 +258,9 @@ export default class SpotifySource {
         else if (this.anonymousToken) {
             success = true;
         }
-        if (this.clientId && this.clientSecret && !this.accessToken) {
+        if (this.clientId && this.clientSecret) {
+            this.accessToken = null;
+            this.nodelink.credentialManager.set('spotify_access_token', null);
             try {
                 const auth = Buffer.from(`${this.clientId}:${this.clientSecret}`).toString('base64');
                 const { body: tokenData, error, statusCode } = await http1makeRequest('https://accounts.spotify.com/api/token', {
@@ -1220,7 +1223,8 @@ export default class SpotifySource {
         return { loadType: 'empty', data: {} };
     }
     async _resolveAlbum(id) {
-        if (this.externalAuthUrl) {
+        // locally generated tokens can also work ig.
+        if (this._isTokenValid() && this.accessToken || this.externalAuthUrl) {
             const data = await this._internalApiRequest(QUERIES.getAlbum, {
                 uri: `spotify:album:${id}`,
                 locale: 'en',
