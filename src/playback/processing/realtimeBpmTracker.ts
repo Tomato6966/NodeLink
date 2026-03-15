@@ -65,6 +65,7 @@ export class RealtimeBpmTracker {
   private phase = 0
   private phaseAnchorSec = Number.NEGATIVE_INFINITY
   private phasePeriodSec = 0
+  private readonly _tempoBins = new Map<number, number>()
 
   constructor(options: RealtimeBpmTrackerOptions = {}) {
     this.opts = { ...DEFAULTS, ...options }
@@ -87,20 +88,24 @@ export class RealtimeBpmTracker {
     this.phasePeriodSec = 0
   }
 
+  private _cachedState: RealtimeBeatState = {
+    timeSec: 0, bpm: 0, confidence: 0, phase: 0, locked: false, lastBeatAgeSec: Number.POSITIVE_INFINITY
+  }
+
   public getState(): RealtimeBeatState {
     const lastBeatAgeSec = Number.isFinite(this.lastBeatSec)
       ? Math.max(0, this.timeSec - this.lastBeatSec)
       : Number.POSITIVE_INFINITY
     const locked = this._isLocked()
 
-    return {
-      timeSec: this.timeSec,
-      bpm: this.bpm,
-      confidence: this.confidence,
-      phase: this.phase,
-      locked,
-      lastBeatAgeSec
-    }
+    const s = this._cachedState
+    s.timeSec = this.timeSec
+    s.bpm = this.bpm
+    s.confidence = this.confidence
+    s.phase = this.phase
+    s.locked = locked
+    s.lastBeatAgeSec = lastBeatAgeSec
+    return s
   }
 
   public push(onset: number, deltaSec: number): RealtimeBeatState {
@@ -278,7 +283,8 @@ export class RealtimeBpmTracker {
       return { tempo: 0, consistency: 0, separation: 0 }
     }
 
-    const bins = new Map<number, number>()
+    const bins = this._tempoBins
+    bins.clear()
     const currentTempo = this.bpm > 0 ? this.bpm : null
     const n = this.intervalsSec.length
     for (let i = 0; i < n; i++) {
@@ -369,6 +375,8 @@ export class RealtimeBpmTracker {
     }
   }
 
+  private _absDevsCache: number[] = []
+
   private _intervalConsistency(): number {
     const n = this.intervalsSec.length
     if (n === 0) return 0
@@ -377,20 +385,35 @@ export class RealtimeBpmTracker {
 
     const median = RealtimeBpmTracker._median(this.intervalsSec)
     if (!(median > 0)) return 0
-    const absDevs = this.intervalsSec.map((v) => Math.abs(v - median))
+    const absDevs = this._absDevsCache
+    absDevs.length = n
+    for (let i = 0; i < n; i++) absDevs[i] = Math.abs(this.intervalsSec[i]! - median)
     const mad = RealtimeBpmTracker._median(absDevs)
     const relMad = mad / median
     return RealtimeBpmTracker._clamp(1 - relMad / 0.18, 0, 1)
   }
 
+  private static _sortBuf: number[] = []
+
   private static _median(values: number[]): number {
-    if (values.length === 0) return 0
-    const sorted = values.slice().sort((a, b) => a - b)
-    const half = sorted.length >> 1
-    if (sorted.length % 2 === 0) {
-      return ((sorted[half - 1] ?? 0) + (sorted[half] ?? 0)) * 0.5
+    const n = values.length
+    if (n === 0) return 0
+    // Reuse sort buffer to avoid allocation (arrays are ≤12 elements)
+    const buf = RealtimeBpmTracker._sortBuf
+    buf.length = n
+    for (let i = 0; i < n; i++) buf[i] = values[i]!
+    // Insertion sort — fast for small n (≤12)
+    for (let i = 1; i < n; i++) {
+      const key = buf[i]!
+      let j = i - 1
+      while (j >= 0 && buf[j]! > key) { buf[j + 1] = buf[j]!; j-- }
+      buf[j + 1] = key
     }
-    return sorted[half] ?? 0
+    const half = n >> 1
+    if (n % 2 === 0) {
+      return ((buf[half - 1] ?? 0) + (buf[half] ?? 0)) * 0.5
+    }
+    return buf[half] ?? 0
   }
 
   private static _clamp(value: number, min: number, max: number): number {

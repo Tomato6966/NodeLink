@@ -3353,6 +3353,10 @@ export class CrossfadeController extends Transform {
     const onset = Math.max(0, rms - this._prevRmsForOnset)
     this._prevRmsForOnset = rms
     this._onsetBuffer.push(onset)
+    const maxOnsets = Math.max(64, Math.round(20000 / Math.max(1, this._onsetChunkMs)))
+    if (this._onsetBuffer.length > maxOnsets) {
+      this._onsetBuffer.shift()
+    }
     if (chunkMs > 0) {
       this._rtBeatState = this._rtBeatTracker.push(onset, chunkMs / 1000)
       if (
@@ -3420,12 +3424,16 @@ export class CrossfadeController extends Transform {
     }
   }
 
+  private _mainEnergyResult = { rms: 0, peak: 0 }
+
   /**
    * Returns the current smoothed energy of the main stream.
    * Used by the player for intelligent transition point detection.
    */
   public getMainEnergy(): { rms: number; peak: number } {
-    return { rms: this._mainRmsEma, peak: this._mainRmsPeak }
+    this._mainEnergyResult.rms = this._mainRmsEma
+    this._mainEnergyResult.peak = this._mainRmsPeak
+    return this._mainEnergyResult
   }
 
   /**

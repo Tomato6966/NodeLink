@@ -1225,6 +1225,53 @@ export class Player {
   }
 
   /**
+   * Examines synchronized lyrics at a given playback position and returns
+   * hints useful for crossfade trigger timing.
+   */
+  private _getLyricsHint(positionMs: number): {
+    inVocalLine: boolean
+    msUntilLineEnd: number
+    gapDurationMs: number
+    isOutro: boolean
+  } | null {
+    const lines = this.currentLyrics?.lines
+    if (!lines || lines.length === 0) return null
+
+    // Binary search: find last line with timestamp <= positionMs
+    let lo = 0, hi = lines.length - 1, idx = -1
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1
+      if (lines[mid]!.timestamp <= positionMs) { idx = mid; lo = mid + 1 }
+      else hi = mid - 1
+    }
+
+    if (idx >= 0) {
+      const l = lines[idx]!
+      const lineEnd = l.timestamp + l.duration
+      if (positionMs < lineEnd) {
+        return {
+          inVocalLine: true,
+          msUntilLineEnd: Math.max(0, lineEnd - positionMs),
+          gapDurationMs: 0,
+          isOutro: false
+        }
+      }
+    }
+
+    // We're in a gap (between lines or after all lines)
+    const nextLine = idx + 1 < lines.length ? lines[idx + 1]! : null
+    const isOutro = !nextLine
+    const gapDurationMs = nextLine ? Math.max(0, nextLine.timestamp - positionMs) : Infinity
+
+    return {
+      inVocalLine: false,
+      msUntilLineEnd: 0,
+      gapDurationMs: isOutro ? Infinity : gapDurationMs,
+      isOutro
+    }
+  }
+
+  /**
    * Triggers an immediate crossfade to the preloaded next track.
    * Useful for manual "/automix start" bot commands.
    *
@@ -2154,6 +2201,7 @@ export class Player {
 
     if (automixConfig?.enabled && total > 0 && !this.track?.info.isStream) {
       const energyHistory: number[] = []
+      let energySum = 0
       let triggered = false
       let trackBEnergy = 0
       let prevSlope = 0 // For derivative tracking
@@ -2172,12 +2220,15 @@ export class Player {
         const audioStream = this._getAudioStream()
         trackBEnergy = audioStream?.getNextTrackOpeningEnergy?.() ?? 0
 
+        const lyricsAvailable = Boolean(this.currentLyrics?.lines?.length)
         logger(
           'info',
           'AutoMix',
           `Analysis window open for guild ${this.guildId}`,
           {
-            trackBOpeningEnergy: `${(trackBEnergy * 100).toFixed(1)}%`
+            trackBOpeningEnergy: `${(trackBEnergy * 100).toFixed(1)}%`,
+            lyricsLines: lyricsAvailable ? this.currentLyrics!.lines.length : 0,
+            lyricsProvider: lyricsAvailable ? this.currentLyrics!.provider ?? this.currentLyrics!.sourceName : 'none'
           }
         )
 
@@ -2314,8 +2365,10 @@ export class Player {
             }
           }
 
+          energySum += energy.rms
           energyHistory.push(energy.rms)
           if (energyHistory.length > ENERGY_HISTORY_SIZE) {
+            energySum -= energyHistory[0]!
             energyHistory.shift()
           }
 
@@ -2373,9 +2426,58 @@ export class Player {
           if (energyHistory.length * ENERGY_POLL_MS < effectivePatienceMs)
             return
 
-          const avg =
-            energyHistory.reduce((a, b) => a + b, 0) / energyHistory.length
+          // ── Lyrics-aware triggers ──────────────────────────────────
+          const currentPosMs = startPosition + energyHistory.length * ENERGY_POLL_MS
+          const lyricsHint = this._getLyricsHint(currentPosMs)
+          let lyricsVetoMs = 0
+
+          if (lyricsHint && remainingMs < SMART_ZONE_MS) {
+            // Outro: vocals are done — perfect time to transition
+            if (lyricsHint.isOutro) {
+              logger(
+                'info',
+                'AutoMix',
+                `Lyrics outro detected for guild ${this.guildId}: no vocals after ${(currentPosMs / 1000).toFixed(1)}s (remaining ${(remainingMs / 1000).toFixed(1)}s)`
+              )
+              triggered = true
+              triggerAutomix(
+                `lyrics outro: no vocals after ${(currentPosMs / 1000).toFixed(1)}s`
+              )
+              return
+            }
+
+            // Gap between lines ≥1.5s — natural pause / section break
+            if (!lyricsHint.inVocalLine && lyricsHint.gapDurationMs >= 1500) {
+              logger(
+                'info',
+                'AutoMix',
+                `Lyrics gap detected for guild ${this.guildId}: ${(lyricsHint.gapDurationMs / 1000).toFixed(1)}s gap at ${(currentPosMs / 1000).toFixed(1)}s (remaining ${(remainingMs / 1000).toFixed(1)}s)`
+              )
+              triggered = true
+              triggerAutomix(
+                `lyrics gap: ${(lyricsHint.gapDurationMs / 1000).toFixed(1)}s gap at ${(currentPosMs / 1000).toFixed(1)}s`
+              )
+              return
+            }
+
+            // Soft veto: if mid-vocal and line ends within 2s, defer energy triggers
+            if (lyricsHint.inVocalLine && lyricsHint.msUntilLineEnd > 0 && lyricsHint.msUntilLineEnd <= 2000) {
+              lyricsVetoMs = lyricsHint.msUntilLineEnd
+            }
+          }
+
+          const avg = energySum / energyHistory.length
           const current = energy.rms
+
+          // Lyrics soft veto: defer energy triggers while mid-vocal line
+          if (lyricsVetoMs > 0 && lyricsHint?.inVocalLine) {
+            logger(
+              'debug',
+              'AutoMix',
+              `Lyrics veto: deferring energy trigger for guild ${this.guildId} (vocal line ends in ${lyricsVetoMs}ms at ${(currentPosMs / 1000).toFixed(1)}s)`
+            )
+            return
+          }
 
           const beatState = stream?.getRealtimeBeatState?.() ?? null
           const beatLocked = Boolean(
@@ -2420,12 +2522,14 @@ export class Player {
             remainingMs < SMART_ZONE_MS &&
             remainingMs > Math.max(7000, MIN_REMAINING_MS * 0.3)
           ) {
-            const recent = energyHistory.slice(-10)
-            const recentAvg =
-              recent.reduce((sum, v) => sum + v, 0) / Math.max(1, recent.length)
-            const variance =
-              recent.reduce((sum, v) => sum + Math.abs(v - recentAvg), 0) /
-              Math.max(1, recent.length)
+            const recentLen = Math.min(10, energyHistory.length)
+            const recentStart = energyHistory.length - recentLen
+            let recentSum = 0
+            for (let ri = recentStart; ri < energyHistory.length; ri++) recentSum += energyHistory[ri]!
+            const recentAvg = recentSum / recentLen
+            let variance = 0
+            for (let ri = recentStart; ri < energyHistory.length; ri++) variance += Math.abs(energyHistory[ri]! - recentAvg)
+            variance /= recentLen
             const continuityFloor = Math.max(
               MIN_RMS_FLOOR * 0.7,
               trackBEnergy * 0.33,
@@ -2481,10 +2585,11 @@ export class Player {
           }
 
           if (energyHistory.length >= 16 && remainingMs < SMART_ZONE_MS) {
-            const recentSlice = energyHistory.slice(-12)
-            const first = recentSlice[0] ?? 0
-            const last = recentSlice[recentSlice.length - 1] ?? first
-            const slope = (last - first) / Math.max(1, recentSlice.length - 1)
+            const sliceLen = Math.min(12, energyHistory.length)
+            const sliceStart = energyHistory.length - sliceLen
+            const first = energyHistory[sliceStart] ?? 0
+            const last = energyHistory[energyHistory.length - 1] ?? first
+            const slope = (last - first) / Math.max(1, sliceLen - 1)
             if (prevSlope > 0.004 && slope < -0.004) {
               triggered = true
               triggerAutomix(
@@ -2496,7 +2601,10 @@ export class Player {
           }
 
           if (energyHistory.length >= 16 && remainingMs < SMART_ZONE_MS) {
-            const windowMin = Math.min(...energyHistory)
+            let windowMin = energyHistory[0]!
+            for (let mi = 1; mi < energyHistory.length; mi++) {
+              if (energyHistory[mi]! < windowMin) windowMin = energyHistory[mi]!
+            }
             if (current <= windowMin && current < avg * 0.55) {
               triggered = true
               triggerAutomix(
@@ -2507,12 +2615,14 @@ export class Player {
           }
 
           if (energyHistory.length >= 12 && remainingMs < SMART_ZONE_MS) {
-            const recent = energyHistory.slice(-20)
-            const recentAvg =
-              recent.reduce((a, b) => a + b, 0) / Math.max(1, recent.length)
-            const variance =
-              recent.reduce((sum, v) => sum + Math.abs(v - recentAvg), 0) /
-              Math.max(1, recent.length)
+            const pLen = Math.min(20, energyHistory.length)
+            const pStart = energyHistory.length - pLen
+            let pSum = 0
+            for (let pi = pStart; pi < energyHistory.length; pi++) pSum += energyHistory[pi]!
+            const recentAvg = pSum / pLen
+            let variance = 0
+            for (let pi = pStart; pi < energyHistory.length; pi++) variance += Math.abs(energyHistory[pi]! - recentAvg)
+            variance /= pLen
             if (variance < recentAvg * 0.04) {
               steadyCount++
             } else {

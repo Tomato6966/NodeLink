@@ -129,6 +129,7 @@ export class LoudnessNormalizer {
   private _attackAlpha = 0
   private _releaseAlpha = 0
   private _energyAlpha = 0
+  private _channelBuffer: Float32Array
 
   /**
    * Creates a new LoudnessNormalizer.
@@ -152,6 +153,7 @@ export class LoudnessNormalizer {
     this._initialEnergy = fround(10 ** ((this.targetLoudness + 0.691) / 10))
     this._energyState = this._initialEnergy
     this._currentGain = 1.0
+    this._channelBuffer = new Float32Array(this.channels)
 
     this._updateSmoothingCoefficients()
   }
@@ -164,6 +166,7 @@ export class LoudnessNormalizer {
     if (!Number.isInteger(count) || count <= 0) return
     if (this.channels === count) return
     this.channels = count
+    this._channelBuffer = new Float32Array(count)
     this._ensureFilters()
   }
 
@@ -186,7 +189,7 @@ export class LoudnessNormalizer {
     if (inputView.length === 0) return
 
     const frameCount = inputView.length / this.channels
-    const channelBuffer = new Float32Array(this.channels)
+    const channelBuffer = this._channelBuffer
 
     let energyState = this._energyState
     let gainState = this._currentGain

@@ -17,6 +17,7 @@ interface ExtendedVoiceStream extends VoiceAudioStream {
 const LAYER_BUFFER_SIZE = 1024 * 1024
 const EMPTY_BUFFER = Buffer.alloc(0)
 const FRAME_SIZE = 3840
+const SILENCE_FRAME = Buffer.alloc(FRAME_SIZE)
 
 /**
  * Mixer that allows layering multiple audio streams over a main PCM stream.
@@ -47,14 +48,14 @@ export class AudioMixer extends Readable {
     const targetSize = FRAME_SIZE
 
     if (this.mixLayers.size === 0 || !this.enabled) {
-      this.push(Buffer.alloc(targetSize))
+      this.push(SILENCE_FRAME)
       return
     }
 
     const chunks = this.readLayerChunks(targetSize)
 
     if (chunks.size === 0) {
-      this.push(Buffer.alloc(targetSize))
+      this.push(SILENCE_FRAME)
       return
     }
 
