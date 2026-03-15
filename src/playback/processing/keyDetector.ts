@@ -26,11 +26,28 @@
  * @module keyDetector
  */
 
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'] as const
+const NOTE_NAMES = [
+  'C',
+  'C#',
+  'D',
+  'D#',
+  'E',
+  'F',
+  'F#',
+  'G',
+  'G#',
+  'A',
+  'A#',
+  'B'
+] as const
 
 // Krumhansl-Kessler key profiles (tonic-aligned, index 0 = tonic)
-const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88]
-const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17]
+const MAJOR_PROFILE = [
+  6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88
+]
+const MINOR_PROFILE = [
+  6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17
+]
 
 // Camelot wheel number for each pitch class (index 0 = C, 1 = C#, … 11 = B)
 // Major: C=8B, C#=3B, D=10B, D#=5B, E=12B, F=7B, F#=2B, G=9B, G#=4B, A=11B, A#=6B, B=1B
@@ -115,7 +132,7 @@ export function estimateKeyFromPcm(
   const targets: { pc: number; freq: number }[] = []
   for (let octave = 2; octave <= 6; octave++) {
     for (let pc = 0; pc < 12; pc++) {
-      targets.push({ pc, freq: C0_FREQ * Math.pow(2, octave + pc / 12) })
+      targets.push({ pc, freq: C0_FREQ * 2 ** (octave + pc / 12) })
     }
   }
 
@@ -126,7 +143,9 @@ export function estimateKeyFromPcm(
   }
 
   // Pre-compute Goertzel coefficients for each target frequency
-  const coeffs = targets.map(t => 2 * Math.cos((2 * Math.PI * t.freq) / sampleRate))
+  const coeffs = targets.map(
+    (t) => 2 * Math.cos((2 * Math.PI * t.freq) / sampleRate)
+  )
 
   // Segment management
   const segmentSamples = Math.round(sampleRate * SEGMENT_S)
@@ -138,7 +157,10 @@ export function estimateKeyFromPcm(
   let segStart = 0
 
   const mono = new Float32Array(WINDOW_SIZE)
-  const maxSamples = Math.min(totalSamples, Math.round(sampleRate * MAX_ANALYSIS_S))
+  const maxSamples = Math.min(
+    totalSamples,
+    Math.round(sampleRate * MAX_ANALYSIS_S)
+  )
 
   for (let start = 0; start + WINDOW_SIZE <= maxSamples; start += HOP_SIZE) {
     // ── Convert to mono float + Hann window + compute frame RMS ──
@@ -167,7 +189,8 @@ export function estimateKeyFromPcm(
     // ── Goertzel for each target frequency ──
     for (let t = 0; t < targets.length; t++) {
       const coeff = coeffs[t] as number
-      let s1 = 0, s2 = 0
+      let s1 = 0,
+        s2 = 0
       for (let i = 0; i < WINDOW_SIZE; i++) {
         const s0 = (mono[i] as number) + coeff * s1 - s2
         s2 = s1
@@ -192,7 +215,7 @@ export function estimateKeyFromPcm(
           const corrGapStrength = clamp01(
             (vote.bestCorr - vote.secondCorr + 0.05) / 0.35
           )
-          const voteStrength = 0.60 * zStrength + 0.40 * corrGapStrength
+          const voteStrength = 0.6 * zStrength + 0.4 * corrGapStrength
           segmentVotes.push({ encoded, weight: Math.max(0.12, voteStrength) })
         }
       }
@@ -211,7 +234,7 @@ export function estimateKeyFromPcm(
       const corrGapStrength = clamp01(
         (vote.bestCorr - vote.secondCorr + 0.05) / 0.35
       )
-      const voteStrength = 0.60 * zStrength + 0.40 * corrGapStrength
+      const voteStrength = 0.6 * zStrength + 0.4 * corrGapStrength
       segmentVotes.push({ encoded, weight: Math.max(0.12, voteStrength) })
     }
   }
@@ -232,9 +255,10 @@ export function estimateKeyFromPcm(
   let confidence: number
   if (segmentVotes.length >= MIN_SEGMENTS_FOR_VOTING) {
     const bestEncoded = best.pc * 2 + (best.mode === 'minor' ? 1 : 0)
-    const bestCamelotNum = best.mode === 'major'
-      ? CAMELOT_MAJOR_NUM[best.pc]
-      : CAMELOT_MINOR_NUM[best.pc]
+    const bestCamelotNum =
+      best.mode === 'major'
+        ? CAMELOT_MAJOR_NUM[best.pc]
+        : CAMELOT_MINOR_NUM[best.pc]
 
     let sumWeight = 0
     let exactWeight = 0
@@ -246,38 +270,39 @@ export function estimateKeyFromPcm(
       }
       const vPc = vote.encoded >> 1
       const vMinor = vote.encoded & 1
-      const vCamelot = vMinor
-        ? CAMELOT_MINOR_NUM[vPc]
-        : CAMELOT_MAJOR_NUM[vPc]
+      const vCamelot = vMinor ? CAMELOT_MINOR_NUM[vPc] : CAMELOT_MAJOR_NUM[vPc]
       if (vCamelot === bestCamelotNum) {
         compatWeight += vote.weight
       }
     }
 
     if (sumWeight > 1e-9) {
-      stability = clamp01((0.75 * exactWeight + 0.25 * compatWeight) / sumWeight)
+      stability = clamp01(
+        (0.75 * exactWeight + 0.25 * compatWeight) / sumWeight
+      )
     }
 
     confidence = clamp01(
       0.42 * stability +
-      0.22 * zMargin +
-      0.18 * corrGap +
-      0.12 * tonalClarity +
-      0.06 * (1 - modeAmbiguity)
+        0.22 * zMargin +
+        0.18 * corrGap +
+        0.12 * tonalClarity +
+        0.06 * (1 - modeAmbiguity)
     )
   } else {
     confidence = clamp01(
-      0.40 * zMargin +
-      0.25 * corrGap +
-      0.25 * tonalClarity +
-      0.10 * (1 - modeAmbiguity)
+      0.4 * zMargin +
+        0.25 * corrGap +
+        0.25 * tonalClarity +
+        0.1 * (1 - modeAmbiguity)
     )
     stability = confidence * 0.75
   }
 
-  const camelotNum = best.mode === 'major'
-    ? CAMELOT_MAJOR_NUM[best.pc] as number
-    : CAMELOT_MINOR_NUM[best.pc] as number
+  const camelotNum =
+    best.mode === 'major'
+      ? (CAMELOT_MAJOR_NUM[best.pc] as number)
+      : (CAMELOT_MINOR_NUM[best.pc] as number)
   const camelotLetter = best.mode === 'major' ? 'B' : 'A'
 
   return {
@@ -324,7 +349,10 @@ export function camelotDistance(a: string, b: string): number {
  * shift in the range [-3, +3] semitones.  Returns null if keys are too
  * far apart for a tasteful correction (would need > 3 semitones).
  */
-export function harmonicPitchShift(keyA: KeyResult, keyB: KeyResult): number | null {
+export function harmonicPitchShift(
+  keyA: KeyResult,
+  keyB: KeyResult
+): number | null {
   const dist = camelotDistance(keyA.camelot, keyB.camelot)
   if (dist <= 1) return 0 // Already compatible
 
@@ -353,7 +381,18 @@ export function harmonicCompatibilityScore(
   if (!keyA || !keyB) return null
 
   const distance = camelotDistance(keyA.camelot, keyB.camelot)
-  const distanceScore = clamp01(1 - Math.pow(distance / 6, 1.1) * 0.9)
+  const letterA = keyA.camelot.slice(-1)
+  const letterB = keyB.camelot.slice(-1)
+  const isRelative = distance === 0 && letterA !== letterB
+  const isSame = distance === 0 && letterA === letterB
+  const isNeighbor = distance === 1 && letterA === letterB
+
+  let distanceScore = 0
+  if (isSame) distanceScore = 1.0
+  else if (isRelative) distanceScore = 0.95
+  else if (isNeighbor) distanceScore = 0.9
+  else distanceScore = clamp01(1 - (distance / 6) ** 1.1 * 0.9)
+
   const confidenceScore = Math.sqrt(
     clamp01(keyA.confidence) * clamp01(keyB.confidence)
   )
@@ -369,14 +408,13 @@ export function harmonicCompatibilityScore(
     ((keyA.modeAmbiguity ?? 0.35) + (keyB.modeAmbiguity ?? 0.35)) * 0.5
 
   return clamp01(
-    0.40 * distanceScore +
+    0.4 * distanceScore +
       0.22 * confidenceScore +
       0.18 * stabilityScore +
       0.15 * clarityScore +
       0.05 * (1 - ambiguityPenalty)
   )
 }
-
 
 // ── Internal helpers ──────────────────────────────────────────────
 
@@ -396,7 +434,11 @@ function rotateProfile(profile: number[], root: number): number[] {
 /** Pearson correlation coefficient between a Float64Array and a number[]. */
 function pearsonCorrelation(x: Float64Array, y: number[]): number {
   const n = x.length
-  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0
+  let sumX = 0,
+    sumY = 0,
+    sumXY = 0,
+    sumX2 = 0,
+    sumY2 = 0
   for (let i = 0; i < n; i++) {
     const xi = x[i] as number
     const yi = y[i] as number
@@ -407,7 +449,9 @@ function pearsonCorrelation(x: Float64Array, y: number[]): number {
     sumY2 += yi * yi
   }
   const numerator = n * sumXY - sumX * sumY
-  const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY))
+  const denominator = Math.sqrt(
+    (n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY)
+  )
   if (denominator < 1e-10) return 0
   return numerator / denominator
 }
@@ -440,8 +484,16 @@ function findBestKey(
   for (let root = 0; root < 12; root++) {
     const corrMaj = pearsonCorrelation(norm, rotateProfile(MAJOR_PROFILE, root))
     const corrMin = pearsonCorrelation(norm, rotateProfile(MINOR_PROFILE, root))
-    if (corrMaj > bestCorr) { bestCorr = corrMaj; bestPc = root; bestMode = 'major' }
-    if (corrMin > bestCorr) { bestCorr = corrMin; bestPc = root; bestMode = 'minor' }
+    if (corrMaj > bestCorr) {
+      bestCorr = corrMaj
+      bestPc = root
+      bestMode = 'major'
+    }
+    if (corrMin > bestCorr) {
+      bestCorr = corrMin
+      bestPc = root
+      bestMode = 'minor'
+    }
   }
 
   if (bestCorr <= 0) return null
@@ -512,7 +564,8 @@ function findBestKeyWithStats(
 
   // z-score: (best - mean) / stddev across all 24 correlations
   const n = correlations.length
-  let sum = 0, sumSq = 0
+  let sum = 0,
+    sumSq = 0
   for (let i = 0; i < n; i++) {
     sum += correlations[i]!
     sumSq += correlations[i]! * correlations[i]!
@@ -567,10 +620,8 @@ function computeTonalClarity(
   const third = (root + (best.mode === 'major' ? 4 : 3)) % 12
   const fifth = (root + 7) % 12
   const triadSupport = clamp01(
-    ((norm[root]! + norm[third]! + norm[fifth]!) - 0.18) / 0.47
+    (norm[root]! + norm[third]! + norm[fifth]! - 0.18) / 0.47
   )
 
-  return clamp01(
-    0.40 * entropyClarity + 0.30 * peakGap + 0.30 * triadSupport
-  )
+  return clamp01(0.4 * entropyClarity + 0.3 * peakGap + 0.3 * triadSupport)
 }

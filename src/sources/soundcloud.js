@@ -1,12 +1,6 @@
 import { PassThrough } from 'node:stream'
-
-import {
-  encodeTrack,
-  http1makeRequest,
-  logger,
-  makeRequest
-} from '../utils.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.ts'
 
 const BASE_URL = 'https://api-v2.soundcloud.com'
 const SOUNDCLOUD_URL = 'https://soundcloud.com'
@@ -604,13 +598,20 @@ export default class SoundCloudSource {
     }
 
     if (!forceRefresh) {
-      const cached = this.nodelink.trackCacheManager.get('soundcloud', info.identifier)
+      const cached = this.nodelink.trackCacheManager.get(
+        'soundcloud',
+        info.identifier
+      )
       if (cached) {
         const expiresMatch = cached.url.match(/expires=(\d+)/)
         const expires = expiresMatch ? parseInt(expiresMatch[1], 10) * 1000 : 0
 
         if (expires > Date.now() + 5000) {
-          logger('debug', 'Sources', `Using cached SoundCloud URL for ${info.identifier}`)
+          logger(
+            'debug',
+            'Sources',
+            `Using cached SoundCloud URL for ${info.identifier}`
+          )
           return cached
         }
       }
@@ -638,7 +639,12 @@ export default class SoundCloudSource {
 
       const result = await this._selectTranscoding(req.body)
       if (result && !result.exception) {
-        this.nodelink.trackCacheManager.set('soundcloud', info.identifier, result, 1000 * 60 * 15)
+        this.nodelink.trackCacheManager.set(
+          'soundcloud',
+          info.identifier,
+          result,
+          1000 * 60 * 15
+        )
       }
       return result
     } catch (err) {
@@ -746,8 +752,11 @@ export default class SoundCloudSource {
       return this._buildException('Failed to resolve stream URL')
     }
 
-    if (finalUrl.includes('cf-preview-media.sndcdn.com') || finalUrl.includes('/preview/')) {
-  return this._buildException('Track only has preview URL')
+    if (
+      finalUrl.includes('cf-preview-media.sndcdn.com') ||
+      finalUrl.includes('/preview/')
+    ) {
+      return this._buildException('Track only has preview URL')
     }
 
     const mimeType = selected.format?.mime_type?.toLowerCase() ?? ''
@@ -835,7 +844,11 @@ export default class SoundCloudSource {
           // Aborted is a non-fatal error, plus when it gets "emitted" to the stream, the playback will continue as normal,
           // even if the stream is aborted, all the data is already transferred or buffered, so it's safe to ignore ig.
 
-          logger('debug', 'Sources', 'SoundCloud progressive stream aborted (most of the time this is harmless)')
+          logger(
+            'debug',
+            'Sources',
+            'SoundCloud progressive stream aborted (most of the time this is harmless)'
+          )
 
           if (!stream.writableEnded) {
             stream.emit('finishBuffering')
@@ -853,7 +866,6 @@ export default class SoundCloudSource {
       stream.destroy(err)
     }
   }
-
 
   _isValidString(val) {
     return typeof val === 'string' && val.length > 0

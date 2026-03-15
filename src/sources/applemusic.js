@@ -251,7 +251,7 @@ export default class AppleMusicSource {
   _extractVideoUrl(attributes) {
     if (!attributes?.editorialVideo) return null
     const ev = attributes.editorialVideo
-    
+
     return (
       ev.motionDetailSquare?.video ||
       ev.motionDetailTall?.video ||
@@ -349,8 +349,7 @@ export default class AppleMusicSource {
           const track = this._buildTrack(item)
           if (track) results.push(track)
         }
-      } 
-      else if (searchType === 'album' && data?.results?.albums?.data) {
+      } else if (searchType === 'album' && data?.results?.albums?.data) {
         for (const album of data.results.albums.data) {
           if (!album?.id) continue
 
@@ -380,8 +379,7 @@ export default class AppleMusicSource {
             }
           })
         }
-      } 
-      else if (searchType === 'playlist' && data?.results?.playlists?.data) {
+      } else if (searchType === 'playlist' && data?.results?.playlists?.data) {
         for (const playlist of data.results.playlists.data) {
           if (!playlist?.id) continue
 
@@ -411,8 +409,7 @@ export default class AppleMusicSource {
             }
           })
         }
-      } 
-      else if (searchType === 'artist' && data?.results?.artists?.data) {
+      } else if (searchType === 'artist' && data?.results?.artists?.data) {
         for (const artist of data.results.artists.data) {
           if (!artist?.id) continue
 
@@ -454,7 +451,7 @@ export default class AppleMusicSource {
     try {
       const urlMatch = this.patterns[0].exec(url)
       if (!urlMatch) return { loadType: 'empty', data: {} }
-      
+
       const country = urlMatch[1]?.toUpperCase()
       const type = urlMatch[2]
       const id = urlMatch[3]
@@ -481,7 +478,6 @@ export default class AppleMusicSource {
   }
 
   async _resolveTrack(id, country = this.country) {
-
     const data = await this._apiRequest(
       `/catalog/${country}/songs/${id}?extend=artistUrl,editorialVideo&include=albums`
     )
@@ -506,7 +502,6 @@ export default class AppleMusicSource {
   }
 
   async _resolveAlbum(id, country = this.country) {
-    
     const albumData = await this._apiRequest(
       `/catalog/${country}/albums/${id}?extend=artistUrl,editorialVideo`
     )
@@ -609,7 +604,12 @@ export default class AppleMusicSource {
       `/catalog/${country}/artists/${id}/view/top-songs`
     )
     if (!topTracksData?.data) {
-      return { exception: { message: 'Artist top songs not found.', severity: 'common' } }
+      return {
+        exception: {
+          message: 'Artist top songs not found.',
+          severity: 'common'
+        }
+      }
     }
 
     const artistName = artistObj.attributes?.name || 'Artist'
@@ -727,7 +727,11 @@ export default class AppleMusicSource {
         }
       }
 
-      const stream = await this.nodelink.sources.getTrackUrl(bestMatch.info, itag, forceRefresh)
+      const stream = await this.nodelink.sources.getTrackUrl(
+        bestMatch.info,
+        itag,
+        forceRefresh
+      )
       return { newTrack: bestMatch, ...stream }
     } catch (error) {
       return { exception: { message: error.message, severity: 'fault' } }

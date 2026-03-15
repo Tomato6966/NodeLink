@@ -20,12 +20,10 @@ type DiscordVoiceModule = typeof import('@performanc/voice')
 type OpusModule = typeof import('../playback/opus/Opus.ts')
 type OpusDecoderInstance = InstanceType<OpusModule['Decoder']>
 
-let voiceRuntimePromise:
-  | Promise<{
-      discordVoice: DiscordVoiceModule['default']
-      OpusDecoder: OpusModule['Decoder']
-    }>
-  | null = null
+let voiceRuntimePromise: Promise<{
+  discordVoice: DiscordVoiceModule['default']
+  OpusDecoder: OpusModule['Decoder']
+}> | null = null
 
 const getVoiceRuntime = async () => {
   if (!voiceRuntimePromise) {

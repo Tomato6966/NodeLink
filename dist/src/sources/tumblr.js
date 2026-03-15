@@ -40,10 +40,10 @@ export default class TumblrSource {
             if (initialStateMatch) {
                 try {
                     const state = JSON.parse(initialStateMatch[1]);
-                    const post = state.PeeprRoute?.initialTimeline?.objects?.find(obj => obj.objectType === 'post');
+                    const post = state.PeeprRoute?.initialTimeline?.objects?.find((obj) => obj.objectType === 'post');
                     if (post) {
-                        const videoContent = post.content?.find(c => c.type === 'video');
-                        const audioContent = post.content?.find(c => c.type === 'audio');
+                        const videoContent = post.content?.find((c) => c.type === 'video');
+                        const audioContent = post.content?.find((c) => c.type === 'audio');
                         const media = videoContent || audioContent;
                         if (media) {
                             const directUrl = media.url || media.media?.url;
@@ -86,10 +86,15 @@ export default class TumblrSource {
             if (vimeoMatch) {
                 return await this.nodelink.sources.resolve(`https://vimeo.com/${vimeoMatch[1]}`);
             }
-            const titleMatch = html.match(/<title data-rh="true">(.*?)<\/title>/i) || html.match(/<title>(.*?)<\/title>/i);
-            const title = (titleMatch ? titleMatch[1].replace(' – @', ' by @').replace(' on Tumblr', '').trim() : 'Tumblr Content');
-            const videoUrl = html.match(/<meta data-rh="" content="(.*?)" property="og:video"/i)?.[1] ||
-                html.match(/<meta property="og:video" content="(.*?)"/i)?.[1];
+            const titleMatch = html.match(/<title data-rh="true">(.*?)<\/title>/i) ||
+                html.match(/<title>(.*?)<\/title>/i);
+            const title = titleMatch
+                ? titleMatch[1]
+                    .replace(' – @', ' by @')
+                    .replace(' on Tumblr', '')
+                    .trim()
+                : 'Tumblr Content';
+            const videoUrl = html.match(/<meta data-rh="" content="(.*?)" property="og:video"/i)?.[1] || html.match(/<meta property="og:video" content="(.*?)"/i)?.[1];
             if (videoUrl) {
                 const trackInfo = {
                     identifier: info.id,
@@ -100,7 +105,8 @@ export default class TumblrSource {
                     position: 0,
                     title: title,
                     uri: url,
-                    artworkUrl: html.match(/<meta property="og:image" content="(.*?)"/i)?.[1] || null,
+                    artworkUrl: html.match(/<meta property="og:image" content="(.*?)"/i)?.[1] ||
+                        null,
                     isrc: null,
                     sourceName: 'tumblr'
                 };
@@ -118,7 +124,10 @@ export default class TumblrSource {
         }
         catch (e) {
             logger('error', 'Tumblr', `Resolution failed: ${e.message}`);
-            return { loadType: 'error', data: { message: e.message, severity: 'fault' } };
+            return {
+                loadType: 'error',
+                data: { message: e.message, severity: 'fault' }
+            };
         }
     }
     async getTrackUrl(decodedTrack) {
@@ -126,7 +135,9 @@ export default class TumblrSource {
             return {
                 url: decodedTrack.pluginInfo.directUrl,
                 protocol: 'https',
-                format: decodedTrack.pluginInfo.directUrl.includes('.mp3') ? 'mp3' : 'mp4'
+                format: decodedTrack.pluginInfo.directUrl.includes('.mp3')
+                    ? 'mp3'
+                    : 'mp4'
             };
         }
         const res = await this.resolve(decodedTrack.uri);
@@ -146,7 +157,7 @@ export default class TumblrSource {
                 streamOnly: true,
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': 'https://www.tumblr.com/'
+                    Referer: 'https://www.tumblr.com/'
                 }
             };
             const response = await http1makeRequest(url, options);

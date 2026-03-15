@@ -1,7 +1,7 @@
+import { SAMPLE_RATE } from '../../constants.ts'
 import type { FilterSettings } from '../../typings/playback/filters.types.ts'
 import { AnimatableFilter } from './AnimatableFilter.ts'
 import { clamp16Bit } from './dsp/clamp16Bit.ts'
-import { SAMPLE_RATE } from '../../constants.ts'
 
 const CHANNELS = 2
 
@@ -73,10 +73,7 @@ export default class Lowpass extends AnimatableFilter {
       return
     }
 
-    const cutoff = Math.max(
-      200,
-      Math.min(23000, 20000 / Math.pow(10, logSmoothing))
-    )
+    const cutoff = Math.max(200, Math.min(23000, 20000 / 10 ** logSmoothing))
 
     const omega0 = (TWO_PI * cutoff) / SAMPLE_RATE
     const cos0 = Math.cos(omega0)

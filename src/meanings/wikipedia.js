@@ -54,7 +54,9 @@ export default class WikipediaMeaning {
             data: {
               title: page.title,
               description: page.description || null,
-              paragraphs: extract.split('\n').filter((line) => line.trim().length > 0),
+              paragraphs: extract
+                .split('\n')
+                .filter((line) => line.trim().length > 0),
               url: `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, '_'))}`,
               provider: 'wikipedia',
               type: type
@@ -62,7 +64,11 @@ export default class WikipediaMeaning {
           }
         }
       } catch (e) {
-        logger('debug', 'WikipediaMeaning', `Failed to fetch for query "${query}": ${e.message}`)
+        logger(
+          'debug',
+          'WikipediaMeaning',
+          `Failed to fetch for query "${query}": ${e.message}`
+        )
       }
     }
 

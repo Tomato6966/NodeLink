@@ -1,7 +1,7 @@
 import { Buffer } from 'node:buffer'
 import type {
-  ResolvedVoiceFormat,
-  ParsedVoiceFrameHeader
+  ParsedVoiceFrameHeader,
+  ResolvedVoiceFormat
 } from '../typings/voice/voice.types.ts'
 
 /**

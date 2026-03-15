@@ -283,7 +283,7 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
         let pcmStream = null;
         let fetchedStream = null;
         if (urlResult.url && !isHls && !isLocal && !isSabr) {
-            const resource = (await createSeekeableAudioResource(urlResult.url, input.position, undefined, streamProcessorRuntime, input.filters, {
+            const resource = (await createSeekeableAudioResource(input.guildId || 'api-stream', urlResult.url, input.position, undefined, streamProcessorRuntime, input.filters, {
                 streamInfo: urlResult,
                 loudnessNormalizer: runtime.options.audio?.loudnessNormalizer
             }, input.volume / 100, null, true));
@@ -307,7 +307,7 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
                 return;
             }
             fetchedStream = fetched.stream;
-            const resource = createAudioResource(fetched.stream, fetched.type ?? urlResult.format ?? 'unknown', streamProcessorRuntime, input.filters, input.volume / 100, null, true, runtime.options.audio?.loudnessNormalizer);
+            const resource = createAudioResource(input.guildId || 'api-stream', fetched.stream, fetched.type ?? urlResult.format ?? 'unknown', streamProcessorRuntime, input.filters, input.volume / 100, null, true, runtime.options.audio?.loudnessNormalizer);
             pcmStream = resource.stream;
         }
         pcmStream.on('error', (error) => {

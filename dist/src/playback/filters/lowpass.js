@@ -1,6 +1,6 @@
+import { SAMPLE_RATE } from "../../constants.js";
 import { AnimatableFilter } from "./AnimatableFilter.js";
 import { clamp16Bit } from "./dsp/clamp16Bit.js";
-import { SAMPLE_RATE } from "../../constants.js";
 const CHANNELS = 2;
 const BUTTERWORTH_Q = 0.7071067811865476;
 const SUB_BLOCK_FRAMES = 64;
@@ -55,7 +55,7 @@ export default class Lowpass extends AnimatableFilter {
             this.a2 = 0;
             return;
         }
-        const cutoff = Math.max(200, Math.min(23000, 20000 / Math.pow(10, logSmoothing)));
+        const cutoff = Math.max(200, Math.min(23000, 20000 / 10 ** logSmoothing));
         const omega0 = (TWO_PI * cutoff) / SAMPLE_RATE;
         const cos0 = Math.cos(omega0);
         const sin0 = Math.sin(omega0);

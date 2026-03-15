@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
-import { encodeTrack, http1makeRequest, logger, makeRequest } from "../utils.js";
 import HLSHandler from "../playback/hls/HLSHandler.js";
+import { encodeTrack, http1makeRequest, logger, makeRequest } from "../utils.js";
 const DECRYPTION_KEY = 'IFYOUWANTTHEARTISTSTOGETPAIDDONOTDOWNLOADFROMMIXCLOUD';
 export default class MixcloudSource {
     constructor(nodelink) {
@@ -320,7 +320,7 @@ export default class MixcloudSource {
                     localAddress: this.nodelink.routePlanner?.getIP(),
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        'Referer': 'https://www.mixcloud.com/'
+                        Referer: 'https://www.mixcloud.com/'
                     },
                     startTime: additionalData?.startTime || 0
                 });

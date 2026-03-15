@@ -50,8 +50,8 @@ export default class AnghamiSource {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'X-ANGH-UDID': this.udid,
             'X-ANGH-TS': Math.floor(Date.now() / 1000).toString(),
-            'Referer': 'https://play.anghami.com/',
-            'Origin': 'https://play.anghami.com'
+            Referer: 'https://play.anghami.com/',
+            Origin: 'https://play.anghami.com'
         };
         if (this.cookieHeader) {
             headers['Cookie'] = this.cookieHeader;
@@ -96,8 +96,8 @@ export default class AnghamiSource {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'X-ANGH-UDID': this.udid,
             'X-ANGH-TS': Math.floor(Date.now() / 1000).toString(),
-            'Referer': 'https://play.anghami.com/',
-            'Origin': 'https://play.anghami.com'
+            Referer: 'https://play.anghami.com/',
+            Origin: 'https://play.anghami.com'
         };
         if (this.cookieHeader) {
             headers['Cookie'] = this.cookieHeader;
@@ -110,11 +110,14 @@ export default class AnghamiSource {
             });
             if (error || !body || body.status !== 'ok') {
                 const searchUrl = `https://api.anghami.com/gateway.php?type=GETtabsearch&query=${id}&web2=true&language=en&output=json`;
-                const { body: searchBody } = await makeRequest(searchUrl, { method: 'GET', headers });
+                const { body: searchBody } = await makeRequest(searchUrl, {
+                    method: 'GET',
+                    headers
+                });
                 if (searchBody && searchBody.sections) {
                     for (const sec of searchBody.sections) {
                         if (sec.data) {
-                            const match = sec.data.find(s => s.id === id);
+                            const match = sec.data.find((s) => s.id === id);
                             if (match)
                                 return { loadType: 'track', data: this.buildTrack(match) };
                         }
@@ -134,21 +137,30 @@ export default class AnghamiSource {
             const apiType = type === 'album' ? 'GETalbumdata' : 'GETplaylistdata';
             const fetchData = async (useBuffered) => {
                 const requestUrl = `https://api.anghami.com/gateway.php?type=${apiType}&${type}Id=${id}&web2=true&language=en&output=json${useBuffered ? '&buffered=1' : ''}`;
-                const { body, error } = await makeRequest(requestUrl, { method: 'GET', headers });
+                const { body, error } = await makeRequest(requestUrl, {
+                    method: 'GET',
+                    headers
+                });
                 if (error || !body || body.error)
                     return null;
                 let tracks = [];
                 const meta = body.playlist || body.album || {};
                 const attributes = meta._attributes || body._attributes || {};
-                let name = body.title || body.name || meta.title || meta.name || attributes.title || attributes.name || 'Unknown Playlist';
+                const name = body.title ||
+                    body.name ||
+                    meta.title ||
+                    meta.name ||
+                    attributes.title ||
+                    attributes.name ||
+                    'Unknown Playlist';
                 if (body.songbuffers) {
                     try {
                         const songMap = new Map();
-                        body.songbuffers.forEach(bufferBase64 => {
+                        body.songbuffers.forEach((bufferBase64) => {
                             const buffer = Buffer.from(bufferBase64, 'base64');
                             const decoded = SongBatchResponse.decode(buffer);
                             if (decoded.response) {
-                                Object.keys(decoded.response).forEach(key => {
+                                Object.keys(decoded.response).forEach((key) => {
                                     songMap.set(key, decoded.response[key]);
                                 });
                             }
@@ -156,13 +168,13 @@ export default class AnghamiSource {
                         const orderStr = body.songorder || attributes.songorder;
                         if (orderStr) {
                             const order = orderStr.split(',');
-                            order.forEach(songId => {
+                            order.forEach((songId) => {
                                 const song = songMap.get(songId.trim());
                                 if (song)
                                     tracks.push(this.buildTrack(song));
                             });
                             if (tracks.length === 0) {
-                                order.reverse().forEach(songId => {
+                                order.reverse().forEach((songId) => {
                                     const song = songMap.get(songId.trim());
                                     if (song)
                                         tracks.push(this.buildTrack(song));
@@ -170,7 +182,7 @@ export default class AnghamiSource {
                             }
                         }
                         else {
-                            songMap.forEach(song => tracks.push(this.buildTrack(song)));
+                            songMap.forEach((song) => tracks.push(this.buildTrack(song)));
                         }
                     }
                     catch (e) {
@@ -178,15 +190,19 @@ export default class AnghamiSource {
                     }
                 }
                 if (tracks.length === 0 && body.sections) {
-                    const songsSec = body.sections.find(s => s.type === 'song' || s.group === 'songs' || s.group === 'album_songs');
+                    const songsSec = body.sections.find((s) => s.type === 'song' ||
+                        s.group === 'songs' ||
+                        s.group === 'album_songs');
                     if (songsSec && songsSec.data) {
-                        tracks = songsSec.data.map(item => this.buildTrack(item));
+                        tracks = songsSec.data.map((item) => this.buildTrack(item));
                     }
                 }
-                const songsMapData = (body.playlist && body.playlist.songs) || body.songs || (body.album && body.album.songs);
+                const songsMapData = (body.playlist && body.playlist.songs) ||
+                    body.songs ||
+                    (body.album && body.album.songs);
                 if (tracks.length === 0 && songsMapData) {
                     const songsMap = new Map();
-                    Object.keys(songsMapData).forEach(key => {
+                    Object.keys(songsMapData).forEach((key) => {
                         const s = songsMapData[key];
                         if (typeof s !== 'object')
                             return;
@@ -198,18 +214,18 @@ export default class AnghamiSource {
                     const orderStr = meta.songorder || attributes.songorder || body.songorder;
                     if (orderStr) {
                         const order = orderStr.split(',');
-                        order.forEach(songId => {
+                        order.forEach((songId) => {
                             const song = songsMap.get(songId.toString().trim());
                             if (song)
                                 tracks.push(this.buildTrack(song));
                         });
                     }
                     if (tracks.length === 0) {
-                        songsMap.forEach(song => tracks.push(this.buildTrack(song)));
+                        songsMap.forEach((song) => tracks.push(this.buildTrack(song)));
                     }
                 }
                 if (tracks.length === 0 && Array.isArray(body.data)) {
-                    tracks = body.data.map(item => this.buildTrack(item));
+                    tracks = body.data.map((item) => this.buildTrack(item));
                 }
                 if (tracks.length === 0)
                     return null;
@@ -231,19 +247,22 @@ export default class AnghamiSource {
         }
         else if (type === 'artist') {
             const artistUrl = `https://api.anghami.com/gateway.php?type=GETartistprofile&artistId=${id}&web2=true&language=en&output=json`;
-            const { body, error } = await makeRequest(artistUrl, { method: 'GET', headers });
+            const { body, error } = await makeRequest(artistUrl, {
+                method: 'GET',
+                headers
+            });
             if (error || !body)
                 return { loadType: 'empty', data: {} };
             let tracksData = [];
             if (body.sections) {
-                const songsSec = body.sections.find(s => s.group === 'songs' || s.type === 'song');
+                const songsSec = body.sections.find((s) => s.group === 'songs' || s.type === 'song');
                 if (songsSec)
                     tracksData = songsSec.data;
             }
             else if (Array.isArray(body.data)) {
                 tracksData = body.data;
             }
-            const tracks = tracksData.map(item => this.buildTrack(item));
+            const tracks = tracksData.map((item) => this.buildTrack(item));
             return {
                 loadType: 'playlist',
                 data: {
@@ -342,7 +361,7 @@ const SongBatchResponse = {
                 case 2:
                     {
                         const end = reader.uint32() + reader.pos;
-                        let key = "";
+                        let key = '';
                         let value = null;
                         while (reader.pos < end) {
                             const mapTag = reader.uint32();
@@ -383,22 +402,22 @@ const Song = {
     decode(reader, len) {
         const end = void 0 === len ? reader.len : reader.pos + len;
         const message = {
-            id: "",
-            title: "",
-            album: "",
-            albumID: "",
-            artist: "",
-            artistID: "",
+            id: '',
+            title: '',
+            album: '',
+            albumID: '',
+            artist: '',
+            artistID: '',
             track: 0,
-            year: "",
+            year: '',
             duration: 0,
-            coverArt: "",
-            genre: "",
+            coverArt: '',
+            genre: '',
             keywords: [],
-            description: "",
-            playervideo: "",
-            videoid: "",
-            thumbnailid: "",
+            description: '',
+            playervideo: '',
+            videoid: '',
+            thumbnailid: '',
             artistType: 0,
             artistGender: 0
         };
@@ -488,7 +507,7 @@ class Reader {
                 return value >>> 0;
             shift += 7;
             if (shift >= 35)
-                throw new Error("Varint too long");
+                throw new Error('Varint too long');
         }
         return value >>> 0;
     }
@@ -524,7 +543,7 @@ class Reader {
                 this.pos += 4;
                 break;
             default:
-                throw new Error("Unknown wire type: " + wireType);
+                throw new Error('Unknown wire type: ' + wireType);
         }
     }
 }

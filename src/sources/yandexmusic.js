@@ -1,6 +1,11 @@
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
-import { encodeTrack, getBestMatch, http1makeRequest, logger } from '../utils.ts'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger
+} from '../utils.ts'
 
 const API_BASE = 'https://api.music.yandex.net'
 const USER_AGENT = 'Yandex-Music-API'
@@ -26,7 +31,11 @@ export default class YandexMusicSource {
     this.config = nodelink.options.sources?.yandexmusic || {}
     this.searchTerms = [SEARCH_PREFIX]
     this.recommendationTerm = [RECOMMENDATIONS_PREFIX]
-    this.patterns = [URL_PATTERN, URL_PLAYLIST_PATTERN, URL_PLAYLIST_UUID_PATTERN]
+    this.patterns = [
+      URL_PATTERN,
+      URL_PLAYLIST_PATTERN,
+      URL_PLAYLIST_UUID_PATTERN
+    ]
     this.priority = 85
 
     this.accessToken = null
@@ -75,7 +84,10 @@ export default class YandexMusicSource {
 
     if (!this.hasToken) {
       return {
-        exception: { message: 'Yandex Music token required', severity: 'common' }
+        exception: {
+          message: 'Yandex Music token required',
+          severity: 'common'
+        }
       }
     }
 
@@ -96,7 +108,9 @@ export default class YandexMusicSource {
           .filter((item) => this.allowUnavailable || item.available)
           .slice(0, limit)
           .map((item) => this._buildAlbumSearchResult(item))
-        return albums.length ? { loadType: 'search', data: albums } : { loadType: 'empty', data: {} }
+        return albums.length
+          ? { loadType: 'search', data: albums }
+          : { loadType: 'empty', data: {} }
       }
 
       if (searchType === 'artist') {
@@ -104,7 +118,9 @@ export default class YandexMusicSource {
           .filter((item) => this.allowUnavailable || item.available)
           .slice(0, limit)
           .map((item) => this._buildArtistSearchResult(item))
-        return artists.length ? { loadType: 'search', data: artists } : { loadType: 'empty', data: {} }
+        return artists.length
+          ? { loadType: 'search', data: artists }
+          : { loadType: 'empty', data: {} }
       }
 
       if (searchType === 'playlist') {
@@ -112,12 +128,18 @@ export default class YandexMusicSource {
           .filter((item) => this.allowUnavailable || item.available)
           .slice(0, limit)
           .map((item) => this._buildPlaylistSearchResult(item))
-        return playlists.length ? { loadType: 'search', data: playlists } : { loadType: 'empty', data: {} }
+        return playlists.length
+          ? { loadType: 'search', data: playlists }
+          : { loadType: 'empty', data: {} }
       }
 
-      const tracks = this._parseTracks(result.tracks?.results || [], 'com')
-        .slice(0, limit)
-      return tracks.length ? { loadType: 'search', data: tracks } : { loadType: 'empty', data: {} }
+      const tracks = this._parseTracks(
+        result.tracks?.results || [],
+        'com'
+      ).slice(0, limit)
+      return tracks.length
+        ? { loadType: 'search', data: tracks }
+        : { loadType: 'empty', data: {} }
     } catch (e) {
       logger('error', 'YandexMusic', `Search failed: ${e.message}`)
       return { exception: { message: e.message, severity: 'fault' } }
@@ -145,7 +167,8 @@ export default class YandexMusicSource {
         if (type1 === 'artist') {
           return await this._getArtist(match.groups.id1, domain)
         }
-        if (type1 === 'track') return await this._getTrack(match.groups.id1, domain)
+        if (type1 === 'track')
+          return await this._getTrack(match.groups.id1, domain)
       }
 
       match = cleanUrl.match(URL_PLAYLIST_PATTERN)
@@ -174,7 +197,10 @@ export default class YandexMusicSource {
   async getRecommendations(query) {
     if (!this.hasToken) {
       return {
-        exception: { message: 'Yandex Music token required', severity: 'common' }
+        exception: {
+          message: 'Yandex Music token required',
+          severity: 'common'
+        }
       }
     }
 
@@ -210,7 +236,10 @@ export default class YandexMusicSource {
   async getTrackUrl(decodedTrack) {
     if (!this.hasToken) {
       return {
-        exception: { message: 'Yandex Music token required', severity: 'common' }
+        exception: {
+          message: 'Yandex Music token required',
+          severity: 'common'
+        }
       }
     }
 
@@ -236,8 +265,14 @@ export default class YandexMusicSource {
         proxy: this.config.proxy
       })
 
-      if (response.error || (response.statusCode && response.statusCode !== 200 && response.statusCode !== 206)) {
-        const message = response.error?.message || `HTTP ${response.statusCode} on ${url}`
+      if (
+        response.error ||
+        (response.statusCode &&
+          response.statusCode !== 200 &&
+          response.statusCode !== 206)
+      ) {
+        const message =
+          response.error?.message || `HTTP ${response.statusCode} on ${url}`
         return { exception: { message, severity: 'fault' } }
       }
 
@@ -409,7 +444,8 @@ export default class YandexMusicSource {
   }
 
   async _getPlaylist(user, id, domain) {
-    const pageSize = PLAYLIST_MAX_PAGE_ITEMS * Math.max(this.playlistLoadLimit, 1)
+    const pageSize =
+      PLAYLIST_MAX_PAGE_ITEMS * Math.max(this.playlistLoadLimit, 1)
     const playlistUrl = `https://music.yandex.${domain}/users/${user}/playlists/${id}`
     let data
     try {
@@ -439,7 +475,8 @@ export default class YandexMusicSource {
   }
 
   async _getPlaylistByUuid(uuid, domain) {
-    const pageSize = PLAYLIST_MAX_PAGE_ITEMS * Math.max(this.playlistLoadLimit, 1)
+    const pageSize =
+      PLAYLIST_MAX_PAGE_ITEMS * Math.max(this.playlistLoadLimit, 1)
     const playlistUrl = `https://music.yandex.${domain}/playlists/${uuid}`
     let data
     try {
@@ -724,7 +761,10 @@ export default class YandexMusicSource {
   async _fetchSongLinkData(trackId) {
     try {
       const songlinkSource = this.nodelink.sources.getSource('songlink')
-      if (!songlinkSource || typeof songlinkSource.getSongLinkData !== 'function') {
+      if (
+        !songlinkSource ||
+        typeof songlinkSource.getSongLinkData !== 'function'
+      ) {
         return null
       }
       const url = `https://song.link/ya/${trackId}`
@@ -752,7 +792,10 @@ export default class YandexMusicSource {
   async _resolveWithSongLink(originalUrl, typeHint, id) {
     try {
       const songlinkSource = this.nodelink.sources.getSource('songlink')
-      if (!songlinkSource || typeof songlinkSource.getSongLinkData !== 'function') {
+      if (
+        !songlinkSource ||
+        typeof songlinkSource.getSongLinkData !== 'function'
+      ) {
         return null
       }
 
@@ -779,7 +822,10 @@ export default class YandexMusicSource {
         if (!source || typeof source.resolve !== 'function') continue
 
         const resolved = await source.resolve(link)
-        if (resolved?.loadType === 'track' || resolved?.loadType === 'playlist') {
+        if (
+          resolved?.loadType === 'track' ||
+          resolved?.loadType === 'playlist'
+        ) {
           return this._decorateSongLinkResult(
             resolved,
             songlinkData,

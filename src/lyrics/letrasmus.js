@@ -63,10 +63,7 @@ const extractLyricOriginal = (html) => {
   text = text.replace(/<br\s*\/?>/gi, '\n')
   text = text.replace(/<\/p>/gi, '\n')
   text = text.replace(/<[^>]+>/g, '')
-  return text
-    .split('\n')
-    .map(cleanText)
-    .filter(Boolean)
+  return text.split('\n').map(cleanText).filter(Boolean)
 }
 
 const extractTranslationLanguages = (html) => {
@@ -124,13 +121,14 @@ const parseSubtitle = (subtitle) => {
     .filter(Boolean)
 }
 
-const buildTrackUrl = (dns, url) =>
-  `https://www.letras.mus.br/${dns}/${url}/`
+const buildTrackUrl = (dns, url) => `https://www.letras.mus.br/${dns}/${url}/`
 
 const findBestDoc = (docs, title, author) => {
   const wantedTitle = normalize(title)
   const wantedAuthor = normalize(author)
-  const candidates = docs.filter((doc) => doc?.t === '2' && doc?.dns && doc?.url)
+  const candidates = docs.filter(
+    (doc) => doc?.t === '2' && doc?.dns && doc?.url
+  )
   let best =
     candidates.find(
       (doc) =>
@@ -237,7 +235,11 @@ export default class LetrasMusLyrics {
         const { body: apiBody, statusCode } = await http1makeRequest(apiUrl, {
           method: 'GET'
         })
-        if (statusCode === 200 && apiBody?.status !== 'not found' && apiBody?.Original?.Subtitle) {
+        if (
+          statusCode === 200 &&
+          apiBody?.status !== 'not found' &&
+          apiBody?.Original?.Subtitle
+        ) {
           const lines = parseSubtitle(apiBody.Original.Subtitle)
           if (lines.length) {
             return {

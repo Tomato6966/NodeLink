@@ -254,7 +254,9 @@ export default class Web extends BaseClient {
       await this.oauth.getAccessToken()
     }
 
-    const { poToken, visitorData } = await this.poTokenManager.generate(decodedTrack.identifier)
+    const { poToken, visitorData } = await this.poTokenManager.generate(
+      decodedTrack.identifier
+    )
 
     if (poToken) {
       const client = this.getClient(context)
@@ -264,7 +266,9 @@ export default class Web extends BaseClient {
       try {
         const playerScript = await cipherManager.getCachedPlayerScript()
         if (playerScript) {
-          signatureTimestamp = await cipherManager.getTimestamp(playerScript.url)
+          signatureTimestamp = await cipherManager.getTimestamp(
+            playerScript.url
+          )
         }
       } catch (e) {
         logger('warn', 'YouTube-Web', `Failed to get STS: ${e.message}`)
@@ -296,17 +300,22 @@ export default class Web extends BaseClient {
               'X-Goog-Visitor-Id': visitorData,
               'X-Youtube-Client-Name': '1',
               'X-Youtube-Client-Version': client.client.clientVersion,
-              'Origin': 'https://www.youtube.com',
-              'Referer': `https://www.youtube.com/watch?v=${decodedTrack.identifier}`
+              Origin: 'https://www.youtube.com',
+              Referer: `https://www.youtube.com/watch?v=${decodedTrack.identifier}`
             },
             body: requestBody,
             disableBodyCompression: true
           }
         )
 
-        const streamingData = playerResponse.streamingData || playerResponse.streaming_data
-        const serverAbrUrl = streamingData?.serverAbrStreamingUrl || streamingData?.server_abr_streaming_url
-        const ustreamerConfig = playerResponse.playerConfig?.mediaCommonConfig?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig
+        const streamingData =
+          playerResponse.streamingData || playerResponse.streaming_data
+        const serverAbrUrl =
+          streamingData?.serverAbrStreamingUrl ||
+          streamingData?.server_abr_streaming_url
+        const ustreamerConfig =
+          playerResponse.playerConfig?.mediaCommonConfig
+            ?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig
 
         if (serverAbrUrl) {
           const playerScript = await cipherManager.getCachedPlayerScript()
@@ -323,11 +332,20 @@ export default class Web extends BaseClient {
                 context
               )
             } catch (e) {
-              logger('warn', 'YouTube-Web', `Failed to resolve SABR URL via cipher server: ${e.message}`)
+              logger(
+                'warn',
+                'YouTube-Web',
+                `Failed to resolve SABR URL via cipher server: ${e.message}`
+              )
             }
           }
 
-          const formats = [...(streamingData.formats || []), ...(streamingData.adaptiveFormats || streamingData.adaptive_formats || [])].map(f => ({
+          const formats = [
+            ...(streamingData.formats || []),
+            ...(streamingData.adaptiveFormats ||
+              streamingData.adaptive_formats ||
+              [])
+          ].map((f) => ({
             itag: f.itag,
             lastModified: f.lastModified || f.last_modified_ms,
             xtags: f.xtags,
@@ -353,7 +371,10 @@ export default class Web extends BaseClient {
               videoPlaybackUstreamerConfig: ustreamerConfig,
               poToken,
               visitorData,
-              clientInfo: { clientName: 1, clientVersion: client.client.clientVersion },
+              clientInfo: {
+                clientName: 1,
+                clientVersion: client.client.clientVersion
+              },
               formats,
               accessToken: null,
               userAgent: client.client.userAgent

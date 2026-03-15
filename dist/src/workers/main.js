@@ -6,11 +6,11 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
     }
     return path;
 };
-import net from 'node:net';
-import os from 'node:os';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import inspector from 'node:inspector';
+import net from 'node:net';
+import os from 'node:os';
 import { resolve as resolvePath } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { pathToFileURL } from 'node:url';
@@ -1342,7 +1342,7 @@ async function startLoadStream(streamId, payload) {
         throw new Error(fetched.exception.message || 'Failed to load stream');
     }
     const createPCMStream = await getCreatePCMStream();
-    const pcmStream = createPCMStream(fetched.stream, fetched.type || urlResult.format || 'unknown', nodelink, (payload?.volume ?? 100) / 100, payload?.filters || {});
+    const pcmStream = createPCMStream(payload?.guildId ?? 'worker-stream', fetched.stream, fetched.type || urlResult.format || 'unknown', nodelink, (payload?.volume ?? 100) / 100, payload?.filters || {});
     const entry = { pcmStream, fetched, cancelled: false };
     activeStreams.set(streamId, entry);
     streamLifecycle.created++;

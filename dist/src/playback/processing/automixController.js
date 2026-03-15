@@ -33,7 +33,7 @@ export default class AutoMixController {
             else if (genre === 'hiphop') {
                 duration *= 0.85; // Hip-hop prefers punchier handoffs
             }
-            const bpmFactor = Math.pow(120 / bpm, 0.28);
+            const bpmFactor = (120 / bpm) ** 0.28;
             duration *= Math.max(0.75, Math.min(1.35, bpmFactor));
         }
         // Beat-match bonus: if BPMs are very close, stretch the blend for transparency.
@@ -44,13 +44,13 @@ export default class AutoMixController {
             if (keyDist > 4)
                 duration *= 0.75; // Dissonant? Move faster.
             else if (keyDist > 2)
-                duration *= 0.90;
+                duration *= 0.9;
         }
         if (trackBEnergy > 0.25) {
             duration *= 0.82;
         }
         else if (trackBEnergy >= 0 && trackBEnergy < 0.05) {
-            duration *= 1.40; // Atmospheric builds
+            duration *= 1.4; // Atmospheric builds
         }
         const minLen = Math.min(trackALengthMs > 0 ? trackALengthMs : 180000, trackBLengthMs > 0 ? trackBLengthMs : 180000);
         duration = Math.min(duration, minLen * 0.25);
@@ -107,7 +107,8 @@ export default class AutoMixController {
         const useBpm = deezerCfg.useBpm !== false;
         const useGain = deezerEnabled && deezerCfg.useGain !== false;
         const tempoMatch = deezerCfg.tempoMatch !== false;
-        const maxBpmDiffRatio = typeof deezerCfg.maxBpmDiffRatio === 'number' && deezerCfg.maxBpmDiffRatio > 0
+        const maxBpmDiffRatio = typeof deezerCfg.maxBpmDiffRatio === 'number' &&
+            deezerCfg.maxBpmDiffRatio > 0
             ? deezerCfg.maxBpmDiffRatio
             : 0.08;
         const metaBpmA = readDeezerNumeric(trackA, 'bpm');
@@ -138,7 +139,7 @@ export default class AutoMixController {
         if (useGain && Number.isFinite(gainA) && Number.isFinite(gainB)) {
             const deltaDb = gainA - gainB;
             const clampedDb = Math.max(-8, Math.min(8, deltaDb));
-            incomingGainMultiplier = Math.max(0.5, Math.min(1.5, Math.pow(10, clampedDb / 20)));
+            incomingGainMultiplier = Math.max(0.5, Math.min(1.5, 10 ** (clampedDb / 20)));
         }
         // AutoMix is the boss — it determines the ideal blend length based
         // on BPM, key, energy, and track length.  The configured duration
@@ -150,14 +151,15 @@ export default class AutoMixController {
         // Only trust key detection when BOTH tracks have confidence > 30%.
         // Low-confidence keys would cause false key-clash decisions, potentially
         // picking heavy FX transitions (echo_out, vocal_strip) unnecessarily.
-        const MIN_KEY_CONFIDENCE = 0.30;
+        const MIN_KEY_CONFIDENCE = 0.3;
         const keySignalA = keySignalReliability(options.keyA ?? null);
         const keySignalB = keySignalReliability(options.keyB ?? null);
-        const keysReliable = !!(options.keyA?.camelot && options.keyB?.camelot
-            && options.keyA.confidence > MIN_KEY_CONFIDENCE
-            && options.keyB.confidence > MIN_KEY_CONFIDENCE)
-            && keySignalA >= 0.36
-            && keySignalB >= 0.36;
+        const keysReliable = !!(options.keyA?.camelot &&
+            options.keyB?.camelot &&
+            options.keyA.confidence > MIN_KEY_CONFIDENCE &&
+            options.keyB.confidence > MIN_KEY_CONFIDENCE) &&
+            keySignalA >= 0.36 &&
+            keySignalB >= 0.36;
         const keyDist = keysReliable
             ? camelotDistance(options.keyA.camelot, options.keyB.camelot)
             : -1;
@@ -186,7 +188,7 @@ export default class AutoMixController {
         const energeticOpeningJumpEarly = energyKnownEarly &&
             trackAEnergy > 0 &&
             trackBEnergy > 0.24 &&
-            trackBEnergy - trackAEnergy > 0.10;
+            trackBEnergy - trackAEnergy > 0.1;
         if (strongEnergyRiseEarly || energeticOpeningJumpEarly) {
             const stretchFactor = strongEnergyRiseEarly ? 1.18 : 1.12;
             const floorMs = energeticOpeningJumpEarly ? 6200 : 4500;
@@ -199,12 +201,19 @@ export default class AutoMixController {
         logger('info', 'AutoMix', `Optimal duration: ${crossfadeDurationMs}ms` +
             (bpmA ? ` (BPM A: ${bpmA.toFixed(0)})` : '') +
             (keyDist >= 0 ? ` (key dist: ${keyDist})` : '') +
-            (harmonicScore != null ? ` (harmonic: ${(harmonicScore * 100).toFixed(0)}%)` : '') +
-            (trackBEnergy >= 0 ? ` (B energy: ${(trackBEnergy * 100).toFixed(0)}%)` : ''));
+            (harmonicScore != null
+                ? ` (harmonic: ${(harmonicScore * 100).toFixed(0)}%)`
+                : '') +
+            (trackBEnergy >= 0
+                ? ` (B energy: ${(trackBEnergy * 100).toFixed(0)}%)`
+                : ''));
         // ── BPM relationship ──
         let bpmMatch = null;
-        if (useBpm && Number.isFinite(bpmA) && Number.isFinite(bpmB)
-            && bpmA > 0 && bpmB > 0) {
+        if (useBpm &&
+            Number.isFinite(bpmA) &&
+            Number.isFinite(bpmB) &&
+            bpmA > 0 &&
+            bpmB > 0) {
             bpmMatch = findBestBpmRatio(bpmA, bpmB);
         }
         const bpmConfidence = bpmMatch
@@ -216,12 +225,12 @@ export default class AutoMixController {
         const lowConfidenceVariantTempo = !!(bpmMatch &&
             bpmMatch.diff <= maxBpmDiffRatio &&
             bpmMatch.variant !== 'direct' &&
-            bpmConfidence < 0.80);
+            bpmConfidence < 0.8);
         // ── Derived features ──
         const sameArtist = authorA.toLowerCase() === authorB.toLowerCase();
         const durationA = trackA.info.length || 0;
         const durationB = trackB.info.length || 0;
-        const durationRatio = (durationA > 0 && durationB > 0)
+        const durationRatio = durationA > 0 && durationB > 0
             ? Math.abs(durationA - durationB) / Math.max(durationA, durationB)
             : 0;
         const avgDuration = ((durationA || 180_000) + (durationB || 180_000)) / 2;
@@ -238,7 +247,7 @@ export default class AutoMixController {
         const energeticOpeningJump = isEnergyKnown &&
             trackAEnergy > 0 &&
             trackBEnergy > 0.24 &&
-            trackBEnergy - trackAEnergy > 0.10;
+            trackBEnergy - trackAEnergy > 0.1;
         const energyPivotMode = strongEnergyRise || energeticOpeningJump;
         const largeBpmGap = !!bpmMatch && bpmMatch.diff > 0.16;
         const extremeBpmGap = !!bpmMatch && bpmMatch.diff > 0.28;
@@ -263,63 +272,133 @@ export default class AutoMixController {
         const getFeatureVector = (t, opts) => {
             const bpm = t === trackA ? bpmA : bpmB;
             const key = t === trackA ? options.keyA : options.keyB;
-            const energy = t === trackA ? (options.trackAEnergy ?? 0.5) : (options.trackBOpeningEnergy ?? 0.5);
+            const energy = t === trackA
+                ? (options.trackAEnergy ?? 0.5)
+                : (options.trackBOpeningEnergy ?? 0.5);
             return [
                 (bpm || 120) / 200, // Normalized BPM
                 (key?.camelotNum || 6) / 12, // Normalized Key
                 energy,
-                stableUnit(t.info.title || "") * 0.2, // Harmonic Jitter (Entropy)
+                stableUnit(t.info.title || '') * 0.2, // Harmonic Jitter (Entropy)
                 (t.info.length || 180000) / 600000 // Temporal mass
             ];
         };
         const vA = getFeatureVector(trackA, options);
         const vB = getFeatureVector(trackB, options);
         // Euclidean Distance in Feature Space
-        const euclideanDist = Math.sqrt(vA.reduce((sum, val, i) => sum + Math.pow(val - (vB[i] || 0), 2), 0));
+        const euclideanDist = Math.sqrt(vA.reduce((sum, val, i) => sum + (val - (vB[i] || 0)) ** 2, 0));
         const spectralStress = euclideanDist / Math.sqrt(vA.length);
         const d = crossfadeDurationMs;
         const candidates = [
-            { transition: 'fusion_morph', build: () => fusionMorph(d, bpmA), idealStress: 0.15 },
-            { transition: 'harmonic_weave', build: () => harmonicWeave(d, bpmA), idealStress: 0.10 },
-            { transition: 'crossfade_eq', build: () => crossfadeEq(d, true, bpmA), idealStress: 0.25 },
-            { transition: 'highpass_dissolve', build: () => highpassDissolve(d, bpmA), idealStress: 0.40 },
-            { transition: 'cinema_lift', build: () => cinemaLift(d, bpmA), idealStress: 0.55 },
-            { transition: 'pulse_tunnel', build: () => pulseTunnel(d, bpmA), idealStress: 0.65 },
-            { transition: 'echo_out', build: () => echoOut(d, bpmA), idealStress: 0.80 },
-            { transition: 'vocal_strip', build: () => vocalStrip(d, bpmA), idealStress: 0.35 },
-            { transition: 'filter_sweep', build: () => filterSweep(d, bpmA), idealStress: 0.45 },
-            { transition: 'reverb_wash', build: () => reverbWash(d, bpmA), idealStress: 0.70 },
-            { transition: 'spinback', build: () => spinback(d, bpmA), idealStress: 0.90 },
-            { transition: 'vinyl_brake', build: () => vinylBrake(d, bpmA), idealStress: 0.85 },
-            { transition: 'backspin', build: () => backspinTransition(d, bpmA), idealStress: 0.95 },
-            { transition: 'scratch_out', build: () => scratchOut(d, bpmA), idealStress: 1.0 },
+            {
+                transition: 'fusion_morph',
+                build: () => fusionMorph(d, bpmA),
+                idealStress: 0.15
+            },
+            {
+                transition: 'harmonic_weave',
+                build: () => harmonicWeave(d, bpmA),
+                idealStress: 0.1
+            },
+            {
+                transition: 'crossfade_eq',
+                build: () => crossfadeEq(d, true, bpmA),
+                idealStress: 0.25
+            },
+            {
+                transition: 'highpass_dissolve',
+                build: () => highpassDissolve(d, bpmA),
+                idealStress: 0.4
+            },
+            {
+                transition: 'cinema_lift',
+                build: () => cinemaLift(d, bpmA),
+                idealStress: 0.55
+            },
+            {
+                transition: 'pulse_tunnel',
+                build: () => pulseTunnel(d, bpmA),
+                idealStress: 0.65
+            },
+            {
+                transition: 'echo_out',
+                build: () => echoOut(d, bpmA),
+                idealStress: 0.8
+            },
+            {
+                transition: 'vocal_strip',
+                build: () => vocalStrip(d, bpmA),
+                idealStress: 0.35
+            },
+            {
+                transition: 'filter_sweep',
+                build: () => filterSweep(d, bpmA),
+                idealStress: 0.45
+            },
+            {
+                transition: 'reverb_wash',
+                build: () => reverbWash(d, bpmA),
+                idealStress: 0.7
+            },
+            {
+                transition: 'spinback',
+                build: () => spinback(d, bpmA),
+                idealStress: 0.9
+            },
+            {
+                transition: 'vinyl_brake',
+                build: () => vinylBrake(d, bpmA),
+                idealStress: 0.85
+            },
+            {
+                transition: 'backspin',
+                build: () => backspinTransition(d, bpmA),
+                idealStress: 0.95
+            },
+            {
+                transition: 'scratch_out',
+                build: () => scratchOut(d, bpmA),
+                idealStress: 1.0
+            }
         ];
-        // Decision Brain: Select transition whose "Ideal Stress" matches the 
+        // Decision Brain: Select transition whose "Ideal Stress" matches the
         // calculated Spectral Stress of the pair.
         candidates.sort((a, b) => {
             const costA = Math.abs(a.idealStress - spectralStress);
             const costB = Math.abs(b.idealStress - spectralStress);
             return costA - costB;
         });
-        const tier = candidates.slice(0, 4).map(c => {
+        const tier = candidates.slice(0, 4).map((c) => {
             let cost = Math.abs(c.idealStress - spectralStress);
             const recency = AutoMixController._recentHistory.indexOf(c.transition);
             if (recency === 0)
-                cost += 0.50;
+                cost += 0.5;
             else if (recency === 1)
                 cost += 0.25;
             return { ...c, totalCost: cost };
         });
         tier.sort((a, b) => a.totalCost - b.totalCost);
         let pick = tier[0];
+        // Best Fusion Logic (Apple Music Style):
+        // If the tracks are harmonically compatible and tempos are close,
+        // prioritize fusion_morph regardless of generic spectral stress.
+        const harmonicMixScore = harmonicScore ?? 0;
+        const isCloseBpm = bpmMatch && bpmMatch.diff <= 0.04;
+        if (harmonicMixScore >= 0.85 && isCloseBpm) {
+            const fusionCandidate = candidates.find((c) => c.transition === 'fusion_morph');
+            if (fusionCandidate) {
+                logger('info', 'AutoMix', `Best Fusion match detected (harm: ${Math.round(harmonicMixScore * 100)}%, bpm-diff: ${(bpmMatch.diff * 100).toFixed(1)}%) -> forcing fusion_morph`);
+                pick = { ...fusionCandidate, totalCost: 0 };
+            }
+        }
         if (energyPivotMode && trackBEnergy >= 0.22) {
             const pivotTransitions = new Set([
                 'harmonic_weave',
                 'crossfade_eq',
                 'filter_sweep',
-                'highpass_dissolve',
+                'highpass_dissolve'
             ]);
-            const pivotPick = candidates.find(c => pivotTransitions.has(c.transition));
+            const pivotPick = candidates.find((c) => pivotTransitions.has(c.transition));
             if (pivotPick && !pivotTransitions.has(pick.transition)) {
                 logger('info', 'AutoMix', `Energy pivot override: ${pick.transition} → ${pivotPick.transition} for [${titleA}] → [${titleB}]`);
                 pick = { ...pivotPick, totalCost: 0 };
@@ -343,9 +422,7 @@ export default class AutoMixController {
                 incomingGainMultiplier = Math.max(0.56, Math.min(1.0, duck));
             }
             if (energyPivotMode) {
-                incomingGainMultiplier = Math.max(0.50, Math.min(0.80, incomingGainMultiplier != null
-                    ? incomingGainMultiplier
-                    : 0.72));
+                incomingGainMultiplier = Math.max(0.5, Math.min(0.8, incomingGainMultiplier != null ? incomingGainMultiplier : 0.72));
             }
         }
         decision.incomingGainMultiplier = incomingGainMultiplier;
@@ -402,13 +479,18 @@ export default class AutoMixController {
             decision.transition === 'harmonic_weave';
         const tempoMatchTolerance = mode === 'smart'
             ? Math.max(maxBpmDiffRatio, fusionTempoTransition ? 0.16 : 0.12)
-            : (fusionTempoTransition ? Math.max(maxBpmDiffRatio, 0.14) : maxBpmDiffRatio);
-        const baseSpeedClamp = mode === 'smart' ? 0.10 : 0.12;
+            : fusionTempoTransition
+                ? Math.max(maxBpmDiffRatio, 0.14)
+                : maxBpmDiffRatio;
+        const baseSpeedClamp = mode === 'smart' ? 0.1 : 0.12;
         const maxSpeedClamp = fusionTempoTransition ? 0.18 : baseSpeedClamp;
         const allowTempoTimescale = !(bpmMatch &&
             bpmMatch.variant !== 'direct' &&
             bpmConfidence < 0.75);
-        if (tempoMatch && bpmMatch && bpmMatch.diff <= tempoMatchTolerance && allowTempoTimescale) {
+        if (tempoMatch &&
+            bpmMatch &&
+            bpmMatch.diff <= tempoMatchTolerance &&
+            allowTempoTimescale) {
             const adaptiveSpeedClamp = fusionTempoTransition
                 ? Math.min(maxSpeedClamp, baseSpeedClamp + Math.max(0, bpmMatch.diff - 0.08) * 0.35)
                 : baseSpeedClamp;
@@ -421,26 +503,28 @@ export default class AutoMixController {
                     durationMs: Math.max(2500, Math.min(15000, Math.round(decision.transitionDurationMs * 1.2))),
                     curve: 'sinusoidal'
                 };
-                if (options.keyA && options.keyB
-                    && options.keyA.confidence > 0.30 && options.keyB.confidence > 0.30
-                    && keyDist >= 2 && keyDist <= 3) {
+                if (options.keyA &&
+                    options.keyB &&
+                    options.keyA.confidence > 0.3 &&
+                    options.keyB.confidence > 0.3 &&
+                    keyDist >= 2 &&
+                    keyDist <= 3) {
                     const semitones = harmonicPitchShift(options.keyA, options.keyB);
                     if (semitones != null && semitones !== 0) {
-                        decision.timescaleA.pitch = Math.pow(2, semitones / 12);
-                        logger('info', 'AutoMix', `Harmonic pitch correction: ${semitones > 0 ? '+' : ''}${semitones} semitones `
-                            + `(${options.keyA.camelot} → ${options.keyB.camelot})`);
+                        decision.timescaleA.pitch = 2 ** (semitones / 12);
+                        logger('info', 'AutoMix', `Harmonic pitch correction: ${semitones > 0 ? '+' : ''}${semitones} semitones ` +
+                            `(${options.keyA.camelot} → ${options.keyB.camelot})`);
                     }
                 }
             }
         }
         // Build score report for log
-        const topScores = tier.slice(0, 4)
-            .map(c => `${c.transition}:cost=${c.totalCost.toFixed(2)}`)
+        const topScores = tier
+            .slice(0, 4)
+            .map((c) => `${c.transition}:cost=${c.totalCost.toFixed(2)}`)
             .join(' ');
         const keyTag = keyDist >= 0 ? ` key:${keyDist}` : '';
-        const harmonicTag = harmonicScore != null
-            ? ` harm:${Math.round(harmonicScore * 100)}%`
-            : '';
+        const harmonicTag = harmonicScore != null ? ` harm:${Math.round(harmonicScore * 100)}%` : '';
         const bpmTag = bpmMatch
             ? ` bpm-diff:${(bpmMatch.diff * 100).toFixed(1)}%(${bpmMatch.variant}, conf:${Math.round(bpmConfidence * 100)}%)`
             : '';
@@ -456,11 +540,11 @@ export default class AutoMixController {
             ? Math.max(0, Math.min(1, context.keyDist / 6))
             : 0.35;
         const tempoContrast = context.bpmDiff != null
-            ? Math.max(0, Math.min(1, context.bpmDiff / 0.30))
+            ? Math.max(0, Math.min(1, context.bpmDiff / 0.3))
             : 0.25;
-        const energyContrast = (context.trackAEnergy >= 0 && context.trackBEnergy >= 0)
+        const energyContrast = context.trackAEnergy >= 0 && context.trackBEnergy >= 0
             ? Math.max(0, Math.min(1, Math.abs(context.trackAEnergy - context.trackBEnergy) / 0.35))
-            : 0.30;
+            : 0.3;
         const contrast = (keyContrast + tempoContrast + energyContrast) / 3;
         const polishedTransitions = new Set([
             'fusion_morph',
@@ -490,8 +574,10 @@ export default class AutoMixController {
             decision.lowpassSweepB = true;
             const lpBase = decision.lowpassSweepAlpha ?? 0.15;
             const lpBoost = contrast >= 0.75 ? 0.018 : 0.012;
-            decision.lowpassSweepAlpha = Math.max(0.13, Math.min(0.20, lpBase + lpBoost));
-            decision.lowpassSweepCompletionRatio = context.strongEnergyDrop ? 0.46 : 0.34;
+            decision.lowpassSweepAlpha = Math.max(0.13, Math.min(0.2, lpBase + lpBoost));
+            decision.lowpassSweepCompletionRatio = context.strongEnergyDrop
+                ? 0.46
+                : 0.34;
         }
         else {
             decision.highpassSweepB = true;
@@ -502,18 +588,20 @@ export default class AutoMixController {
             let lpBoost = contrast >= 0.75 ? 0.012 : 0.006;
             if (context.strongEnergyDrop)
                 lpBoost += 0.006;
-            decision.highpassSweepAlpha = Math.max(0.04, Math.min(0.10, hpBase + hpBoost));
+            decision.highpassSweepAlpha = Math.max(0.04, Math.min(0.1, hpBase + hpBoost));
             decision.lowpassSweepAlpha = Math.max(0.07, Math.min(0.12, lpBase + lpBoost));
-            decision.lowpassSweepCompletionRatio = context.strongEnergyDrop ? 0.62 : 0.52;
+            decision.lowpassSweepCompletionRatio = context.strongEnergyDrop
+                ? 0.62
+                : 0.52;
         }
         if (context.energyPivotMode) {
             if (fusionLike) {
                 decision.lowpassSweepAlpha = Math.max(decision.lowpassSweepAlpha ?? 0.12, 0.14);
-                decision.lowpassSweepCompletionRatio = Math.max(decision.lowpassSweepCompletionRatio ?? 0.42, 0.40);
+                decision.lowpassSweepCompletionRatio = Math.max(decision.lowpassSweepCompletionRatio ?? 0.42, 0.4);
                 decision.lowpassSweepCompletionRatio = Math.min(0.52, decision.lowpassSweepCompletionRatio);
             }
             else {
-                decision.lowpassSweepAlpha = Math.max(decision.lowpassSweepAlpha ?? 0.10, 0.105);
+                decision.lowpassSweepAlpha = Math.max(decision.lowpassSweepAlpha ?? 0.1, 0.105);
                 decision.lowpassSweepCompletionRatio = Math.max(decision.lowpassSweepCompletionRatio ?? 0.52, 0.78);
             }
             if (decision.incomingGainMultiplier == null) {
@@ -522,26 +610,28 @@ export default class AutoMixController {
             else {
                 decision.incomingGainMultiplier = fusionLike
                     ? Math.max(0.58, Math.min(0.82, decision.incomingGainMultiplier))
-                    : Math.max(0.50, Math.min(0.80, decision.incomingGainMultiplier));
+                    : Math.max(0.5, Math.min(0.8, decision.incomingGainMultiplier));
             }
         }
         // Add a subtle incoming echo for cinematic emergence when needed.
         if (!decision.echoB) {
             decision.echoB = {
                 delay: beatSyncedDelay(context.bpmForEcho, 0.5, 220),
-                mix: context.extremeBpmGap ? 0.13 : 0.10,
-                feedback: context.extremeBpmGap ? 0.20 : 0.16
+                mix: context.extremeBpmGap ? 0.13 : 0.1,
+                feedback: context.extremeBpmGap ? 0.2 : 0.16
             };
         }
         decision.incomingEchoCompletionRatio = context.extremeBpmGap ? 0.72 : 0.64;
         // Keep vocal blends cleaner when artists differ.
-        if (!context.sameArtist && decision.transition === 'vocal_strip' && decision.echoA) {
+        if (!context.sameArtist &&
+            decision.transition === 'vocal_strip' &&
+            decision.echoA) {
             decision.echoA.mix = Math.max(0.08, Math.min(0.14, decision.echoA.mix - 0.02));
         }
         // If contrast is extreme and energy drops hard, avoid too much wetness.
         if (context.strongEnergyDrop && context.largeBpmGap) {
             if (decision.reverbA) {
-                decision.reverbA.mix = Math.max(0.10, Math.min(0.24, decision.reverbA.mix));
+                decision.reverbA.mix = Math.max(0.1, Math.min(0.24, decision.reverbA.mix));
             }
             if (decision.echoA) {
                 decision.echoA.mix = Math.max(0.08, Math.min(0.22, decision.echoA.mix));
@@ -577,7 +667,10 @@ function keySignalReliability(key) {
     const stability = Math.max(0, Math.min(1, key.stability ?? confidence));
     const clarity = Math.max(0, Math.min(1, key.tonalClarity ?? confidence));
     const ambiguity = Math.max(0, Math.min(1, key.modeAmbiguity ?? 0.35));
-    return Math.max(0, Math.min(1, 0.45 * confidence + 0.25 * stability + 0.20 * clarity + 0.10 * (1 - ambiguity)));
+    return Math.max(0, Math.min(1, 0.45 * confidence +
+        0.25 * stability +
+        0.2 * clarity +
+        0.1 * (1 - ambiguity)));
 }
 function quantizeDurationToPhrase(durationMs, bpm, minMs, maxMs) {
     if (!Number.isFinite(bpm) || bpm <= 0) {
@@ -607,6 +700,7 @@ function quantizeDurationToPhrase(durationMs, bpm, minMs, maxMs) {
 function gapless() {
     return {
         transition: 'gapless',
+        blendStyle: 'standard',
         transitionDurationMs: 500,
         lowpassA: null,
         highpassA: null,
@@ -641,15 +735,16 @@ function crossfadeEq(durationMs, withEcho = true, bpm = null) {
     const ramp = Math.round(durationMs * 0.85);
     // Beat-synced: eighth note (0.5 beat) for subtle rhythmic echo
     const echoDelay = beatSyncedDelay(bpm, 0.5, 340);
-    const echoFeedback = adaptiveFeedback(bpm, 0.20);
-    const roomSize = adaptiveRoomSize(bpm, 0.50);
+    const echoFeedback = adaptiveFeedback(bpm, 0.2);
+    const roomSize = adaptiveRoomSize(bpm, 0.5);
     const damping = adaptiveDamping(bpm, 0.55);
     // BPM-adaptive HP sweep: faster BPM → lighter sweep (track B punches through)
     const hpAlpha = bpm && bpm > 0
-        ? Math.max(0.03, Math.min(0.07, 0.05 * Math.pow(120 / bpm, 0.2)))
+        ? Math.max(0.03, Math.min(0.07, 0.05 * (120 / bpm) ** 0.2))
         : 0.05;
     return {
         transition: 'crossfade_eq',
+        blendStyle: 'fusion',
         transitionDurationMs: durationMs,
         // Refined Lowpass: smoother cutoff ramp
         lowpassA: {
@@ -664,7 +759,7 @@ function crossfadeEq(durationMs, withEcho = true, bpm = null) {
         echoA: withEcho
             ? { delay: echoDelay, mix: 0.08, feedback: echoFeedback, rampMs: ramp }
             : null,
-        reverbA: { mix: 0.10, roomSize, damping, rampMs: ramp },
+        reverbA: { mix: 0.1, roomSize, damping, rampMs: ramp },
         karaokeA: null,
         phaserA: null,
         tremoloA: null,
@@ -693,19 +788,20 @@ function crossfadeEq(durationMs, withEcho = true, bpm = null) {
  */
 function echoOut(durationMs, bpm = null) {
     // Atmospheric transitions benefit from longer blends
-    durationMs = Math.round(durationMs * 1.10);
-    const ramp = Math.round(durationMs * 0.80);
+    durationMs = Math.round(durationMs * 1.1);
+    const ramp = Math.round(durationMs * 0.8);
     // Beat-synced: dotted eighth (0.75 beat) for groovy spacious tail
     const echoDelay = beatSyncedDelay(bpm, 0.75, 480);
-    const echoFeedback = adaptiveFeedback(bpm, 0.40);
-    const roomSize = adaptiveRoomSize(bpm, 0.90);
+    const echoFeedback = adaptiveFeedback(bpm, 0.4);
+    const roomSize = adaptiveRoomSize(bpm, 0.9);
     const damping = adaptiveDamping(bpm, 0.22);
     // BPM-adaptive HP sweep: slower BPM → heavier sweep (more dramatic entrance)
     const hpAlpha = bpm && bpm > 0
-        ? Math.max(0.04, Math.min(0.08, 0.06 * Math.pow(120 / bpm, 0.25)))
+        ? Math.max(0.04, Math.min(0.08, 0.06 * (120 / bpm) ** 0.25))
         : 0.06;
     return {
         transition: 'echo_out',
+        blendStyle: 'fusion',
         transitionDurationMs: durationMs,
         // Lowpass smoothing 40 → cutoff ~500 Hz (distant, hollow mood).
         // Old value (1000) hit the 200 Hz floor → identical to all other
@@ -769,27 +865,27 @@ function readDeezerText(track, field) {
 }
 function tempoSourceConfidence(source) {
     if (!source)
-        return 0.70;
+        return 0.7;
     if (source.includes('audio-live'))
         return 0.92;
     if (source.includes('audio') && source.includes('lowconf'))
         return 0.62;
     if (source.includes('audio'))
-        return 0.80;
-    if (source.includes('deezer') || source.includes('api') || source.includes('metadata'))
+        return 0.8;
+    if (source.includes('deezer') ||
+        source.includes('api') ||
+        source.includes('metadata'))
         return 0.74;
     return 0.76;
 }
 function computeTempoConfidence(sourceA, sourceB, variant) {
     let confidence = (tempoSourceConfidence(sourceA) + tempoSourceConfidence(sourceB)) / 2;
     if (variant !== 'direct')
-        confidence *= 0.70;
+        confidence *= 0.7;
     return Math.max(0.35, Math.min(1.0, confidence));
 }
 function asValidTempo(value) {
-    return Number.isFinite(value) && value > 0
-        ? Number(value)
-        : null;
+    return Number.isFinite(value) && value > 0 ? Number(value) : null;
 }
 function asConfidence(value) {
     if (!Number.isFinite(value))
@@ -809,7 +905,7 @@ function selectTempoCandidate(input) {
     if (live && !meta) {
         return {
             bpm: live,
-            source: liveConf != null && liveConf < 0.40 ? 'audio-live-lowconf' : 'audio-live'
+            source: liveConf != null && liveConf < 0.4 ? 'audio-live-lowconf' : 'audio-live'
         };
     }
     if (!live && meta) {
@@ -840,18 +936,19 @@ function selectTempoCandidate(input) {
  * - Slower tempos where vocals linger
  */
 function vocalStrip(durationMs, bpm = null) {
-    const ramp = Math.round(durationMs * 0.80);
+    const ramp = Math.round(durationMs * 0.8);
     const echoDelay = beatSyncedDelay(bpm, 0.5, 300);
-    const echoFeedback = adaptiveFeedback(bpm, 0.30);
+    const echoFeedback = adaptiveFeedback(bpm, 0.3);
     const roomSize = adaptiveRoomSize(bpm, 0.65);
-    const damping = adaptiveDamping(bpm, 0.40);
+    const damping = adaptiveDamping(bpm, 0.4);
     return {
         transition: 'vocal_strip',
+        blendStyle: 'fusion',
         transitionDurationMs: durationMs,
         // Light lowpass to soften the instrumental bed (cutoff ~670 Hz)
         lowpassA: { smoothing: 30, durationMs },
         highpassA: null,
-        echoA: { delay: echoDelay, mix: 0.10, feedback: echoFeedback, rampMs: ramp },
+        echoA: { delay: echoDelay, mix: 0.1, feedback: echoFeedback, rampMs: ramp },
         reverbA: { mix: 0.16, roomSize, damping, rampMs: ramp },
         karaokeA: {
             level: 1.0, // Full vocal removal
@@ -874,7 +971,7 @@ function vocalStrip(durationMs, bpm = null) {
         echoB: {
             delay: beatSyncedDelay(bpm, 0.5, 250),
             mix: 0.12,
-            feedback: 0.20
+            feedback: 0.2
         },
         tapeStopA: null,
         scratchA: null
@@ -895,9 +992,10 @@ function highpassDissolve(durationMs, bpm = null) {
     const echoDelay = beatSyncedDelay(bpm, 0.75, 400);
     const echoFeedback = adaptiveFeedback(bpm, 0.25);
     const roomSize = adaptiveRoomSize(bpm, 0.75);
-    const damping = adaptiveDamping(bpm, 0.30);
+    const damping = adaptiveDamping(bpm, 0.3);
     return {
         transition: 'highpass_dissolve',
+        blendStyle: 'fusion',
         transitionDurationMs: durationMs,
         lowpassA: null,
         // Highpass: Track A loses bass progressively → becomes thin/airy
@@ -906,7 +1004,7 @@ function highpassDissolve(durationMs, bpm = null) {
         // and sounded like listening through a tin can.  3400 Hz keeps the
         // "thin / airy" character while preserving some upper-mid body.
         highpassA: { smoothing: 150, durationMs },
-        echoA: { delay: echoDelay, mix: 0.10, feedback: echoFeedback, rampMs: ramp },
+        echoA: { delay: echoDelay, mix: 0.1, feedback: echoFeedback, rampMs: ramp },
         reverbA: { mix: 0.22, roomSize, damping, rampMs: ramp },
         karaokeA: null,
         phaserA: null,
@@ -940,15 +1038,16 @@ function cinemaLift(durationMs, bpm = null) {
         : 1.6;
     return {
         transition: 'cinema_lift',
+        blendStyle: 'fusion',
         transitionDurationMs: durationMs,
         lowpassA: { smoothing: 55, durationMs },
         highpassA: null,
         echoA: { delay: echoDelay, mix: 0.16, feedback: 0.22, rampMs: ramp },
-        reverbA: { mix: 0.20, roomSize, damping, rampMs: ramp },
+        reverbA: { mix: 0.2, roomSize, damping, rampMs: ramp },
         karaokeA: null,
         phaserA: {
             rate: 0.38,
-            depth: 0.40,
+            depth: 0.4,
             mix: 0.14,
             rampMs: ramp
         },
@@ -961,13 +1060,13 @@ function cinemaLift(durationMs, bpm = null) {
         lowpassSweepB: true,
         lowpassSweepAlpha: 0.09,
         highpassSweepAlpha: 0.08,
-        lowpassSweepCompletionRatio: 0.50,
+        lowpassSweepCompletionRatio: 0.5,
         incomingGainMultiplier: null,
         timescaleA: null,
         stereoPanB: true,
-        incomingPanCompletionRatio: 0.30,
+        incomingPanCompletionRatio: 0.3,
         stereoPanA: true,
-        outgoingPanCompletionRatio: 0.50,
+        outgoingPanCompletionRatio: 0.5,
         echoB: {
             delay: beatSyncedDelay(bpm, 0.5, 230),
             mix: 0.12,
@@ -986,12 +1085,13 @@ function cinemaLift(durationMs, bpm = null) {
  */
 function pulseTunnel(durationMs, bpm = null) {
     durationMs = Math.round(durationMs * 0.96);
-    const ramp = Math.round(durationMs * 0.80);
+    const ramp = Math.round(durationMs * 0.8);
     const echoDelay = beatSyncedDelay(bpm, 0.5, 280);
-    const roomSize = adaptiveRoomSize(bpm, 0.50);
-    const damping = adaptiveDamping(bpm, 0.50);
+    const roomSize = adaptiveRoomSize(bpm, 0.5);
+    const damping = adaptiveDamping(bpm, 0.5);
     return {
         transition: 'pulse_tunnel',
+        blendStyle: 'fusion',
         transitionDurationMs: durationMs,
         lowpassA: { smoothing: 45, durationMs },
         highpassA: { smoothing: 170, durationMs: Math.round(durationMs * 0.85) },
@@ -1005,8 +1105,10 @@ function pulseTunnel(durationMs, bpm = null) {
             rampMs: ramp
         },
         tremoloA: {
-            frequency: bpm && bpm > 0 ? Math.max(0.8, Math.min(4.0, Math.round((bpm / 50) * 100) / 100)) : 1.8,
-            depth: 0.10,
+            frequency: bpm && bpm > 0
+                ? Math.max(0.8, Math.min(4.0, Math.round((bpm / 50) * 100) / 100))
+                : 1.8,
+            depth: 0.1,
             rampMs: ramp
         },
         highpassSweepB: true,
@@ -1022,7 +1124,7 @@ function pulseTunnel(durationMs, bpm = null) {
         outgoingPanCompletionRatio: 0.44,
         echoB: {
             delay: beatSyncedDelay(bpm, 0.5, 200),
-            mix: 0.10,
+            mix: 0.1,
             feedback: 0.16
         },
         incomingEchoCompletionRatio: 0.56,
@@ -1043,17 +1145,18 @@ function pulseTunnel(durationMs, bpm = null) {
 function spinback(durationMs, bpm = null) {
     // Physical effects are inherently shorter — dramatic, quick
     durationMs = Math.round(durationMs * 0.65);
-    const ramp = Math.round(durationMs * 0.70);
+    const ramp = Math.round(durationMs * 0.7);
     const echoDelay = beatSyncedDelay(bpm, 1.0, 500); // quarter note for dramatic tail
-    const echoFeedback = adaptiveFeedback(bpm, 0.40);
-    const roomSize = adaptiveRoomSize(bpm, 0.60);
+    const echoFeedback = adaptiveFeedback(bpm, 0.4);
+    const roomSize = adaptiveRoomSize(bpm, 0.6);
     const damping = adaptiveDamping(bpm, 0.45);
     return {
         transition: 'spinback',
+        blendStyle: 'standard',
         transitionDurationMs: durationMs,
         lowpassA: { smoothing: 50, durationMs },
         highpassA: null,
-        echoA: { delay: echoDelay, mix: 0.30, feedback: echoFeedback, rampMs: ramp },
+        echoA: { delay: echoDelay, mix: 0.3, feedback: echoFeedback, rampMs: ramp },
         reverbA: { mix: 0.25, roomSize, damping, rampMs: ramp },
         karaokeA: null,
         phaserA: {
@@ -1103,6 +1206,7 @@ function filterSweep(durationMs, bpm = null) {
         : 2.0;
     return {
         transition: 'filter_sweep',
+        blendStyle: 'fusion',
         transitionDurationMs: durationMs,
         lowpassA: { smoothing: 80, durationMs },
         highpassA: null,
@@ -1154,6 +1258,7 @@ function reverbWash(durationMs, bpm = null) {
     const damping = adaptiveDamping(bpm, 0.18); // Very low damping = long, bright tail
     return {
         transition: 'reverb_wash',
+        blendStyle: 'fusion',
         transitionDurationMs: durationMs,
         lowpassA: null,
         highpassA: null,
@@ -1164,7 +1269,7 @@ function reverbWash(durationMs, bpm = null) {
             rampMs: ramp
         },
         reverbA: {
-            mix: 0.30, // Wet reverb wash, tamed to avoid clipping
+            mix: 0.3, // Wet reverb wash, tamed to avoid clipping
             roomSize,
             damping,
             rampMs: ramp
@@ -1183,7 +1288,7 @@ function reverbWash(durationMs, bpm = null) {
         echoB: {
             delay: beatSyncedDelay(bpm, 0.75, 350),
             mix: 0.14,
-            feedback: 0.30
+            feedback: 0.3
         },
         tapeStopA: null,
         scratchA: null
@@ -1203,12 +1308,13 @@ function reverbWash(durationMs, bpm = null) {
  */
 function vinylBrake(durationMs, bpm = null) {
     // Physical effects are inherently shorter — dramatic, quick
-    durationMs = Math.round(durationMs * 0.70);
-    const ramp = Math.round(durationMs * 0.80);
+    durationMs = Math.round(durationMs * 0.7);
+    const ramp = Math.round(durationMs * 0.8);
     const roomSize = adaptiveRoomSize(bpm, 0.55);
-    const damping = adaptiveDamping(bpm, 0.40);
+    const damping = adaptiveDamping(bpm, 0.4);
     return {
         transition: 'vinyl_brake',
+        blendStyle: 'standard',
         transitionDurationMs: durationMs,
         lowpassA: { smoothing: 50, durationMs },
         highpassA: null,
@@ -1227,7 +1333,7 @@ function vinylBrake(durationMs, bpm = null) {
         stereoPanA: false,
         echoB: null,
         tapeStopA: {
-            durationMs: Math.round(durationMs * 0.90),
+            durationMs: Math.round(durationMs * 0.9),
             curve: 'sinusoidal' // Gradual at first, accelerates (natural brake feel)
         },
         scratchA: null
@@ -1246,16 +1352,22 @@ function vinylBrake(durationMs, bpm = null) {
  */
 function backspinTransition(durationMs, bpm = null) {
     // Physical effects are inherently shorter — dramatic, quick
-    durationMs = Math.round(durationMs * 0.60);
-    const ramp = Math.round(durationMs * 0.70);
+    durationMs = Math.round(durationMs * 0.6);
+    const ramp = Math.round(durationMs * 0.7);
     const echoDelay = beatSyncedDelay(bpm, 0.5, 350);
     const echoFeedback = adaptiveFeedback(bpm, 0.35);
     return {
         transition: 'backspin',
+        blendStyle: 'standard',
         transitionDurationMs: durationMs,
         lowpassA: null,
         highpassA: null,
-        echoA: { delay: echoDelay, mix: 0.16, feedback: echoFeedback, rampMs: ramp },
+        echoA: {
+            delay: echoDelay,
+            mix: 0.16,
+            feedback: echoFeedback,
+            rampMs: ramp
+        },
         reverbA: null,
         karaokeA: null,
         phaserA: null,
@@ -1290,18 +1402,24 @@ function backspinTransition(durationMs, bpm = null) {
  */
 function scratchOut(durationMs, bpm = null) {
     // Physical effects are inherently shorter — dramatic, quick
-    durationMs = Math.round(durationMs * 0.70);
+    durationMs = Math.round(durationMs * 0.7);
     const ramp = Math.round(durationMs * 0.75);
     const echoDelay = beatSyncedDelay(bpm, 0.75, 400);
-    const echoFeedback = adaptiveFeedback(bpm, 0.30);
-    const roomSize = adaptiveRoomSize(bpm, 0.40);
-    const damping = adaptiveDamping(bpm, 0.50);
+    const echoFeedback = adaptiveFeedback(bpm, 0.3);
+    const roomSize = adaptiveRoomSize(bpm, 0.4);
+    const damping = adaptiveDamping(bpm, 0.5);
     return {
         transition: 'scratch_out',
+        blendStyle: 'standard',
         transitionDurationMs: durationMs,
         lowpassA: { smoothing: 35, durationMs },
         highpassA: null,
-        echoA: { delay: echoDelay, mix: 0.16, feedback: echoFeedback, rampMs: ramp },
+        echoA: {
+            delay: echoDelay,
+            mix: 0.16,
+            feedback: echoFeedback,
+            rampMs: ramp
+        },
         reverbA: { mix: 0.12, roomSize, damping, rampMs: ramp },
         karaokeA: null,
         phaserA: null,
@@ -1317,7 +1435,7 @@ function scratchOut(durationMs, bpm = null) {
         echoB: null,
         tapeStopA: null,
         scratchA: {
-            durationMs: Math.round(durationMs * 0.80),
+            durationMs: Math.round(durationMs * 0.8),
             style: 'wash'
         }
     };
@@ -1330,11 +1448,12 @@ function scratchOut(durationMs, bpm = null) {
  */
 function harmonicWeave(durationMs, bpm = null) {
     durationMs = Math.round(durationMs * 1.08);
-    const ramp = Math.round(durationMs * 0.90);
+    const ramp = Math.round(durationMs * 0.9);
     const roomSize = adaptiveRoomSize(bpm, 0.58);
     const damping = adaptiveDamping(bpm, 0.45);
     return {
         transition: 'harmonic_weave',
+        blendStyle: 'fusion',
         transitionDurationMs: durationMs,
         lowpassA: null,
         highpassA: null,
@@ -1348,7 +1467,7 @@ function harmonicWeave(durationMs, bpm = null) {
         karaokeA: null,
         phaserA: {
             rate: 0.32,
-            depth: 0.30,
+            depth: 0.3,
             mix: 0.09,
             rampMs: ramp
         },
@@ -1361,7 +1480,7 @@ function harmonicWeave(durationMs, bpm = null) {
         incomingGainMultiplier: 0.98,
         timescaleA: null,
         stereoPanB: true,
-        incomingPanCompletionRatio: 0.50,
+        incomingPanCompletionRatio: 0.5,
         stereoPanA: true,
         outgoingPanCompletionRatio: 0.52,
         echoB: {
@@ -1381,12 +1500,13 @@ function harmonicWeave(durationMs, bpm = null) {
  * Uses multi-band frequency crossover and spatial arrive choreography.
  */
 function fusionMorph(durationMs, bpm = null) {
-    const ramp = Math.round(durationMs * 0.90);
+    const ramp = Math.round(durationMs * 0.9);
     const echoDelay = beatSyncedDelay(bpm, 0.5, 280);
     const roomSize = adaptiveRoomSize(bpm, 0.55);
     const damping = adaptiveDamping(bpm, 0.45);
     return {
         transition: 'fusion_morph',
+        blendStyle: 'fusion',
         transitionDurationMs: durationMs,
         lowpassA: null,
         highpassA: null,
@@ -1396,7 +1516,7 @@ function fusionMorph(durationMs, bpm = null) {
         phaserA: {
             rate: 0.25,
             depth: 0.35,
-            mix: 0.10,
+            mix: 0.1,
             rampMs: ramp
         },
         tremoloA: null,
@@ -1416,7 +1536,7 @@ function fusionMorph(durationMs, bpm = null) {
             mix: 0.08,
             feedback: 0.15
         },
-        incomingEchoCompletionRatio: 0.70,
+        incomingEchoCompletionRatio: 0.7,
         tapeStopA: null,
         scratchA: null
     };
@@ -1443,7 +1563,7 @@ function beatSyncedDelay(bpm, subdivision, fallback) {
 function adaptiveRoomSize(bpm, base) {
     if (!bpm || bpm <= 0)
         return Math.round(base * 100) / 100;
-    const raw = base * Math.pow(120 / bpm, 0.25);
+    const raw = base * (120 / bpm) ** 0.25;
     return Math.round(Math.max(0.35, Math.min(0.95, raw)) * 100) / 100;
 }
 /**
@@ -1453,7 +1573,7 @@ function adaptiveRoomSize(bpm, base) {
 function adaptiveDamping(bpm, base) {
     if (!bpm || bpm <= 0)
         return Math.round(base * 100) / 100;
-    const raw = base * Math.pow(bpm / 120, 0.3);
+    const raw = base * (bpm / 120) ** 0.3;
     return Math.round(Math.max(0.15, Math.min(0.75, raw)) * 100) / 100;
 }
 /**
@@ -1464,7 +1584,7 @@ function adaptiveDamping(bpm, base) {
 function adaptiveFeedback(bpm, base) {
     if (!bpm || bpm <= 0)
         return Math.round(Math.min(base, 0.45) * 100) / 100;
-    const raw = base * Math.pow(120 / bpm, 0.2);
+    const raw = base * (120 / bpm) ** 0.2;
     // Capped at 0.45 (was 0.60) — high feedback causes delay-line energy
     // to accumulate beyond Int16 range even with soft-limiting.  0.45 gives
     // audible repeats (~6 until inaudible) without runaway growth.
@@ -1481,9 +1601,24 @@ function adaptiveFeedback(bpm, base) {
  */
 function findBestBpmRatio(bpmA, bpmB) {
     const candidates = [
-        { effectiveBpmB: bpmB, speedRatio: bpmB / bpmA, diff: Math.abs(1 - bpmB / bpmA), variant: 'direct' },
-        { effectiveBpmB: bpmB * 2, speedRatio: (bpmB * 2) / bpmA, diff: Math.abs(1 - (bpmB * 2) / bpmA), variant: 'double-B' },
-        { effectiveBpmB: bpmB / 2, speedRatio: (bpmB / 2) / bpmA, diff: Math.abs(1 - (bpmB / 2) / bpmA), variant: 'half-B' },
+        {
+            effectiveBpmB: bpmB,
+            speedRatio: bpmB / bpmA,
+            diff: Math.abs(1 - bpmB / bpmA),
+            variant: 'direct'
+        },
+        {
+            effectiveBpmB: bpmB * 2,
+            speedRatio: (bpmB * 2) / bpmA,
+            diff: Math.abs(1 - (bpmB * 2) / bpmA),
+            variant: 'double-B'
+        },
+        {
+            effectiveBpmB: bpmB / 2,
+            speedRatio: bpmB / 2 / bpmA,
+            diff: Math.abs(1 - bpmB / 2 / bpmA),
+            variant: 'half-B'
+        }
     ];
-    return candidates.reduce((best, c) => c.diff < best.diff ? c : best);
+    return candidates.reduce((best, c) => (c.diff < best.diff ? c : best));
 }

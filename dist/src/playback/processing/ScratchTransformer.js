@@ -96,7 +96,7 @@ export class ScratchTransformer extends Transform {
         switch (style) {
             case 'wash':
                 if (t < 0.6)
-                    return state.startRate * Math.pow(1 - t / 0.6, 2.5);
+                    return state.startRate * (1 - t / 0.6) ** 2.5;
                 return Math.sin((t - 0.6) * 25) * (0.4 + s * 0.2) * (1 - t);
             case 'backspin':
                 if (t < 0.15)
@@ -108,10 +108,10 @@ export class ScratchTransformer extends Transform {
                 return Math.cos(t * Math.PI * (5 + s * 3)) * (1 - t);
             case 'start':
                 if (t < 0.5)
-                    return Math.pow(t / 0.5, 2) * 1.5;
+                    return (t / 0.5) ** 2 * 1.5;
                 return 1.5 - ((t - 0.5) / 0.5) * 0.5;
             case 'stop':
-                return state.startRate * (1 - Math.pow(t, 2.2));
+                return state.startRate * (1 - t ** 2.2);
             default:
                 return 1 - t;
         }

@@ -87,9 +87,10 @@ export function estimateBpmFromOnsets(onsets, onsetsPerSecond) {
             sum += onsets[j];
             count++;
         }
-        normalized[i] = count > 0
-            ? Math.max(0, onsets[i] - sum / count)
-            : onsets[i];
+        normalized[i] =
+            count > 0
+                ? Math.max(0, onsets[i] - sum / count)
+                : onsets[i];
     }
     return autocorrelateBpm(normalized, onsetsPerSecond);
 }

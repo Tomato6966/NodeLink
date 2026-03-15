@@ -18,13 +18,15 @@ class LiveChat {
                 logger('error', 'YouTube-LiveChat', `Failed to get next data for ${videoId}: Status ${statusCode}`);
                 return null;
             }
-            const chatRenderer = data.contents?.twoColumnWatchNextResults?.conversationBar?.liveChatRenderer;
+            const chatRenderer = data.contents?.twoColumnWatchNextResults?.conversationBar
+                ?.liveChatRenderer;
             let continuation = chatRenderer?.continuations?.[0]?.reloadContinuationData?.continuation;
             if (!continuation) {
                 logger('warn', 'YouTube-LiveChat', `No live chat continuation found for ${videoId}`);
                 return null;
             }
-            const apiKey = data?.responseContext?.serviceTrackingParams?.[0]?.serviceInfo?.[0]?.value || this.apiKey;
+            const apiKey = data?.responseContext?.serviceTrackingParams?.[0]?.serviceInfo?.[0]
+                ?.value || this.apiKey;
             return {
                 poll: async () => {
                     if (!continuation)
@@ -70,19 +72,31 @@ class LiveChat {
         for (const action of actions) {
             if (action.addChatItemAction) {
                 const item = action.addChatItemAction.item;
-                const renderer = item.liveChatTextMessageRenderer || item.liveChatPaidMessageRenderer || item.liveChatMembershipItemRenderer || item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer;
+                const renderer = item.liveChatTextMessageRenderer ||
+                    item.liveChatPaidMessageRenderer ||
+                    item.liveChatMembershipItemRenderer ||
+                    item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer;
                 if (renderer) {
                     parsed.push({
-                        type: item.liveChatTextMessageRenderer ? 'text' : item.liveChatPaidMessageRenderer ? 'paid' : item.liveChatMembershipItemRenderer ? 'membership' : 'gift',
+                        type: item.liveChatTextMessageRenderer
+                            ? 'text'
+                            : item.liveChatPaidMessageRenderer
+                                ? 'paid'
+                                : item.liveChatMembershipItemRenderer
+                                    ? 'membership'
+                                    : 'gift',
                         id: renderer.id,
                         timestamp: renderer.timestampUsec,
                         author: {
-                            name: renderer.authorName?.simpleText || renderer.headerPrimaryText?.runs?.map(r => r.text).join(''),
+                            name: renderer.authorName?.simpleText ||
+                                renderer.headerPrimaryText?.runs?.map((r) => r.text).join(''),
                             id: renderer.authorExternalChannelId,
                             photo: renderer.authorPhoto?.thumbnails?.pop()?.url,
-                            badges: renderer.authorBadges?.map(b => b.liveChatAuthorBadgeRenderer?.tooltip)
+                            badges: renderer.authorBadges?.map((b) => b.liveChatAuthorBadgeRenderer?.tooltip)
                         },
-                        message: renderer.message?.runs?.map(r => r.text).join('') || renderer.headerSubtext?.simpleText || renderer.headerSubtext?.runs?.map(r => r.text).join(''),
+                        message: renderer.message?.runs?.map((r) => r.text).join('') ||
+                            renderer.headerSubtext?.simpleText ||
+                            renderer.headerSubtext?.runs?.map((r) => r.text).join(''),
                         amount: renderer.purchaseAmountText?.simpleText
                     });
                 }

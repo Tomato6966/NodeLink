@@ -685,6 +685,7 @@ export class Player {
           }
 
           resource = createAudioResource(
+            this.guildId,
             resource.stream as unknown as Readable,
             'pcm',
             this.nodelink,
@@ -1043,6 +1044,7 @@ export class Player {
   private _getCrossfadeConfig(): {
     enabled: boolean
     durationMs: number
+    style: 'standard' | 'fusion'
     curve: string
     mode: CrossfadeMode
     minBufferMs: number
@@ -1057,6 +1059,7 @@ export class Player {
         : 0
     if (durationMs <= 0) return null
 
+    const style = config.style === 'fusion' ? 'fusion' : 'standard'
     const curve = typeof config.curve === 'string' ? config.curve : 'sinusoidal'
     const mode: CrossfadeMode = config.mode === 'stream' ? 'stream' : 'preload'
     const minBufferMs =
@@ -1074,6 +1077,7 @@ export class Player {
     return {
       enabled: true,
       durationMs,
+      style,
       curve,
       mode,
       minBufferMs,
@@ -1182,9 +1186,7 @@ export class Player {
     ])
   }
 
-  private _getAutomixLiveSignals(
-    stream?: ExtendedAudioStream | null
-  ): {
+  private _getAutomixLiveSignals(stream?: ExtendedAudioStream | null): {
     liveBpmA?: number
     liveBpmB?: number
     liveBpmAConfidence?: number
@@ -1198,12 +1200,10 @@ export class Player {
     const bpmA = audioStream.getMainTrackBpm?.() ?? null
     const bpmB = audioStream.getNextTrackBpm?.() ?? null
 
-    const liveBpmA = Number.isFinite(bpmA) && (bpmA as number) > 0
-      ? Number(bpmA)
-      : undefined
-    const liveBpmB = Number.isFinite(bpmB) && (bpmB as number) > 0
-      ? Number(bpmB)
-      : undefined
+    const liveBpmA =
+      Number.isFinite(bpmA) && (bpmA as number) > 0 ? Number(bpmA) : undefined
+    const liveBpmB =
+      Number.isFinite(bpmB) && (bpmB as number) > 0 ? Number(bpmB) : undefined
 
     const liveBpmAConfidence = beatA
       ? Math.max(0, Math.min(1, beatA.confidence))
@@ -1213,7 +1213,7 @@ export class Player {
     const liveBpmBConfidence = beatB
       ? Math.max(0, Math.min(1, beatB.confidence))
       : liveBpmB != null
-        ? 0.50
+        ? 0.5
         : undefined
 
     return {
@@ -1818,8 +1818,11 @@ export class Player {
     }
 
     const ANALYSIS_WINDOW_MS = 120_000 // Start monitoring 120s before end
-    const MIN_REMAINING_MS = 28_000 // Fallback at 28s remaining
-    const SMART_ZONE_MS = 35_000 // Only trigger sensitive strategies in the last 35s
+    const MIN_REMAINING_MS = 28_000 // Safety lower bound for trigger checks
+    const estimatedPreLeadMs = Math.max(Math.round(durationMs * 0.52), 4800)
+    // Non-fallback fusion preLeadMs (smaller than fallback) — used to size the energy trigger window
+    const estimatedEnergyPreLeadMs = Math.max(Math.min(5000, Math.round(durationMs * 0.4)), Math.round(durationMs * 0.46), 3600)
+    const SMART_ZONE_MS = durationMs + estimatedEnergyPreLeadMs + 3000 // 3s search window before fallback
     const ENERGY_POLL_MS = 200 // Faster polling to catch beat anchors reliably
     const ENERGY_HISTORY_SIZE = 100 // 20 seconds of history (100 × 200ms)
     const ENERGY_DROP_RATIO = 0.5 // Trigger when energy < 50% of average (was 70% — too eager)
@@ -1830,7 +1833,7 @@ export class Player {
       0,
       total - ANALYSIS_WINDOW_MS - startPosition
     )
-    const fallbackDelay = Math.max(0, total - startPosition - MIN_REMAINING_MS)
+    const fallbackDelay = Math.max(0, delay - estimatedPreLeadMs)
 
     const triggerAutomix = (reason: string) => {
       if (this._crossfadeToken !== token) return
@@ -1890,14 +1893,11 @@ export class Player {
       const fusionLikeTransition =
         automixDecision.transition === 'fusion_morph' ||
         automixDecision.transition === 'harmonic_weave'
-      const fallbackFusion =
-        reason.includes('fallback') && fusionLikeTransition
+      const fallbackFusion = reason.includes('fallback') && fusionLikeTransition
 
       if (fusionLikeTransition) {
         const fusionFloorMs =
-          normalizeAutoMixMode(automixConfig?.mode) === 'fusion'
-            ? 16000
-            : 14000
+          normalizeAutoMixMode(automixConfig?.mode) === 'fusion' ? 16000 : 14000
         transitionMs = Math.max(transitionMs, fusionFloorMs)
       }
 
@@ -1938,16 +1938,6 @@ export class Player {
           filterRampMs
         }
       )
-
-      const audioStream = this._getAudioStream()
-      if (typeof audioStream?.startShowcaseRecording === 'function') {
-        audioStream.startShowcaseRecording(
-          10000,
-          preLeadMs + transitionMs,
-          10000,
-          automixDecision.transition
-        )
-      }
 
       const currentFiltersPayload = this.filters.filters as
         | Record<string, unknown>
@@ -2380,7 +2370,8 @@ export class Player {
           }
 
           if (energyHistory.length < 16) return
-          if (energyHistory.length * ENERGY_POLL_MS < effectivePatienceMs) return
+          if (energyHistory.length * ENERGY_POLL_MS < effectivePatienceMs)
+            return
 
           const avg =
             energyHistory.reduce((a, b) => a + b, 0) / energyHistory.length
@@ -2400,14 +2391,13 @@ export class Player {
             remainingMs < SMART_ZONE_MS &&
             remainingMs > Math.max(8000, MIN_REMAINING_MS * 0.35)
           ) {
-            const nearDownbeat =
-              (isFusionMode
-                ? beatState!.phase <= 0.18 ||
-                  beatState!.phase >= 0.82 ||
-                  beatState!.lastBeatAgeSec <= 0.16
-                : beatState!.phase <= 0.12 ||
-                  beatState!.phase >= 0.88 ||
-                  beatState!.lastBeatAgeSec <= 0.12)
+            const nearDownbeat = isFusionMode
+              ? beatState!.phase <= 0.18 ||
+                beatState!.phase >= 0.82 ||
+                beatState!.lastBeatAgeSec <= 0.16
+              : beatState!.phase <= 0.12 ||
+                beatState!.phase >= 0.88 ||
+                beatState!.lastBeatAgeSec <= 0.12
 
             // For Fusion mode, we prioritize structural alignment over energy matching.
             // We allow triggering on intro beats that might be quieter than the body.
@@ -2424,6 +2414,7 @@ export class Player {
             }
           }
 
+          // Fusion continuity: steady energy in fusion mode
           if (
             isFusionMode &&
             remainingMs < SMART_ZONE_MS &&
@@ -2517,16 +2508,18 @@ export class Player {
 
           if (energyHistory.length >= 12 && remainingMs < SMART_ZONE_MS) {
             const recent = energyHistory.slice(-20)
-            const recentAvg = recent.reduce((a, b) => a + b, 0) / Math.max(1, recent.length)
+            const recentAvg =
+              recent.reduce((a, b) => a + b, 0) / Math.max(1, recent.length)
             const variance =
-              recent.reduce((sum, v) => sum + Math.abs(v - recentAvg), 0) / Math.max(1, recent.length)
+              recent.reduce((sum, v) => sum + Math.abs(v - recentAvg), 0) /
+              Math.max(1, recent.length)
             if (variance < recentAvg * 0.04) {
               steadyCount++
             } else {
               if (steadyCount >= 25) {
                 triggered = true
                 triggerAutomix(
-                  `plateau exit: energy changing after ${(steadyCount * ENERGY_POLL_MS / 1000).toFixed(1)}s stability`
+                  `plateau exit: energy changing after ${((steadyCount * ENERGY_POLL_MS) / 1000).toFixed(1)}s stability`
                 )
                 return
               }
@@ -2579,7 +2572,11 @@ export class Player {
   private _startCrossfade(
     token: number,
     durationMs: number,
-    config: { curve: string; mode: CrossfadeMode },
+    config: {
+      curve: string
+      mode: CrossfadeMode
+      style: 'standard' | 'fusion'
+    },
     automixDecision?: AutoMixDecision | null,
     triggerReason?: string | null
   ): void {
@@ -2628,7 +2625,7 @@ export class Player {
 
     const audioStream = this._getAudioStream()
     const state = audioStream?.getCrossfadeState?.()
-    let bufferedMs = state?.bufferedMs ?? 0
+    const bufferedMs = state?.bufferedMs ?? 0
     if (!audioStream || !audioStream.startCrossfade || bufferedMs <= 0) {
       const canRetry =
         !!audioStream &&
@@ -2815,12 +2812,14 @@ export class Player {
       }
     }
 
+    const effectiveDurationMs = automixDecision?.transitionDurationMs ?? durationMs
+
     const hasPhysicalReset =
       automixDecision && (automixDecision.tapeStopA || automixDecision.scratchA)
     if (audioStream.setFadeVolume) {
       if (hasPhysicalReset && typeof audioStream.fadeTo === 'function') {
         audioStream.setFadeVolume(0.0)
-        audioStream.fadeTo(1.0, Math.min(1200, durationMs * 0.4), 's-curve')
+        audioStream.fadeTo(1.0, Math.min(1200, effectiveDurationMs * 0.4), 's-curve')
       } else {
         audioStream.setFadeVolume(1.0)
       }
@@ -2830,9 +2829,9 @@ export class Player {
       typeof audioStream.isBridgeDraining === 'function' &&
       audioStream.isBridgeDraining()
     const transition = automixDecision?.transition ?? null
-    const fallbackReason = (triggerReason ?? '').toLowerCase().includes(
-      'fallback'
-    )
+    const fallbackReason = (triggerReason ?? '')
+      .toLowerCase()
+      .includes('fallback')
     const fusionLikeTransition =
       transition === 'fusion_morph' || transition === 'harmonic_weave'
     if (!inBridge && typeof audioStream.seekToEnergyMatch === 'function') {
@@ -2864,7 +2863,7 @@ export class Player {
                 ? 0.055
                 : transition === 'harmonic_weave'
                   ? 0.06
-                : 0.065
+                  : 0.065
             targetRms = Math.max(targetRms, floor)
           }
         }
@@ -2874,27 +2873,30 @@ export class Player {
           transition !== 'vocal_strip'
         const strictNoVocalPreference =
           preferNoVocalEntry &&
-          (
-            fusionLikeTransition ||
+          (fusionLikeTransition ||
             transition === 'crossfade_eq' ||
             transition === 'filter_sweep' ||
             transition === 'highpass_dissolve' ||
-            fallbackReason
-          )
+            fallbackReason)
         const transitionHint =
           transition !== null
             ? `${transition}${preferNoVocalEntry ? '|no-vocal-entry' : ''}${strictNoVocalPreference ? '|strict-no-vocal' : ''}${fallbackReason ? '|fallback' : ''}`
             : null
         audioStream.seekToEnergyMatch(
           targetRms,
-          durationMs,
+          effectiveDurationMs,
           transitionHint ?? null,
           audioStream.getRealtimeBeatState?.() ?? null
         )
       }
     }
 
-    const started = audioStream.startCrossfade(durationMs, config.curve)
+    const blendStyle = automixDecision?.blendStyle ?? config.style
+    const started = audioStream.startCrossfade(
+      effectiveDurationMs,
+      config.curve,
+      blendStyle
+    )
     if (!started) {
       logger(
         'warn',
@@ -2920,7 +2922,7 @@ export class Player {
 
     this._emitTrackEnd(EndReasons.CROSSFADE, {
       crossfade: {
-        durationMs,
+        durationMs: effectiveDurationMs,
         curve: config.curve,
         mode: config.mode,
         transition: automixDecision?.transition ?? null,
@@ -2934,11 +2936,11 @@ export class Player {
 
     const energySkipMs = audioStream.getEnergySkipMs?.() ?? 0
 
-    this.position = energySkipMs
-    this._lyricsBasePosition = energySkipMs
+    // Do NOT reset lyrics base position yet. The position during crossfade 
+    // is tracked by _realPosition() using the unified consumed counter.
     this._lyricsBasePackets = this.connection?.statistics?.packetsExpected ?? 0
     this._emitTrackStart().catch((err) => this._onError(err))
-    this._crossfadeEndsAt = Date.now() + durationMs
+    this._crossfadeEndsAt = Date.now() + effectiveDurationMs
     this._crossfadeBlendStartedAt = Date.now()
 
     const startPositionMs = this._realPosition()
@@ -2946,7 +2948,7 @@ export class Player {
       token,
       previousTrack,
       startPositionMs,
-      endPositionMs: startPositionMs + durationMs
+      endPositionMs: startPositionMs + effectiveDurationMs
     }
     logger(
       'debug',
@@ -2957,10 +2959,10 @@ export class Player {
         previousTrack: previousTrack.info.identifier,
         nextTrack: nextTrack.info.identifier,
         startPositionMs,
-        endPositionMs: startPositionMs + durationMs
+        endPositionMs: startPositionMs + effectiveDurationMs
       }
     )
-    this._armCrossfadeCompletionTimer(durationMs)
+    this._armCrossfadeCompletionTimer(effectiveDurationMs)
   }
 
   /**
@@ -3021,6 +3023,25 @@ export class Player {
     this.position = snapshotPosition
     this._crossfadeBlendStartedAt = 0
 
+    this._lastStreamDataTime = Date.now()
+
+    const activeStream = this._getAudioStream()
+    if (typeof activeStream?.setIncomingHighpass === 'function') {
+      activeStream.setIncomingHighpass(false)
+    }
+    if (typeof activeStream?.setIncomingLowpass === 'function') {
+      activeStream.setIncomingLowpass(false)
+    }
+
+    if (typeof activeStream?.setFilterBypass === 'function') {
+      logger(
+        'debug',
+        'Crossfade',
+        `Disabling filter bypass at completion for guild ${this.guildId}`
+      )
+      activeStream.setFilterBypass(false)
+    }
+
     if (this._preAutomixFilters !== null) {
       const preFilters = this._preAutomixFilters
       this._preAutomixFilters = null
@@ -3033,20 +3054,6 @@ export class Player {
         this.filters = { ...this.filters, filters: {} }
         this.setFilters({ filters: preFilters } as FiltersState)
       }
-    }
-
-    this._lastStreamDataTime = Date.now()
-
-    const activeStream = this._getAudioStream()
-    if (typeof activeStream?.setIncomingHighpass === 'function') {
-      activeStream.setIncomingHighpass(false)
-    }
-    if (typeof activeStream?.setIncomingLowpass === 'function') {
-      activeStream.setIncomingLowpass(false)
-    }
-
-    if (typeof activeStream?.setFilterBypass === 'function') {
-      activeStream.setFilterBypass(false)
     }
 
     this._fading('reset')
@@ -3271,6 +3278,7 @@ export class Player {
       })
     }
     const resource = audioResourceFactory(
+      this.guildId,
       fetchedStream,
       fetched.type || urlData.format,
       this.nodelink,
@@ -3322,6 +3330,7 @@ export class Player {
     if (fetched.exception) return fetched as { exception: { message: string } }
 
     const resource = audioResourceFactory(
+      this.guildId,
       fetched.stream,
       fetched.type || urlData.format,
       this.nodelink,
@@ -3999,6 +4008,7 @@ export class Player {
       if (!url) return false
 
       const resourceResult = await seekResourceFactory(
+        this.guildId,
         url,
         position,
         endTime,
@@ -4945,6 +4955,7 @@ export class Player {
     }
 
     const pcmResource = createResource(
+      this.guildId,
       fetched.stream,
       fetched.type || (urlData.format as string) || 'unknown',
       this.nodelink,

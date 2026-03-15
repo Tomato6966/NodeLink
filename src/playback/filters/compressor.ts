@@ -1,7 +1,7 @@
+import { SAMPLE_RATE } from '../../constants.ts'
 import type { FilterSettings } from '../../typings/playback/filters.types.ts'
 import { AnimatableFilter } from './AnimatableFilter.ts'
 import { clamp16Bit } from './dsp/clamp16Bit.ts'
-import { SAMPLE_RATE } from '../../constants.ts'
 
 const CHANNELS = 2
 

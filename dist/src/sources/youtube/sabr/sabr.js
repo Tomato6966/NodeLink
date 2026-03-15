@@ -1,11 +1,11 @@
-import { PassThrough } from 'node:stream';
 import { Buffer } from 'node:buffer';
-import path from 'node:path';
-import { appendFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { appendFile } from 'node:fs/promises';
+import path from 'node:path';
+import { PassThrough } from 'node:stream';
 import { logger } from "../../../utils.js";
 import { poTokenManager } from './potoken.js';
-import { UMPPartId, FormatInitializationMetadata, SabrError, SabrRedirect, StreamProtectionStatus, MediaHeader, NextRequestPolicy, PlaybackStartPolicy, RequestIdentifier, RequestCancellationPolicy, SabrContextUpdate, SabrContextSendingPolicy, VideoPlaybackAbrRequest, ProtoReader, ReloadPlaybackContext, base64ToU8, concatenateChunks } from './protor.js';
+import { base64ToU8, concatenateChunks, FormatInitializationMetadata, MediaHeader, NextRequestPolicy, PlaybackStartPolicy, ProtoReader, ReloadPlaybackContext, RequestCancellationPolicy, RequestIdentifier, SabrContextSendingPolicy, SabrContextUpdate, SabrError, SabrRedirect, StreamProtectionStatus, UMPPartId, VideoPlaybackAbrRequest } from './protor.js';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36';
 const MAX_BUFFER_BYTES = 512 * 1024;
 const MIN_REQUEST_INTERVAL_MS = 500;
@@ -165,7 +165,7 @@ class UmpReader {
     }
     read(handlePart) {
         while (true) {
-            let offset = 0;
+            const offset = 0;
             const [partType, nextOffset] = this.readVarInt(offset);
             if (partType < 0)
                 break;
@@ -445,7 +445,7 @@ export class SabrStream extends PassThrough {
                 }
                 this.lastIterationAt = now;
                 const baseTimeMs = this.startTime || 0;
-                let reportedPlayerTime = Math.floor(this.virtualPlayerTimeMs + baseTimeMs);
+                const reportedPlayerTime = Math.floor(this.virtualPlayerTimeMs + baseTimeMs);
                 this.lastReportedPlayerTimeMs = reportedPlayerTime;
                 if (this.readableLength > MAX_BUFFER_BYTES) {
                     await wait(250, signal);

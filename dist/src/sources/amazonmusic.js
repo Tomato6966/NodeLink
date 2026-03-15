@@ -1,5 +1,5 @@
-import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
 import crypto from 'node:crypto';
+import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
 const BOT_USER_AGENT = 'Mozilla/5.0 (compatible; NodeLinkBot/0.1; +https://nodelink.js.org/)';
 const SEARCH_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36';
 const FALLBACK_DEVICE_ID = '13580682033287541';

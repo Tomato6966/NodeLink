@@ -928,7 +928,7 @@ function getRequestPayload(req, parsedUrl) {
         payload.pid = pid;
     return payload;
 }
-export { collectActionSnapshot, detectAnomalies, collectAllocationTopSites };
+export { collectActionSnapshot, collectAllocationTopSites, detectAnomalies };
 /**
  * Streams periodic profiler snapshots over Server-Sent Events.
  *

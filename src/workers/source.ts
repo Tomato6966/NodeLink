@@ -1284,6 +1284,7 @@ if (isMainThread) {
 
       if (urlResult.url && !isHls && !isLocal && !isSabr) {
         const resource = await createSeekeableAudioResource(
+          id,
           urlResult.url,
           payload?.position || 0,
           undefined,
@@ -1328,6 +1329,7 @@ if (isMainThread) {
         }
 
         pcmStream = createPCMStream(
+          id,
           fetched.stream,
           fetched.type || (urlResult.format as string) || 'unknown',
           nodelink as unknown as NodeLink,

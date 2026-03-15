@@ -1,8 +1,8 @@
-import net from 'node:net'
-import os from 'node:os'
 import fs from 'node:fs'
 import fsPromises from 'node:fs/promises'
 import inspector from 'node:inspector'
+import net from 'node:net'
+import os from 'node:os'
 import { resolve as resolvePath } from 'node:path'
 import { monitorEventLoopDelay } from 'node:perf_hooks'
 import { pathToFileURL } from 'node:url'
@@ -11,13 +11,13 @@ import v8 from 'node:v8'
 import { GatewayEvents } from '../constants.ts'
 import ConnectionManager from '../managers/connectionManager.ts'
 import CredentialManager from '../managers/credentialManager.ts'
+import type LyricsManager from '../managers/lyricsManager.ts'
+import type MeaningManager from '../managers/meaningManager.ts'
 import PluginManager from '../managers/pluginManager.ts'
 import RoutePlannerManager from '../managers/routePlannerManager.ts'
 import SourceManager from '../managers/sourceManager.ts'
 import StatsManager from '../managers/statsManager.ts'
 import TrackCacheManager from '../managers/trackCacheManager.ts'
-import type LyricsManager from '../managers/lyricsManager.ts'
-import type MeaningManager from '../managers/meaningManager.ts'
 import { getWebmOpusProfilerStats } from '../playback/demuxers/WebmOpus.ts'
 import { bufferPool } from '../playback/structs/BufferPool.ts'
 import type { TrackInfoExtended } from '../typings/playback/player.types.ts'
@@ -1833,6 +1833,7 @@ async function startLoadStream(
 
   const createPCMStream = await getCreatePCMStream()
   const pcmStream = createPCMStream(
+    payload?.guildId ?? 'worker-stream',
     fetched.stream,
     fetched.type || (urlResult.format as string) || 'unknown',
     nodelink,

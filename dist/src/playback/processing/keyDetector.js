@@ -25,10 +25,27 @@
  *
  * @module keyDetector
  */
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+const NOTE_NAMES = [
+    'C',
+    'C#',
+    'D',
+    'D#',
+    'E',
+    'F',
+    'F#',
+    'G',
+    'G#',
+    'A',
+    'A#',
+    'B'
+];
 // Krumhansl-Kessler key profiles (tonic-aligned, index 0 = tonic)
-const MAJOR_PROFILE = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
-const MINOR_PROFILE = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+const MAJOR_PROFILE = [
+    6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88
+];
+const MINOR_PROFILE = [
+    6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17
+];
 // Camelot wheel number for each pitch class (index 0 = C, 1 = C#, … 11 = B)
 // Major: C=8B, C#=3B, D=10B, D#=5B, E=12B, F=7B, F#=2B, G=9B, G#=4B, A=11B, A#=6B, B=1B
 const CAMELOT_MAJOR_NUM = [8, 3, 10, 5, 12, 7, 2, 9, 4, 11, 6, 1];
@@ -74,7 +91,7 @@ export function estimateKeyFromPcm(pcm, sampleRate, channels) {
     const targets = [];
     for (let octave = 2; octave <= 6; octave++) {
         for (let pc = 0; pc < 12; pc++) {
-            targets.push({ pc, freq: C0_FREQ * Math.pow(2, octave + pc / 12) });
+            targets.push({ pc, freq: C0_FREQ * 2 ** (octave + pc / 12) });
         }
     }
     // Hann window (pre-computed once)
@@ -83,7 +100,7 @@ export function estimateKeyFromPcm(pcm, sampleRate, channels) {
         hann[i] = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (WINDOW_SIZE - 1)));
     }
     // Pre-compute Goertzel coefficients for each target frequency
-    const coeffs = targets.map(t => 2 * Math.cos((2 * Math.PI * t.freq) / sampleRate));
+    const coeffs = targets.map((t) => 2 * Math.cos((2 * Math.PI * t.freq) / sampleRate));
     // Segment management
     const segmentSamples = Math.round(sampleRate * SEGMENT_S);
     const globalChroma = new Float64Array(12);
@@ -142,7 +159,7 @@ export function estimateKeyFromPcm(pcm, sampleRate, channels) {
                     const encoded = vote.pc * 2 + (vote.mode === 'minor' ? 1 : 0);
                     const zStrength = clamp01(vote.zScore / 3.5);
                     const corrGapStrength = clamp01((vote.bestCorr - vote.secondCorr + 0.05) / 0.35);
-                    const voteStrength = 0.60 * zStrength + 0.40 * corrGapStrength;
+                    const voteStrength = 0.6 * zStrength + 0.4 * corrGapStrength;
                     segmentVotes.push({ encoded, weight: Math.max(0.12, voteStrength) });
                 }
             }
@@ -158,7 +175,7 @@ export function estimateKeyFromPcm(pcm, sampleRate, channels) {
             const encoded = vote.pc * 2 + (vote.mode === 'minor' ? 1 : 0);
             const zStrength = clamp01(vote.zScore / 3.5);
             const corrGapStrength = clamp01((vote.bestCorr - vote.secondCorr + 0.05) / 0.35);
-            const voteStrength = 0.60 * zStrength + 0.40 * corrGapStrength;
+            const voteStrength = 0.6 * zStrength + 0.4 * corrGapStrength;
             segmentVotes.push({ encoded, weight: Math.max(0.12, voteStrength) });
         }
     }
@@ -190,9 +207,7 @@ export function estimateKeyFromPcm(pcm, sampleRate, channels) {
             }
             const vPc = vote.encoded >> 1;
             const vMinor = vote.encoded & 1;
-            const vCamelot = vMinor
-                ? CAMELOT_MINOR_NUM[vPc]
-                : CAMELOT_MAJOR_NUM[vPc];
+            const vCamelot = vMinor ? CAMELOT_MINOR_NUM[vPc] : CAMELOT_MAJOR_NUM[vPc];
             if (vCamelot === bestCamelotNum) {
                 compatWeight += vote.weight;
             }
@@ -207,10 +222,10 @@ export function estimateKeyFromPcm(pcm, sampleRate, channels) {
             0.06 * (1 - modeAmbiguity));
     }
     else {
-        confidence = clamp01(0.40 * zMargin +
+        confidence = clamp01(0.4 * zMargin +
             0.25 * corrGap +
             0.25 * tonalClarity +
-            0.10 * (1 - modeAmbiguity));
+            0.1 * (1 - modeAmbiguity));
         stability = confidence * 0.75;
     }
     const camelotNum = best.mode === 'major'
@@ -285,14 +300,27 @@ export function harmonicCompatibilityScore(keyA, keyB) {
     if (!keyA || !keyB)
         return null;
     const distance = camelotDistance(keyA.camelot, keyB.camelot);
-    const distanceScore = clamp01(1 - Math.pow(distance / 6, 1.1) * 0.9);
+    const letterA = keyA.camelot.slice(-1);
+    const letterB = keyB.camelot.slice(-1);
+    const isRelative = distance === 0 && letterA !== letterB;
+    const isSame = distance === 0 && letterA === letterB;
+    const isNeighbor = distance === 1 && letterA === letterB;
+    let distanceScore = 0;
+    if (isSame)
+        distanceScore = 1.0;
+    else if (isRelative)
+        distanceScore = 0.95;
+    else if (isNeighbor)
+        distanceScore = 0.9;
+    else
+        distanceScore = clamp01(1 - (distance / 6) ** 1.1 * 0.9);
     const confidenceScore = Math.sqrt(clamp01(keyA.confidence) * clamp01(keyB.confidence));
     const stabilityScore = Math.sqrt(clamp01(keyA.stability ?? keyA.confidence) *
         clamp01(keyB.stability ?? keyB.confidence));
     const clarityScore = Math.sqrt(clamp01(keyA.tonalClarity ?? keyA.confidence) *
         clamp01(keyB.tonalClarity ?? keyB.confidence));
     const ambiguityPenalty = ((keyA.modeAmbiguity ?? 0.35) + (keyB.modeAmbiguity ?? 0.35)) * 0.5;
-    return clamp01(0.40 * distanceScore +
+    return clamp01(0.4 * distanceScore +
         0.22 * confidenceScore +
         0.18 * stabilityScore +
         0.15 * clarityScore +
@@ -472,6 +500,6 @@ function computeTonalClarity(chroma, weight, best) {
     const root = best.pc;
     const third = (root + (best.mode === 'major' ? 4 : 3)) % 12;
     const fifth = (root + 7) % 12;
-    const triadSupport = clamp01(((norm[root] + norm[third] + norm[fifth]) - 0.18) / 0.47);
-    return clamp01(0.40 * entropyClarity + 0.30 * peakGap + 0.30 * triadSupport);
+    const triadSupport = clamp01((norm[root] + norm[third] + norm[fifth] - 0.18) / 0.47);
+    return clamp01(0.4 * entropyClarity + 0.3 * peakGap + 0.3 * triadSupport);
 }

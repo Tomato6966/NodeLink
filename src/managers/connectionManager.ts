@@ -5,6 +5,7 @@ import { performance } from 'node:perf_hooks'
 import type { Readable } from 'node:stream'
 import { promisify } from 'node:util'
 import { GatewayEvents } from '../constants.ts'
+import type { ConnectionManagerContext } from '../typings/index.types.ts'
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
@@ -15,7 +16,6 @@ import type {
   PingResult
 } from '../typings/voice/connection.types.ts'
 import { http1makeRequest, logger } from '../utils.ts'
-import type { ConnectionManagerContext } from '../typings/index.types.ts'
 
 const execAsync = promisify(exec)
 const dnsLookup = promisify(dns.lookup)

@@ -1,5 +1,5 @@
-import { encodeTrack, http1makeRequest, logger, makeRequest } from "../utils.js";
 import HLSHandler from "../playback/hls/HLSHandler.js";
+import { encodeTrack, http1makeRequest, logger, makeRequest } from "../utils.js";
 const API_BASE = 'https://api.vk.com/method/';
 const API_VERSION = '5.131';
 const BASE64_CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN0PQRSTUVWXYZO123456789+/=';
@@ -58,9 +58,9 @@ export default class VKMusicSource {
             method: 'POST',
             headers: {
                 'User-Agent': USER_AGENT,
-                'Referer': 'https://vk.ru/',
-                'Origin': 'https://vk.ru',
-                'Cookie': this.cookie,
+                Referer: 'https://vk.ru/',
+                Origin: 'https://vk.ru',
+                Cookie: this.cookie,
                 'Content-Type': 'application/x-www-form-urlencoded'
             },
             body: 'version=1&app_id=6287487',
@@ -91,10 +91,17 @@ export default class VKMusicSource {
         }
         try {
             logger('debug', 'VKMusic', `Searching for: ${query}`);
-            const res = await this._apiRequest('audio.search', { q: query, count: this.nodelink.options.maxSearchResults || 10, extended: 1 });
+            const res = await this._apiRequest('audio.search', {
+                q: query,
+                count: this.nodelink.options.maxSearchResults || 10,
+                extended: 1
+            });
             if (!res?.items?.length)
                 return { loadType: 'empty', data: {} };
-            return { loadType: 'search', data: res.items.map(item => this.buildTrack(item)) };
+            return {
+                loadType: 'search',
+                data: res.items.map((item) => this.buildTrack(item))
+            };
         }
         catch (e) {
             logger('error', 'VKMusic', `Search failed: ${e.message}`);
@@ -114,12 +121,19 @@ export default class VKMusicSource {
         }
         try {
             logger('debug', 'VKMusic', `Getting recommendations for: ${audioId}`);
-            const res = await this._apiRequest('audio.getRecommendations', { target_audio: audioId, count: 20, extended: 1 });
+            const res = await this._apiRequest('audio.getRecommendations', {
+                target_audio: audioId,
+                count: 20,
+                extended: 1
+            });
             if (!res?.items?.length)
                 return { loadType: 'empty', data: {} };
             return {
                 loadType: 'playlist',
-                data: { info: { name: 'VK Recommendations', selectedTrack: 0 }, tracks: res.items.map(item => this.buildTrack(item)) }
+                data: {
+                    info: { name: 'VK Recommendations', selectedTrack: 0 },
+                    tracks: res.items.map((item) => this.buildTrack(item))
+                }
             };
         }
         catch (e) {
@@ -146,7 +160,11 @@ export default class VKMusicSource {
         if (this.hasToken) {
             try {
                 logger('debug', 'VKMusic', `Resolving playlist via API: ${ownerId}_${playlistId}`);
-                const params = { owner_id: ownerId, extended: 1, count: this.nodelink.options.maxAlbumPlaylistLength || 100 };
+                const params = {
+                    owner_id: ownerId,
+                    extended: 1,
+                    count: this.nodelink.options.maxAlbumPlaylistLength || 100
+                };
                 if (playlistId)
                     params.album_id = playlistId;
                 if (accessKey)
@@ -155,7 +173,10 @@ export default class VKMusicSource {
                 if (res?.items?.length) {
                     return {
                         loadType: 'playlist',
-                        data: { info: { name: 'VK Playlist', selectedTrack: 0 }, tracks: res.items.map(item => this.buildTrack(item)) }
+                        data: {
+                            info: { name: 'VK Playlist', selectedTrack: 0 },
+                            tracks: res.items.map((item) => this.buildTrack(item))
+                        }
                     };
                 }
             }
@@ -168,23 +189,39 @@ export default class VKMusicSource {
     async _scrapePlaylist(url) {
         try {
             logger('debug', 'VKMusic', `Scraping playlist: ${url}`);
-            const { body, statusCode } = await http1makeRequest(url, { headers: { 'User-Agent': USER_AGENT, 'Cookie': this.cookie }, proxy: this.config.proxy });
+            const { body, statusCode } = await http1makeRequest(url, {
+                headers: { 'User-Agent': USER_AGENT, Cookie: this.cookie },
+                proxy: this.config.proxy
+            });
             if (statusCode !== 200)
                 throw new Error(`HTTP ${statusCode}`);
             const dataAudioMatch = body.match(/data-audio="([^"]+)"/g);
             if (dataAudioMatch) {
-                const tracks = dataAudioMatch.map(m => {
+                const tracks = dataAudioMatch
+                    .map((m) => {
                     const raw = m.match(/"([^"]+)"/)[1].replace(/&quot;/g, '"');
                     return this._parseMeta(JSON.parse(raw));
-                }).filter(Boolean);
+                })
+                    .filter(Boolean);
                 logger('debug', 'VKMusic', `Scraped ${tracks.length} tracks from playlist`);
-                return { loadType: 'playlist', data: { info: { name: 'VK Scraped Playlist', selectedTrack: 0 }, tracks } };
+                return {
+                    loadType: 'playlist',
+                    data: {
+                        info: { name: 'VK Scraped Playlist', selectedTrack: 0 },
+                        tracks
+                    }
+                };
             }
             throw new Error('No track data found in page');
         }
         catch (e) {
             logger('error', 'VKMusic', `Scraping playlist failed: ${e.message}`);
-            return { exception: { message: `Scraping failed: ${e.message}`, severity: 'fault' } };
+            return {
+                exception: {
+                    message: `Scraping failed: ${e.message}`,
+                    severity: 'fault'
+                }
+            };
         }
     }
     async _resolveTrack(url, trackMatch) {
@@ -195,14 +232,18 @@ export default class VKMusicSource {
                 const { owner, id, hash } = trackMatch.groups;
                 const audios = `${owner}_${id}${hash ? `_${hash}` : ''}`;
                 logger('debug', 'VKMusic', `Resolving track via API: ${audios}`);
-                const res = await this._apiRequest('audio.getById', { audios, extended: 1 });
+                const res = await this._apiRequest('audio.getById', {
+                    audios,
+                    extended: 1
+                });
                 if (res?.[0]) {
                     let track = this.buildTrack(res[0]);
                     if (!track.info.artworkUrl || !res[0].url) {
                         logger('debug', 'VKMusic', `Self-healing track: ${audios}`);
                         const searchRes = await this.search(`${res[0].artist} ${res[0].title}`, 'vksearch');
                         if (searchRes.loadType === 'search' && searchRes.data.length > 0) {
-                            const healed = searchRes.data.find(t => t.info.artworkUrl) || searchRes.data[0];
+                            const healed = searchRes.data.find((t) => t.info.artworkUrl) ||
+                                searchRes.data[0];
                             track = healed;
                         }
                     }
@@ -218,7 +259,10 @@ export default class VKMusicSource {
     async _scrapeTrack(url) {
         try {
             logger('debug', 'VKMusic', `Scraping track: ${url}`);
-            const { body, statusCode } = await http1makeRequest(url, { headers: { 'User-Agent': USER_AGENT, 'Cookie': this.cookie }, proxy: this.config.proxy });
+            const { body, statusCode } = await http1makeRequest(url, {
+                headers: { 'User-Agent': USER_AGENT, Cookie: this.cookie },
+                proxy: this.config.proxy
+            });
             if (statusCode !== 200)
                 throw new Error(`HTTP ${statusCode}`);
             const dataAudioMatch = body.match(/data-audio="([^"]+)"/);
@@ -229,7 +273,8 @@ export default class VKMusicSource {
                     logger('debug', 'VKMusic', `Self-healing scraped track: ${track.info.title}`);
                     const searchRes = await this.search(`${track.info.author} ${track.info.title}`, 'vksearch');
                     if (searchRes.loadType === 'search' && searchRes.data.length > 0) {
-                        track = searchRes.data.find(t => t.info.artworkUrl) || searchRes.data[0];
+                        track =
+                            searchRes.data.find((t) => t.info.artworkUrl) || searchRes.data[0];
                     }
                 }
                 return { loadType: 'track', data: track };
@@ -238,7 +283,12 @@ export default class VKMusicSource {
         }
         catch (e) {
             logger('error', 'VKMusic', `Scraping track failed: ${e.message}`);
-            return { exception: { message: `Scraping failed: ${e.message}`, severity: 'fault' } };
+            return {
+                exception: {
+                    message: `Scraping failed: ${e.message}`,
+                    severity: 'fault'
+                }
+            };
         }
     }
     _parseMeta(data) {
@@ -250,9 +300,17 @@ export default class VKMusicSource {
             rawUrl = this._unmask_url(rawUrl, this.userId);
         const artworkUrl = data[14] ? data[14].split(',')[0] : null;
         const trackInfo = {
-            identifier: id, isSeekable: true, author: data[4], length: data[5] * 1000,
-            isStream: false, position: 0, title: data[3], uri: `https://vk.com/audio${id}`,
-            artworkUrl, isrc: null, sourceName: 'vkmusic',
+            identifier: id,
+            isSeekable: true,
+            author: data[4],
+            length: data[5] * 1000,
+            isStream: false,
+            position: 0,
+            title: data[3],
+            uri: `https://vk.com/audio${id}`,
+            artworkUrl,
+            isrc: null,
+            sourceName: 'vkmusic',
             details: [data[25] || null]
         };
         return { encoded: encodeTrack(trackInfo), info: trackInfo };
@@ -262,9 +320,17 @@ export default class VKMusicSource {
         const thumb = item.album?.thumb || item.album?.images?.[0];
         const artworkUrl = thumb?.photo_1200 || thumb?.photo_600 || thumb?.photo_300 || null;
         const trackInfo = {
-            identifier: id, isSeekable: true, author: item.artist, length: item.duration * 1000,
-            isStream: false, position: 0, title: item.title, uri: `https://vk.com/audio${id}`,
-            artworkUrl, isrc: item.external_ids?.isrc || null, sourceName: 'vkmusic',
+            identifier: id,
+            isSeekable: true,
+            author: item.artist,
+            length: item.duration * 1000,
+            isStream: false,
+            position: 0,
+            title: item.title,
+            uri: `https://vk.com/audio${id}`,
+            artworkUrl,
+            isrc: item.external_ids?.isrc || null,
+            sourceName: 'vkmusic',
             details: [item.access_key || null]
         };
         return { encoded: encodeTrack(trackInfo), info: trackInfo };
@@ -286,7 +352,9 @@ export default class VKMusicSource {
                 const audios = accessKey ? `${id}_${accessKey}` : id;
                 const res = await this._apiRequest('audio.getById', { audios });
                 if (res?.[0]?.url)
-                    url = res[0].url.includes('audio_api_unavailable') ? this._unmask_url(res[0].url, this.userId) : res[0].url;
+                    url = res[0].url.includes('audio_api_unavailable')
+                        ? this._unmask_url(res[0].url, this.userId)
+                        : res[0].url;
             }
             catch (e) {
                 logger('debug', 'VKMusic', `Stream API getById failed: ${e.message}`);
@@ -294,10 +362,16 @@ export default class VKMusicSource {
             if (!url) {
                 try {
                     logger('debug', 'VKMusic', `Stream fallback search for: ${decodedTrack.author} - ${decodedTrack.title}`);
-                    const res = await this._apiRequest('audio.search', { q: `${decodedTrack.author} ${decodedTrack.title}`, count: 10 });
-                    const match = res?.items?.find(i => `${i.owner_id}_${i.id}` === id) || res?.items?.[0];
+                    const res = await this._apiRequest('audio.search', {
+                        q: `${decodedTrack.author} ${decodedTrack.title}`,
+                        count: 10
+                    });
+                    const match = res?.items?.find((i) => `${i.owner_id}_${i.id}` === id) ||
+                        res?.items?.[0];
                     if (match?.url)
-                        url = match.url.includes('audio_api_unavailable') ? this._unmask_url(match.url, this.userId) : match.url;
+                        url = match.url.includes('audio_api_unavailable')
+                            ? this._unmask_url(match.url, this.userId)
+                            : match.url;
                 }
                 catch (e) {
                     logger('debug', 'VKMusic', `Stream fallback search failed: ${e.message}`);
@@ -306,19 +380,31 @@ export default class VKMusicSource {
         }
         if (url && (url.startsWith('http') || url.includes('.m3u8'))) {
             logger('debug', 'VKMusic', `Stream resolved: ${url.substring(0, 50)}...`);
-            const result = { url, protocol: url.includes('.m3u8') ? 'hls' : 'https', format: url.includes('.m3u8') ? 'mpegts' : 'mp3' };
+            const result = {
+                url,
+                protocol: url.includes('.m3u8') ? 'hls' : 'https',
+                format: url.includes('.m3u8') ? 'mpegts' : 'mp3'
+            };
             this.nodelink.trackCacheManager.set('vkmusic', decodedTrack.identifier, result, 1000 * 60 * 60 * 2);
             return result;
         }
         logger('warn', 'VKMusic', 'Native stream not found, falling back to YouTube');
         const searchRes = await this.nodelink.sources.searchWithDefault(`${decodedTrack.title} ${decodedTrack.author}`);
         if (searchRes.loadType === 'search' && searchRes.data.length > 0) {
-            return { newTrack: searchRes.data[0], ...(await this.nodelink.sources.getTrackUrl(searchRes.data[0].info)) };
+            return {
+                newTrack: searchRes.data[0],
+                ...(await this.nodelink.sources.getTrackUrl(searchRes.data[0].info))
+            };
         }
         return { exception: { message: 'Stream not found', severity: 'fault' } };
     }
     async loadStream(_track, url, protocol, additionalData) {
-        const headers = { 'User-Agent': USER_AGENT, 'Cookie': this.cookie, 'Referer': 'https://vk.com/', 'Origin': 'https://vk.com' };
+        const headers = {
+            'User-Agent': USER_AGENT,
+            Cookie: this.cookie,
+            Referer: 'https://vk.com/',
+            Origin: 'https://vk.com'
+        };
         if (protocol === 'hls') {
             logger('debug', 'VKMusic', 'Loading HLS stream via mpegts strategy');
             return {
@@ -332,25 +418,36 @@ export default class VKMusicSource {
                 type: 'mpegts'
             };
         }
-        const { stream, error } = await http1makeRequest(url, { method: 'GET', streamOnly: true, headers, proxy: this.config.proxy });
+        const { stream, error } = await http1makeRequest(url, {
+            method: 'GET',
+            streamOnly: true,
+            headers,
+            proxy: this.config.proxy
+        });
         if (error)
             throw error;
         return { stream, type: 'mp3' };
     }
     async _apiRequest(method, params) {
-        if (this.cookie && (!this.accessToken || (this.tokenExpiry && Date.now() >= this.tokenExpiry - 60000)))
+        if (this.cookie &&
+            (!this.accessToken ||
+                (this.tokenExpiry && Date.now() >= this.tokenExpiry - 60000)))
             await this._refreshAccessToken();
         const url = new URL(API_BASE + method);
         params.access_token = this.accessToken;
         params.v = API_VERSION;
-        Object.keys(params).forEach(k => url.searchParams.append(k, params[k]));
+        Object.keys(params).forEach((k) => url.searchParams.append(k, params[k]));
         const { body, error, statusCode } = await makeRequest(url.toString(), {
-            method: 'GET', headers: { 'User-Agent': 'KateMobileAndroid/56 lite-460 (Android 4.4.2; SDK 19; x86; unknown Android SDK built for x86; en)' },
+            method: 'GET',
+            headers: {
+                'User-Agent': 'KateMobileAndroid/56 lite-460 (Android 4.4.2; SDK 19; x86; unknown Android SDK built for x86; en)'
+            },
             localAddress: this.nodelink.routePlanner?.getIP(),
             proxy: this.config.proxy
         });
         if (error || statusCode !== 200 || body.error) {
-            if ((statusCode === 401 || body?.error?.error_code === 5) && this.cookie) {
+            if ((statusCode === 401 || body?.error?.error_code === 5) &&
+                this.cookie) {
                 await this._refreshAccessToken();
                 return this._apiRequest(method, params);
             }
@@ -364,7 +461,7 @@ export default class VKMusicSource {
             const r = BASE64_CHARS.indexOf(enc[i]);
             if (r === -1)
                 continue;
-            e = (n % 4) ? 64 * e + r : r;
+            e = n % 4 ? 64 * e + r : r;
             if (n++ % 4)
                 dec += String.fromCharCode(255 & (e >> ((-2 * n) & 6)));
         }
@@ -385,7 +482,7 @@ export default class VKMusicSource {
             }
             for (let n = 1; n < urlLen; n++) {
                 const c = maskUrlArr[n], idx = indexes[urlLen - 1 - n];
-                maskUrlArr[n] = maskUrlArr[idx], maskUrlArr[idx] = c;
+                (maskUrlArr[n] = maskUrlArr[idx]), (maskUrlArr[idx] = c);
             }
             return maskUrlArr.join('');
         }

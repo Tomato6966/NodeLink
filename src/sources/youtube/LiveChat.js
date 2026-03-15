@@ -16,22 +16,39 @@ class LiveChat {
     }
 
     try {
-      const { body: data, statusCode } = await this.webClient._makeNextRequest(videoId, this.source.ytContext, {})
+      const { body: data, statusCode } = await this.webClient._makeNextRequest(
+        videoId,
+        this.source.ytContext,
+        {}
+      )
 
       if (statusCode !== 200 || !data) {
-        logger('error', 'YouTube-LiveChat', `Failed to get next data for ${videoId}: Status ${statusCode}`)
+        logger(
+          'error',
+          'YouTube-LiveChat',
+          `Failed to get next data for ${videoId}: Status ${statusCode}`
+        )
         return null
       }
 
-      const chatRenderer = data.contents?.twoColumnWatchNextResults?.conversationBar?.liveChatRenderer
-      let continuation = chatRenderer?.continuations?.[0]?.reloadContinuationData?.continuation
+      const chatRenderer =
+        data.contents?.twoColumnWatchNextResults?.conversationBar
+          ?.liveChatRenderer
+      let continuation =
+        chatRenderer?.continuations?.[0]?.reloadContinuationData?.continuation
 
       if (!continuation) {
-        logger('warn', 'YouTube-LiveChat', `No live chat continuation found for ${videoId}`)
+        logger(
+          'warn',
+          'YouTube-LiveChat',
+          `No live chat continuation found for ${videoId}`
+        )
         return null
       }
 
-      const apiKey = data?.responseContext?.serviceTrackingParams?.[0]?.serviceInfo?.[0]?.value || this.apiKey
+      const apiKey =
+        data?.responseContext?.serviceTrackingParams?.[0]?.serviceInfo?.[0]
+          ?.value || this.apiKey
 
       return {
         poll: async () => {
@@ -51,16 +68,22 @@ class LiveChat {
           )
 
           if (statusCode !== 200 || !chatResponse) {
-            logger('warn', 'YouTube-LiveChat', `Polling failed for ${videoId}: Status ${statusCode}`)
+            logger(
+              'warn',
+              'YouTube-LiveChat',
+              `Polling failed for ${videoId}: Status ${statusCode}`
+            )
             return null
           }
 
-          const chatCont = chatResponse.continuationContents?.liveChatContinuation
+          const chatCont =
+            chatResponse.continuationContents?.liveChatContinuation
           if (!chatCont) return null
 
-          const nextContData = chatCont.continuations?.[0]?.invalidationContinuationData || 
-                               chatCont.continuations?.[0]?.timedContinuationData
-          
+          const nextContData =
+            chatCont.continuations?.[0]?.invalidationContinuationData ||
+            chatCont.continuations?.[0]?.timedContinuationData
+
           if (nextContData) {
             continuation = nextContData.continuation
           } else {
@@ -74,7 +97,11 @@ class LiveChat {
         }
       }
     } catch (e) {
-      logger('error', 'YouTube-LiveChat', `Error initializing chat for ${videoId}: ${e.message}`)
+      logger(
+        'error',
+        'YouTube-LiveChat',
+        `Error initializing chat for ${videoId}: ${e.message}`
+      )
       return null
     }
   }
@@ -84,20 +111,37 @@ class LiveChat {
     for (const action of actions) {
       if (action.addChatItemAction) {
         const item = action.addChatItemAction.item
-        const renderer = item.liveChatTextMessageRenderer || item.liveChatPaidMessageRenderer || item.liveChatMembershipItemRenderer || item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer
+        const renderer =
+          item.liveChatTextMessageRenderer ||
+          item.liveChatPaidMessageRenderer ||
+          item.liveChatMembershipItemRenderer ||
+          item.liveChatSponsorshipsGiftPurchaseAnnouncementRenderer
 
         if (renderer) {
           parsed.push({
-            type: item.liveChatTextMessageRenderer ? 'text' : item.liveChatPaidMessageRenderer ? 'paid' : item.liveChatMembershipItemRenderer ? 'membership' : 'gift',
+            type: item.liveChatTextMessageRenderer
+              ? 'text'
+              : item.liveChatPaidMessageRenderer
+                ? 'paid'
+                : item.liveChatMembershipItemRenderer
+                  ? 'membership'
+                  : 'gift',
             id: renderer.id,
             timestamp: renderer.timestampUsec,
             author: {
-              name: renderer.authorName?.simpleText || renderer.headerPrimaryText?.runs?.map(r => r.text).join(''),
+              name:
+                renderer.authorName?.simpleText ||
+                renderer.headerPrimaryText?.runs?.map((r) => r.text).join(''),
               id: renderer.authorExternalChannelId,
               photo: renderer.authorPhoto?.thumbnails?.pop()?.url,
-              badges: renderer.authorBadges?.map(b => b.liveChatAuthorBadgeRenderer?.tooltip)
+              badges: renderer.authorBadges?.map(
+                (b) => b.liveChatAuthorBadgeRenderer?.tooltip
+              )
             },
-            message: renderer.message?.runs?.map(r => r.text).join('') || renderer.headerSubtext?.simpleText || renderer.headerSubtext?.runs?.map(r => r.text).join(''),
+            message:
+              renderer.message?.runs?.map((r) => r.text).join('') ||
+              renderer.headerSubtext?.simpleText ||
+              renderer.headerSubtext?.runs?.map((r) => r.text).join(''),
             amount: renderer.purchaseAmountText?.simpleText
           })
         }
@@ -111,7 +155,11 @@ class LiveChat {
   }
 
   async handleConnection(socket, videoId) {
-    logger('info', 'YouTube-LiveChat', `Starting live chat for video: ${videoId}`)
+    logger(
+      'info',
+      'YouTube-LiveChat',
+      `Starting live chat for video: ${videoId}`
+    )
 
     try {
       const chat = await this.getLiveChat(videoId)

@@ -157,18 +157,14 @@ export default class SongLinkSource {
       const searchUrl = new URL('https://itunes.apple.com/search')
       searchUrl.searchParams.set('term', query)
       searchUrl.searchParams.set('country', this.userCountry || 'US')
-      searchUrl.searchParams.set(
-        'entity',
-        'song,album,podcast,podcastEpisode'
-      )
+      searchUrl.searchParams.set('entity', 'song,album,podcast,podcastEpisode')
       searchUrl.searchParams.set('limit', String(limit))
       searchUrl.searchParams.set('callback', '__jp33')
 
       const { body, statusCode } = await http1makeRequest(searchUrl.toString())
       if (statusCode !== 200) return { loadType: 'empty', data: {} }
 
-      const payload =
-        typeof body === 'string' ? this._parseJsonp(body) : body
+      const payload = typeof body === 'string' ? this._parseJsonp(body) : body
       const results = payload?.results || []
       if (!Array.isArray(results) || results.length === 0) {
         return { loadType: 'empty', data: {} }

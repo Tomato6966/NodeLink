@@ -59,30 +59,34 @@ export type CrossfadeMode = 'preload' | 'stream'
  */
 export interface CrossfadeConfig {
   /**
-   * Enables crossfade handling.
+   * Enables the overlap mechanism between tracks.
    */
   enabled?: boolean
 
   /**
-   * Crossfade duration in milliseconds.
+   * Default duration for the overlap (ms).
    */
   duration?: number
 
   /**
-   * Fading curve to use during crossfade.
+   * Blending style when AutoMix is disabled.
+   * - `standard`: Simple volume crossfade.
+   * - `fusion`: Advanced spectral/bass-aware blending.
+   */
+  style?: 'standard' | 'fusion'
+
+  /**
+   * Fading curve to use during standard crossfade.
    */
   curve?: FadeCurve
 
   /**
-   * Crossfade mode.
-   *
-   * - `preload`: overlaps when the next track is preloaded.
-   * - `stream`: starts overlap immediately after preload (useful for streams).
+   * Overlap trigger mode.
    */
   mode?: CrossfadeMode
 
   /**
-   * Minimum buffered audio (ms) required before crossfade begins.
+   * Minimum buffered audio (ms) required.
    */
   minBufferMs?: number
 
@@ -198,7 +202,11 @@ export interface AudioResource {
   /**
    * Starts crossfading with the buffered PCM stream.
    */
-  startCrossfade?: (durationMs: number, curve?: string) => boolean
+  startCrossfade?: (
+    durationMs: number,
+    curve?: string,
+    style?: 'standard' | 'fusion'
+  ) => boolean
   /**
    * Applies a gain multiplier only to incoming Track B during crossfade.
    */
@@ -280,12 +288,6 @@ export interface ExtendedAudioStream extends AudioResource {
   getNextTrackBeatState?: () => RealtimeBeatState | null
   getMainTrackKey?: () => TrackKeyResult | null
   getNextTrackKey?: () => TrackKeyResult | null
-  startShowcaseRecording?: (
-    prerollMs: number,
-    transitionMs: number,
-    tailMs: number,
-    transitionName: string
-  ) => void
   setFilterBypass?: (enabled: boolean) => void
   setIncomingHighpass?: (enabled: boolean, alpha?: number) => void
   setIncomingLowpass?: (
@@ -599,6 +601,7 @@ export interface PlayerStateJSON {
  * Factory signature for creating audio resources.
  */
 export type CreateAudioResource = (
+  guildId: string,
   stream: TrackStreamResult['stream'],
   type: unknown,
   nodelink: NodeLink,
@@ -613,6 +616,7 @@ export type CreateAudioResource = (
  * Factory signature for creating seekable audio resources.
  */
 export type CreateSeekeableAudioResource = (
+  guildId: string,
   url: string,
   seekTime: number,
   endTime: number | undefined,

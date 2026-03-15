@@ -387,13 +387,13 @@ async function requestHandler(
   if (req.method !== 'GET') {
     const contentLength = parseContentLength(headerAccess['content-length'])
     if (!Number.isNaN(contentLength) && contentLength > MAX_BODY_SIZE) {
-          logger(
-            'warn',
-            'Server',
-            `Request rejected: Content-Length ${contentLength} exceeds limit of ${MAX_BODY_SIZE}`
-          )
-          ;(res as unknown as { __traceReason?: string }).__traceReason =
-            'payload_too_large'
+      logger(
+        'warn',
+        'Server',
+        `Request rejected: Content-Length ${contentLength} exceeds limit of ${MAX_BODY_SIZE}`
+      )
+      ;(res as unknown as { __traceReason?: string }).__traceReason =
+        'payload_too_large'
       sendErrorResponse(
         req,
         res,

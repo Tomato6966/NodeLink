@@ -7,7 +7,12 @@ const SAMPLE_RATES = Object.freeze([
   8000, 7350
 ])
 
-const _createAdtsHeader = (sampleLength, profile, samplingIndex, channelCount) => {
+const _createAdtsHeader = (
+  sampleLength,
+  profile,
+  samplingIndex,
+  channelCount
+) => {
   const frameLength = sampleLength + 7
   const profileIndex = profile - 1
 
@@ -266,7 +271,10 @@ export default class EternalboxSource {
     const analysis = payload?.analysis || null
     const spotifyTitle = spotifyData?.name || null
     const spotifyArtists = Array.isArray(spotifyData?.artists)
-      ? spotifyData.artists.map((a) => a?.name).filter(Boolean).join(', ')
+      ? spotifyData.artists
+          .map((a) => a?.name)
+          .filter(Boolean)
+          .join(', ')
       : null
     const title = spotifyTitle || info?.title || info?.name || 'Unknown'
     const author = spotifyArtists || info?.artist || info?.author || 'Unknown'
@@ -277,7 +285,8 @@ export default class EternalboxSource {
     const summaryMs = Number.isFinite(summarySeconds)
       ? Math.round(summarySeconds * 1000)
       : -1
-    const length = Number.isFinite(duration) && duration > 0 ? duration : summaryMs
+    const length =
+      Number.isFinite(duration) && duration > 0 ? duration : summaryMs
     const infiniteStream = this.config.infiniteStream ?? true
     const isStream = Boolean(infiniteStream)
 
@@ -312,10 +321,7 @@ export default class EternalboxSource {
     }
 
     if (includeSummary) {
-      pluginInfo.analysisSummary = this._buildAnalysisSummary(
-        analysis,
-        length
-      )
+      pluginInfo.analysisSummary = this._buildAnalysisSummary(analysis, length)
     }
 
     if (spotifyData) {
@@ -342,7 +348,8 @@ export default class EternalboxSource {
 
   _extractId(input) {
     if (!input || typeof input !== 'string') return null
-    if (input.startsWith('eternalbox:')) return input.slice('eternalbox:'.length)
+    if (input.startsWith('eternalbox:'))
+      return input.slice('eternalbox:'.length)
     if (input.startsWith('ebox:')) return input.slice('ebox:'.length)
 
     try {
@@ -433,9 +440,13 @@ export default class EternalboxSource {
       durationMs: length > 0 ? length : null,
       beats: Array.isArray(analysis.beats) ? analysis.beats.length : null,
       bars: Array.isArray(analysis.bars) ? analysis.bars.length : null,
-      sections: Array.isArray(analysis.sections) ? analysis.sections.length : null,
+      sections: Array.isArray(analysis.sections)
+        ? analysis.sections.length
+        : null,
       tatums: Array.isArray(analysis.tatums) ? analysis.tatums.length : null,
-      segments: Array.isArray(analysis.segments) ? analysis.segments.length : null
+      segments: Array.isArray(analysis.segments)
+        ? analysis.segments.length
+        : null
     }
   }
 
@@ -464,7 +475,8 @@ export default class EternalboxSource {
       }
     }
 
-    const analysis = cached?.analysis || (await this._fetchAnalysis(id))?.analysis
+    const analysis =
+      cached?.analysis || (await this._fetchAnalysis(id))?.analysis
     if (!analysis?.beats?.length || !analysis?.segments?.length) return null
 
     const audioBuffer = await this._fetchAudioBufferWithLimit(id, headers)
@@ -623,7 +635,8 @@ export default class EternalboxSource {
 
   _getAudioConfig(track) {
     const samplingIndex = SAMPLE_RATES.indexOf(track.audio.sample_rate)
-    if (samplingIndex === -1) throw new Error('Unsupported sample rate for ADTS')
+    if (samplingIndex === -1)
+      throw new Error('Unsupported sample rate for ADTS')
 
     let profile = 2
     if (track.codec) {
@@ -681,7 +694,8 @@ export default class EternalboxSource {
     const addLastEdge = this.config.addLastEdge ?? true
     const justBackwards = this.config.justBackwards ?? false
     const justLongBranches = this.config.justLongBranches ?? false
-    const removeSequentialBranches = this.config.removeSequentialBranches ?? true
+    const removeSequentialBranches =
+      this.config.removeSequentialBranches ?? true
     const useFilteredSegments = this.config.useFilteredSegments ?? true
 
     const rawSegments = Array.isArray(segments) ? segments : []
@@ -700,7 +714,11 @@ export default class EternalboxSource {
     let count = 0
     const targetBranchCount = Math.floor(quanta.length / targetDivisor)
 
-    for (threshold = thresholdStart; threshold < maxThreshold; threshold += thresholdStep) {
+    for (
+      threshold = thresholdStart;
+      threshold < maxThreshold;
+      threshold += thresholdStep
+    ) {
       count = this._collectNearestNeighbors(
         quanta,
         threshold,
@@ -712,11 +730,7 @@ export default class EternalboxSource {
 
     if (addLastEdge) {
       const longest = this._longestBackwardBranch(quanta)
-      this._insertBestBackwardBranch(
-        quanta,
-        threshold,
-        longest < 50 ? 65 : 55
-      )
+      this._insertBestBackwardBranch(quanta, threshold, longest < 50 ? 65 : 55)
     }
 
     this._calculateReachability(quanta)
@@ -786,7 +800,9 @@ export default class EternalboxSource {
       segmentList[i].which = i
     }
 
-    const rawSegmentList = Array.isArray(rawSegments) ? rawSegments : segmentList
+    const rawSegmentList = Array.isArray(rawSegments)
+      ? rawSegments
+      : segmentList
     for (let i = 0; i < rawSegmentList.length; i++) {
       rawSegmentList[i].which = rawSegmentList[i].which ?? i
     }
@@ -813,7 +829,10 @@ export default class EternalboxSource {
         segIdx++
       }
       let cursor = segIdx
-      while (cursor < segmentList.length && segmentList[cursor].start < beatEnd) {
+      while (
+        cursor < segmentList.length &&
+        segmentList[cursor].start < beatEnd
+      ) {
         q.overlappingSegments.push(segmentList[cursor])
         cursor++
       }
@@ -892,7 +911,13 @@ export default class EternalboxSource {
     return branchingCount
   }
 
-  _extractNearestNeighbors(q, maxThreshold, justBackwards, justLongBranches, minLongBranch) {
+  _extractNearestNeighbors(
+    q,
+    maxThreshold,
+    justBackwards,
+    justLongBranches,
+    minLongBranch
+  ) {
     const neighbors = []
     for (const neighbor of q.all_neighbors) {
       if (neighbor.deleted) continue

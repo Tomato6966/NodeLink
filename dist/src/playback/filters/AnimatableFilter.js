@@ -44,7 +44,9 @@ export class AnimatableFilter extends BaseFilter {
                 newTarget[key] = defaults[key];
             }
         }
-        if (transition && typeof transition.durationMs === 'number' && transition.durationMs > 0) {
+        if (transition &&
+            typeof transition.durationMs === 'number' &&
+            transition.durationMs > 0) {
             this.animation = {
                 durationMs: transition.durationMs,
                 elapsedMs: 0,
@@ -123,7 +125,7 @@ export class AnimatableFilter extends BaseFilter {
     isActive() {
         if (this.animation)
             return true;
-        // Need to explicitly check if target is also active so that when animation finishes at 0, 
+        // Need to explicitly check if target is also active so that when animation finishes at 0,
         // it returns false the next tick, but not while it's actively holding the static 0.
         return this.isConfigActive(this.currentConfig);
     }

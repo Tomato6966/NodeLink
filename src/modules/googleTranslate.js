@@ -1,7 +1,8 @@
 import { http1makeRequest } from '../utils.ts'
 
 const DEFAULT_API_KEY = 'AIzaSyDLEeFI5OtFBwYBIoK_jj5m32rZK5CkCXA'
-const GOOGLE_TRANSLATE_ENDPOINT = 'https://translate-pa.googleapis.com/v1/translate'
+const GOOGLE_TRANSLATE_ENDPOINT =
+  'https://translate-pa.googleapis.com/v1/translate'
 
 export const GoogleLanguages = {
   auto: 'Detect language',

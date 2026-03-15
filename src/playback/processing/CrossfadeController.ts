@@ -1,4 +1,3 @@
-import fs from 'node:fs'
 import { type Readable, Transform, type TransformCallback } from 'node:stream'
 import type { FadeCurve } from '../../typings/playback/processing.types.ts'
 import { logger } from '../../utils.ts'
@@ -6,8 +5,8 @@ import { RingBuffer } from '../structs/RingBuffer.ts'
 import { estimateBpmFromOnsets, estimateBpmFromPcm } from './bpmDetector.ts'
 import { estimateKeyFromPcm, type KeyResult } from './keyDetector.ts'
 import {
-  RealtimeBpmTracker,
-  type RealtimeBeatState
+  type RealtimeBeatState,
+  RealtimeBpmTracker
 } from './realtimeBpmTracker.ts'
 
 const HALF_PI = Math.PI / 2
@@ -16,13 +15,14 @@ const DEFAULT_CURVE: FadeCurve = 'sinusoidal'
 const SUPPORTED_CURVES = new Set<FadeCurve>(['linear', 'sine', 'sinusoidal'])
 const SOFT_CLIP_THRESHOLD = 28000
 const SOFT_CLIP_HEADROOM = 32767 - SOFT_CLIP_THRESHOLD
-const MIX_BUS_TARGET_PEAK = 27500
-const MIX_BUS_TARGET_PEAK_FUSION = 26200
+const MIX_BUS_TARGET_PEAK = 28500
+const MIX_BUS_TARGET_PEAK_FUSION = 27800
 
 interface CrossfadeRuntime {
   durationFrames: number
   elapsedFrames: number
   curve: FadeCurve
+  style: 'standard' | 'fusion'
   isFinished: boolean
 }
 
@@ -73,6 +73,7 @@ export class CrossfadeController extends Transform {
   private readonly sampleRate: number
   private readonly channels: number
   private readonly bytesPerMs: number
+  private readonly guildId: string
   private bufferSize: number
   private targetBufferBytes: number
   private minBufferBytes: number
@@ -170,13 +171,6 @@ export class CrossfadeController extends Transform {
 
   private _totalNextConsumedSamples = 0
   private _incomingGain = 1
-
-  private _showcaseHistoryPcm: Buffer[] = []
-  private _showcaseHistoryBytes = 0
-  private _showcaseHistoryMaxBytes = 0
-  private _showcaseWriter: fs.WriteStream | null = null
-  private _showcaseRemainingBytes = 0
-  private _showcaseTargetFile = ''
 
   /**
    * Called once after the bridge pump fully drains Track B's ring buffer.
@@ -550,7 +544,8 @@ export class CrossfadeController extends Transform {
    */
   private _startBridgeCrossfade(
     durationMs: number,
-    curve?: FadeCurve
+    curve?: FadeCurve,
+    style: 'standard' | 'fusion' = 'standard'
   ): boolean {
     if (!this._bcfRing || !this._bcfReady) return false
 
@@ -562,6 +557,7 @@ export class CrossfadeController extends Transform {
       durationFrames,
       elapsedFrames: 0,
       curve: this._resolveCurve(curve),
+      style,
       isFinished: false
     }
     this._transitionName = null
@@ -734,24 +730,19 @@ export class CrossfadeController extends Transform {
   /**
    * Creates a new CrossfadeController.
    *
+   * @param guildId - The guild ID for this controller (optional for API streams).
    * @param sampleRate - PCM sample rate (Hz).
    * @param channels - Number of audio channels.
-   * @example
-   * ```ts
-   * const controller = new CrossfadeController(48000, 2)
-   * ```
    */
-  constructor(sampleRate = 48000, channels = 2) {
+  constructor(guildId?: string, sampleRate = 48000, channels = 2) {
     super()
+    this.guildId = guildId || 'api-stream'
     this.sampleRate = sampleRate
     this.channels = channels
     this.bytesPerMs = (this.sampleRate * this.channels * 2) / 1000
     this.bufferSize = Math.round(this.bytesPerMs * 1000)
     this.targetBufferBytes = 0
     this.minBufferBytes = 0
-    this._showcaseHistoryMaxBytes = Math.round(
-      15 * this.sampleRate * this.channels * 2
-    )
     this._fusionBandLowAlpha = this._computeOnePoleAlpha(220)
     this._fusionBandHighAlpha = this._computeOnePoleAlpha(2800)
     this._fusionAmbientAlpha = this._computeOnePoleAlpha(1800)
@@ -766,74 +757,7 @@ export class CrossfadeController extends Transform {
   }
 
   override push(chunk: any, encoding?: BufferEncoding): boolean {
-    if (Buffer.isBuffer(chunk)) {
-      if (this._showcaseHistoryMaxBytes > 0) {
-        this._showcaseHistoryPcm.push(chunk)
-        this._showcaseHistoryBytes += chunk.length
-        while (
-          this._showcaseHistoryBytes > this._showcaseHistoryMaxBytes &&
-          this._showcaseHistoryPcm.length > 1
-        ) {
-          const removed = this._showcaseHistoryPcm.shift()!
-          this._showcaseHistoryBytes -= removed.length
-        }
-      }
-      if (this._showcaseWriter) {
-        this._showcaseWriter.write(chunk)
-        this._showcaseRemainingBytes -= chunk.length
-        if (this._showcaseRemainingBytes <= 0) {
-          this._showcaseWriter.end()
-          this._showcaseWriter = null
-          logger(
-            'info',
-            'AutoMix',
-            `Finished showcase recording PCM: ${this._showcaseTargetFile}`
-          )
-        }
-      }
-    }
     return super.push(chunk, encoding)
-  }
-
-  public startShowcaseRecording(
-    preMs: number,
-    activeMs: number,
-    postMs: number,
-    name: string
-  ): void {
-    if (this._showcaseWriter) return
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-    this._showcaseTargetFile = `automix_logs/showcase_${name}_${timestamp}.pcm`
-    if (!fs.existsSync('automix_logs')) fs.mkdirSync('automix_logs')
-    this._showcaseWriter = fs.createWriteStream(this._showcaseTargetFile)
-
-    const targetHistoryBytes = Math.round(
-      (preMs / 1000) * this.sampleRate * this.channels * 2
-    )
-    let dumpedBytes = 0
-    for (let i = this._showcaseHistoryPcm.length - 1; i >= 0; i--) {
-      dumpedBytes += this._showcaseHistoryPcm[i]!.length
-      if (dumpedBytes >= targetHistoryBytes) {
-        for (let j = i; j < this._showcaseHistoryPcm.length; j++) {
-          this._showcaseWriter.write(this._showcaseHistoryPcm[j]!)
-        }
-        break
-      }
-    }
-    if (dumpedBytes < targetHistoryBytes) {
-      for (const buf of this._showcaseHistoryPcm) {
-        this._showcaseWriter.write(buf)
-      }
-    }
-
-    this._showcaseRemainingBytes = Math.round(
-      ((activeMs + postMs) / 1000) * this.sampleRate * this.channels * 2
-    )
-    logger(
-      'info',
-      'AutoMix',
-      `Started showcase recording PCM (Duration: ${(preMs + activeMs + postMs) / 1000}s) to ${this._showcaseTargetFile}`
-    )
   }
 
   /**
@@ -993,10 +917,14 @@ export class CrossfadeController extends Transform {
    * }
    * ```
    */
-  public startCrossfade(durationMs: number, curve?: FadeCurve): boolean {
+  public startCrossfade(
+    durationMs: number,
+    curve?: FadeCurve,
+    style: 'standard' | 'fusion' = 'standard'
+  ): boolean {
     if (this._flushed) {
       if (this._bridgePumpRunning && this._bcfRing && this._bcfReady) {
-        return this._startBridgeCrossfade(durationMs, curve)
+        return this._startBridgeCrossfade(durationMs, curve, style)
       }
       if (this.ringBuffer && this.ringBuffer.length > 0) {
       } else {
@@ -1016,6 +944,7 @@ export class CrossfadeController extends Transform {
       durationFrames,
       elapsedFrames: 0,
       curve: this._resolveCurve(curve),
+      style,
       isFinished: false
     }
     this._resetDynamicMixState()
@@ -1026,7 +955,6 @@ export class CrossfadeController extends Transform {
     if (this._hpEnabled) {
       this._hpDurationFrames = durationFrames
     }
-    this._totalNextConsumedSamples = 0
     return true
   }
 
@@ -1053,29 +981,38 @@ export class CrossfadeController extends Transform {
     this._strictNoVocalEntry = strictNoVocalEntry
     this._transitionName = transition || null
 
-    const isFusion =
-      this._isFusionTransition(transition)
+    const isFusion = this._isFusionTransition(transition)
     const isFusionPremium =
       transition === 'fusion_morph' || transition === 'harmonic_weave'
     const reserveMs = strictNoVocalEntry
-      ? Math.max(2200, Math.min(crossfadeDurationMs * 0.40, 7000))
+      ? Math.max(2200, Math.min(crossfadeDurationMs * 0.4, 7000))
       : Math.max(3200, Math.min(crossfadeDurationMs * 0.55, 9000))
     const requiredBytes = Math.round(crossfadeDurationMs * this.bytesPerMs)
     const reserveBytes = Math.round(reserveMs * this.bytesPerMs)
     let maxScannableBytes = this.ringBuffer.length - reserveBytes
     if (maxScannableBytes <= 0) return
     const fusionIntroGuardWindows = fallbackHint
-      ? (isFusionPremium ? 12 : 14)
-      : (isFusionPremium ? 8 : 10) // 0.5s windows
+      ? isFusionPremium
+        ? 8
+        : 10
+      : isFusionPremium
+        ? 4
+        : 6 // 3 seconds max skip for fusion (was 5s)
 
     // Standardize scan window to 60s for better phrase detection.
     // Fusion should stay close to the beginning so the entry feels like a medley,
     // not a jump cut into a later vocal phrase.
     const scanLimitMs = isFusion
-      ? (forceNoVocalEntry || fallbackHint)
-        ? (isFusionPremium ? 8000 : 9500)
-        : (isFusionPremium ? 3600 : 4600)
-      : (forceNoVocalEntry ? 12000 : 60000)
+      ? forceNoVocalEntry || fallbackHint
+        ? isFusionPremium
+          ? 8000
+          : 9500
+        : isFusionPremium
+          ? 3600
+          : 4600
+      : forceNoVocalEntry
+        ? 12000
+        : 60000
     const scanLimitBytes = Math.round(scanLimitMs * this.bytesPerMs)
     maxScannableBytes = Math.min(maxScannableBytes, scanLimitBytes)
 
@@ -1095,9 +1032,10 @@ export class CrossfadeController extends Transform {
       transition === 'highpass_dissolve'
 
     // Fusion mode: prioritize beat phase alignment for transparent handoffs.
-    const targetPhase = (targetBeatState?.locked && targetBeatState.bpm > 0)
-      ? targetBeatState.phase
-      : null
+    const targetPhase =
+      targetBeatState?.locked && targetBeatState.bpm > 0
+        ? targetBeatState.phase
+        : null
     const targetBpm = targetBeatState?.bpm ?? null
 
     const energies: number[] = []
@@ -1115,15 +1053,15 @@ export class CrossfadeController extends Transform {
     const specLowAlpha = this._computeOnePoleAlpha(170)
     const specMidAlpha = this._computeOnePoleAlpha(900)
     const specHighAlpha = this._computeOnePoleAlpha(3200)
-    const phaseConfidenceGate = isFusion ? 0.62 : 0.50
+    const phaseConfidenceGate = isFusion ? 0.62 : 0.5
     const hardVocalCeiling = strictNoVocalEntry
       ? isFusionPremium
         ? 0.26
-        : 0.30
+        : 0.3
       : forceNoVocalEntry
         ? isFusion
           ? 0.34
-          : 0.40
+          : 0.4
         : isFusion
           ? 0.42
           : 0.62
@@ -1138,13 +1076,10 @@ export class CrossfadeController extends Transform {
         ? 3.5
         : 4.0
     const mainBrightnessRef = Math.max(
-      0.10,
+      0.1,
       Math.min(0.95, this._mainSpecBrightnessEma)
     )
-    const mainMotionRef = Math.max(
-      0.04,
-      Math.min(0.90, this._mainSpecMotionEma)
-    )
+    const mainMotionRef = Math.max(0.04, Math.min(0.9, this._mainSpecMotionEma))
     const mainCentroidRef = Math.max(
       0.08,
       Math.min(0.95, this._mainSpecCentroidEma)
@@ -1197,7 +1132,7 @@ export class CrossfadeController extends Transform {
       let specFlux = 0
       let prevSpecComposite = 0
       let prevMid = peekData.readInt16LE(i * 2)
-      for (let j = 0; j < windowSamples; j += this.channels * 2) {
+      for (let j = 0; j < windowSamples; j += this.channels * 2 * 16) {
         const sampleIndex = i + j
         if (sampleIndex + this.channels > samples) break
         const l = peekData.readInt16LE(sampleIndex * 2)
@@ -1237,16 +1172,14 @@ export class CrossfadeController extends Transform {
       if (count === 0) continue
       const energy = Math.sqrt(sumSq / count) / 32768
       energies.push(energy)
-      transients.push(
-        riseCount > 0 ? sumRise / riseCount / 32768 : 0
-      )
+      transients.push(riseCount > 0 ? sumRise / riseCount / 32768 : 0)
       const peakNorm = peakAbs / 32768
       windowPeaks.push(peakNorm)
       windowCrests.push(peakNorm / Math.max(energy, 0.012))
       const centerFocus = sumAbsMid / (sumAbsMid + sumAbsSide + 1)
       const bandRatio = sumAbsBand / (sumAbsMid + 1)
       const vocalDensity =
-        Math.max(0, Math.min(1, (bandRatio - 0.10) / 0.55)) *
+        Math.max(0, Math.min(1, (bandRatio - 0.1) / 0.55)) *
         Math.max(0, Math.min(1, (centerFocus - 0.52) / 0.45))
       vocalDensities.push(vocalDensity)
       const specTotal = specBass + specMid + specTreble + 1
@@ -1256,11 +1189,16 @@ export class CrossfadeController extends Transform {
       )
       const motion = Math.max(
         0,
-        Math.min(1, (specFlux / (specMid + specTreble + 1)) / 0.70)
+        Math.min(1, specFlux / (specMid + specTreble + 1) / 0.7)
       )
       const centroidNorm = Math.max(
         0,
-        Math.min(1, (specBass * 140 + specMid * 900 + specTreble * 3200) / specTotal / 3800)
+        Math.min(
+          1,
+          (specBass * 140 + specMid * 900 + specTreble * 3200) /
+            specTotal /
+            3800
+        )
       )
       spectralBrightness.push(bright)
       spectralMotion.push(motion)
@@ -1275,7 +1213,7 @@ export class CrossfadeController extends Transform {
               Math.max(1e-6, Math.min(targetBpm, bState.bpm))
             : 1
         const bpmCoherent =
-          bpmRatio <= 1.35 || (bpmRatio >= 1.80 && bpmRatio <= 2.25)
+          bpmRatio <= 1.35 || (bpmRatio >= 1.8 && bpmRatio <= 2.25)
         // Estimate phase at this window start
         if (
           bState.locked &&
@@ -1303,7 +1241,7 @@ export class CrossfadeController extends Transform {
     const fusionIntroLowVocalThreshold = isFusionPremium
       ? Math.min(0.24, Math.max(0.11, openingVocalDensity - 0.06))
       : Math.min(0.27, Math.max(0.12, openingVocalDensity - 0.05))
-    const strictFusionVocalTarget = isFusionPremium ? 0.20 : 0.24
+    const strictFusionVocalTarget = isFusionPremium ? 0.2 : 0.24
     const sortedEnergies = [...energies].sort((a, b) => a - b)
     const percentile = (p: number): number => {
       const idx = Math.max(
@@ -1329,16 +1267,8 @@ export class CrossfadeController extends Transform {
       target = Math.max(target, Math.min(0.1, p90 * 0.92))
     }
     const preferControlledEntry =
-      (
-        openingEnergy > target * 1.45 &&
-        target < 0.17 &&
-        openingEnergy > 0.10
-      ) ||
-      (
-        openingEnergy > 0.24 &&
-        target < 0.20 &&
-        openingEnergy > target * 1.25
-      )
+      (openingEnergy > target * 1.45 && target < 0.17 && openingEnergy > 0.1) ||
+      (openingEnergy > 0.24 && target < 0.2 && openingEnergy > target * 1.25)
     const punchyScoring = preferPunchyEntry && !preferControlledEntry
 
     const forwardSpan = isFusion ? 3 : 2
@@ -1367,7 +1297,7 @@ export class CrossfadeController extends Transform {
       forwardEnergyMean[i] = energySum / norm
       forwardMotionMean[i] = motionSum / norm
     }
-    
+
     // Choose best window by weighted "energy fit" + phase alignment.
     let bestWindowIdx = 0
     let bestScore = Number.POSITIVE_INFINITY
@@ -1384,7 +1314,30 @@ export class CrossfadeController extends Transform {
       const t = transients[i]!
       const p = phases[i]!
       const ratio = (e + eps) / (target + eps)
-      const logDistance = Math.abs(Math.log(ratio))
+      // Asymmetric Energy Distance:
+      // We are much more tolerant of the track being QUIETER than the target (intro)
+      // than we are of it being LOUDER (clipping/energy jump).
+      const logDistance = e < target
+        ? Math.abs(Math.log(ratio)) * 0.20 // 80% less penalty for quiet intros
+        : Math.abs(Math.log(ratio)) * 1.8; // More penalty for being too loud
+
+      let score = logDistance;
+
+      // Penalize forward progress HEAVILY to encourage earliest match.
+      score += i * 0.65; 
+
+      const peakNorm = windowPeaks[i] ?? 0
+      const crest = windowCrests[i] ?? 1
+
+      // Preference for artistic intros:
+      // If Window 0 has reasonable energy (>0.01) and isn't clipping, give it a lead
+      // but not so large that poor-quality windows can't be outscored by later ones.
+      if (i === 0 && e > 0.01 && peakNorm < 0.95) {
+        score -= 2.5;
+      } else if (i < 4) {
+        score -= 2.0; // Bonus for the first 2 seconds
+      }
+
       const prev = i > 0 ? energies[i - 1]! : e
       const slope = e - prev
       const transientRef = Math.max(openingTransient, 0.003)
@@ -1395,10 +1348,8 @@ export class CrossfadeController extends Transform {
       const centroidNow = spectralCentroids[i] ?? mainCentroidRef
       const spectralDistance =
         Math.abs(brightNow - mainBrightnessRef) * 0.55 +
-        Math.abs(motionNow - mainMotionRef) * 0.30 +
+        Math.abs(motionNow - mainMotionRef) * 0.3 +
         Math.abs(centroidNow - mainCentroidRef) * 0.15
-      const peakNorm = windowPeaks[i] ?? 0
-      const crest = windowCrests[i] ?? 1
       const nextEnergy = i + 1 < energies.length ? energies[i + 1]! : e
       const nextVocalDensity =
         i + 1 < vocalDensities.length
@@ -1423,12 +1374,12 @@ export class CrossfadeController extends Transform {
       const energyDropAhead = Math.max(0, e - aheadEnergyMean)
       const flowInstability =
         vocalSurge * 1.55 +
-        peakSurge * 1.20 +
+        peakSurge * 1.2 +
         energyDropAhead * 2.2 +
         Math.max(0, motionNow - aheadMotionMean) * 0.22
       const priorEnergy = i > 0 ? energies[i - 1]! : e
       const prior2Energy = i > 1 ? energies[i - 2]! : priorEnergy
-      const preValley = Math.max(0, ((priorEnergy + prior2Energy) * 0.5) - e)
+      const preValley = Math.max(0, (priorEnergy + prior2Energy) * 0.5 - e)
       const liftAhead = Math.max(0, aheadEnergyMean - e)
       const attackPenalty = Math.max(0, entryAttackJump - 0.018)
       const phraseRaw =
@@ -1439,50 +1390,38 @@ export class CrossfadeController extends Transform {
         attackPenalty * 5.2
       const phraseConfidence = Math.max(
         0,
-        Math.min(1, (phraseRaw + 0.24) / 0.90)
+        Math.min(1, (phraseRaw + 0.24) / 0.9)
       )
       const instabilityRaw =
-        flowInstability * 0.70 +
+        flowInstability * 0.7 +
         Math.abs(aheadEnergyMean - e) * 2.0 +
         Math.max(0, aheadPeakMax - peakNorm) * 1.1 +
         Math.max(0, aheadVocalMax - vocalDensity) * 1.2
-      const stabilityScore = Math.max(
-        0,
-        Math.min(1, 1 - instabilityRaw * 0.45)
-      )
-
-      // Base: closeness to target.
-      let score = logDistance
+      const stabilityScore = Math.max(0, Math.min(1, 1 - instabilityRaw * 0.45))
 
       // Phase alignment bonus (up to 0.40 score reduction)
       if (targetPhase !== null && p >= 0) {
-        const phaseDist = Math.min(Math.abs(p - targetPhase), 1 - Math.abs(p - targetPhase))
+        const phaseDist = Math.min(
+          Math.abs(p - targetPhase),
+          1 - Math.abs(p - targetPhase)
+        )
         const phaseMatch = Math.max(0, 1 - phaseDist / 0.15) // Tightened window
-        const phaseWeight = isFusion ? 0.70 : 1.5
+        const phaseWeight = isFusion ? 0.7 : 1.5
         score -= phaseMatch * phaseWeight
-
-        // FUSION PROTECT: If we have a beat match in the early windows, 
-        // aggressively lock onto it to prevent skipping the intro.
-        if (isFusion && i <= fusionIntroGuardWindows && phaseMatch > 0.8) {
-          score -= 1.2
-        }
       }
-
-      // Encourage forward progress (avoid index 0 unless truly best).
-      if (i === 0) score += 0.25
-      else if (i < 3) score += 0.10
 
       // Prefer windows with some upward movement for smoother "arrival".
       if (slope > 0) score -= Math.min(0.12, slope * 2.5)
 
       // Penalize windows that are much quieter than the target.
-      if (e < target * 0.55) score += 0.25
+      if (e < 0.015) score += 15.0 // Massive penalty for near-silence
+      else if (e < target * 0.4) score += 0.5 // Penalty for being too quiet
 
       if (isFusion || forceNoVocalEntry) {
         score -= grooveDrive * (isFusion ? 0.24 : 0.12)
         score += flowInstability * (isFusion ? 0.55 : 0.32)
         score -= phraseConfidence * (isFusion ? 0.32 : 0.18)
-        score -= stabilityScore * (isFusion ? 0.18 : 0.10)
+        score -= stabilityScore * (isFusion ? 0.18 : 0.1)
         if (
           entryAttackJump > 0.022 &&
           (vocalDensity > 0.26 || nextVocalDensity > 0.26)
@@ -1499,7 +1438,7 @@ export class CrossfadeController extends Transform {
       if (isFusion) {
         score += spectralDistance * 0.62
         if (i <= fusionIntroGuardWindows && spectralDistance < 0.12) {
-          score -= 0.10
+          score -= 0.1
         }
         if (e < fusionEnergyFloor) {
           const lowEnergyDelta = fusionEnergyFloor - e
@@ -1521,23 +1460,20 @@ export class CrossfadeController extends Transform {
       }
 
       if (preferControlledEntry) {
-        const hotPenalty = Math.max(
-          0,
-          Math.min(0.30, (e - target * 1.30) * 2.4)
-        )
+        const hotPenalty = Math.max(0, Math.min(0.3, (e - target * 1.3) * 2.4))
         score += hotPenalty
         if (transientRatio > 1.12) {
           score += Math.min(0.18, (transientRatio - 1.12) * 0.22)
         }
         if (i === 0) score += 0.22
         if (peakNorm > 0.86) {
-          score += Math.min(0.60, (peakNorm - 0.86) * 2.6)
+          score += Math.min(0.6, (peakNorm - 0.86) * 2.6)
         }
       }
 
       if (punchyScoring) {
         if (transientRatio > 1) {
-          score -= Math.min(0.30, (transientRatio - 1) * 0.14)
+          score -= Math.min(0.3, (transientRatio - 1) * 0.14)
         } else {
           score += Math.min(0.14, (1 - transientRatio) * 0.12)
         }
@@ -1555,7 +1491,7 @@ export class CrossfadeController extends Transform {
             (vocalDensity - vocalTarget) * (isFusionPremium ? 2.6 : 2.0)
           )
         } else {
-          score -= Math.min(0.24, (vocalTarget - vocalDensity) * 0.70)
+          score -= Math.min(0.24, (vocalTarget - vocalDensity) * 0.7)
         }
         if (vocalDensity > fusionVocalHardCeiling) {
           const excess = vocalDensity - fusionVocalHardCeiling
@@ -1574,7 +1510,9 @@ export class CrossfadeController extends Transform {
           }
         }
         if (forceNoVocalEntry || fallbackHint) {
-          const strictTarget = strictNoVocalEntry ? 0.17 : strictFusionVocalTarget
+          const strictTarget = strictNoVocalEntry
+            ? 0.17
+            : strictFusionVocalTarget
           if (vocalDensity > strictFusionVocalTarget) {
             score += Math.min(
               2.4,
@@ -1614,7 +1552,7 @@ export class CrossfadeController extends Transform {
 
       if (
         (isFusion || forceNoVocalEntry) &&
-        aheadVocalMax > hardVocalCeiling + (strictNoVocalEntry ? 0.00 : 0.03)
+        aheadVocalMax > hardVocalCeiling + (strictNoVocalEntry ? 0.0 : 0.03)
       ) {
         score +=
           3.8 +
@@ -1629,8 +1567,10 @@ export class CrossfadeController extends Transform {
       }
 
       if ((isFusion || forceNoVocalEntry) && vocalDensity > hardVocalCeiling) {
-        score +=
-          5.0 + Math.min(3.4, (vocalDensity - hardVocalCeiling) * 8.0)
+        // Reduced vocal penalty for the very start (first 2 seconds) 
+        // to prevent synthetics/drums from being mistaken for vocals.
+        const positionMultiplier = i < 4 ? 0.2 : Math.min(1, i / 8)
+        score += (5.0 + Math.min(3.4, (vocalDensity - hardVocalCeiling) * 8.0)) * positionMultiplier
       }
       if (peakNorm > hardPeakCeiling) {
         score += 2.0 + Math.min(2.2, (peakNorm - hardPeakCeiling) * 8.0)
@@ -1639,18 +1579,17 @@ export class CrossfadeController extends Transform {
         score += Math.min(2.4, (crest - hardCrestCeiling) * 0.9)
       }
 
-      // FUSION BIAS: Heavily penalize late jumps in Fusion mode to stay in the intro.
-      if (isFusion) {
-        if (i > 4) score += (i - 4) * 0.5 // Aggressive penalty for jumping deep into track
-      } else if (punchyScoring) {
-        if (i > 18) score += Math.min(0.42, (i - 18) * 0.018)
-      } else if (i > 12) {
-        score += Math.min(0.46, (i - 12) * 0.024)
-      }
-
       windowScores[i] = score
       phraseConfidenceScores[i] = phraseConfidence
       stabilityScores[i] = stabilityScore
+
+      if (i < 20) {
+        logger(
+          'debug',
+          'AutoMix-Scoring',
+          `Window ${i} (${(i * 0.5).toFixed(1)}s): FinalScore=${score.toFixed(3)} [LogDist=${logDistance.toFixed(3)}, Vocal=${vocalDensity.toFixed(2)}, Phrase=${phraseConfidence.toFixed(2)}, Stability=${stabilityScore.toFixed(2)}]`
+        )
+      }
 
       if (isFusion && i <= fusionIntroGuardWindows) {
         if (score < bestFusionIntroScore) {
@@ -1683,8 +1622,14 @@ export class CrossfadeController extends Transform {
           ? 8
           : 6
     const shortlist = rankedWindows.slice(0, shortlistCount)
+    // Force Window 0 into the shortlist if it is not already there.
+    // The start of the song is too important to be discarded by initial scoring.
+    if (!shortlist.some((c) => c.idx === 0)) {
+      shortlist.push({ idx: 0, score: windowScores[0] ?? Number.POSITIVE_INFINITY })
+    }
+
     if (shortlist.length > 0) {
-      let rerankIdx = bestWindowIdx
+      let rerankIdx = shortlist[0]!.idx
       let rerankBest = Number.POSITIVE_INFINITY
       for (const candidate of shortlist) {
         const i = candidate.idx
@@ -1703,190 +1648,73 @@ export class CrossfadeController extends Transform {
           Math.max(0, e - aheadE) * 2.0 +
           Math.max(0, 1 - stability) * 0.9
         const vocalPenalty =
-          Math.max(0, vocal - (strictNoVocalEntry ? 0.22 : 0.30)) * 4.2 +
+          Math.max(0, vocal - (strictNoVocalEntry ? 0.22 : 0.3)) * 4.2 +
           Math.max(0, aheadVocal - (strictNoVocalEntry ? 0.24 : 0.34)) * 3.3
         const clipPenalty =
-          Math.max(0, peak - 0.90) * 3.0 + Math.max(0, crest - 3.2) * 0.9
+          Math.max(0, peak - 0.9) * 3.0 + Math.max(0, crest - 3.2) * 0.9
+        
+        // Quadratic Position Penalty: 
+        // 0s = 0, 0.5s = 0.4, 1s = 1.6, 2s = 6.4, 3s = 14.4, 5s = 40.0
+        // Gentle enough for the first 2-3s so audio quality (vocal density,
+        // phrase boundary, stability) can outweigh a small positional shift.
         const positionPenalty = isFusion
-          ? i * 0.08
+          ? Math.pow(i * 0.4, 2) * 2.5
           : strictNoVocalEntry
-            ? i * 0.03
-            : i * 0.018
+            ? i * 0.15
+            : i * 0.08
+
         const rerankScore =
-          candidate.score * 0.66 +
-          instabilityPenalty +
+          candidate.score * 0.8 + 
+          instabilityPenalty * 0.5 + 
           vocalPenalty +
           clipPenalty +
           positionPenalty -
-          phrase * 0.60 -
-          stability * 0.35
+          phrase * 0.15 - 
+          stability * 0.1 
+
+        logger(
+          'debug',
+          'AutoMix-ReRank',
+          `Candidate Window ${i}: RerankScore=${rerankScore.toFixed(3)} [Base=${(candidate.score * 0.8).toFixed(3)}, PosPen=${positionPenalty.toFixed(2)}, VocalPen=${vocalPenalty.toFixed(2)}]`
+        )
+
         if (rerankScore < rerankBest) {
           rerankBest = rerankScore
           rerankIdx = i
         }
       }
-      if (rerankIdx !== bestWindowIdx) {
-        bestWindowIdx = rerankIdx
-        bestScore = windowScores[bestWindowIdx] ?? bestScore
-      }
+      bestWindowIdx = rerankIdx
+      bestScore = windowScores[bestWindowIdx] ?? bestScore
     }
 
-    if (!isFusion && (forceNoVocalEntry || strictNoVocalEntry) && bestWindowIdx > 2) {
-      const earlyLimit = Math.min(
-        windowScores.length - 1,
-        strictNoVocalEntry ? 10 : 14
-      )
-      let earliestCleanIdx = -1
-      const cleanVocalCeiling = strictNoVocalEntry ? 0.26 : 0.32
-      const cleanPeakCeiling = strictNoVocalEntry ? 0.90 : 0.94
-      const cleanCrestCeiling = strictNoVocalEntry ? 3.2 : 3.6
-      for (let i = 0; i <= earlyLimit; i++) {
-        const vocal = vocalDensities[i] ?? 1
-        const peak = windowPeaks[i] ?? 1
-        const crest = windowCrests[i] ?? 10
-        const energy = energies[i] ?? 0
-        if (energy < Math.max(0.01, target * 0.35)) continue
-        if (vocal <= cleanVocalCeiling && peak <= cleanPeakCeiling && crest <= cleanCrestCeiling) {
-          earliestCleanIdx = i
-          break
-        }
-      }
-      if (earliestCleanIdx >= 0) {
-        const earlyScore = windowScores[earliestCleanIdx] ?? Number.POSITIVE_INFINITY
-        const scoreSlack = strictNoVocalEntry ? 1.0 : 0.7
-        if (earlyScore - bestScore <= scoreSlack) {
-          bestWindowIdx = earliestCleanIdx
-          bestScore = earlyScore
-        }
-      }
-    }
-
-    if (isFusion) {
-      const chosenLowVocalIntro =
-        bestFusionLowVocalIntroScore < Number.POSITIVE_INFINITY
-          ? bestFusionLowVocalIntroIdx
-          : bestFusionIntroIdx
-      const selectedVocalDensity = vocalDensities[bestWindowIdx] ?? openingVocalDensity
-      const selectedLate = bestWindowIdx > fusionIntroGuardWindows
-      const selectedVocalHeavy = selectedVocalDensity > fusionVocalHardCeiling
-      const selectedScore = windowScores[bestWindowIdx] ?? bestScore
-      const introCandidateScore =
-        windowScores[chosenLowVocalIntro] ?? bestFusionIntroScore
-
-      const shouldForceIntro =
-        selectedLate ||
-        selectedVocalHeavy ||
-        introCandidateScore - selectedScore <= 0.45
-
-      if (shouldForceIntro && chosenLowVocalIntro !== bestWindowIdx) {
-        bestWindowIdx = chosenLowVocalIntro
-        bestScore = introCandidateScore
-      }
-
-      const openingScore = windowScores[0] ?? Number.POSITIVE_INFINITY
-      const openingSpectralDistance =
-        Math.abs((spectralBrightness[0] ?? mainBrightnessRef) - mainBrightnessRef) * 0.55 +
-        Math.abs((spectralMotion[0] ?? mainMotionRef) - mainMotionRef) * 0.30 +
-        Math.abs((spectralCentroids[0] ?? mainCentroidRef) - mainCentroidRef) * 0.15
-      const openingGoodForFusion =
-        openingVocalDensity <= Math.min(fusionVocalHardCeiling, fusionIntroLowVocalThreshold + 0.04) &&
-        openingSpectralDistance <= 0.18 &&
-        openingEnergy >= Math.max(0.018, target * 0.65)
-
-      // If opening is already clean/instrumental and reasonably matched,
-      // don't skip deep into Track B for tiny score gains.
-      if (
-        !forceNoVocalEntry &&
-        openingGoodForFusion &&
-        bestWindowIdx > 0 &&
-        openingScore - bestScore <= 0.85
-      ) {
-        bestWindowIdx = 0
-        bestScore = openingScore
-      }
-
-      if (forceNoVocalEntry || fallbackHint || openingVocalDensity > fusionVocalHardCeiling) {
-        const searchLimit = Math.min(
-          vocalDensities.length - 1,
-          strictNoVocalEntry ? 22 : (fallbackHint ? 16 : 12)
-        )
-        let bestLowVocalIdx = 0
-        let bestLowVocalScore = Number.POSITIVE_INFINITY
-        for (let i = 0; i <= searchLimit; i++) {
-          const vocalDensity = vocalDensities[i] ?? 1
-          const energy = energies[i] ?? 0
-          const peak = windowPeaks[i] ?? 0
-          if (energy < Math.max(0.010, target * (strictNoVocalEntry ? 0.22 : 0.30))) continue
-          const score =
-            vocalDensity * (strictNoVocalEntry ? 1.25 : 1.0) +
-            Math.max(0, (strictNoVocalEntry ? 0.16 : strictFusionVocalTarget) - energy) * 0.12 +
-            Math.max(0, peak - 0.84) * 0.30 +
-            i * (strictNoVocalEntry ? 0.004 : 0.006)
-          if (score < bestLowVocalScore) {
-            bestLowVocalScore = score
-            bestLowVocalIdx = i
-          }
-        }
-        const chosenVocal = vocalDensities[bestWindowIdx] ?? 1
-        const bestLowVocal = vocalDensities[bestLowVocalIdx] ?? chosenVocal
-        const strictTarget = strictNoVocalEntry ? 0.18 : strictFusionVocalTarget
-        const shouldForceLowVocal =
-          bestLowVocalIdx !== bestWindowIdx &&
-          (
-            bestLowVocal <= chosenVocal - 0.01 ||
-            (strictNoVocalEntry && bestLowVocal <= strictTarget)
-          )
-        if (shouldForceLowVocal) {
-          bestWindowIdx = bestLowVocalIdx
-          bestScore = windowScores[bestWindowIdx] ?? bestScore
-        }
-      }
-    }
-
-    if (strictNoVocalEntry) {
-      const selectedVocal = vocalDensities[bestWindowIdx] ?? 1
-      const strictFallbackCeiling = isFusionPremium ? 0.26 : 0.30
-      if (selectedVocal > strictFallbackCeiling) {
-        let minVocalIdx = bestWindowIdx
-        let minVocal = selectedVocal
-        for (let i = 0; i < vocalDensities.length; i++) {
-          const vocal = vocalDensities[i] ?? 1
-          const energy = energies[i] ?? 0
-          if (energy < Math.max(0.008, target * 0.20)) continue
-          if (
-            vocal < minVocal ||
-            (vocal <= minVocal + 0.01 && (windowPeaks[i] ?? 1) < (windowPeaks[minVocalIdx] ?? 1))
-          ) {
-            minVocal = vocal
-            minVocalIdx = i
-          }
-        }
-        if (minVocalIdx !== bestWindowIdx) {
-          bestWindowIdx = minVocalIdx
-          bestScore = windowScores[minVocalIdx] ?? bestScore
-        }
-      }
-    }
+    // --- FINAL DECISION ---
+    // Re-ranking is the sole authority. All legacy overrides removed.
 
     const selectedEnergy = energies[bestWindowIdx] ?? openingEnergy
     const selectedPeak = windowPeaks[bestWindowIdx] ?? 0
     const selectedCrest = windowCrests[bestWindowIdx] ?? 1
-    const selectedVocalDensity = vocalDensities[bestWindowIdx] ?? openingVocalDensity
-    const selectedPhraseConfidence =
-      phraseConfidenceScores[bestWindowIdx] ?? 0
+    const selectedVocalDensity =
+      vocalDensities[bestWindowIdx] ?? openingVocalDensity
+    const selectedPhraseConfidence = phraseConfidenceScores[bestWindowIdx] ?? 0
     const selectedStability = stabilityScores[bestWindowIdx] ?? 0
     const selBright = spectralBrightness[bestWindowIdx] ?? mainBrightnessRef
     const selMotion = spectralMotion[bestWindowIdx] ?? mainMotionRef
     const selCentroid = spectralCentroids[bestWindowIdx] ?? mainCentroidRef
     const selectedSpectralDistance =
       Math.abs(selBright - mainBrightnessRef) * 0.55 +
-      Math.abs(selMotion - mainMotionRef) * 0.30 +
+      Math.abs(selMotion - mainMotionRef) * 0.3 +
       Math.abs(selCentroid - mainCentroidRef) * 0.15
-    const peakRisk = Math.max(0, Math.min(1, (selectedPeak - 0.80) / 0.18))
+    const peakRisk = Math.max(0, Math.min(1, (selectedPeak - 0.8) / 0.18))
     const crestRisk = Math.max(0, Math.min(1, (selectedCrest - 2.6) / 1.8))
     const energyRisk = Math.max(0, Math.min(1, (selectedEnergy - 0.22) / 0.22))
-    const vocalRisk = Math.max(0, Math.min(1, (selectedVocalDensity - 0.20) / 0.45))
-    const spectralRisk = Math.max(0, Math.min(1, selectedSpectralDistance / 0.40))
+    const vocalRisk = Math.max(
+      0,
+      Math.min(1, (selectedVocalDensity - 0.2) / 0.45)
+    )
+    const spectralRisk = Math.max(
+      0,
+      Math.min(1, selectedSpectralDistance / 0.4)
+    )
     const entryRisk = Math.max(
       peakRisk,
       crestRisk * 0.85 + energyRisk * 0.35,
@@ -1895,12 +1723,12 @@ export class CrossfadeController extends Transform {
     const minEntryGain = strictNoVocalEntry ? 0.46 : 0.52
     this._incomingEntryGainComp = Math.max(
       minEntryGain,
-      Math.min(1, 1 - entryRisk * 0.40)
+      Math.min(1, 1 - entryRisk * 0.4)
     )
     if (strictNoVocalEntry && selectedPeak > 0.92) {
       this._incomingEntryGainComp = Math.min(this._incomingEntryGainComp, 0.62)
     }
-    if (strictNoVocalEntry && selectedVocalDensity > 0.30) {
+    if (strictNoVocalEntry && selectedVocalDensity > 0.3) {
       this._incomingEntryGainComp = Math.min(this._incomingEntryGainComp, 0.58)
     }
     this._entryPhraseConfidence = selectedPhraseConfidence
@@ -1909,16 +1737,16 @@ export class CrossfadeController extends Transform {
       0,
       Math.min(
         0.48,
-        Math.max(0, selectedVocalDensity - 0.14) * 0.90 +
+        Math.max(0, selectedVocalDensity - 0.14) * 0.9 +
           Math.max(0, 1 - selectedStability) * 0.26 +
-          Math.max(0, 0.45 - selectedPhraseConfidence) * 0.20
+          Math.max(0, 0.45 - selectedPhraseConfidence) * 0.2
       )
     )
     this._entryFxLowDuckBoost = Math.max(
       0,
       Math.min(
         0.26,
-        Math.max(0, selectedPeak - 0.78) * 0.70 +
+        Math.max(0, selectedPeak - 0.78) * 0.7 +
           Math.max(0, selectedEnergy - 0.16) * 0.75
       )
     )
@@ -1926,7 +1754,7 @@ export class CrossfadeController extends Transform {
       0,
       Math.min(
         0.24,
-        Math.max(0, selectedSpectralDistance - 0.12) * 0.90 +
+        Math.max(0, selectedSpectralDistance - 0.12) * 0.9 +
           Math.max(0, selectedVocalDensity - 0.24) * 0.35
       )
     )
@@ -1934,16 +1762,16 @@ export class CrossfadeController extends Transform {
       0,
       Math.min(
         0.28,
-        entryRisk * 0.30 +
+        entryRisk * 0.3 +
           Math.max(0, selectedPhraseConfidence - 0.25) * 0.16 +
           Math.max(0, 1 - selectedStability) * 0.12
       )
     )
 
     if (bestWindowIdx > 0) {
-      const skipSamples = bestWindowIdx * windowSamples
-      const skipBytes = skipSamples * 2
-      const alignedSkip = skipBytes - (skipBytes % (this.channels * 2))
+      // Correct Skip Calculation: 
+      // bestWindowIdx is the index of 500ms windows.
+      const skipMs = bestWindowIdx * 500
       
       // Hard cap skip to keep Fusion in the opening bars.
       const openingVocalHeavy =
@@ -1953,30 +1781,47 @@ export class CrossfadeController extends Transform {
       const baseMaxSkipMs = isFusion
         ? openingVocalHeavy
           ? fallbackHint
-            ? (isFusionPremium ? 4600 : 5600)
-            : (isFusionPremium ? 3600 : 4600)
-          : (isFusionPremium ? 1100 : 1500)
+            ? isFusionPremium
+              ? 3000
+              : 4000
+            : isFusionPremium
+              ? 2000
+              : 3000
+          : isFusionPremium
+            ? 800
+            : 1200
         : strictNoVocalEntry
-          ? Math.min(4200, Math.round(crossfadeDurationMs * 0.65))
+          ? Math.min(3000, Math.round(crossfadeDurationMs * 0.5))
           : forceNoVocalEntry
-            ? Math.min(5600, Math.round(crossfadeDurationMs * 0.90))
-            : Math.min(8000, Math.round(crossfadeDurationMs * 1.2))
+            ? Math.min(4000, Math.round(crossfadeDurationMs * 0.7))
+            : Math.min(6000, Math.round(crossfadeDurationMs * 1.0))
       const fusionAbsoluteCapMs = isFusion
         ? openingVocalHeavy
-          ? Math.max(2200, Math.min(5200, Math.round(crossfadeDurationMs * 0.36)))
-          : Math.max(700, Math.min(2200, Math.round(crossfadeDurationMs * 0.18)))
+          ? Math.max(1000, Math.min(3000, Math.round(crossfadeDurationMs * 0.2)))
+          : Math.max(200, Math.min(800, Math.round(crossfadeDurationMs * 0.08)))
         : Number.POSITIVE_INFINITY
       const maxSkipMs =
         !isFusion && punchyScoring && !forceNoVocalEntry
           ? baseMaxSkipMs * 1.5
           : Math.min(baseMaxSkipMs, fusionAbsoluteCapMs)
-      const maxSkipBytes = Math.round(maxSkipMs * this.bytesPerMs)
-      const cappedSkip = Math.min(alignedSkip, maxSkipBytes)
-      const finalSkip = cappedSkip - (cappedSkip % (this.channels * 2))
+
+      const finalSkipMs = Math.min(skipMs, maxSkipMs)
+      const skipBytes = Math.round(finalSkipMs * this.bytesPerMs)
+      // Ensure absolute 4-byte alignment (Int16 Stereo = 2 channels * 2 bytes)
+      const finalSkip = skipBytes - (skipBytes % 4)
+
       if (finalSkip > 0 && finalSkip < this.ringBuffer.length - reserveBytes) {
+        logger(
+          'debug',
+          'AutoMix-Skip',
+          `Executing skip: ${finalSkipMs}ms (${finalSkip} bytes) | bestWindowIdx: ${bestWindowIdx} | maxAllowed: ${maxSkipMs}ms`
+        )
         this.ringBuffer.skip(finalSkip)
         this._energySkipMs = Math.round(finalSkip / this.bytesPerMs)
-        const spectralMatch = Math.max(0, Math.min(1, 1 - selectedSpectralDistance))
+        const spectralMatch = Math.max(
+          0,
+          Math.min(1, 1 - selectedSpectralDistance)
+        )
         logger(
           'info',
           'AutoMix',
@@ -2155,10 +2000,9 @@ export class CrossfadeController extends Transform {
    * Track B's, so the player's position tracking is correct.
    */
   public getConsumedMs(): number {
-    if (this._bridgeCrossfadeActive) {
-      return Math.round((this._bcfConsumedSamples * 1000) / this.sampleRate)
-    }
-    return Math.round((this._totalNextConsumedSamples * 1000) / this.sampleRate)
+    return Math.round(
+      (this._totalNextConsumedSamples * 1000) / this.sampleRate
+    )
   }
 
   public clear(): void {
@@ -2224,6 +2068,7 @@ export class CrossfadeController extends Transform {
     this._lastRealtimeBpmLogSec = 0
     this._nextRmsEma = 0
     this._nextRmsPeak = 0
+    this._totalNextConsumedSamples = 0
     this._nextOpeningEnergyAcc = 0
     this._nextOpeningEnergyMs = 0
     this._nextOpeningEnergy = 0
@@ -2272,24 +2117,18 @@ export class CrossfadeController extends Transform {
   }
 
   private _softClipSample(sample: number): number {
-    // Multi-stage adaptive soft-limiter
-    // Stage 1: Quadratic knee starting at 24000
-    // Stage 2: Exponential saturation above 28000
+    // Robust Exponential Soft-Knee Limiter (Strictly Monotonic)
+    // Prevents digital clipping while maintaining harmonic integrity.
     const abs = Math.abs(sample)
-    if (abs <= 24000) return sample
+    if (abs <= 22000) return sample
 
     const sign = sample < 0 ? -1 : 1
-    if (abs <= 28500) {
-      // Quadratic knee
-      const normalized = (abs - 24000) / 4500
-      const limited = 24000 + 4000 * (normalized - 0.5 * normalized * normalized)
-      return sign * limited
-    }
-
-    // Exponential saturation for extreme peaks
-    const over = (abs - 28500) / (32767 - 28500)
-    const saturated = 28500 + (32767 - 28500) * (1 - Math.exp(-over * 1.8))
-    return sign * Math.min(32766, saturated)
+    // Knee range: 22000 to 32767 (width 10767)
+    // We approach the hard limit of 32767 asymptotically using an exponential curve.
+    const over = (abs - 22000) / 10767
+    const limited = 22000 + 10767 * (1 - Math.exp(-over))
+    
+    return sign * Math.round(limited)
   }
 
   private _toInt16Sample(sample: number): number {
@@ -2302,33 +2141,34 @@ export class CrossfadeController extends Transform {
   }
 
   /**
-   * Computes coherence-aware gains. 
-   * Beat-matched tracks are coherent; standard crossfade (SumSq=1) causes 
+   * Computes coherence-aware gains.
+   * Beat-matched tracks are coherent; standard crossfade (SumSq=1) causes
    * a +3dB boost and clipping. We cross-fade between Equal Power and Equal Gain.
    */
   private _computeCoherenceGains(
-    gainOut: number, 
-    gainIn: number, 
+    gainOut: number,
+    gainIn: number,
     progress: number
   ): [number, number] {
-    const beatLocked = this._rtBeatState.locked && this._rtBeatState.confidence > 0.45
+    const beatLocked =
+      this._rtBeatState.locked && this._rtBeatState.confidence > 0.45
     // Correlation estimation (Bio-inspired heuristic)
-    const correlation = beatLocked 
-      ? 0.45 + (this._rtBeatState.confidence * 0.45) 
+    const correlation = beatLocked
+      ? 0.45 + this._rtBeatState.confidence * 0.45
       : 0.12 + (this._dynamicToneMismatchEma < 1.1 ? 0.08 : 0)
 
-    const sumSq = (gainOut * gainOut) + (gainIn * gainIn)
+    const sumSq = gainOut * gainOut + gainIn * gainIn
     const sum = gainOut + gainIn
-    
+
     // normP: Equal-power (preserves energy for uncorrelated signals)
     const normP = sumSq > 1e-6 ? 1 / Math.sqrt(sumSq) : 1
     // normG: Equal-gain (prevents clipping for coherent signals)
     const normG = sum > 1e-6 ? 1 / sum : 1
-    
+
     const adaptiveNorm = normP * (1 - correlation) + normG * correlation
-    
+
     // Anti-pumping bias: avoid sudden volume dips at 50% blend
-    const dipGuard = 1 + (Math.sin(progress * Math.PI) * 0.04 * (1 - correlation))
+    const dipGuard = 1 + Math.sin(progress * Math.PI) * 0.04 * (1 - correlation)
     const finalNorm = adaptiveNorm * dipGuard
 
     return [gainOut * finalNorm, gainIn * finalNorm]
@@ -2449,7 +2289,7 @@ export class CrossfadeController extends Transform {
     const diffRatio = Math.abs(fromHz - toHz) / Math.max(fromHz, toHz, 1e-6)
 
     let strength = (fusionPremium ? 0.16 : 0.13) + diffRatio * 0.52
-    strength = Math.max(0.14, Math.min(0.40, strength))
+    strength = Math.max(0.14, Math.min(0.4, strength))
 
     this._fusionBeatMorphEnabled = diffRatio > 0.012
     this._fusionBeatMorphFromHz = fromHz
@@ -2516,7 +2356,7 @@ export class CrossfadeController extends Transform {
     this._dynamicNextRmsEma = this._dynamicNextRmsEma * 0.975 + amp * 0.025
     const transient = Math.max(0, amp - this._dynamicNextRmsEma)
     this._dynamicNextTransientEma =
-      this._dynamicNextTransientEma * 0.90 + transient * 0.10
+      this._dynamicNextTransientEma * 0.9 + transient * 0.1
 
     const energyNorm = Math.max(
       0,
@@ -2546,18 +2386,18 @@ export class CrossfadeController extends Transform {
       (this._dynamicMainBrightnessEma + 0.001) /
       (this._dynamicNextBrightnessEma + 0.001)
     this._dynamicToneMismatchEma =
-      this._dynamicToneMismatchEma * 0.90 + toneRatio * 0.10
+      this._dynamicToneMismatchEma * 0.9 + toneRatio * 0.1
     const toneOpenBoost = Math.max(
       0,
       Math.min(0.14, (this._dynamicToneMismatchEma - 1.15) * 0.18)
     )
     const toneSoften = Math.max(
       0,
-      Math.min(0.10, (0.88 - this._dynamicToneMismatchEma) * 0.16)
+      Math.min(0.1, (0.88 - this._dynamicToneMismatchEma) * 0.16)
     )
     const unlockedConfidence = Math.max(
       0,
-      Math.min(1, transientNorm * 0.60 + energyNorm * 0.40)
+      Math.min(1, transientNorm * 0.6 + energyNorm * 0.4)
     )
     const beatConfidence = this._rtBeatState.locked
       ? Math.max(0, Math.min(1, this._rtBeatState.confidence))
@@ -2581,8 +2421,7 @@ export class CrossfadeController extends Transform {
     const earlyFactor = Math.max(0, 1 - progress)
     const pulseInfluence = 0.06 + beatConfidence * 0.07
     const pivotZone = Math.max(0, 1 - Math.abs(progress - 0.58) / 0.26)
-    const pivotPunch =
-      (transientNorm * 0.55 + energyNorm * 0.35) * pivotZone
+    const pivotPunch = (transientNorm * 0.55 + energyNorm * 0.35) * pivotZone
     const dynamicGate = this._rtBeatState.locked
       ? 0.82 + beatConfidence * 0.18
       : 0.74 + unlockedConfidence * 0.16
@@ -2590,12 +2429,12 @@ export class CrossfadeController extends Transform {
       -0.08,
       Math.min(
         0.24,
-        (energyNorm * 0.10 +
+        (energyNorm * 0.1 +
           transientNorm * 0.16 +
           (pulse - 0.5) * pulseInfluence +
-          pivotPunch * 0.10 +
+          pivotPunch * 0.1 +
           toneOpenBoost * 0.42 -
-          toneSoften * 0.20) *
+          toneSoften * 0.2) *
           dynamicGate *
           (0.45 + earlyFactor * 0.55)
       )
@@ -2604,9 +2443,7 @@ export class CrossfadeController extends Transform {
       0,
       Math.min(
         0.24,
-        (transientNorm * 0.13 +
-          energyNorm * 0.06 +
-          pivotPunch * 0.08) *
+        (transientNorm * 0.13 + energyNorm * 0.06 + pivotPunch * 0.08) *
           dynamicGate *
           (0.25 + earlyFactor * 0.75)
       )
@@ -2617,7 +2454,7 @@ export class CrossfadeController extends Transform {
         0.26,
         (transientNorm * 0.12 +
           energyNorm * 0.07 +
-          pivotPunch * 0.10 +
+          pivotPunch * 0.1 +
           toneOpenBoost * (0.35 + earlyFactor * 0.65) -
           toneSoften * 0.25) *
           dynamicGate *
@@ -2630,7 +2467,7 @@ export class CrossfadeController extends Transform {
         0.55,
         (transientNorm * 0.38 +
           energyNorm * 0.18 +
-          toneOpenBoost * 0.20 -
+          toneOpenBoost * 0.2 -
           toneSoften * 0.12) *
           dynamicGate
       )
@@ -2668,7 +2505,7 @@ export class CrossfadeController extends Transform {
     const phase = (this._dynamicPulsePhaseOffset + timeSec * beatHz) % 1
 
     const beatPulse = 0.5 - 0.5 * Math.cos(phase * TWO_PI)
-    const linger = Math.pow(beatPulse, 0.72 + morphProgress * 0.75)
+    const linger = beatPulse ** (0.72 + morphProgress * 0.75)
     const drag = this._fusionBeatMorphStrength * (0.25 + morphProgress * 0.55)
     const transientScale = Math.max(0.52, 1 - linger * drag)
 
@@ -2683,7 +2520,7 @@ export class CrossfadeController extends Transform {
     const shapedR = this._fusionMainLpR + hiR * transientScale
 
     const outGainScale =
-      1 - linger * this._fusionBeatMorphStrength * (0.12 + morphProgress * 0.10)
+      1 - linger * this._fusionBeatMorphStrength * (0.12 + morphProgress * 0.1)
 
     return { mainL: shapedL, mainR: shapedR, outGainScale }
   }
@@ -2706,7 +2543,8 @@ export class CrossfadeController extends Transform {
     const absMid = Math.abs(mid)
     const absSide = Math.abs(side)
 
-    this._fusionBandLowLp += this._fusionBandLowAlpha * (mid - this._fusionBandLowLp)
+    this._fusionBandLowLp +=
+      this._fusionBandLowAlpha * (mid - this._fusionBandLowLp)
     this._fusionBandHighLp +=
       this._fusionBandHighAlpha * (mid - this._fusionBandHighLp)
 
@@ -2736,9 +2574,9 @@ export class CrossfadeController extends Transform {
     const ambienceGain = ambienceRise * (0.38 + ambienceTail * 0.62)
 
     const vocalGuard = this._strictNoVocalEntry
-      ? Math.max(0, Math.min(1, (vocalPresence - 0.10) / 0.46))
+      ? Math.max(0, Math.min(1, (vocalPresence - 0.1) / 0.46))
       : Math.max(0, Math.min(1, (vocalPresence - 0.16) / 0.64))
-    const gateStart = 0.30 + vocalGuard * 0.40
+    const gateStart = 0.3 + vocalGuard * 0.4
     const gateSpan = Math.max(0.18, 0.34 - vocalGuard * 0.12)
     const coreGate = this._smoothStep01((progress - gateStart) / gateSpan)
 
@@ -2749,15 +2587,17 @@ export class CrossfadeController extends Transform {
 
     const ambienceL = this._fusionAmbientLpL + side * 0.24
     const ambienceR = this._fusionAmbientLpR - side * 0.24
-    const shapedL = (nextL * coreWeight + ambienceL * ambienceWeight) / totalWeight
-    const shapedR = (nextR * coreWeight + ambienceR * ambienceWeight) / totalWeight
+    const shapedL =
+      (nextL * coreWeight + ambienceL * ambienceWeight) / totalWeight
+    const shapedR =
+      (nextR * coreWeight + ambienceR * ambienceWeight) / totalWeight
     const shapedMid = (shapedL + shapedR) * 0.5
     const shapedSide = (shapedL - shapedR) * 0.5
     const introShield = 1 - this._smoothStep01((progress - 0.14) / 0.56)
     const centerDuckCapBase = this._strictNoVocalEntry ? 0.34 : 0.24
     const centerDuckCap = Math.max(
       centerDuckCapBase,
-      Math.min(0.50, centerDuckCapBase + this._entryFxCenterShield * 0.40)
+      Math.min(0.5, centerDuckCapBase + this._entryFxCenterShield * 0.4)
     )
     const centerDuck = Math.max(
       0,
@@ -2773,24 +2613,24 @@ export class CrossfadeController extends Transform {
     const sideScale =
       1 +
       centerDuck *
-        ((this._strictNoVocalEntry ? 0.42 : 0.30) +
+        ((this._strictNoVocalEntry ? 0.42 : 0.3) +
           this._entryFxCenterShield * 0.32)
     const duckedL = shapedMid * midScale + shapedSide * sideScale
     const duckedR = shapedMid * midScale - shapedSide * sideScale
 
-    const gainRise = this._smoothStep01((progress - 0.10) / 0.80)
+    const gainRise = this._smoothStep01((progress - 0.1) / 0.8)
     const strictShield = this._strictNoVocalEntry
-      ? 1 - this._smoothStep01((progress - 0.52) / 0.30)
+      ? 1 - this._smoothStep01((progress - 0.52) / 0.3)
       : 0
     const gainScale = Math.max(
       this._strictNoVocalEntry ? 0.58 : 0.66,
       Math.min(
         1,
-        0.70 +
+        0.7 +
           gainRise * 0.26 -
-          vocalGuard * (this._strictNoVocalEntry ? 0.10 : 0.06) +
+          vocalGuard * (this._strictNoVocalEntry ? 0.1 : 0.06) +
           introShield * 0.02 -
-          strictShield * vocalGuard * 0.10 -
+          strictShield * vocalGuard * 0.1 -
           this._entryFxCenterShield *
             (1 - this._smoothStep01((progress - 0.42) / 0.42)) *
             0.08
@@ -2824,49 +2664,92 @@ export class CrossfadeController extends Transform {
     this._mixNextLowLpL += this._mixBandLowAlpha * (nextL - this._mixNextLowLpL)
     this._mixNextLowLpR += this._mixBandLowAlpha * (nextR - this._mixNextLowLpR)
 
-    this._mixMainHighLpL += this._mixBandHighAlpha * (mainL - this._mixMainHighLpL)
-    this._mixMainHighLpR += this._mixBandHighAlpha * (mainR - this._mixMainHighLpR)
-    this._mixNextHighLpL += this._mixBandHighAlpha * (nextL - this._mixNextHighLpL)
-    this._mixNextHighLpR += this._mixBandHighAlpha * (nextR - this._mixNextHighLpR)
+    this._mixMainHighLpL +=
+      this._mixBandHighAlpha * (mainL - this._mixMainHighLpL)
+    this._mixMainHighLpR +=
+      this._mixBandHighAlpha * (mainR - this._mixMainHighLpR)
+    this._mixNextHighLpL +=
+      this._mixBandHighAlpha * (nextL - this._mixNextHighLpL)
+    this._mixNextHighLpR +=
+      this._mixBandHighAlpha * (nextR - this._mixNextHighLpR)
 
-    const mainLow = (Math.abs(this._mixMainLowLpL) + Math.abs(this._mixMainLowLpR)) * 0.5
-    const nextLow = (Math.abs(this._mixNextLowLpL) + Math.abs(this._mixNextLowLpR)) * 0.5
-    
+    const mainLow =
+      (Math.abs(this._mixMainLowLpL) + Math.abs(this._mixMainLowLpR)) * 0.5
+    const nextLow =
+      (Math.abs(this._mixNextLowLpL) + Math.abs(this._mixNextLowLpR)) * 0.5
+
     // Spectral Centroid Masking: Identify which track dominates each band
     const overlap = Math.sin(progress * Math.PI)
-    const lowConflict = Math.min(mainLow, nextLow) / (Math.max(mainLow, nextLow) + 1e-6)
-    
-    // Dynamic Spectral Subtraction: 
-    // Track A gives up exactly what Track B needs to exist in the low-end.
-    let lowSubtract = lowConflict * overlap * 0.45 * (1 + transientNorm)
-    lowSubtract = Math.max(0, Math.min(0.35, lowSubtract))
+    const lowConflict =
+      Math.min(mainLow, nextLow) / (Math.max(mainLow, nextLow) + 1e-6)
+
+    // Bass Crossover (Best Fusion Logic):
+    // In fusion_morph, we swap the bass band at the midpoint (50%) instead of
+    // subtracting it. This is a standard pro DJ technique.
+    // We use a small 100ms window around the midpoint to smooth the transition and avoid clicks.
+    if (this._transitionName === 'fusion_morph') {
+      const midpoint = 0.5
+      const window =
+        (100 / (this.crossfade?.durationFrames || 1)) * (this.sampleRate / 1000)
+      const low = midpoint - window
+      const high = midpoint + window
+
+      if (progress < low) {
+        nextL -= this._mixNextLowLpL
+        nextR -= this._mixNextLowLpR
+      } else if (progress > high) {
+        mainL -= this._mixMainLowLpL
+        mainR -= this._mixMainLowLpR
+      } else {
+        // Smooth cross-fade of the bass band itself within the 100ms window
+        const t = (progress - low) / (high - low)
+        const bassGainOut = Math.cos(t * Math.PI * 0.5)
+        const bassGainIn = Math.sin(t * Math.PI * 0.5)
+
+        const outgoingBassL = this._mixMainLowLpL * (1 - bassGainOut)
+        const outgoingBassR = this._mixMainLowLpR * (1 - bassGainOut)
+        const incomingBassL = this._mixNextLowLpL * (1 - bassGainIn)
+        const incomingBassR = this._mixNextLowLpR * (1 - bassGainIn)
+
+        mainL -= outgoingBassL
+        mainR -= outgoingBassR
+        nextL -= incomingBassL
+        nextR -= incomingBassR
+      }
+    } else {
+      // Dynamic Spectral Subtraction:
+      // Track A gives up exactly what Track B needs to exist in the low-end.
+      let lowSubtract = lowConflict * overlap * 0.45 * (1 + transientNorm)
+      lowSubtract = Math.max(0, Math.min(0.35, lowSubtract))
+
+      mainL -= this._mixMainLowLpL * lowSubtract
+      mainR -= this._mixMainLowLpR * lowSubtract
+    }
 
     // Transient Preservation: Prioritize the incoming track's kick/snare
     const transientGate = Math.max(0, transientNorm - 0.5) * overlap * 0.30
-    
-    // Apply the spectral masks
-    mainL -= this._mixMainLowLpL * lowSubtract
-    mainR -= this._mixMainLowLpR * lowSubtract
-    
+
     // Space-remapping: Widening the sidechain only during peak overlap
-    const sidechain = 0.05 + (energyNorm * 0.15 * overlap) + transientGate
+    const sidechain = 0.05 + energyNorm * 0.15 * overlap + transientGate
 
     return { mainL, mainR, nextL, nextR, outGainScale: 1 - sidechain }
   }
 
   /**
-   * Calculates the cross-correlation between two signals to find the optimal 
+   * Calculates the cross-correlation between two signals to find the optimal
    * phase alignment. This is the mathematical "essence" of a perfect blend,
    * ensuring that peaks align and prevent destructive interference (noise).
    */
   private _calculateOptimalLag(
-    main: Int16Array, 
-    next: Int16Array, 
+    main: Buffer,
+    next: Buffer,
     searchWindow: number
   ): number {
     let maxCorr = -1
     let optimalLag = 0
-    const sampleLimit = Math.min(main.length, next.length, 2048)
+    const mainSamples = main.length >> 1
+    const nextSamples = next.length >> 1
+    const sampleLimit = Math.min(mainSamples, nextSamples, 2048)
 
     // Using a sliding dot product to find the lag that maximizes similarity.
     for (let lag = -searchWindow; lag <= searchWindow; lag++) {
@@ -2875,11 +2758,14 @@ export class CrossfadeController extends Transform {
       let normB = 0
 
       for (let i = searchWindow; i < sampleLimit - searchWindow; i++) {
-        const a = main[i] || 0
-        const b = next[i + lag] || 0
-        dotProduct += a * b
-        normA += a * a
-        normB += b * b
+        const valA = main.readInt16LE(i * 2)
+        const nextIdx = (i + lag) * 2
+        if (nextIdx < 0 || nextIdx >= next.length - 1) continue
+        const valB = next.readInt16LE(nextIdx)
+
+        dotProduct += valA * valB
+        normA += valA * valA
+        normB += valB * valB
       }
 
       const correlation = dotProduct / (Math.sqrt(normA * normB) + 1e-6)
@@ -2900,32 +2786,25 @@ export class CrossfadeController extends Transform {
     if (sampleCount === 0) return main
 
     const output = Buffer.allocUnsafe(main.length)
-    const mainView = new Int16Array(main.buffer, main.byteOffset, sampleCount)
-    const nextView = new Int16Array(next.buffer, next.byteOffset, sampleCount)
-    const outView = new Int16Array(output.buffer, output.byteOffset, sampleCount)
 
-    const totalFrames = Math.floor(sampleCount / this.channels)
-    const remainingFrames = runtime.isFinished ? 0 : Math.max(0, runtime.durationFrames - runtime.elapsedFrames)
-    const fadeFrames = Math.min(totalFrames, remainingFrames)
-
-    // Phase Alignment: Detect optimal lag only at the start of the blend
-    // to lock the tracks together.
-    const SEARCH_WINDOW = 128
-    const lag = (runtime.elapsedFrames === 0) 
-      ? this._calculateOptimalLag(mainView, nextView, SEARCH_WINDOW)
-      : 0
-
-    const getMain = (i: number): number =>
-      mainView ? (mainView[i] ?? 0) : main.readInt16LE(i * 2)
-    const getNext = (i: number): number =>
-      nextView ? (nextView[i] ?? 0) : next.readInt16LE(i * 2)
+    // Critical: Ensure alignment. Node.js Buffers can have any byteOffset.
+    // We use local helpers that handle alignment safely via readInt16LE.
+    const getMain = (i: number): number => main.readInt16LE(i * 2)
+    const getNext = (i: number): number => next.readInt16LE(i * 2)
     const setOut = (i: number, val: number): void => {
-      if (outView) outView[i] = val
-      else output.writeInt16LE(val, i * 2)
+      output.writeInt16LE(val, i * 2)
     }
 
+    const totalFrames = Math.floor(sampleCount / this.channels)
+    const remainingFrames = runtime.isFinished
+      ? 0
+      : Math.max(0, runtime.durationFrames - runtime.elapsedFrames)
+    const fadeFrames = Math.min(totalFrames, remainingFrames)
+
     const useHp = this._hpEnabled && this._hpDurationFrames > 0
+    const isFusionStyle = runtime.style === 'fusion'
     const fusionWindowActive =
+      isFusionStyle &&
       this._fusionBlendEnabled &&
       runtime.durationFrames >= Math.round(this.sampleRate * 1.8)
     const fusionTransitionActive =
@@ -2940,13 +2819,16 @@ export class CrossfadeController extends Transform {
             : 1
       }
 
+      // Progress Debug: Log every ~1 second of transition
+      if (frame === 0 && !runtime.isFinished && Math.floor(runtime.elapsedFrames / this.sampleRate) !== Math.floor((runtime.elapsedFrames - totalFrames) / this.sampleRate)) {
+         logger('debug', 'Crossfade-Progress', `Guild ${this.guildId} | Progress: ${(frameProgress * 100).toFixed(1)}% | Elapsed: ${Math.round(runtime.elapsedFrames / this.sampleRate * 1000)}ms / ${Math.round(runtime.durationFrames / this.sampleRate * 1000)}ms | ConsumedNext: ${this.getConsumedMs()}ms`);
+      }
+
       const [gainOut, gainIn] = this._fadeGains(frameProgress, runtime.curve)
       const base = frame * this.channels
-      const nextBase = base + (lag * this.channels)
-      const safeNextBase = Math.max(0, Math.min(nextBase, (sampleCount - this.channels)))
 
-      let nextL = getNext(safeNextBase)
-      let nextR = this.channels > 1 ? getNext(safeNextBase + 1) : nextL
+      let nextL = getNext(base)
+      let nextR = this.channels > 1 ? getNext(base + 1) : nextL
       let mainL = getMain(base)
       let mainR = this.channels > 1 ? getMain(base + 1) : mainL
 
@@ -2954,279 +2836,309 @@ export class CrossfadeController extends Transform {
         nextL *= this._incomingGain
         nextR *= this._incomingGain
       }
-      if (this._incomingEntryGainComp < 0.999 && frameProgress < 0.40) {
-        const compT = this._smoothStep01(frameProgress / 0.40)
-        const entryComp =
-          this._incomingEntryGainComp +
-          (1 - this._incomingEntryGainComp) * compT
-        nextL *= entryComp
-        nextR *= entryComp
-      }
-      const attackWindow = this._strictNoVocalEntry ? 0.34 : 0.24
-      const clipGuardPeak = this._strictNoVocalEntry ? 19500 : 22000
-      if (frameProgress < attackWindow) {
-        const incomingPeak = Math.max(Math.abs(nextL), Math.abs(nextR))
-        if (incomingPeak > clipGuardPeak) {
-          const attack = 1 - this._smoothStep01(frameProgress / attackWindow)
-          const overshoot = Math.max(
-            0,
-            Math.min(1, (incomingPeak - clipGuardPeak) / 12000)
-          )
-          const tameScale =
-            1 - attack * overshoot * (this._strictNoVocalEntry ? 0.42 : 0.30)
-          nextL *= tameScale
-          nextR *= tameScale
+
+      if (isFusionStyle) {
+        // --- Advanced Fusion Blending ---
+        if (this._incomingEntryGainComp < 0.999 && frameProgress < 0.4) {
+          const compT = this._smoothStep01(frameProgress / 0.4)
+          const entryComp =
+            this._incomingEntryGainComp +
+            (1 - this._incomingEntryGainComp) * compT
+          nextL *= entryComp
+          nextR *= entryComp
         }
-      }
-
-      const dyn = this._computeDynamicMixState(
-        mainL,
-        mainR,
-        nextL,
-        nextR,
-        frameProgress
-      )
-      const dynamicProgress = Math.min(1, frameProgress + dyn.openLift)
-
-      // Short eased ramp at the very beginning of Track B prevents attack clipping
-      // while still keeping both tracks present.
-      const entryRampSpan = this._strictNoVocalEntry ? 0.42 : 0.28
-      const entryRampFloor = this._strictNoVocalEntry ? 0.64 : 0.78
-      if (frameProgress < entryRampSpan) {
-        const ramp =
-          entryRampFloor +
-          (1 - entryRampFloor) *
-            this._smoothStep01(frameProgress / entryRampSpan)
-        nextL *= ramp
-        nextR *= ramp
-      }
-      if (this._strictNoVocalEntry && frameProgress < 0.36) {
-        const shield = 1 - (1 - this._smoothStep01(frameProgress / 0.36)) * 0.10
-        nextL *= shield
-        nextR *= shield
-      }
-      if (this._strictNoVocalEntry && frameProgress < 0.46) {
-        const mid = (nextL + nextR) * 0.5
-        const side = (nextL - nextR) * 0.5
-        const baseCenterShield =
-          1 - (1 - this._smoothStep01(frameProgress / 0.46)) * 0.22
-        const shieldBoost =
-          this._entryFxCenterShield *
-          (1 - this._smoothStep01(frameProgress / 0.52))
-        const centerShield = Math.max(
-          0.56,
-          Math.min(1, baseCenterShield - shieldBoost * 0.26)
-        )
-        const sideLift =
-          1 + (1 - centerShield) * (0.25 + shieldBoost * 0.42)
-        nextL = mid * centerShield + side * sideLift
-        nextR = mid * centerShield - side * sideLift
-      }
-
-      let mixOutGain = gainOut
-      let mixInGain = gainIn
-      if (this._dynamicMixEnabled) {
-        mixOutGain = Math.max(0, mixOutGain * (1 - dyn.outBias))
-        mixInGain = Math.max(0, mixInGain * (1 + dyn.inBias))
-        
-        // Coherence-aware normalization: 
-        // Prevents the +3dB "correlated sum" noise that causes clipping 
-        // during beat-matched transitions.
-        const [adjOut, adjIn] = this._computeCoherenceGains(mixOutGain, mixInGain, frameProgress)
-        mixOutGain = adjOut
-        mixInGain = adjIn
-      }
-
-      if (fusionTransitionActive) {
-        if (this._fusionBeatMorphEnabled) {
-          const shapedMain = this._applyFusionBeatMorph(
-            mainL,
-            mainR,
-            dynamicProgress,
-            runtime.elapsedFrames + frame
-          )
-          mainL = shapedMain.mainL
-          mainR = shapedMain.mainR
-          mixOutGain *= shapedMain.outGainScale
-        }
-
-        if (this._fusionTailHoldEnabled) {
-          const holdShape = 1 - this._smoothStep01((dynamicProgress - 0.76) / 0.24)
-          const outFloor =
-            this._fusionOutFloorTail +
-            (this._fusionOutFloorPeak - this._fusionOutFloorTail) * holdShape
-          if (mixOutGain < outFloor) mixOutGain = outFloor
-
-          const inCeil = 1.06 - outFloor * 0.42
-          if (mixInGain > inCeil) mixInGain = inCeil
-
-          const normSq = mixOutGain * mixOutGain + mixInGain * mixInGain
-          if (normSq > 1.08) {
-            const norm = Math.sqrt(normSq)
-            mixOutGain /= norm
-            mixInGain /= norm
+        const attackWindow = this._strictNoVocalEntry ? 0.34 : 0.24
+        const clipGuardPeak = this._strictNoVocalEntry ? 19500 : 22000
+        if (frameProgress < attackWindow) {
+          const incomingPeak = Math.max(Math.abs(nextL), Math.abs(nextR))
+          if (incomingPeak > clipGuardPeak) {
+            const attack = 1 - this._smoothStep01(frameProgress / attackWindow)
+            const overshoot = Math.max(
+              0,
+              Math.min(1, (incomingPeak - clipGuardPeak) / 12000)
+            )
+            const tameScale =
+              1 - attack * overshoot * (this._strictNoVocalEntry ? 0.42 : 0.3)
+            nextL *= tameScale
+            nextR *= tameScale
           }
         }
 
-        // Keep both tracks clearly audible in the center of the blend.
-        const overlapMid = Math.sin(dynamicProgress * Math.PI)
-        const glueMin = 0.06 + overlapMid * 0.12
-        if (mixOutGain < glueMin) mixOutGain = glueMin
-        if (mixInGain < glueMin) mixInGain = glueMin
-        const glueNorm = mixOutGain * mixOutGain + mixInGain * mixInGain
-        if (glueNorm > 1.10) {
-          const scale = Math.sqrt(1.10 / glueNorm)
-          mixOutGain *= scale
-          mixInGain *= scale
-        }
-      }
-
-      let hpAlpha = 0
-      if (useHp && dynamicProgress < 1) {
-        const hpMappedProgress = Math.min(1, dynamicProgress / 0.3)
-        const hpProgress = (1 - Math.cos(hpMappedProgress * Math.PI)) / 2
-        hpAlpha = this._hpPeakAlpha * (1 - hpProgress)
-      }
-
-      if (hpAlpha > 0.001) {
-        this._hpPrevL = this._hpPrevL + hpAlpha * (nextL - this._hpPrevL)
-        nextL = nextL - this._hpPrevL
-        if (this.channels > 1) {
-          this._hpPrevR = this._hpPrevR + hpAlpha * (nextR - this._hpPrevR)
-          nextR = nextR - this._hpPrevR
-        }
-      } else {
-        this._hpPrevL = 0
-        this._hpPrevR = 0
-      }
-
-      if (this._lpEnabled && dynamicProgress < this._lpCompletionRatio) {
-        const lpMappedProgress = Math.min(
-          1,
-          dynamicProgress / this._lpCompletionRatio
-        )
-        const lpProgress = (1 - Math.cos(lpMappedProgress * Math.PI)) / 2
-        const lpAlpha =
-          this._lpPeakAlpha + (1.0 - this._lpPeakAlpha) * lpProgress
-        this._lpPrevL += lpAlpha * (nextL - this._lpPrevL)
-        nextL = this._lpPrevL
-        if (this.channels > 1) {
-          this._lpPrevR += lpAlpha * (nextR - this._lpPrevR)
-          nextR = this._lpPrevR
-        }
-      } else if (this._lpEnabled) {
-        this._lpPrevL = 0
-        this._lpPrevR = 0
-      }
-
-      if (this._echoEnabled && this._echoDelayL && this._echoDelayR) {
-        const delayLen = this._echoDelayFrames
-        const readPos =
-          (((this._echoWritePos - delayLen) % delayLen) + delayLen) % delayLen
-
-        const delayedL = this._echoDelayL[readPos]!
-        const delayedR = this._echoDelayR[readPos]!
-
-        const fbL = nextL + delayedL * this._echoFeedback
-        const fbR = nextR + delayedR * this._echoFeedback
-        this._echoDelayL[this._echoWritePos] =
-          fbL > 65534 ? 65534 : fbL < -65534 ? -65534 : fbL
-        this._echoDelayR[this._echoWritePos] =
-          fbR > 65534 ? 65534 : fbR < -65534 ? -65534 : fbR
-
-        this._echoWritePos = (this._echoWritePos + 1) % delayLen
-
-        if (dynamicProgress < this._echoCompletionRatio) {
-          const echoT = dynamicProgress / this._echoCompletionRatio
-          const baseWet = this._echoPeakMix * (1 - echoT)
-          const echoWet = baseWet * (1 - dyn.echoDryLift)
-          const echoDry = 1 - echoWet
-          nextL = nextL * echoDry + delayedL * echoWet
-          nextR = nextR * echoDry + delayedR * echoWet
-        }
-      }
-
-      if (fusionTransitionActive) {
-        const shapedIncoming = this._shapeIncomingFusion(
+        const dyn = this._computeDynamicMixState(
+          mainL,
+          mainR,
           nextL,
           nextR,
-          dynamicProgress
+          frameProgress
         )
-        nextL = shapedIncoming.nextL
-        nextR = shapedIncoming.nextR
-        mixInGain *= shapedIncoming.gainScale
-      }
+        const dynamicProgress = Math.min(1, frameProgress + dyn.openLift)
 
-      const adaptiveUnmask = this._applyAdaptiveBandUnmasking(
-        mainL,
-        mainR,
-        nextL,
-        nextR,
-        dynamicProgress,
-        dyn.transientNorm,
-        dyn.energyNorm
-      )
-      mainL = adaptiveUnmask.mainL
-      mainR = adaptiveUnmask.mainR
-      nextL = adaptiveUnmask.nextL
-      nextR = adaptiveUnmask.nextR
-      mixOutGain *= adaptiveUnmask.outGainScale
+        // Short eased ramp at the very beginning of Track B prevents attack clipping
+        // while still keeping both tracks present.
+        const entryRampSpan = this._strictNoVocalEntry ? 0.42 : 0.28
+        const entryRampFloor = this._strictNoVocalEntry ? 0.64 : 0.78
+        if (frameProgress < entryRampSpan) {
+          const ramp =
+            entryRampFloor +
+            (1 - entryRampFloor) *
+              this._smoothStep01(frameProgress / entryRampSpan)
+          nextL *= ramp
+          nextR *= ramp
+        }
+        if (this._strictNoVocalEntry && frameProgress < 0.36) {
+          const shield =
+            1 - (1 - this._smoothStep01(frameProgress / 0.36)) * 0.1
+          nextL *= shield
+          nextR *= shield
+        }
+        if (this._strictNoVocalEntry && frameProgress < 0.46) {
+          const mid = (nextL + nextR) * 0.5
+          const side = (nextL - nextR) * 0.5
+          const baseCenterShield =
+            1 - (1 - this._smoothStep01(frameProgress / 0.46)) * 0.22
+          const shieldBoost =
+            this._entryFxCenterShield *
+            (1 - this._smoothStep01(frameProgress / 0.52))
+          const centerShield = Math.max(
+            0.56,
+            Math.min(1, baseCenterShield - shieldBoost * 0.26)
+          )
+          const sideLift = 1 + (1 - centerShield) * (0.25 + shieldBoost * 0.42)
+          nextL = mid * centerShield + side * sideLift
+          nextR = mid * centerShield - side * sideLift
+        }
 
-      // Bus headroom guard: keep headroom without flattening the blend.
-      const mainAbsPeak = this.channels > 1
-        ? Math.max(Math.abs(mainL), Math.abs(mainR))
-        : Math.abs(mainL)
-      const nextAbsPeak = this.channels > 1
-        ? Math.max(Math.abs(nextL), Math.abs(nextR))
-        : Math.abs(nextL)
-      const predictedPeak = mainAbsPeak * mixOutGain + nextAbsPeak * mixInGain
-      const targetBusPeak = fusionTransitionActive
-        ? MIX_BUS_TARGET_PEAK_FUSION
-        : MIX_BUS_TARGET_PEAK
-      if (predictedPeak > targetBusPeak && predictedPeak > 1) {
-        const headroomScale = Math.max(
-          0.84,
-          Math.sqrt(targetBusPeak / predictedPeak)
+        let mixOutGain = gainOut
+        let mixInGain = gainIn
+        if (this._dynamicMixEnabled) {
+          mixOutGain = Math.max(0, mixOutGain * (1 - dyn.outBias))
+          mixInGain = Math.max(0, mixInGain * (1 + dyn.inBias))
+
+          // Coherence-aware normalization:
+          // Prevents the +3dB "correlated sum" noise that causes clipping
+          // during beat-matched transitions.
+          const [adjOut, adjIn] = this._computeCoherenceGains(
+            mixOutGain,
+            mixInGain,
+            frameProgress
+          )
+          mixOutGain = adjOut
+          mixInGain = adjIn
+        }
+
+        if (fusionTransitionActive) {
+          if (this._fusionBeatMorphEnabled) {
+            const shapedMain = this._applyFusionBeatMorph(
+              mainL,
+              mainR,
+              dynamicProgress,
+              runtime.elapsedFrames + frame
+            )
+            mainL = shapedMain.mainL
+            mainR = shapedMain.mainR
+            mixOutGain *= shapedMain.outGainScale
+          }
+
+          if (this._fusionTailHoldEnabled) {
+            const holdShape =
+              1 - this._smoothStep01((dynamicProgress - 0.76) / 0.24)
+            const outFloor =
+              this._fusionOutFloorTail +
+              (this._fusionOutFloorPeak - this._fusionOutFloorTail) * holdShape
+            if (mixOutGain < outFloor) mixOutGain = outFloor
+
+            const inCeil = 1.06 - outFloor * 0.42
+            if (mixInGain > inCeil) mixInGain = inCeil
+
+            const normSq = mixOutGain * mixOutGain + mixInGain * mixInGain
+            if (normSq > 1.08) {
+              const norm = Math.sqrt(normSq)
+              mixOutGain /= norm
+              mixInGain /= norm
+            }
+          }
+
+          // Keep both tracks clearly audible in the center of the blend.
+          const overlapMid = Math.sin(dynamicProgress * Math.PI)
+          const glueMin = 0.06 + overlapMid * 0.12
+          if (mixOutGain < glueMin) mixOutGain = glueMin
+          if (mixInGain < glueMin) mixInGain = glueMin
+          const glueNorm = mixOutGain * mixOutGain + mixInGain * mixInGain
+          if (glueNorm > 1.1) {
+            const scale = Math.sqrt(1.1 / glueNorm)
+            mixOutGain *= scale
+            mixInGain *= scale
+          }
+        }
+
+        let hpAlpha = 0
+        if (useHp && dynamicProgress < 1) {
+          const hpMappedProgress = Math.min(1, dynamicProgress / 0.3)
+          const hpProgress = (1 - Math.cos(hpMappedProgress * Math.PI)) / 2
+          hpAlpha = this._hpPeakAlpha * (1 - hpProgress)
+        }
+
+        if (hpAlpha > 0.001) {
+          this._hpPrevL = this._hpPrevL + hpAlpha * (nextL - this._hpPrevL)
+          nextL = nextL - this._hpPrevL
+          if (this.channels > 1) {
+            this._hpPrevR = this._hpPrevR + hpAlpha * (nextR - this._hpPrevR)
+            nextR = nextR - this._hpPrevR
+          }
+        } else {
+          this._hpPrevL = 0
+          this._hpPrevR = 0
+        }
+
+        if (this._lpEnabled && dynamicProgress < this._lpCompletionRatio) {
+          const lpMappedProgress = Math.min(
+            1,
+            dynamicProgress / this._lpCompletionRatio
+          )
+          const lpProgress = (1 - Math.cos(lpMappedProgress * Math.PI)) / 2
+          const lpAlpha =
+            this._lpPeakAlpha + (1.0 - this._lpPeakAlpha) * lpProgress
+          this._lpPrevL += lpAlpha * (nextL - this._lpPrevL)
+          nextL = this._lpPrevL
+          if (this.channels > 1) {
+            this._lpPrevR += lpAlpha * (nextR - this._lpPrevR)
+            nextR = this._lpPrevR
+          }
+        } else if (this._lpEnabled) {
+          this._lpPrevL = 0
+          this._lpPrevR = 0
+        }
+
+        if (this._echoEnabled && this._echoDelayL && this._echoDelayR) {
+          const delayLen = this._echoDelayFrames
+          const readPos =
+            (((this._echoWritePos - delayLen) % delayLen) + delayLen) % delayLen
+
+          const delayedL = this._echoDelayL[readPos]!
+          const delayedR = this._echoDelayR[readPos]!
+
+          const fbL = nextL + delayedL * this._echoFeedback
+          const fbR = nextR + delayedR * this._echoFeedback
+          this._echoDelayL[this._echoWritePos] =
+            fbL > 65534 ? 65534 : fbL < -65534 ? -65534 : fbL
+          this._echoDelayR[this._echoWritePos] =
+            fbR > 65534 ? 65534 : fbR < -65534 ? -65534 : fbR
+
+          this._echoWritePos = (this._echoWritePos + 1) % delayLen
+
+          if (dynamicProgress < this._echoCompletionRatio) {
+            const echoT = dynamicProgress / this._echoCompletionRatio
+            const baseWet = this._echoPeakMix * (1 - echoT)
+            const echoWet = baseWet * (1 - dyn.echoDryLift)
+            const echoDry = 1 - echoWet
+            nextL = nextL * echoDry + delayedL * echoWet
+            nextR = nextR * echoDry + delayedR * echoWet
+          }
+        }
+
+        if (fusionTransitionActive) {
+          const shapedIncoming = this._shapeIncomingFusion(
+            nextL,
+            nextR,
+            dynamicProgress
+          )
+          nextL = shapedIncoming.nextL
+          nextR = shapedIncoming.nextR
+          mixInGain *= shapedIncoming.gainScale
+        }
+
+        const adaptiveUnmask = this._applyAdaptiveBandUnmasking(
+          mainL,
+          mainR,
+          nextL,
+          nextR,
+          dynamicProgress,
+          dyn.transientNorm,
+          dyn.energyNorm
         )
-        mixOutGain *= headroomScale
-        mixInGain *= headroomScale
-      }
+        mainL = adaptiveUnmask.mainL
+        mainR = adaptiveUnmask.mainR
+        nextL = adaptiveUnmask.nextL
+        nextR = adaptiveUnmask.nextR
+        mixOutGain *= adaptiveUnmask.outGainScale
 
-      if (this._panEnabled && dynamicProgress < this._panCompletionRatio) {
-        const panT = dynamicProgress / this._panCompletionRatio
-        const panL = (1 - Math.cos(panT * Math.PI)) / 2 // 0 → 1 smooth
-        nextL *= panL
-      }
+        // Bus headroom guard: keep headroom without flattening the blend.
+        const mainAbsPeak =
+          this.channels > 1
+            ? Math.max(Math.abs(mainL), Math.abs(mainR))
+            : Math.abs(mainL)
+        const nextAbsPeak =
+          this.channels > 1
+            ? Math.max(Math.abs(nextL), Math.abs(nextR))
+            : Math.abs(nextL)
+        const predictedPeak = mainAbsPeak * mixOutGain + nextAbsPeak * mixInGain
+        const targetBusPeak = fusionTransitionActive
+          ? MIX_BUS_TARGET_PEAK_FUSION
+          : MIX_BUS_TARGET_PEAK
+        if (predictedPeak > targetBusPeak && predictedPeak > 1) {
+          const headroomScale = Math.sqrt(targetBusPeak / predictedPeak)
+          mixOutGain *= headroomScale
+          mixInGain *= headroomScale
+        }
 
-      if (
-        this._panOutEnabled &&
-        this.channels > 1 &&
-        dynamicProgress < this._panOutCompletionRatio
-      ) {
-        const panT = dynamicProgress / this._panOutCompletionRatio
-        const panR = (1 + Math.cos(panT * Math.PI)) / 2 // 1 → 0 smooth
-        mainR *= panR
-      }
+        if (this._panEnabled && dynamicProgress < this._panCompletionRatio) {
+          const panT = dynamicProgress / this._panCompletionRatio
+          const panL = (1 - Math.cos(panT * Math.PI)) / 2 // 0 → 1 smooth
+          nextL *= panL
+        }
 
-      let mixedL = mainL * mixOutGain + nextL * mixInGain
-      let mixedR = this.channels > 1 ? mainR * mixOutGain + nextR * mixInGain : mixedL
-      const mixedPeak = this.channels > 1
-        ? Math.max(Math.abs(mixedL), Math.abs(mixedR))
-        : Math.abs(mixedL)
-      if (mixedPeak > targetBusPeak && mixedPeak > 1) {
-        const limiterScale = Math.max(
-          0.82,
-          Math.sqrt(targetBusPeak / mixedPeak)
-        )
-        mixedL *= limiterScale
-        mixedR *= limiterScale
-      }
-      mixedL = this._softClipSample(mixedL)
-      mixedR = this.channels > 1 ? this._softClipSample(mixedR) : mixedL
-      setOut(base, this._toInt16Sample(mixedL))
+        if (
+          this._panOutEnabled &&
+          this.channels > 1 &&
+          dynamicProgress < this._panOutCompletionRatio
+        ) {
+          const panT = dynamicProgress / this._panOutCompletionRatio
+          const panR = (1 + Math.cos(panT * Math.PI)) / 2 // 1 → 0 smooth
+          mainR *= panR
+        }
 
-      if (this.channels > 1) {
-        setOut(base + 1, this._toInt16Sample(mixedR))
+        let mixedL = mainL * mixOutGain + nextL * mixInGain
+        let mixedR =
+          this.channels > 1 ? mainR * mixOutGain + nextR * mixInGain : mixedL
+        const mixedPeak =
+          this.channels > 1
+            ? Math.max(Math.abs(mixedL), Math.abs(mixedR))
+            : Math.abs(mixedL)
+        if (mixedPeak > targetBusPeak && mixedPeak > 1) {
+          const limiterScale = Math.max(
+            0.9,
+            Math.sqrt(targetBusPeak / mixedPeak)
+          )
+          mixedL *= limiterScale
+          mixedR *= limiterScale
+        }
+        mixedL = this._softClipSample(mixedL)
+        mixedR = this.channels > 1 ? this._softClipSample(mixedR) : mixedL
+        setOut(base, this._toInt16Sample(mixedL))
+
+        if (this.channels > 1) {
+          setOut(base + 1, this._toInt16Sample(mixedR))
+        }
+      } else {
+        // --- Standard Crossfade ---
+        // Simple, high-performance volume blending with peak protection.
+        let outG = gainOut
+        let inG = gainIn
+        
+        const predictedPeak = (Math.abs(mainL) * outG + Math.abs(nextL) * inG)
+        if (predictedPeak > MIX_BUS_TARGET_PEAK) {
+          const scale = MIX_BUS_TARGET_PEAK / predictedPeak
+          outG *= scale
+          inG *= scale
+        }
+
+        setOut(base, this._toInt16Sample(mainL * outG + nextL * inG))
+        if (this.channels > 1) {
+          setOut(
+            base + 1,
+            this._toInt16Sample(mainR * outG + nextR * inG)
+          )
+        }
       }
     }
 
@@ -3239,15 +3151,9 @@ export class CrossfadeController extends Transform {
 
     if (runtime.isFinished && !this._bypassTriggered) {
       this._bypassTriggered = true
+      this._incomingGain = 1.0
       this.filterBypassSetter?.(true)
       this.filterStateResetter?.()
-    }
-
-    if (runtime.isFinished && this._incomingGain !== 1) {
-      this._incomingGain += (1.0 - this._incomingGain) * 0.25
-      if (Math.abs(this._incomingGain - 1.0) < 0.002) {
-        this._incomingGain = 1.0
-      }
     }
 
     return output
@@ -3258,12 +3164,12 @@ export class CrossfadeController extends Transform {
     if (curve === 'linear') {
       return [1 - clamped, clamped]
     }
-    
+
     // Constant-power cosine/sine curve for transparent equal-power crossfades.
     const angle = clamped * HALF_PI
     const gainOut = Math.cos(angle)
     const gainIn = Math.sin(angle)
-    
+
     return [gainOut, gainIn]
   }
 
@@ -3279,7 +3185,7 @@ export class CrossfadeController extends Transform {
 
     let sumSq = 0
     let count = 0
-    for (let i = 0; i < samples; i += 8) {
+    for (let i = 0; i < samples; i += 32) {
       const s = chunk.readInt16LE(i * 2)
       sumSq += s * s
       count++
@@ -3294,12 +3200,14 @@ export class CrossfadeController extends Transform {
     if (chunkMs > 0) this._nextOnsetChunkMs = chunkMs
 
     if (this._nextOpeningEnergyMs < this._nextOpeningWindowMs && chunkMs > 0) {
-      const remainingWindow = this._nextOpeningWindowMs - this._nextOpeningEnergyMs
+      const remainingWindow =
+        this._nextOpeningWindowMs - this._nextOpeningEnergyMs
       const usedMs = Math.min(remainingWindow, chunkMs)
       this._nextOpeningEnergyAcc += rms * usedMs
       this._nextOpeningEnergyMs += usedMs
       if (this._nextOpeningEnergyMs > 0) {
-        this._nextOpeningEnergy = this._nextOpeningEnergyAcc / this._nextOpeningEnergyMs
+        this._nextOpeningEnergy =
+          this._nextOpeningEnergyAcc / this._nextOpeningEnergyMs
       }
     }
 
@@ -3308,7 +3216,7 @@ export class CrossfadeController extends Transform {
     this._nextOnsetBuffer.push(onset)
     const maxOnsets = Math.max(
       64,
-      Math.round((20000 / Math.max(1, this._nextOnsetChunkMs)))
+      Math.round(20000 / Math.max(1, this._nextOnsetChunkMs))
     )
     if (this._nextOnsetBuffer.length > maxOnsets) {
       this._nextOnsetBuffer.shift()
@@ -3356,7 +3264,10 @@ export class CrossfadeController extends Transform {
       }
     }
 
-    if (!this._nextKeyDetected && this._nextKeyPcmBytes < this._nextKeyMaxBytes) {
+    if (
+      !this._nextKeyDetected &&
+      this._nextKeyPcmBytes < this._nextKeyMaxBytes
+    ) {
       this._nextKeyPcm.push(Buffer.from(chunk))
       this._nextKeyPcmBytes += chunk.length
       if (this._nextKeyPcmBytes >= this.sampleRate * this.channels * 2 * 5) {
@@ -3392,12 +3303,13 @@ export class CrossfadeController extends Transform {
     let sumMid = 0
     let sumTreble = 0
     let sumFlux = 0
-    for (let i = 0; i < samples; i += 8) {
+    for (let i = 0; i < samples; i += 32) {
       const s = chunk.readInt16LE(i * 2)
       sumSq += s * s
       this._mainSpecLowLp += this._mainSpecLowAlpha * (s - this._mainSpecLowLp)
       this._mainSpecMidLp += this._mainSpecMidAlpha * (s - this._mainSpecMidLp)
-      this._mainSpecHighLp += this._mainSpecHighAlpha * (s - this._mainSpecHighLp)
+      this._mainSpecHighLp +=
+        this._mainSpecHighAlpha * (s - this._mainSpecHighLp)
       const bass = Math.abs(this._mainSpecLowLp)
       const midBand = Math.abs(this._mainSpecMidLp - this._mainSpecLowLp)
       const treble = Math.abs(s - this._mainSpecHighLp)
@@ -3417,19 +3329,24 @@ export class CrossfadeController extends Transform {
     const toneTotal = sumBass + sumMid + sumTreble + 1
     const brightness = Math.max(
       0,
-      Math.min(1, (sumTreble * 1.10 + sumMid * 0.42) / toneTotal)
+      Math.min(1, (sumTreble * 1.1 + sumMid * 0.42) / toneTotal)
     )
     const motion = Math.max(
       0,
-      Math.min(1, (sumFlux / (sumMid + sumTreble + 1)) / 0.65)
+      Math.min(1, sumFlux / (sumMid + sumTreble + 1) / 0.65)
     )
     const centroidNorm = Math.max(
       0,
-      Math.min(1, (sumBass * 140 + sumMid * 900 + sumTreble * 3200) / toneTotal / 3800)
+      Math.min(
+        1,
+        (sumBass * 140 + sumMid * 900 + sumTreble * 3200) / toneTotal / 3800
+      )
     )
-    this._mainSpecBrightnessEma = this._mainSpecBrightnessEma * 0.92 + brightness * 0.08
-    this._mainSpecMotionEma = this._mainSpecMotionEma * 0.90 + motion * 0.10
-    this._mainSpecCentroidEma = this._mainSpecCentroidEma * 0.92 + centroidNorm * 0.08
+    this._mainSpecBrightnessEma =
+      this._mainSpecBrightnessEma * 0.92 + brightness * 0.08
+    this._mainSpecMotionEma = this._mainSpecMotionEma * 0.9 + motion * 0.1
+    this._mainSpecCentroidEma =
+      this._mainSpecCentroidEma * 0.92 + centroidNorm * 0.08
 
     const chunkMs = (chunk.length / 2 / this.channels / this.sampleRate) * 1000
     if (chunkMs > 0) this._onsetChunkMs = chunkMs
@@ -3444,8 +3361,7 @@ export class CrossfadeController extends Transform {
         (!this._detectedMainBpm ||
           Math.abs(this._detectedMainBpm - this._rtBeatState.bpm) > 0.9)
       ) {
-        this._detectedMainBpm =
-          Math.round(this._rtBeatState.bpm * 10) / 10
+        this._detectedMainBpm = Math.round(this._rtBeatState.bpm * 10) / 10
         const shouldLog =
           this._rtBeatState.timeSec - this._lastRealtimeBpmLogSec >= 8
         if (shouldLog) {
@@ -3756,10 +3672,11 @@ export class CrossfadeController extends Transform {
 
     const nextChunk = this.ringBuffer.read(needed)
     if (nextChunk) {
-      if (!this.crossfade?.isFinished) {
-        this._totalNextConsumedSamples += nextChunk.length / (this.channels * 2)
-      }
+      // Track consumed samples for position reporting EVERY time we read.
+      // This fixes the lyrics freeze/jump bug.
+      this._totalNextConsumedSamples += nextChunk.length / (this.channels * 2)
     }
+
     if (!nextChunk) {
       const silence = Buffer.alloc(needed, 0)
       this.push(this._mixBuffers(data, silence, this.crossfade))
@@ -3786,17 +3703,9 @@ export class CrossfadeController extends Transform {
         : paddedNext
 
       if (this._incomingGain !== 1) {
-        const gain = this._incomingGain
-        const samps = output.length >> 1
-        for (let i = 0; i < samps; i++) {
-          const offset = i * 2
-          const val = output.readInt16LE(offset) * gain
-          output.writeInt16LE(this._toInt16Sample(val), offset)
-        }
-        this._incomingGain += (1.0 - this._incomingGain) * 0.25
-        if (Math.abs(this._incomingGain - 1.0) < 0.002) {
-          this._incomingGain = 1.0
-        }
+        // Instant restore gain to 1.0 after crossfade is finished.
+        // No ramp-up needed as it causes perceived low volume.
+        this._incomingGain = 1.0
       }
 
       this.push(output)
@@ -3821,9 +3730,9 @@ export class CrossfadeController extends Transform {
     const FRAME_SIZE = 3840
     const FRAME_MS = (FRAME_SIZE / 2 / this.channels / this.sampleRate) * 1000 // ~20 ms
     const INITIAL_BURST_MS = 200 // pre-fill 200 ms on entry
-    const MAX_AHEAD_MS = 100 // stay max 100 ms ahead of wall clock
-    const PUMP_CHECK_MS = 15 // check pace every 15 ms
-    const MAX_PER_TICK = 15 // hard cap per tick to avoid event-loop stalls
+    const MAX_AHEAD_MS = 60 // stay max 60 ms ahead of wall clock (was 100)
+    const PUMP_CHECK_MS = 20 // check pace every 20 ms (was 15)
+    const MAX_PER_TICK = 3 // hard cap per tick (max 3x real-time catch-up)
     const STARVATION_TIMEOUT_MS = 5000 // end stream after 5 s of no data
 
     const ringLen = this.ringBuffer?.length ?? 0
@@ -3913,6 +3822,9 @@ export class CrossfadeController extends Transform {
 
           if (nextChunk) {
             starvationStart = null
+            if (!this._bcfCountFrozen) {
+              this._totalNextConsumedSamples += nextChunk.length / (this.channels * 2)
+            }
             if (
               this._bridgeCrossfadeActive &&
               !this._bcfRuntime &&
@@ -3980,10 +3892,10 @@ export class CrossfadeController extends Transform {
                 const cChunk = this._bcfRing?.read(FRAME_SIZE)
                 if (!cChunk) break // Track C also exhausted — give up
 
-                this._bcfConsumedSamples += cChunk.length / (this.channels * 2)
+                const framesInChunk = FRAME_SIZE / 2 / this.channels
+                this._totalNextConsumedSamples += framesInChunk
 
                 const bcfRT = this._bcfRuntime!
-                const framesInChunk = FRAME_SIZE / 2 / this.channels
                 const fadeRemain = Math.max(
                   0,
                   bcfRT.durationFrames - bcfRT.elapsedFrames
@@ -4061,11 +3973,16 @@ export class CrossfadeController extends Transform {
                   cL = this._softClipSample(cL)
                   cR = this._softClipSample(cR)
 
-                  const [adjOut, adjIn] = this._computeCoherenceGains(0, gainIn, progress)
+                  const [adjOut, adjIn] = this._computeCoherenceGains(
+                    0,
+                    gainIn,
+                    progress
+                  )
                   const mixL = cL * adjIn
                   const mixR = cR * adjIn
                   mixed.writeInt16LE(this._toInt16Sample(mixL), base * 2)
-                  if (this.channels > 1) {                    mixed.writeInt16LE(
+                  if (this.channels > 1) {
+                    mixed.writeInt16LE(
                       this._toInt16Sample(mixR),
                       (base + 1) * 2
                     )
@@ -4197,29 +4114,45 @@ export class CrossfadeController extends Transform {
               )
               const mixed = Buffer.allocUnsafe(FRAME_SIZE)
 
-              const mainView = new Int16Array(filteredB.buffer, filteredB.byteOffset, FRAME_SIZE / 2)
-              const nextView = new Int16Array(paddedC.buffer, paddedC.byteOffset, FRAME_SIZE / 2)
-              const lag = (bcfRT.elapsedFrames === 0)
-                ? this._calculateOptimalLag(mainView, nextView, 128)
-                : 0
+              const lag =
+                bcfRT.elapsedFrames === 0
+                  ? this._calculateOptimalLag(filteredB, paddedC, 128)
+                  : 0
 
               for (let f = 0; f < totalFrames; f++) {
                 const progress =
                   f < fadeFrames
                     ? (bcfRT.elapsedFrames + f) / bcfRT.durationFrames
                     : 1
-                const [gainOut, gainIn] = this._fadeGains(
+                const [gainOut, gainInBase] = this._fadeGains(
                   Math.min(1, progress),
                   bcfRT.curve
                 )
-                const base = f * this.channels
-                const nextBase = base + (lag * this.channels)
 
-                const safeNextBase = Math.max(0, Math.min(nextBase, (FRAME_SIZE / 2) - this.channels))
+                // Smooth gain recovery
+                let gainIn = gainInBase
+                if (this._incomingGain !== 1) {
+                  const gainRecovery = this._smoothStep01(progress)
+                  const currentInGain =
+                    this._incomingGain +
+                    (1.0 - this._incomingGain) * gainRecovery
+                  gainIn *= currentInGain
+                }
+
+                const base = f * this.channels
+                const nextBase = base + lag * this.channels
+
+                const safeNextBase = Math.max(
+                  0,
+                  Math.min(nextBase, FRAME_SIZE / 2 - this.channels)
+                )
 
                 let cL = paddedC.readInt16LE(safeNextBase * 2)
                 let cR =
-                  this.channels > 1 ? paddedC.readInt16LE((safeNextBase + 1) * 2) : cL
+                  this.channels > 1
+                    ? paddedC.readInt16LE((safeNextBase + 1) * 2)
+                    : cL
+
                 if (this._hpEnabled && progress < 1) {
                   const hpP = Math.min(1, progress / 0.3)
                   const hpAlpha =
@@ -4291,21 +4224,41 @@ export class CrossfadeController extends Transform {
                 const bR =
                   this.channels > 1 ? filteredB.readInt16LE((base + 1) * 2) : bL
 
-                const [adjOut, adjIn] = this._computeCoherenceGains(gainOut, gainIn, progress)
+                const [adjOut, adjIn] = this._computeCoherenceGains(
+                  gainOut,
+                  gainIn,
+                  progress
+                )
 
-                const mixL = bL * adjOut + cL * adjIn
-                const mixR = bR * adjOut + cR * adjIn
+                let mixL = bL * adjOut + cL * adjIn
+                let mixR = bR * adjOut + cR * adjIn
 
-                const clL = this._toInt16Sample(mixL)
-                const clR = this._toInt16Sample(mixR)
+                // Headroom Guard for Bridge Blend
+                const predPeak = Math.max(
+                  Math.abs(bL) * adjOut + Math.abs(cL) * adjIn,
+                  Math.abs(bR) * adjOut + Math.abs(cR) * adjIn
+                )
+                if (predPeak > MIX_BUS_TARGET_PEAK_FUSION) {
+                  const scale = MIX_BUS_TARGET_PEAK_FUSION / predPeak
+                  mixL *= scale
+                  mixR *= scale
+                }
 
-                mixed.writeInt16LE(clL, base * 2)
+                mixed.writeInt16LE(this._toInt16Sample(mixL), base * 2)
                 if (this.channels > 1) {
-                  mixed.writeInt16LE(clR, (base + 1) * 2)
+                  mixed.writeInt16LE(
+                    this._toInt16Sample(mixR),
+                    (base + 1) * 2
+                  )
                 }
               }
 
               bcfRT.elapsedFrames += fadeFrames
+              // Track consumed samples for position reporting during bridge blend
+              if (!this._bcfCountFrozen) {
+                this._totalNextConsumedSamples += fadeFrames
+              }
+
               if (bcfRT.elapsedFrames >= bcfRT.durationFrames) {
                 bcfRT.isFinished = true
                 logger(
@@ -4326,20 +4279,7 @@ export class CrossfadeController extends Transform {
           }
 
           if (this._incomingGain !== 1) {
-            const gain = this._incomingGain
-            const samps = outBuf.length >> 1
-            for (let s = 0; s < samps; s++) {
-              const offset = s * 2
-              const val = outBuf.readInt16LE(offset) * gain
-              outBuf.writeInt16LE(
-                val < -32768 ? -32768 : val > 32767 ? 32767 : (val + 0.5) | 0,
-                offset
-              )
-            }
-            this._incomingGain += (1.0 - this._incomingGain) * 0.25
-            if (Math.abs(this._incomingGain - 1.0) < 0.002) {
-              this._incomingGain = 1.0
-            }
+            this._incomingGain = 1.0
           }
 
           if (outBuf.length < FRAME_SIZE) {

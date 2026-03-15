@@ -40,7 +40,11 @@ export default class WebParentTools extends BaseClient {
                 const { body: playerResponse, statusCode } = await this._makePlayerRequest(videoId, context, {}, cipherManager);
                 if (statusCode !== 200) {
                     return {
-                        exception: { message: `Failed to load video data. Status: ${statusCode}`, severity: 'common', cause: 'Upstream' }
+                        exception: {
+                            message: `Failed to load video data. Status: ${statusCode}`,
+                            severity: 'common',
+                            cause: 'Upstream'
+                        }
                     };
                 }
                 return await this._handlePlayerResponse(playerResponse, sourceName, videoId);
@@ -52,7 +56,13 @@ export default class WebParentTools extends BaseClient {
     async getTrackUrl(decodedTrack, context, cipherManager, itag) {
         const { body: playerResponse, statusCode } = await this._makePlayerRequest(decodedTrack.identifier, context, {}, cipherManager);
         if (statusCode !== 200) {
-            return { exception: { message: `Failed to get player data. Status: ${statusCode}`, severity: 'common', cause: 'Upstream' } };
+            return {
+                exception: {
+                    message: `Failed to get player data. Status: ${statusCode}`,
+                    severity: 'common',
+                    cause: 'Upstream'
+                }
+            };
         }
         return await this._extractStreamData(playerResponse, decodedTrack, context, cipherManager, itag);
     }
@@ -85,8 +95,8 @@ export default class WebParentTools extends BaseClient {
                 'X-YouTube-Client-Name': '88',
                 'X-YouTube-Client-Version': '1.20220918',
                 'X-Goog-Visitor-Id': context.client.visitorData,
-                'Origin': 'https://www.youtube.com',
-                'Referer': 'https://www.youtube.com/',
+                Origin: 'https://www.youtube.com',
+                Referer: 'https://www.youtube.com/',
                 ...headers
             },
             body: requestBody,

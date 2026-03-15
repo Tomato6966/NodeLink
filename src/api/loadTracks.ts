@@ -1,4 +1,3 @@
-import { validator } from '../validators.ts'
 import type {
   ApiNodelinkServer,
   ApiRequest,
@@ -12,6 +11,7 @@ import type {
   LoadTracksWorkerRequest
 } from '../typings/api/loadTracks.types.ts'
 import { logger, sendErrorResponse } from '../utils.ts'
+import { validator } from '../validators.ts'
 
 /**
  * Quick protocol matcher for absolute URLs.

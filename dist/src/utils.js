@@ -1803,4 +1803,4 @@ function cleanupLogger() {
         logStream = null;
     }
 }
-export { initLogger, cleanupLogger, validateProperty, logger, getVersion, parseSemver, getGitInfo, getStats, verifyMethod, decodeTrack, encodeTrack, generateRandomLetters, parseClient, verifyDiscordID, makeRequest, http1makeRequest, sendResponse, checkForUpdates, sendErrorResponse, applyEnvOverrides, getBestMatch, cleanupHttpAgents };
+export { applyEnvOverrides, checkForUpdates, cleanupHttpAgents, cleanupLogger, decodeTrack, encodeTrack, generateRandomLetters, getBestMatch, getGitInfo, getStats, getVersion, http1makeRequest, initLogger, logger, makeRequest, parseClient, parseSemver, sendErrorResponse, sendResponse, validateProperty, verifyDiscordID, verifyMethod };

@@ -1,11 +1,6 @@
 import { PassThrough } from 'node:stream'
-import {
-  encodeTrack,
-  http1makeRequest,
-  logger,
-  makeRequest
-} from '../utils.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.ts'
 
 const DECRYPTION_KEY = 'IFYOUWANTTHEARTISTSTOGETPAIDDONOTDOWNLOADFROMMIXCLOUD'
 
@@ -326,7 +321,10 @@ export default class MixcloudSource {
 
   async getTrackUrl(decodedTrack, _itag, forceRefresh = false) {
     if (!forceRefresh) {
-      const cached = this.nodelink.trackCacheManager.get('mixcloud', decodedTrack.identifier)
+      const cached = this.nodelink.trackCacheManager.get(
+        'mixcloud',
+        decodedTrack.identifier
+      )
       if (cached) return cached
     }
 
@@ -367,8 +365,9 @@ export default class MixcloudSource {
           strategy: 'segmented',
           localAddress: this.nodelink.routePlanner?.getIP(),
           headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://www.mixcloud.com/'
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            Referer: 'https://www.mixcloud.com/'
           },
           startTime: additionalData?.startTime || 0
         })

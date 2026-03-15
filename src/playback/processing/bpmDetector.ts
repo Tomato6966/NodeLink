@@ -48,7 +48,11 @@ export function estimateBpmFromPcm(
     const offset = w * bytesPerWindow
     const totalSamples = samplesPerWindow * channels
     // Sample every 4th sample for speed — still accurate for energy
-    for (let i = 0; i < totalSamples && offset + i * 2 + 1 < pcm.length; i += 4) {
+    for (
+      let i = 0;
+      i < totalSamples && offset + i * 2 + 1 < pcm.length;
+      i += 4
+    ) {
       const s = pcm.readInt16LE(offset + i * 2)
       sumSq += s * s
     }
@@ -58,7 +62,10 @@ export function estimateBpmFromPcm(
   // Step 2: onset strength (half-wave rectified first difference)
   const onset = new Float32Array(numWindows - 1)
   for (let i = 1; i < numWindows; i++) {
-    onset[i - 1] = Math.max(0, (energy[i] as number) - (energy[i - 1] as number))
+    onset[i - 1] = Math.max(
+      0,
+      (energy[i] as number) - (energy[i - 1] as number)
+    )
   }
 
   // Step 3: normalize — subtract running mean to remove slow dynamics
@@ -100,9 +107,10 @@ export function estimateBpmFromOnsets(
       sum += onsets[j] as number
       count++
     }
-    normalized[i] = count > 0
-      ? Math.max(0, (onsets[i] as number) - sum / count)
-      : (onsets[i] as number)
+    normalized[i] =
+      count > 0
+        ? Math.max(0, (onsets[i] as number) - sum / count)
+        : (onsets[i] as number)
   }
 
   return autocorrelateBpm(normalized, onsetsPerSecond)

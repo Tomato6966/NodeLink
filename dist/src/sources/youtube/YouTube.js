@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
-import { getBestMatch, http1makeRequest, logger, makeRequest } from "../../utils.js";
 import HLSHandler from "../../playback/hls/HLSHandler.js";
+import { getBestMatch, http1makeRequest, logger, makeRequest } from "../../utils.js";
 import CipherManager from './CipherManager.js';
 import Android from './clients/Android.js';
 import AndroidVR from './clients/AndroidVR.js';
@@ -9,12 +9,12 @@ import Music from './clients/Music.js';
 import TV from './clients/TV.js';
 import TVCast from './clients/TVCast.js';
 import Web from './clients/Web.js';
-import WebEmbedded from './clients/WebEmbedded.js';
 import WebRemix from './clients/Web_Remix.js';
+import WebEmbedded from './clients/WebEmbedded.js';
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js';
+import YouTubeLiveChat from './LiveChat.js';
 import OAuth from './OAuth.js';
 import { SabrStream } from './sabr/sabr.js';
-import YouTubeLiveChat from './LiveChat.js';
 const CHUNK_SIZE = 64 * 1024;
 const MAX_RETRIES = 3;
 const MAX_URL_REFRESH = 10;
@@ -671,7 +671,8 @@ export default class YouTubeSource {
                     }
                     const bestMatch = getBestMatch(search.data, decodedTrack);
                     const bestInfo = bestMatch?.info;
-                    if (!bestInfo || ['youtube', 'ytmusic'].includes(bestInfo.sourceName)) {
+                    if (!bestInfo ||
+                        ['youtube', 'ytmusic'].includes(bestInfo.sourceName)) {
                         continue;
                     }
                     const stream = await this.nodelink.sources.getTrackUrl(bestInfo, itag, forceRefresh);

@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
-import { encodeTrack, http1makeRequest, logger } from "../utils.js";
 import HLSHandler from "../playback/hls/HLSHandler.js";
+import { encodeTrack, http1makeRequest, logger } from "../utils.js";
 export default class TwitchSource {
     constructor(nodelink) {
         this.nodelink = nodelink;

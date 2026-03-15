@@ -2045,7 +2045,7 @@ function getRequestPayload(req: ApiRequest, parsedUrl: URL): ProfilerPayload {
   return payload
 }
 
-export { collectActionSnapshot, detectAnomalies, collectAllocationTopSites }
+export { collectActionSnapshot, collectAllocationTopSites, detectAnomalies }
 
 /**
  * Streams periodic profiler snapshots over Server-Sent Events.

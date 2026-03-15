@@ -238,7 +238,10 @@ export default class EternalboxSource {
         const analysis = payload?.analysis || null;
         const spotifyTitle = spotifyData?.name || null;
         const spotifyArtists = Array.isArray(spotifyData?.artists)
-            ? spotifyData.artists.map((a) => a?.name).filter(Boolean).join(', ')
+            ? spotifyData.artists
+                .map((a) => a?.name)
+                .filter(Boolean)
+                .join(', ')
             : null;
         const title = spotifyTitle || info?.title || info?.name || 'Unknown';
         const author = spotifyArtists || info?.artist || info?.author || 'Unknown';
@@ -389,9 +392,13 @@ export default class EternalboxSource {
             durationMs: length > 0 ? length : null,
             beats: Array.isArray(analysis.beats) ? analysis.beats.length : null,
             bars: Array.isArray(analysis.bars) ? analysis.bars.length : null,
-            sections: Array.isArray(analysis.sections) ? analysis.sections.length : null,
+            sections: Array.isArray(analysis.sections)
+                ? analysis.sections.length
+                : null,
             tatums: Array.isArray(analysis.tatums) ? analysis.tatums.length : null,
-            segments: Array.isArray(analysis.segments) ? analysis.segments.length : null
+            segments: Array.isArray(analysis.segments)
+                ? analysis.segments.length
+                : null
         };
     }
     _isEternalEnabled() {
@@ -673,7 +680,9 @@ export default class EternalboxSource {
         for (let i = 0; i < segmentList.length; i++) {
             segmentList[i].which = i;
         }
-        const rawSegmentList = Array.isArray(rawSegments) ? rawSegments : segmentList;
+        const rawSegmentList = Array.isArray(rawSegments)
+            ? rawSegments
+            : segmentList;
         for (let i = 0; i < rawSegmentList.length; i++) {
             rawSegmentList[i].which = rawSegmentList[i].which ?? i;
         }
@@ -693,7 +702,8 @@ export default class EternalboxSource {
                 segIdx++;
             }
             let cursor = segIdx;
-            while (cursor < segmentList.length && segmentList[cursor].start < beatEnd) {
+            while (cursor < segmentList.length &&
+                segmentList[cursor].start < beatEnd) {
                 q.overlappingSegments.push(segmentList[cursor]);
                 cursor++;
             }

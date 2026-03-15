@@ -18,7 +18,11 @@ export default class YandexMusicSource {
         this.config = nodelink.options.sources?.yandexmusic || {};
         this.searchTerms = [SEARCH_PREFIX];
         this.recommendationTerm = [RECOMMENDATIONS_PREFIX];
-        this.patterns = [URL_PATTERN, URL_PLAYLIST_PATTERN, URL_PLAYLIST_UUID_PATTERN];
+        this.patterns = [
+            URL_PATTERN,
+            URL_PLAYLIST_PATTERN,
+            URL_PLAYLIST_UUID_PATTERN
+        ];
         this.priority = 85;
         this.accessToken = null;
         this.hasToken = false;
@@ -50,7 +54,10 @@ export default class YandexMusicSource {
         }
         if (!this.hasToken) {
             return {
-                exception: { message: 'Yandex Music token required', severity: 'common' }
+                exception: {
+                    message: 'Yandex Music token required',
+                    severity: 'common'
+                }
             };
         }
         try {
@@ -68,25 +75,32 @@ export default class YandexMusicSource {
                     .filter((item) => this.allowUnavailable || item.available)
                     .slice(0, limit)
                     .map((item) => this._buildAlbumSearchResult(item));
-                return albums.length ? { loadType: 'search', data: albums } : { loadType: 'empty', data: {} };
+                return albums.length
+                    ? { loadType: 'search', data: albums }
+                    : { loadType: 'empty', data: {} };
             }
             if (searchType === 'artist') {
                 const artists = (result.artists?.results || [])
                     .filter((item) => this.allowUnavailable || item.available)
                     .slice(0, limit)
                     .map((item) => this._buildArtistSearchResult(item));
-                return artists.length ? { loadType: 'search', data: artists } : { loadType: 'empty', data: {} };
+                return artists.length
+                    ? { loadType: 'search', data: artists }
+                    : { loadType: 'empty', data: {} };
             }
             if (searchType === 'playlist') {
                 const playlists = (result.playlists?.results || [])
                     .filter((item) => this.allowUnavailable || item.available)
                     .slice(0, limit)
                     .map((item) => this._buildPlaylistSearchResult(item));
-                return playlists.length ? { loadType: 'search', data: playlists } : { loadType: 'empty', data: {} };
+                return playlists.length
+                    ? { loadType: 'search', data: playlists }
+                    : { loadType: 'empty', data: {} };
             }
-            const tracks = this._parseTracks(result.tracks?.results || [], 'com')
-                .slice(0, limit);
-            return tracks.length ? { loadType: 'search', data: tracks } : { loadType: 'empty', data: {} };
+            const tracks = this._parseTracks(result.tracks?.results || [], 'com').slice(0, limit);
+            return tracks.length
+                ? { loadType: 'search', data: tracks }
+                : { loadType: 'empty', data: {} };
         }
         catch (e) {
             logger('error', 'YandexMusic', `Search failed: ${e.message}`);
@@ -133,7 +147,10 @@ export default class YandexMusicSource {
     async getRecommendations(query) {
         if (!this.hasToken) {
             return {
-                exception: { message: 'Yandex Music token required', severity: 'common' }
+                exception: {
+                    message: 'Yandex Music token required',
+                    severity: 'common'
+                }
             };
         }
         let trackId = query;
@@ -166,7 +183,10 @@ export default class YandexMusicSource {
     async getTrackUrl(decodedTrack) {
         if (!this.hasToken) {
             return {
-                exception: { message: 'Yandex Music token required', severity: 'common' }
+                exception: {
+                    message: 'Yandex Music token required',
+                    severity: 'common'
+                }
             };
         }
         try {
@@ -190,7 +210,10 @@ export default class YandexMusicSource {
                 localAddress: this.nodelink.routePlanner?.getIP(),
                 proxy: this.config.proxy
             });
-            if (response.error || (response.statusCode && response.statusCode !== 200 && response.statusCode !== 206)) {
+            if (response.error ||
+                (response.statusCode &&
+                    response.statusCode !== 200 &&
+                    response.statusCode !== 206)) {
                 const message = response.error?.message || `HTTP ${response.statusCode} on ${url}`;
                 return { exception: { message, severity: 'fault' } };
             }
@@ -582,7 +605,8 @@ export default class YandexMusicSource {
     async _fetchSongLinkData(trackId) {
         try {
             const songlinkSource = this.nodelink.sources.getSource('songlink');
-            if (!songlinkSource || typeof songlinkSource.getSongLinkData !== 'function') {
+            if (!songlinkSource ||
+                typeof songlinkSource.getSongLinkData !== 'function') {
                 return null;
             }
             const url = `https://song.link/ya/${trackId}`;
@@ -610,7 +634,8 @@ export default class YandexMusicSource {
     async _resolveWithSongLink(originalUrl, typeHint, id) {
         try {
             const songlinkSource = this.nodelink.sources.getSource('songlink');
-            if (!songlinkSource || typeof songlinkSource.getSongLinkData !== 'function') {
+            if (!songlinkSource ||
+                typeof songlinkSource.getSongLinkData !== 'function') {
                 return null;
             }
             const songlinkUrl = this._buildSongLinkUrl(originalUrl, typeHint, id);
@@ -634,7 +659,8 @@ export default class YandexMusicSource {
                 if (!source || typeof source.resolve !== 'function')
                     continue;
                 const resolved = await source.resolve(link);
-                if (resolved?.loadType === 'track' || resolved?.loadType === 'playlist') {
+                if (resolved?.loadType === 'track' ||
+                    resolved?.loadType === 'playlist') {
                     return this._decorateSongLinkResult(resolved, songlinkData, originalUrl, sourceName);
                 }
             }

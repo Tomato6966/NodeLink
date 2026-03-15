@@ -35,7 +35,8 @@ export default class WebRemix extends BaseClient {
     const sourceName = 'ytmusic'
 
     let params = 'EgWKAQIIAWoSEAMQBRAEEAkQChAVEBAQDhAR' // Default (Tracks)
-    if (type === 'playlist') params = 'EgeKAQQoAEABahIQAxAFEAQQCRAKEBUQEBAOEBE%3D'
+    if (type === 'playlist')
+      params = 'EgeKAQQoAEABahIQAxAFEAQQCRAKEBUQEBAOEBE%3D'
     if (type === 'album') params = 'EgWKAQIYAWoSEAMQBRAEEAkQChAVEBAQDhAR'
     if (type === 'artist') params = 'EgWKAQIgAWoSEAMQBRAEEAkQChAVEBAQDhAR'
 
@@ -49,15 +50,18 @@ export default class WebRemix extends BaseClient {
       body: searchResult,
       error,
       statusCode
-    } = await makeRequest('https://music.youtube.com/youtubei/v1/search?prettyPrint=false', {
-      method: 'POST',
-      headers: {
-        'User-Agent': this.getClient(context).client.userAgent,
-        'X-Goog-Api-Format-Version': '2'
-      },
-      body: requestBody,
-      disableBodyCompression: true
-    })
+    } = await makeRequest(
+      'https://music.youtube.com/youtubei/v1/search?prettyPrint=false',
+      {
+        method: 'POST',
+        headers: {
+          'User-Agent': this.getClient(context).client.userAgent,
+          'X-Goog-Api-Format-Version': '2'
+        },
+        body: requestBody,
+        disableBodyCompression: true
+      }
+    )
 
     if (error || statusCode !== 200) {
       const message =

@@ -62,7 +62,13 @@ function decodeArtist(buffer) {
 }
 function decodeCanvas(buffer) {
     let offset = 0;
-    const canvas = { id: '', canvasUrl: '', trackUri: '', artist: {}, canvasUri: '' };
+    const canvas = {
+        id: '',
+        canvasUrl: '',
+        trackUri: '',
+        artist: {},
+        canvasUri: ''
+    };
     while (offset < buffer.length) {
         try {
             const key = readVarint(buffer, offset);
@@ -130,16 +136,22 @@ function decodeCanvasResponse(buffer) {
 export async function fetchCanvas(trackUri, token) {
     try {
         const trackUriBuf = Buffer.from(trackUri);
-        const trackBuf = Buffer.concat([Buffer.from([0x0a, trackUriBuf.length]), trackUriBuf]);
-        const requestBuf = Buffer.concat([Buffer.from([0x0a, trackBuf.length]), trackBuf]);
+        const trackBuf = Buffer.concat([
+            Buffer.from([0x0a, trackUriBuf.length]),
+            trackUriBuf
+        ]);
+        const requestBuf = Buffer.concat([
+            Buffer.from([0x0a, trackBuf.length]),
+            trackBuf
+        ]);
         const res = await fetch('https://spclient.wg.spotify.com/canvaz-cache/v0/canvases', {
             method: 'POST',
             body: requestBuf,
             headers: {
-                'Accept': 'application/protobuf',
+                Accept: 'application/protobuf',
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'User-Agent': 'Spotify/9.0.34.593 iOS/18.4 (iPhone15,3)',
-                'Authorization': `Bearer ${token}`
+                Authorization: `Bearer ${token}`
             }
         });
         if (!res.ok)

@@ -225,11 +225,18 @@ export default class Android extends BaseClient {
             return { exception: { message, severity: 'common', cause: 'Upstream' } };
         }
         const streamingData = playerResponse.streamingData || playerResponse.streaming_data;
-        const serverAbrUrl = streamingData?.serverAbrStreamingUrl || streamingData?.server_abr_streaming_url;
-        const ustreamerConfig = playerResponse.playerConfig?.mediaCommonConfig?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig;
+        const serverAbrUrl = streamingData?.serverAbrStreamingUrl ||
+            streamingData?.server_abr_streaming_url;
+        const ustreamerConfig = playerResponse.playerConfig?.mediaCommonConfig
+            ?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig;
         if (serverAbrUrl) {
             logger('debug', 'YouTube-Android', `SABR URL found for ${decodedTrack.identifier}. Using SABR protocol.`);
-            const formats = [...(streamingData.formats || []), ...(streamingData.adaptiveFormats || streamingData.adaptive_formats || [])].map(f => ({
+            const formats = [
+                ...(streamingData.formats || []),
+                ...(streamingData.adaptiveFormats ||
+                    streamingData.adaptive_formats ||
+                    [])
+            ].map((f) => ({
                 itag: f.itag,
                 lastModified: f.lastModified || f.last_modified_ms,
                 xtags: f.xtags,

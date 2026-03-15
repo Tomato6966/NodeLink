@@ -43,18 +43,32 @@ function decodeArtist(buffer) {
       const valBuf = buffer.subarray(offset, offset + len.val)
       offset += len.val
       switch (fieldNumber) {
-        case 1: artist.artistUri = valBuf.toString('utf8'); break
-        case 2: artist.artistName = valBuf.toString('utf8'); break
-        case 3: artist.artistImgUrl = valBuf.toString('utf8'); break
+        case 1:
+          artist.artistUri = valBuf.toString('utf8')
+          break
+        case 2:
+          artist.artistName = valBuf.toString('utf8')
+          break
+        case 3:
+          artist.artistImgUrl = valBuf.toString('utf8')
+          break
       }
-    } catch { break }
+    } catch {
+      break
+    }
   }
   return artist
 }
 
 function decodeCanvas(buffer) {
   let offset = 0
-  const canvas = { id: '', canvasUrl: '', trackUri: '', artist: {}, canvasUri: '' }
+  const canvas = {
+    id: '',
+    canvasUrl: '',
+    trackUri: '',
+    artist: {},
+    canvasUri: ''
+  }
   while (offset < buffer.length) {
     try {
       const key = readVarint(buffer, offset)
@@ -70,13 +84,25 @@ function decodeCanvas(buffer) {
       const valBuf = buffer.subarray(offset, offset + len.val)
       offset += len.val
       switch (fieldNumber) {
-        case 1: canvas.id = valBuf.toString('utf8'); break
-        case 2: canvas.canvasUrl = valBuf.toString('utf8'); break
-        case 5: canvas.trackUri = valBuf.toString('utf8'); break
-        case 6: canvas.artist = decodeArtist(valBuf); break
-        case 11: canvas.canvasUri = valBuf.toString('utf8'); break
+        case 1:
+          canvas.id = valBuf.toString('utf8')
+          break
+        case 2:
+          canvas.canvasUrl = valBuf.toString('utf8')
+          break
+        case 5:
+          canvas.trackUri = valBuf.toString('utf8')
+          break
+        case 6:
+          canvas.artist = decodeArtist(valBuf)
+          break
+        case 11:
+          canvas.canvasUri = valBuf.toString('utf8')
+          break
       }
-    } catch { break }
+    } catch {
+      break
+    }
   }
   return canvas
 }
@@ -99,7 +125,9 @@ function decodeCanvasResponse(buffer) {
       } else {
         offset = skipField(buffer, offset, wireType)
       }
-    } catch { break }
+    } catch {
+      break
+    }
   }
   return { canvasesList: canvases }
 }
@@ -107,24 +135,35 @@ function decodeCanvasResponse(buffer) {
 export async function fetchCanvas(trackUri, token) {
   try {
     const trackUriBuf = Buffer.from(trackUri)
-    const trackBuf = Buffer.concat([Buffer.from([0x0a, trackUriBuf.length]), trackUriBuf])
-    const requestBuf = Buffer.concat([Buffer.from([0x0a, trackBuf.length]), trackBuf])
+    const trackBuf = Buffer.concat([
+      Buffer.from([0x0a, trackUriBuf.length]),
+      trackUriBuf
+    ])
+    const requestBuf = Buffer.concat([
+      Buffer.from([0x0a, trackBuf.length]),
+      trackBuf
+    ])
 
-    const res = await fetch('https://spclient.wg.spotify.com/canvaz-cache/v0/canvases', {
-      method: 'POST',
-      body: requestBuf,
-      headers: {
-        'Accept': 'application/protobuf',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Spotify/9.0.34.593 iOS/18.4 (iPhone15,3)',
-        'Authorization': `Bearer ${token}`
+    const res = await fetch(
+      'https://spclient.wg.spotify.com/canvaz-cache/v0/canvases',
+      {
+        method: 'POST',
+        body: requestBuf,
+        headers: {
+          Accept: 'application/protobuf',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Spotify/9.0.34.593 iOS/18.4 (iPhone15,3)',
+          Authorization: `Bearer ${token}`
+        }
       }
-    })
+    )
 
     if (!res.ok) return null
-    
+
     const arrayBuffer = await res.arrayBuffer()
     const buffer = Buffer.from(arrayBuffer)
     return { data: decodeCanvasResponse(buffer) }
-  } catch { return null }
+  } catch {
+    return null
+  }
 }

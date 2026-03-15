@@ -44,6 +44,11 @@ interface LoadStreamInput {
   encodedTrack: string
 
   /**
+   * Target guild ID.
+   */
+  guildId?: string
+
+  /**
    * Playback volume as a percent value where `100` equals unity gain.
    */
   volume: number
@@ -319,6 +324,7 @@ interface StreamProcessorModule {
    * @returns PCM-capable audio resource.
    */
   createAudioResource: (
+    guildId: string,
     stream: Readable,
     type: string,
     nodelink: StreamProcessorRuntime,
@@ -332,6 +338,7 @@ interface StreamProcessorModule {
   /**
    * Creates a seekable PCM resource from a remote URL.
    *
+   * @param guildId - Target guild ID.
    * @param url - Remote source URL.
    * @param seekTime - Start position in milliseconds.
    * @param endTime - Optional end position.
@@ -344,6 +351,7 @@ interface StreamProcessorModule {
    * @returns PCM audio resource or a serialized exception payload.
    */
   createSeekeableAudioResource: (
+    guildId: string,
     url: string,
     seekTime: number,
     endTime: number | undefined,
@@ -816,6 +824,7 @@ async function handler(
 
     if (urlResult.url && !isHls && !isLocal && !isSabr) {
       const resource = (await createSeekeableAudioResource(
+        input.guildId || 'api-stream',
         urlResult.url,
         input.position,
         undefined,
@@ -877,6 +886,7 @@ async function handler(
       fetchedStream = fetched.stream as DestroyableReadable
 
       const resource = createAudioResource(
+        input.guildId || 'api-stream',
         fetched.stream,
         fetched.type ?? urlResult.format ?? 'unknown',
         streamProcessorRuntime,

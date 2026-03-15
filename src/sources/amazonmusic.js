@@ -1,10 +1,10 @@
+import crypto from 'node:crypto'
 import {
   encodeTrack,
   getBestMatch,
   http1makeRequest,
   logger
 } from '../utils.ts'
-import crypto from 'node:crypto'
 
 const BOT_USER_AGENT =
   'Mozilla/5.0 (compatible; NodeLinkBot/0.1; +https://nodelink.js.org/)'

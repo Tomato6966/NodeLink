@@ -14,7 +14,8 @@ export default class WebParentTools extends BaseClient {
         hl: context.client.hl,
         gl: context.client.gl,
         visitorData: context.client.visitorData,
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36,gzip(gfe)'
+        userAgent:
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36,gzip(gfe)'
       },
       thirdParty: {
         embedUrl: 'https://www.youtube.com/'
@@ -47,7 +48,11 @@ export default class WebParentTools extends BaseClient {
 
         if (statusCode !== 200) {
           return {
-            exception: { message: `Failed to load video data. Status: ${statusCode}`, severity: 'common', cause: 'Upstream' }
+            exception: {
+              message: `Failed to load video data. Status: ${statusCode}`,
+              severity: 'common',
+              cause: 'Upstream'
+            }
           }
         }
 
@@ -72,7 +77,13 @@ export default class WebParentTools extends BaseClient {
     )
 
     if (statusCode !== 200) {
-      return { exception: { message: `Failed to get player data. Status: ${statusCode}`, severity: 'common', cause: 'Upstream' } }
+      return {
+        exception: {
+          message: `Failed to get player data. Status: ${statusCode}`,
+          severity: 'common',
+          cause: 'Upstream'
+        }
+      }
     }
 
     return await this._extractStreamData(
@@ -120,8 +131,8 @@ export default class WebParentTools extends BaseClient {
           'X-YouTube-Client-Name': '88',
           'X-YouTube-Client-Version': '1.20220918',
           'X-Goog-Visitor-Id': context.client.visitorData,
-          'Origin': 'https://www.youtube.com',
-          'Referer': 'https://www.youtube.com/',
+          Origin: 'https://www.youtube.com',
+          Referer: 'https://www.youtube.com/',
           ...headers
         },
         body: requestBody,

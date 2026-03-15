@@ -464,7 +464,12 @@ export default class AppleMusicSource {
         const editorialVideo = this._extractVideoUrl(artistObj.attributes);
         const topTracksData = await this._apiRequest(`/catalog/${country}/artists/${id}/view/top-songs`);
         if (!topTracksData?.data) {
-            return { exception: { message: 'Artist top songs not found.', severity: 'common' } };
+            return {
+                exception: {
+                    message: 'Artist top songs not found.',
+                    severity: 'common'
+                }
+            };
         }
         const artistName = artistObj.attributes?.name || 'Artist';
         const tracks = topTracksData.data

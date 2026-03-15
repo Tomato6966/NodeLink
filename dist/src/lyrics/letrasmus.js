@@ -59,10 +59,7 @@ const extractLyricOriginal = (html) => {
     text = text.replace(/<br\s*\/?>/gi, '\n');
     text = text.replace(/<\/p>/gi, '\n');
     text = text.replace(/<[^>]+>/g, '');
-    return text
-        .split('\n')
-        .map(cleanText)
-        .filter(Boolean);
+    return text.split('\n').map(cleanText).filter(Boolean);
 };
 const extractTranslationLanguages = (html) => {
     const match = html.match(/window\.__translationLanguages\s*=\s*(\[[\s\S]*?\]);/i);
@@ -222,7 +219,9 @@ export default class LetrasMusLyrics {
                 const { body: apiBody, statusCode } = await http1makeRequest(apiUrl, {
                     method: 'GET'
                 });
-                if (statusCode === 200 && apiBody?.status !== 'not found' && apiBody?.Original?.Subtitle) {
+                if (statusCode === 200 &&
+                    apiBody?.status !== 'not found' &&
+                    apiBody?.Original?.Subtitle) {
                     const lines = parseSubtitle(apiBody.Original.Subtitle);
                     if (lines.length) {
                         return {

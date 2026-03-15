@@ -1438,7 +1438,8 @@ export class BaseClient {
             return { loadType: 'empty', data: {} };
         }
         const playlistTitle = contentsRoot.tabbedRenderer?.watchNextTabbedResultsRenderer?.tabs?.[0]
-            ?.tabRenderer?.content?.musicQueueRenderer?.header?.musicQueueHeaderRenderer?.subtitle?.runs?.[0]?.text ||
+            ?.tabRenderer?.content?.musicQueueRenderer?.header
+            ?.musicQueueHeaderRenderer?.subtitle?.runs?.[0]?.text ||
             contentsRoot.playlist?.playlist?.title ||
             'Unknown Playlist';
         return {

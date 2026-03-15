@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
-import { encodeTrack, http1makeRequest, logger, makeRequest } from "../utils.js";
 import HLSHandler from "../playback/hls/HLSHandler.js";
+import { encodeTrack, http1makeRequest, logger, makeRequest } from "../utils.js";
 const BASE_URL = 'https://api-v2.soundcloud.com';
 const SOUNDCLOUD_URL = 'https://soundcloud.com';
 const ASSET_PATTERN = /https:\/\/a-v2\.sndcdn\.com\/assets\/[a-zA-Z0-9-]+\.js/g;
@@ -583,7 +583,8 @@ export default class SoundCloudSource {
         if (!finalUrl) {
             return this._buildException('Failed to resolve stream URL');
         }
-        if (finalUrl.includes('cf-preview-media.sndcdn.com') || finalUrl.includes('/preview/')) {
+        if (finalUrl.includes('cf-preview-media.sndcdn.com') ||
+            finalUrl.includes('/preview/')) {
             return this._buildException('Track only has preview URL');
         }
         const mimeType = selected.format?.mime_type?.toLowerCase() ?? '';

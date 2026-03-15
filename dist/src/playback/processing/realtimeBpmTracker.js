@@ -90,15 +90,14 @@ export class RealtimeBpmTracker {
         this.fluxMean = this.fluxMean * 0.986 + flux * 0.014;
         const fluxDistance = Math.abs(flux - this.fluxMean);
         this.fluxDev = this.fluxDev * 0.986 + fluxDistance * 0.014;
-        const threshold = this.fluxMean + this.fluxDev * this.opts.thresholdSigma + this.opts.noiseFloor;
+        const threshold = this.fluxMean +
+            this.fluxDev * this.opts.thresholdSigma +
+            this.opts.noiseFloor;
         const beatGap = this.timeSec - this.lastBeatSec;
         const rising = flux > this.prevFlux * 1.015;
         const refractory = this._adaptiveRefractorySec();
         const strength = this.fluxDev > 1e-7 ? (flux - threshold) / this.fluxDev : 0;
-        const beatDetected = flux > threshold &&
-            rising &&
-            beatGap >= refractory &&
-            strength > 0;
+        const beatDetected = flux > threshold && rising && beatGap >= refractory && strength > 0;
         // When locked, reject implausibly early hits unless very strong.
         if (beatDetected &&
             this._isLocked() &&
@@ -143,8 +142,11 @@ export class RealtimeBpmTracker {
                 const separation = estimate.separation;
                 const sampleFactor = Math.min(1, this.intervalsSec.length / 8);
                 const strengthFactor = RealtimeBpmTracker._clamp(this.beatStrength / 2.6, 0, 1);
-                const rawConfidence = RealtimeBpmTracker._clamp(consistency * 0.48 + separation * 0.26 + sampleFactor * 0.16 + strengthFactor * 0.1, 0, 1);
-                this.confidence = this.confidence * 0.80 + rawConfidence * 0.20;
+                const rawConfidence = RealtimeBpmTracker._clamp(consistency * 0.48 +
+                    separation * 0.26 +
+                    sampleFactor * 0.16 +
+                    strengthFactor * 0.1, 0, 1);
+                this.confidence = this.confidence * 0.8 + rawConfidence * 0.2;
                 this._updatePhaseAnchor(beatTimeSec);
             }
         }
@@ -215,7 +217,7 @@ export class RealtimeBpmTracker {
             const interval = this.intervalsSec[i];
             const recency = 0.52 + ((i + 1) / n) * 0.48;
             for (const candidate of HARMONIC_CANDIDATES) {
-                const rawTempo = 60 / interval * candidate.multiplier;
+                const rawTempo = (60 / interval) * candidate.multiplier;
                 const tempo = this._normalizeTempo(rawTempo);
                 if (!(tempo > 0))
                     continue;
@@ -273,9 +275,11 @@ export class RealtimeBpmTracker {
         // Higher confidence allows faster convergence.
         const pGain = 0.28 + this.confidence * 0.42;
         const iGain = 0.04 + this.confidence * 0.08;
-        this.phaseAnchorSec += (boundedError * pGain) + (this.fluxMean * boundedError * iGain);
+        this.phaseAnchorSec +=
+            boundedError * pGain + this.fluxMean * boundedError * iGain;
         // Safety: ensure anchor doesn't drift too far from the current window.
-        if (Math.abs(this.timeSec - this.phaseAnchorSec) > this.phasePeriodSec * 16) {
+        if (Math.abs(this.timeSec - this.phaseAnchorSec) >
+            this.phasePeriodSec * 16) {
             this.phaseAnchorSec = beatTimeSec;
         }
     }
@@ -284,13 +288,13 @@ export class RealtimeBpmTracker {
         if (n === 0)
             return 0;
         if (n === 1)
-            return 0.30;
+            return 0.3;
         if (n === 2)
             return 0.45;
         const median = RealtimeBpmTracker._median(this.intervalsSec);
         if (!(median > 0))
             return 0;
-        const absDevs = this.intervalsSec.map(v => Math.abs(v - median));
+        const absDevs = this.intervalsSec.map((v) => Math.abs(v - median));
         const mad = RealtimeBpmTracker._median(absDevs);
         const relMad = mad / median;
         return RealtimeBpmTracker._clamp(1 - relMad / 0.18, 0, 1);

@@ -1,8 +1,8 @@
 import { Buffer } from 'node:buffer'
-import { base64ToU8 } from './protor.js'
 import { appendFile } from 'node:fs/promises'
 import path from 'node:path'
 import { logger } from '../../../utils.ts'
+import { base64ToU8 } from './protor.js'
 
 const TOKENS_LOG_PATH = path.join(process.cwd(), 'po_tokens.jsonl')
 
@@ -31,7 +31,7 @@ function u8ToBase64(u8, base64url = false) {
   if (Buffer.isEncoding?.('base64url')) {
     return Buffer.from(u8).toString('base64url')
   }
-  let s = Buffer.from(u8)
+  const s = Buffer.from(u8)
     .toString('base64')
     .replaceAll('+', '-')
     .replaceAll('/', '_')
@@ -161,14 +161,17 @@ export class PoTokenManager {
 
   _refreshIdleTimer() {
     if (this._idleTimer) clearTimeout(this._idleTimer)
-    this._idleTimer = setTimeout(() => {
-      logger(
-        'debug',
-        'PoToken',
-        'Idle timeout reached. Cleaning up JSDOM resources.'
-      )
-      this.reset()
-    }, 10 * 60 * 1000) // 10 minutes
+    this._idleTimer = setTimeout(
+      () => {
+        logger(
+          'debug',
+          'PoToken',
+          'Idle timeout reached. Cleaning up JSDOM resources.'
+        )
+        this.reset()
+      },
+      10 * 60 * 1000
+    ) // 10 minutes
     if (this._idleTimer.unref) this._idleTimer.unref()
   }
 

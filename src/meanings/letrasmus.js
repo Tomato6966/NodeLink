@@ -77,7 +77,9 @@ const buildSearchCandidates = (trackInfo) => {
   }
 
   if (rawAuthorLower && rawTitleLower.includes(rawAuthorLower)) {
-    const stripped = cleanText(rawTitle.replace(new RegExp(rawAuthor, 'ig'), ''))
+    const stripped = cleanText(
+      rawTitle.replace(new RegExp(rawAuthor, 'ig'), '')
+    )
     if (stripped) {
       pushCandidate(stripped, cleanedAuthor)
       candidates.add(stripped)
@@ -134,11 +136,11 @@ const decodeHtml = (text) => {
 
 const extractMeta = (html, property) => {
   const re1 = new RegExp(
-    `<meta[^>]+property=[\"']${property}[\"'][^>]+content=[\"']([^\"']+)[\"'][^>]*>`,
+    `<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']+)["'][^>]*>`,
     'i'
   )
   const re2 = new RegExp(
-    `<meta[^>]+content=[\"']([^\"']+)[^>]+property=[\"']${property}[\"'][^>]*>`,
+    `<meta[^>]+content=["']([^"']+)[^>]+property=["']${property}["'][^>]*>`,
     'i'
   )
   const match = html.match(re1) || html.match(re2)
@@ -278,14 +280,18 @@ export default class LetrasMusMeaning {
 
       for (const candidate of candidates) {
         const letrasTrack = candidate.info
-        if (!letrasTrack?.uri || letrasTrack.sourceName !== 'letrasmus') continue
+        if (!letrasTrack?.uri || letrasTrack.sourceName !== 'letrasmus')
+          continue
 
         const baseUrl = letrasTrack.uri.endsWith('/')
           ? letrasTrack.uri
           : `${letrasTrack.uri}/`
         const url = `${baseUrl}significado.html`
-        const { body: fetchedBody, statusCode, error } =
-          await http1makeRequest(url, { method: 'GET' })
+        const {
+          body: fetchedBody,
+          statusCode,
+          error
+        } = await http1makeRequest(url, { method: 'GET' })
 
         if (error || statusCode !== 200 || !fetchedBody) continue
 
@@ -319,10 +325,18 @@ export default class LetrasMusMeaning {
             language
           )
           const translatedTitle = meaning.title
-            ? await translateText(decodeHtml(meaning.title), sourceLang, language)
+            ? await translateText(
+                decodeHtml(meaning.title),
+                sourceLang,
+                language
+              )
             : null
           const translatedDescription = ogDescription
-            ? await translateText(decodeHtml(ogDescription), sourceLang, language)
+            ? await translateText(
+                decodeHtml(ogDescription),
+                sourceLang,
+                language
+              )
             : null
           translated = {
             language: {

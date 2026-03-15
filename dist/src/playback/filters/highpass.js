@@ -1,6 +1,6 @@
+import { SAMPLE_RATE } from "../../constants.js";
 import { AnimatableFilter } from "./AnimatableFilter.js";
 import { clamp16Bit } from "./dsp/clamp16Bit.js";
-import { SAMPLE_RATE } from "../../constants.js";
 const CHANNELS = 2;
 const BUTTERWORTH_Q = 0.7071067811865476;
 const SUB_BLOCK_FRAMES = 64;

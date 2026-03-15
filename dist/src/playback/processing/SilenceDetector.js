@@ -16,7 +16,7 @@ export class SilenceDetector extends Transform {
     constructor(options = {}) {
         super();
         const thresholdDb = options.thresholdDb ?? -40;
-        this.thresholdLinear = Math.pow(10, thresholdDb / 20);
+        this.thresholdLinear = 10 ** (thresholdDb / 20);
         // At 48kHz with 20ms Opus frames (960 samples per channel),
         // each chunk represents ~20ms. Alpha = 0.15 gives ~130ms smoothing.
         this._alpha = 0.15;

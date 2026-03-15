@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { PassThrough } from 'node:stream';
-import { encodeTrack, http1makeRequest, logger, makeRequest } from "../utils.js";
 import HLSHandler from "../playback/hls/HLSHandler.js";
+import { encodeTrack, http1makeRequest, logger, makeRequest } from "../utils.js";
 const MIXIN_KEY_ENC_TAB = [
     46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
     33, 9, 42, 19, 29, 28, 14, 39, 12, 38, 41, 13, 37, 48, 7, 16, 24, 55, 40, 61,

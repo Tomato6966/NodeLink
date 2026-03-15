@@ -299,7 +299,9 @@ class BaseAudioResource {
     pipes;
     stream;
     _destroyed;
-    constructor() {
+    guildId;
+    constructor(guildId) {
+        this.guildId = guildId || 'api-stream';
         this.pipes = [];
         this.stream = null;
         this._destroyed = false;
@@ -309,7 +311,7 @@ class BaseAudioResource {
         voiceStream.setVolume = (volume) => this.setVolume(volume);
         voiceStream.setFilters = (filters) => this.setFilters(filters);
         voiceStream.prepareCrossfade = (nextStream, options) => this.prepareCrossfade(nextStream, options);
-        voiceStream.startCrossfade = (durationMs, curve) => this.startCrossfade(durationMs, curve);
+        voiceStream.startCrossfade = (durationMs, curve, style) => this.startCrossfade(durationMs, curve, style);
         voiceStream.seekToEnergyMatch = (targetRms, crossfadeDurationMs, transitionName, targetBeatState) => this.seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, targetBeatState);
         voiceStream.setIncomingGain = (multiplier) => this.setIncomingGain(multiplier);
         voiceStream.setIncomingHighpass = (enabled, peakAlpha) => this.setIncomingHighpass(enabled, peakAlpha);
@@ -331,7 +333,6 @@ class BaseAudioResource {
         voiceStream.isBridgeMode = () => this.isBridgeMode();
         voiceStream.isFlushed = () => this.isFlushed();
         voiceStream.isBridgeDraining = () => this.isBridgeDraining();
-        voiceStream.startShowcaseRecording = (preMs, activeMs, postMs, name) => this.startShowcaseRecording(preMs, activeMs, postMs, name);
         voiceStream.clearCrossfade = () => this.clearCrossfade();
         voiceStream.getCrossfadeState = () => this.getCrossfadeState();
         voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted();
@@ -370,7 +371,7 @@ class BaseAudioResource {
     prepareCrossfade(_nextStream, _options) {
         return false;
     }
-    startCrossfade(_durationMs, _curve) {
+    startCrossfade(_durationMs, _curve, _style) {
         return false;
     }
     seekToEnergyMatch(_targetRms, _crossfadeDurationMs, _transitionName, _targetBeatState) { }
@@ -442,7 +443,6 @@ class BaseAudioResource {
     isBridgeDraining() {
         return false;
     }
-    startShowcaseRecording(_preMs, _activeMs, _postMs, _name) { }
     checkTapeRampCompleted() {
         return false;
     }
@@ -1821,8 +1821,8 @@ class StreamAudioResource extends BaseAudioResource {
     nodelink;
     crossfadeController = null;
     frameCounter = null;
-    constructor(stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false, enableAGC = true) {
-        super();
+    constructor(guildId, stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false, enableAGC = true) {
+        super(guildId);
         this.nodelink = nodelink;
         this._validateInputStream(stream);
         const resamplingQuality = nodelink.options.audio?.resamplingQuality || 'fastest';
@@ -1976,7 +1976,7 @@ class StreamAudioResource extends BaseAudioResource {
             sampleRate: AUDIO_CONFIG.sampleRate,
             channels: AUDIO_CONFIG.channels
         });
-        const crossfadeController = new CrossfadeController(AUDIO_CONFIG.sampleRate, AUDIO_CONFIG.channels);
+        const crossfadeController = new CrossfadeController(this.guildId, AUDIO_CONFIG.sampleRate, AUDIO_CONFIG.channels);
         this.crossfadeController = crossfadeController;
         const silenceDetector = new SilenceDetector({
             sampleRate: AUDIO_CONFIG.sampleRate,
@@ -2039,10 +2039,10 @@ class StreamAudioResource extends BaseAudioResource {
         this.crossfadeController.prepareNextStream(nextStream, options);
         return true;
     }
-    startCrossfade(durationMs, curve) {
+    startCrossfade(durationMs, curve, style) {
         if (!this.crossfadeController)
             return false;
-        return this.crossfadeController.startCrossfade(durationMs, curve);
+        return this.crossfadeController.startCrossfade(durationMs, curve, style);
     }
     seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, targetBeatState) {
         this.crossfadeController?.seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, targetBeatState);
@@ -2092,9 +2092,6 @@ class StreamAudioResource extends BaseAudioResource {
     }
     clearCrossfade() {
         this.crossfadeController?.clear();
-    }
-    startShowcaseRecording(preMs, activeMs, postMs, name) {
-        this.crossfadeController?.startShowcaseRecording(preMs, activeMs, postMs, name);
     }
     extractCrossfadeBuffer() {
         if (!this.crossfadeController)
@@ -2221,8 +2218,8 @@ class StreamAudioResource extends BaseAudioResource {
             supportedFormats.map((f) => `  • ${f}`).join('\n'));
     }
 }
-export const createAudioResource = (stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false, enableAGC = true) => new StreamAudioResource(stream, type, nodelink, initialFilters, volume, audioMixer, returnPCM, enableAGC);
-export const createSeekeableAudioResource = async (url, seekTime, endTime, nodelink, initialFilters, player, volume = 1.0, audioMixer = null, returnPCM = false, enableAGC = true) => {
+export const createAudioResource = (guildId, stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false, enableAGC = true) => new StreamAudioResource(guildId, stream, type, nodelink, initialFilters, volume, audioMixer, returnPCM, enableAGC);
+export const createSeekeableAudioResource = async (guildId, url, seekTime, endTime, nodelink, initialFilters, player, volume = 1.0, audioMixer = null, returnPCM = false, enableAGC = true) => {
     try {
         const hinted = String(player.streamInfo?.format ?? '').toLowerCase();
         const ext = _extFromUrl(url);
@@ -2243,7 +2240,7 @@ export const createSeekeableAudioResource = async (url, seekTime, endTime, nodel
                     passthroughStream.emit('error', err);
             });
             const format = hinted || (ext ? ext : 'm4a');
-            return new StreamAudioResource(passthroughStream, format, nodelink, initialFilters, volume, audioMixer, returnPCM, returnPCM ? true : (player.loudnessNormalizer ?? enableAGC));
+            return new StreamAudioResource(guildId, passthroughStream, format, nodelink, initialFilters, volume, audioMixer, returnPCM, returnPCM ? true : (player.loudnessNormalizer ?? enableAGC));
         }
         const { stream, meta } = (await seekableStream(url, seekTime, endTime, {}));
         const passthroughStream = new PassThrough({
@@ -2257,14 +2254,14 @@ export const createSeekeableAudioResource = async (url, seekTime, endTime, nodel
                 passthroughStream.emit('error', err);
         });
         const format = meta.codec?.container || player.streamInfo?.format;
-        return new StreamAudioResource(passthroughStream, format, nodelink, initialFilters, volume, audioMixer, returnPCM, returnPCM ? true : (player.loudnessNormalizer ?? enableAGC));
+        return new StreamAudioResource(guildId, passthroughStream, format, nodelink, initialFilters, volume, audioMixer, returnPCM, returnPCM ? true : (player.loudnessNormalizer ?? enableAGC));
     }
     catch (err) {
         const cause = err instanceof SeekError ? err.code : 'UNKNOWN';
         return _createErrorResponse(err.message, cause);
     }
 };
-export const createPCMStream = (stream, type, nodelink, volume = 1.0, filters = {}) => {
+export const createPCMStream = (guildId, stream, type, nodelink, volume = 1.0, filters = {}) => {
     const resamplingQuality = nodelink.options.audio?.resamplingQuality || 'fastest';
     const normalizedType = normalizeFormat(type);
     const streams = [stream];

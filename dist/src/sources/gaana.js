@@ -1,8 +1,8 @@
-import { encodeTrack, http1makeRequest, logger, getBestMatch } from "../utils.js";
+import { createDecipheriv } from 'node:crypto';
+import { PassThrough } from 'node:stream';
 import HLSHandler from "../playback/hls/HLSHandler.js";
 import { parse as parsePlaylist } from "../playback/hls/PlaylistParser.js";
-import { PassThrough } from 'node:stream';
-import { createDecipheriv } from 'node:crypto';
+import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 const API_URL = 'https://gaana.com/apiv2';
 const STREAM_URL_API = 'https://gaana.com/api/stream-url';
@@ -20,7 +20,8 @@ export default class GaanaSource {
         this.priority = 70;
         this.maxSearchResults = nodelink.options.maxSearchResults || 10;
         const maxAlbumPlaylistLength = nodelink.options.maxAlbumPlaylistLength || 100;
-        this.playlistLoadLimit = this.config.playlistLoadLimit ?? maxAlbumPlaylistLength;
+        this.playlistLoadLimit =
+            this.config.playlistLoadLimit ?? maxAlbumPlaylistLength;
         this.albumLoadLimit = this.config.albumLoadLimit ?? maxAlbumPlaylistLength;
         this.artistLoadLimit = this.config.artistLoadLimit ?? maxAlbumPlaylistLength;
         this.streamQuality = this.config.streamQuality || 'high';
@@ -34,9 +35,9 @@ export default class GaanaSource {
     _getHeaders(query = '') {
         return {
             'User-Agent': USER_AGENT,
-            'Accept': 'application/json, text/plain, */*',
-            'Origin': 'https://gaana.com',
-            'Referer': `https://gaana.com/${query}`
+            Accept: 'application/json, text/plain, */*',
+            Origin: 'https://gaana.com',
+            Referer: `https://gaana.com/${query}`
         };
     }
     async getJson(params, query = '') {
@@ -84,17 +85,28 @@ export default class GaanaSource {
             const data = await this.getJson(params, `search/${encodeURIComponent(query)}`);
             if (!data || !data.gr)
                 return { loadType: 'empty', data: {} };
-            const group = data.gr.find((g) => g.ty === (searchType === 'track' ? 'Track' : searchType.charAt(0).toUpperCase() + searchType.slice(1)));
+            const group = data.gr.find((g) => g.ty ===
+                (searchType === 'track'
+                    ? 'Track'
+                    : searchType.charAt(0).toUpperCase() + searchType.slice(1)));
             if (!group || !group.gd)
                 return { loadType: 'empty', data: {} };
             const items = group.gd.slice(0, this.maxSearchResults);
             if (searchType === 'track') {
-                const trackIdentifiers = items.map((item) => item.seo || item.id).filter(Boolean);
+                const trackIdentifiers = items
+                    .map((item) => item.seo || item.id)
+                    .filter(Boolean);
                 const tracks = await this.getTracks(trackIdentifiers);
-                return tracks.length ? { loadType: 'search', data: tracks } : { loadType: 'empty', data: {} };
+                return tracks.length
+                    ? { loadType: 'search', data: tracks }
+                    : { loadType: 'empty', data: {} };
             }
-            const results = items.map((item) => this.mapCollectionResult(item, searchType)).filter(Boolean);
-            return results.length ? { loadType: 'search', data: results } : { loadType: 'empty', data: {} };
+            const results = items
+                .map((item) => this.mapCollectionResult(item, searchType))
+                .filter(Boolean);
+            return results.length
+                ? { loadType: 'search', data: results }
+                : { loadType: 'empty', data: {} };
         }
         catch (e) {
             logger('error', 'Gaana', `Search error: ${e.message}`);
@@ -127,7 +139,9 @@ export default class GaanaSource {
         if (!data || !data.tracks || !data.tracks[0])
             return { loadType: 'empty', data: {} };
         const track = this.mapTrack(data.tracks[0]);
-        return track ? { loadType: 'track', data: track } : { loadType: 'empty', data: {} };
+        return track
+            ? { loadType: 'track', data: track }
+            : { loadType: 'empty', data: {} };
     }
     async getAlbum(seokey) {
         const data = await this.getJson({ type: 'albumDetail', seokey }, `album/${seokey}`);
@@ -163,7 +177,9 @@ export default class GaanaSource {
     }
     buildPlaylist(name, tracksArray, type, url, artwork, author) {
         const tracks = tracksArray
-            .map((item) => (item.track_id || item.track_title ? this.mapTrack(item) : this.mapEntityTrack(item)))
+            .map((item) => item.track_id || item.track_title
+            ? this.mapTrack(item)
+            : this.mapEntityTrack(item))
             .filter(Boolean)
             .slice(0, this.getLoadLimit(type));
         const infoName = type === 'artist' ? `${name}'s Top Tracks` : name;
@@ -181,7 +197,9 @@ export default class GaanaSource {
         if (!title)
             return null;
         const duration = (Number(track.duration) || 0) * 1000;
-        const author = Array.isArray(track.artist) ? track.artist.map(a => a.name).join(', ') : (track.artist?.name || 'Unknown Artist');
+        const author = Array.isArray(track.artist)
+            ? track.artist.map((a) => a.name).join(', ')
+            : track.artist?.name || 'Unknown Artist';
         const identifier = String(track.track_id || track.seokey);
         const uri = track.seokey ? `https://gaana.com/song/${track.seokey}` : null;
         const info = {
@@ -198,18 +216,24 @@ export default class GaanaSource {
             sourceName: 'gaana'
         };
         return {
-            encoded: encodeTrack(info), info, pluginInfo: {
+            encoded: encodeTrack(info),
+            info,
+            pluginInfo: {
                 trackId: track.track_id,
                 albumName: track.album_title,
-                albumUrl: track.albumseokey ? `https://gaana.com/album/${track.albumseokey}` : null
+                albumUrl: track.albumseokey
+                    ? `https://gaana.com/album/${track.albumseokey}`
+                    : null
             }
         };
     }
     mapEntityTrack(json) {
-        const getEntityValue = (key) => json.entity_info?.find(e => e.key === key)?.value;
+        const getEntityValue = (key) => json.entity_info?.find((e) => e.key === key)?.value;
         const title = json.name;
         const duration = (Number(getEntityValue('duration')) || 0) * 1000;
-        const artists = getEntityValue('artist')?.map(a => a.name).join(', ') || '';
+        const artists = getEntityValue('artist')
+            ?.map((a) => a.name)
+            .join(', ') || '';
         const identifier = String(json.entity_id);
         const uri = `https://gaana.com/song/${json.seokey}`;
         const info = {
@@ -269,7 +293,12 @@ export default class GaanaSource {
         const searchResult = await this.nodelink.sources.searchWithDefault(`${decodedTrack.title} ${decodedTrack.author}`);
         const bestMatch = getBestMatch(searchResult.data, decodedTrack);
         if (!bestMatch)
-            return { exception: { message: 'No suitable alternative found on YouTube.', severity: 'fault' } };
+            return {
+                exception: {
+                    message: 'No suitable alternative found on YouTube.',
+                    severity: 'fault'
+                }
+            };
         const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info);
         return { newTrack: bestMatch, ...streamInfo };
     }
@@ -289,7 +318,10 @@ export default class GaanaSource {
             body: params.toString(),
             proxy: this.config.proxy
         });
-        if (error || statusCode !== 200 || data?.api_status !== 'success' || !data?.data?.stream_path)
+        if (error ||
+            statusCode !== 200 ||
+            data?.api_status !== 'success' ||
+            !data?.data?.stream_path)
             return null;
         const hlsUrl = this.decryptStreamPath(data.data.stream_path);
         if (!hlsUrl)
@@ -340,10 +372,13 @@ export default class GaanaSource {
             let decrypted = decipher.update(ciphertext);
             decrypted = Buffer.concat([decrypted, decipher.final()]);
             let rawText = decrypted.toString('utf8').replace(/\0/g, '').trim();
-            rawText = rawText.split('').filter(c => {
+            rawText = rawText
+                .split('')
+                .filter((c) => {
                 const code = c.charCodeAt(0);
                 return code >= 32 && code <= 126;
-            }).join('');
+            })
+                .join('');
             if (rawText.includes('/hls/')) {
                 const pathStart = rawText.indexOf('hls/');
                 return HLS_BASE_URL + rawText.substring(pathStart);
@@ -355,13 +390,19 @@ export default class GaanaSource {
         }
     }
     async parseHlsManifest(url) {
-        const { body: text } = await http1makeRequest(url, { headers: this._getHeaders(), proxy: this.config.proxy });
+        const { body: text } = await http1makeRequest(url, {
+            headers: this._getHeaders(),
+            proxy: this.config.proxy
+        });
         if (!text)
             throw new Error('Empty manifest');
         let manifest = parsePlaylist(text, url);
         if (manifest.isMaster) {
             const bestVariant = manifest.variants[0];
-            const { body: variantText } = await http1makeRequest(bestVariant.url, { headers: this._getHeaders(), proxy: this.config.proxy });
+            const { body: variantText } = await http1makeRequest(bestVariant.url, {
+                headers: this._getHeaders(),
+                proxy: this.config.proxy
+            });
             manifest = parsePlaylist(variantText, bestVariant.url);
         }
         return manifest;
@@ -382,7 +423,7 @@ export default class GaanaSource {
             let segments = additionalData.segments;
             if (additionalData.startTime > 0) {
                 let elapsed = 0;
-                const startIndex = segments.findIndex(s => {
+                const startIndex = segments.findIndex((s) => {
                     const duration = (s.duration || 0) * 1000;
                     if (elapsed + duration > additionalData.startTime)
                         return true;
@@ -392,7 +433,7 @@ export default class GaanaSource {
                 if (startIndex !== -1)
                     segments = segments.slice(startIndex);
             }
-            this.streamSegments(stream, additionalData.initUrl, segments.map(s => s.url || s));
+            this.streamSegments(stream, additionalData.initUrl, segments.map((s) => s.url || s));
             let type = 'mp4';
             if (additionalData.format === 'ts' || additionalData.format === 'mpegts')
                 type = 'mpegts';
@@ -400,7 +441,12 @@ export default class GaanaSource {
                 type = 'aac';
             return { stream, type };
         }
-        const { stream, error, statusCode } = await http1makeRequest(url, { method: 'GET', streamOnly: true, headers: this._getHeaders(), proxy: this.config.proxy });
+        const { stream, error, statusCode } = await http1makeRequest(url, {
+            method: 'GET',
+            streamOnly: true,
+            headers: this._getHeaders(),
+            proxy: this.config.proxy
+        });
         if (error || statusCode !== 200 || !stream) {
             throw new Error(error?.message || `Stream status ${statusCode}`);
         }

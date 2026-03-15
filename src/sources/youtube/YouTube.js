@@ -1,11 +1,11 @@
 import { PassThrough } from 'node:stream'
+import HLSHandler from '../../playback/hls/HLSHandler.ts'
 import {
   getBestMatch,
   http1makeRequest,
   logger,
   makeRequest
 } from '../../utils.ts'
-import HLSHandler from '../../playback/hls/HLSHandler.ts'
 import CipherManager from './CipherManager.js'
 import Android from './clients/Android.js'
 import AndroidVR from './clients/AndroidVR.js'
@@ -14,13 +14,12 @@ import Music from './clients/Music.js'
 import TV from './clients/TV.js'
 import TVCast from './clients/TVCast.js'
 import Web from './clients/Web.js'
-import WebEmbedded from './clients/WebEmbedded.js'
 import WebRemix from './clients/Web_Remix.js'
+import WebEmbedded from './clients/WebEmbedded.js'
 import { checkURLType, YOUTUBE_CONSTANTS } from './common.js'
+import YouTubeLiveChat from './LiveChat.js'
 import OAuth from './OAuth.js'
 import { SabrStream } from './sabr/sabr.js'
-
-import YouTubeLiveChat from './LiveChat.js'
 
 const CHUNK_SIZE = 64 * 1024
 const MAX_RETRIES = 3
@@ -983,10 +982,14 @@ export default class YouTubeSource {
       'vimeo'
     ])
 
-    const configuredFallbackSources = Array.isArray(this.config?.fallbackSources)
+    const configuredFallbackSources = Array.isArray(
+      this.config?.fallbackSources
+    )
       ? this.config.fallbackSources
       : []
-    const defaultSources = Array.isArray(this.nodelink.options.defaultSearchSource)
+    const defaultSources = Array.isArray(
+      this.nodelink.options.defaultSearchSource
+    )
       ? this.nodelink.options.defaultSearchSource
       : [this.nodelink.options.defaultSearchSource]
 
@@ -1007,10 +1010,9 @@ export default class YouTubeSource {
       'bilibili',
       'bluesky',
       'nicovideo'
-    ].filter(
-      (name, index, arr) => {
-        const source = this.nodelink.sources?.getSource(name)
-        return (
+    ].filter((name, index, arr) => {
+      const source = this.nodelink.sources?.getSource(name)
+      return (
         typeof name === 'string' &&
         name.length > 0 &&
         arr.indexOf(name) === index &&
@@ -1020,20 +1022,23 @@ export default class YouTubeSource {
         source &&
         typeof source.search === 'function' &&
         typeof source.getTrackUrl === 'function'
-        )
-      }
-    )
+      )
+    })
 
     if (fallbackOrder.length === 0) return null
 
-    const query = `${decodedTrack?.title || ''} ${decodedTrack?.author || ''}`.trim()
+    const query =
+      `${decodedTrack?.title || ''} ${decodedTrack?.author || ''}`.trim()
     if (!query) return null
 
     this.mirrorFallbackInFlight.add(key)
     try {
       for (const fallbackSource of fallbackOrder) {
         try {
-          const search = await this.nodelink.sources.search(fallbackSource, query)
+          const search = await this.nodelink.sources.search(
+            fallbackSource,
+            query
+          )
           if (
             !search ||
             search.loadType !== 'search' ||
@@ -1045,7 +1050,10 @@ export default class YouTubeSource {
 
           const bestMatch = getBestMatch(search.data, decodedTrack)
           const bestInfo = bestMatch?.info
-          if (!bestInfo || ['youtube', 'ytmusic'].includes(bestInfo.sourceName)) {
+          if (
+            !bestInfo ||
+            ['youtube', 'ytmusic'].includes(bestInfo.sourceName)
+          ) {
             continue
           }
 

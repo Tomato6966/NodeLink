@@ -119,8 +119,8 @@ const decodeHtml = (text) => {
     return out;
 };
 const extractMeta = (html, property) => {
-    const re1 = new RegExp(`<meta[^>]+property=[\"']${property}[\"'][^>]+content=[\"']([^\"']+)[\"'][^>]*>`, 'i');
-    const re2 = new RegExp(`<meta[^>]+content=[\"']([^\"']+)[^>]+property=[\"']${property}[\"'][^>]*>`, 'i');
+    const re1 = new RegExp(`<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i');
+    const re2 = new RegExp(`<meta[^>]+content=["']([^"']+)[^>]+property=["']${property}["'][^>]*>`, 'i');
     const match = html.match(re1) || html.match(re2);
     return match ? decodeHtml(match[1]) : null;
 };

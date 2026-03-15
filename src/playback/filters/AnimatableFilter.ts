@@ -1,8 +1,9 @@
 import { Buffer } from 'node:buffer'
-import type { FilterSettings } from '../../typings/playback/filters.types.ts'
+import type {
+  AnimationTransition,
+  FilterSettings
+} from '../../typings/playback/filters.types.ts'
 import { BaseFilter } from './BaseFilter.ts'
-
-import type { AnimationTransition } from '../../typings/playback/filters.types.ts'
 
 export type AnimationCurve = 'linear' | 'exponential' | 'sinusoidal'
 
@@ -55,7 +56,9 @@ export abstract class AnimatableFilter extends BaseFilter {
       }
     }
 
-    const transition = rawConfig['transition'] as AnimationTransition | undefined
+    const transition = rawConfig['transition'] as
+      | AnimationTransition
+      | undefined
 
     // If disabled via auto-injection hook, make sure transition executes properly but to default states
     // and if there's no transition, snap instantly to defaults
@@ -65,7 +68,11 @@ export abstract class AnimatableFilter extends BaseFilter {
       }
     }
 
-    if (transition && typeof transition.durationMs === 'number' && transition.durationMs > 0) {
+    if (
+      transition &&
+      typeof transition.durationMs === 'number' &&
+      transition.durationMs > 0
+    ) {
       this.animation = {
         durationMs: transition.durationMs,
         elapsedMs: 0,
@@ -99,7 +106,11 @@ export abstract class AnimatableFilter extends BaseFilter {
    * @param chunkLength - The byte length of the incoming PCM buffer.
    * @param channels - The number of audio channels (e.g. 2).
    */
-  protected processAnimation(sampleRate: number, chunkLength: number, channels: number): void {
+  protected processAnimation(
+    sampleRate: number,
+    chunkLength: number,
+    channels: number
+  ): void {
     if (!this.animation) return
 
     // Calculate how many milliseconds this chunk represents
@@ -163,7 +174,7 @@ export abstract class AnimatableFilter extends BaseFilter {
    */
   public isActive(): boolean {
     if (this.animation) return true
-    // Need to explicitly check if target is also active so that when animation finishes at 0, 
+    // Need to explicitly check if target is also active so that when animation finishes at 0,
     // it returns false the next tick, but not while it's actively holding the static 0.
     return this.isConfigActive(this.currentConfig)
   }

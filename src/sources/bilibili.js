@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { PassThrough } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.ts'
 
 const MIXIN_KEY_ENC_TAB = [
   46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35, 27, 43, 5, 49,
@@ -41,7 +41,8 @@ export default class BilibiliSource {
   }
 
   generateBuvid3() {
-    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    const chars =
+      '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
     let result = ''
     for (let i = 0; i < 32; i++) {
       result += chars.charAt(Math.floor(Math.random() * chars.length))
@@ -50,7 +51,8 @@ export default class BilibiliSource {
   }
 
   generateBuvid4() {
-    const chars = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+    const chars =
+      '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
     let result = ''
     for (let i = 0; i < 36; i++) {
       result += chars.charAt(Math.floor(Math.random() * chars.length))
@@ -60,11 +62,11 @@ export default class BilibiliSource {
 
   buildCookieHeader() {
     const baseCookie = `buvid3=${this.buvid3}; buvid4=${this.buvid4}; CURRENT_FNVAL=4048`
-    
+
     if (this.cookie) {
       return `${baseCookie}; ${this.cookie}`
     }
-    
+
     return baseCookie
   }
 
@@ -257,7 +259,9 @@ export default class BilibiliSource {
       })
 
       if (body && typeof body === 'string') {
-        const match = body.match(/rel=["']canonical["'][^>]+href=["']([^"']+)["']/)
+        const match = body.match(
+          /rel=["']canonical["'][^>]+href=["']([^"']+)["']/
+        )
         if (match) {
           return match[1]
         }
@@ -269,7 +273,7 @@ export default class BilibiliSource {
       return shortUrl
     }
   }
-  
+
   extractPageParameter(url) {
     try {
       const pageMatch = url.match(/[?&]p=(\d+)/)
@@ -312,7 +316,11 @@ export default class BilibiliSource {
     const pages = videoData.pages || []
 
     if (pageIndex < 0 || pageIndex >= pages.length) {
-      logger('warn', 'Bilibili', `Invalid page index: ${pageIndex}, using first page`)
+      logger(
+        'warn',
+        'Bilibili',
+        `Invalid page index: ${pageIndex}, using first page`
+      )
       return this.loadSingleVideo(videoData)
     }
 
@@ -331,7 +339,11 @@ export default class BilibiliSource {
       sourceName: 'bilibili'
     }
 
-    logger('debug', 'Bilibili', `Created track from page ${pageIndex + 1}: ${trackInfo.title}`)
+    logger(
+      'debug',
+      'Bilibili',
+      `Created track from page ${pageIndex + 1}: ${trackInfo.title}`
+    )
 
     return {
       loadType: 'track',
@@ -378,7 +390,11 @@ export default class BilibiliSource {
       }
     })
 
-    logger('debug', 'Bilibili', `Created playlist: ${videoData.title} with ${tracks.length} tracks`)
+    logger(
+      'debug',
+      'Bilibili',
+      `Created playlist: ${videoData.title} with ${tracks.length} tracks`
+    )
 
     return {
       loadType: 'playlist',
@@ -397,7 +413,7 @@ export default class BilibiliSource {
       url = await this.resolveShortUrl(url)
       logger('debug', 'Bilibili', `Resolved short URL to: ${url}`)
     }
-    
+
     const videoMatch = url.match(this.patterns[0])
     if (videoMatch) {
       const bvidOrAvid = videoMatch[1]
@@ -431,7 +447,11 @@ export default class BilibiliSource {
 
         if (pages.length > 1) {
           if (requestedPage > 0) {
-            logger('debug', 'Bilibili', `Loading specific page ${requestedPage}`)
+            logger(
+              'debug',
+              'Bilibili',
+              `Loading specific page ${requestedPage}`
+            )
             return this.loadVideoPage(data, requestedPage - 1)
           } else {
             logger('debug', 'Bilibili', `Loading as playlist`)
@@ -931,12 +951,12 @@ export default class BilibiliSource {
       }
 
       if (protocol === 'hls' || url.includes('.m3u8')) {
-      const stream = new HLSHandler(url, {
-        headers: HEADERS,
-        type: 'mpegts',
-        localAddress: this.nodelink.routePlanner?.getIP(),
-        startTime: additionalData?.startTime || 0
-      })
+        const stream = new HLSHandler(url, {
+          headers: HEADERS,
+          type: 'mpegts',
+          localAddress: this.nodelink.routePlanner?.getIP(),
+          startTime: additionalData?.startTime || 0
+        })
         return { stream, type: 'mpegts' }
       }
 
@@ -970,7 +990,7 @@ export default class BilibiliSource {
       response.stream.on('error', (err) => {
         logger('error', 'Bilibili', `Upstream stream error: ${err.message}`)
         if (!stream.destroyed) {
-          stream.emit('finishBuffering') 
+          stream.emit('finishBuffering')
           stream.destroy(err)
         }
       })

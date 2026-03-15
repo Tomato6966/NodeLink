@@ -93,8 +93,7 @@ export default class BilibiliLyrics {
     const info = track.info || track
     const pluginInfo = track.pluginInfo || {}
 
-    if (info.sourceName !== 'bilibili')
-      return { loadType: 'empty', data: {} }
+    if (info.sourceName !== 'bilibili') return { loadType: 'empty', data: {} }
 
     try {
       let bvid = info.identifier

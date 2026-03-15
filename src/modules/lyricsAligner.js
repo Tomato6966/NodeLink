@@ -11,7 +11,7 @@ function similarity(s1, s2) {
 function editDistance(s1, s2) {
   s1 = s1.toLowerCase()
   s2 = s2.toLowerCase()
-  const costs = new Array()
+  const costs = []
   for (let i = 0; i <= s1.length; i++) {
     let lastValue = i
     for (let j = 0; j <= s2.length; j++) {
@@ -78,7 +78,10 @@ function flattenYouTubeLyrics(ytLyrics) {
 
 function getLineWords(text) {
   if (!text) return []
-  return text.split(/\s+/).map(cleanWord).filter((w) => w.length > 0)
+  return text
+    .split(/\s+/)
+    .map(cleanWord)
+    .filter((w) => w.length > 0)
 }
 
 function findBestSequenceMatch(
@@ -100,7 +103,7 @@ function findBestSequenceMatch(
 
     if (similarity(keys[0], yw.text) > 0.75) {
       let matchCount = 1
-      let checkLen = Math.min(keys.length, ytWords.length - i)
+      const checkLen = Math.min(keys.length, ytWords.length - i)
 
       let ytOffset = 0
       for (let k = 1; k < checkLen; k++) {

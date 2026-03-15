@@ -443,8 +443,10 @@ class BaseAudioResource {
   pipes: (Readable | Transform)[] | null
   stream: (VoiceAudioStream & Transform) | null
   protected _destroyed: boolean
+  protected guildId: string
 
-  constructor() {
+  constructor(guildId?: string) {
+    this.guildId = guildId || 'api-stream'
     this.pipes = []
     this.stream = null
     this._destroyed = false
@@ -466,7 +468,9 @@ class BaseAudioResource {
           targetRms: number,
           crossfadeDurationMs: number,
           transitionName?: string | null,
-          targetBeatState?: import('../../typings/playback/player.types.ts').RealtimeBeatState | null
+          targetBeatState?:
+            | import('../../typings/playback/player.types.ts').RealtimeBeatState
+            | null
         ) => void
         setIncomingGain?: (multiplier: number) => void
         setIncomingHighpass?: (enabled: boolean, peakAlpha?: number) => void
@@ -489,10 +493,18 @@ class BaseAudioResource {
         getNextTrackOpeningEnergy?: () => number
         getMainTrackBpm?: () => number | null
         getNextTrackBpm?: () => number | null
-        getRealtimeBeatState?: () => import('../../typings/playback/player.types.ts').RealtimeBeatState | null
-        getNextTrackBeatState?: () => import('../../typings/playback/player.types.ts').RealtimeBeatState | null
-        getMainTrackKey?: () => import('../../typings/playback/player.types.ts').TrackKeyResult | null
-        getNextTrackKey?: () => import('../../typings/playback/player.types.ts').TrackKeyResult | null
+        getRealtimeBeatState?: () =>
+          | import('../../typings/playback/player.types.ts').RealtimeBeatState
+          | null
+        getNextTrackBeatState?: () =>
+          | import('../../typings/playback/player.types.ts').RealtimeBeatState
+          | null
+        getMainTrackKey?: () =>
+          | import('../../typings/playback/player.types.ts').TrackKeyResult
+          | null
+        getNextTrackKey?: () =>
+          | import('../../typings/playback/player.types.ts').TrackKeyResult
+          | null
         getEnergySkipMs?: () => number
         getCrossfadeConsumedNextMs?: () => number
         isBridgeMode?: () => boolean
@@ -527,13 +539,18 @@ class BaseAudioResource {
       nextStream: Readable,
       options: { durationMs: number; minBufferMs?: number; bufferMs?: number }
     ) => this.prepareCrossfade(nextStream, options)
-    voiceStream.startCrossfade = (durationMs: number, curve?: string) =>
-      this.startCrossfade(durationMs, curve)
+    voiceStream.startCrossfade = (
+      durationMs: number,
+      curve?: string,
+      style?: 'standard' | 'fusion'
+    ) => this.startCrossfade(durationMs, curve, style)
     voiceStream.seekToEnergyMatch = (
       targetRms: number,
       crossfadeDurationMs: number,
       transitionName?: string | null,
-      targetBeatState?: import('../../typings/playback/player.types.ts').RealtimeBeatState | null
+      targetBeatState?:
+        | import('../../typings/playback/player.types.ts').RealtimeBeatState
+        | null
     ) =>
       this.seekToEnergyMatch(
         targetRms,
@@ -558,20 +575,14 @@ class BaseAudioResource {
       mix?: number,
       feedback?: number,
       completionRatio?: number
-    ) =>
-      this.setIncomingEcho(
-        enabled,
-        delayMs,
-        mix,
-        feedback,
-        completionRatio
-      )
+    ) => this.setIncomingEcho(enabled, delayMs, mix, feedback, completionRatio)
     voiceStream.setOutgoingPan = (enabled: boolean, completionRatio?: number) =>
       this.setOutgoingPan(enabled, completionRatio)
     voiceStream.setFilterBypass = (bypass: boolean) =>
       this.setFilterBypass(bypass)
     voiceStream.getMainEnergy = () => this.getMainEnergy()
-    voiceStream.getNextTrackOpeningEnergy = () => this.getNextTrackOpeningEnergy()
+    voiceStream.getNextTrackOpeningEnergy = () =>
+      this.getNextTrackOpeningEnergy()
     voiceStream.getMainTrackBpm = () => this.getMainTrackBpm()
     voiceStream.getNextTrackBpm = () => this.getNextTrackBpm()
     voiceStream.getRealtimeBeatState = () => this.getRealtimeBeatState()
@@ -584,12 +595,6 @@ class BaseAudioResource {
     voiceStream.isBridgeMode = () => this.isBridgeMode()
     voiceStream.isFlushed = () => this.isFlushed()
     voiceStream.isBridgeDraining = () => this.isBridgeDraining()
-    voiceStream.startShowcaseRecording = (
-      preMs: number,
-      activeMs: number,
-      postMs: number,
-      name: string
-    ) => this.startShowcaseRecording(preMs, activeMs, postMs, name)
     voiceStream.clearCrossfade = () => this.clearCrossfade()
     voiceStream.getCrossfadeState = () => this.getCrossfadeState()
     voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted()
@@ -651,7 +656,11 @@ class BaseAudioResource {
     return false
   }
 
-  startCrossfade(_durationMs: number, _curve?: string): boolean {
+  startCrossfade(
+    _durationMs: number,
+    _curve?: string,
+    _style?: 'standard' | 'fusion'
+  ): boolean {
     return false
   }
 
@@ -659,7 +668,9 @@ class BaseAudioResource {
     _targetRms: number,
     _crossfadeDurationMs: number,
     _transitionName?: string | null,
-    _targetBeatState?: import('../../typings/playback/player.types.ts').RealtimeBeatState | null
+    _targetBeatState?:
+      | import('../../typings/playback/player.types.ts').RealtimeBeatState
+      | null
   ): void {}
 
   setIncomingGain(_multiplier: number): void {}
@@ -780,13 +791,6 @@ class BaseAudioResource {
   isBridgeDraining(): boolean {
     return false
   }
-
-  startShowcaseRecording(
-    _preMs: number,
-    _activeMs: number,
-    _postMs: number,
-    _name: string
-  ): void {}
 
   checkTapeRampCompleted(): boolean {
     return false
@@ -2449,6 +2453,7 @@ class StreamAudioResource extends BaseAudioResource {
   private frameCounter: PCMFrameCounter | null = null
 
   constructor(
+    guildId: string,
     stream: Readable,
     type: string,
     nodelink: NodeLink,
@@ -2458,7 +2463,7 @@ class StreamAudioResource extends BaseAudioResource {
     returnPCM = false,
     enableAGC = true
   ) {
-    super()
+    super(guildId)
 
     this.nodelink = nodelink
     this._validateInputStream(stream)
@@ -2690,6 +2695,7 @@ class StreamAudioResource extends BaseAudioResource {
       channels: AUDIO_CONFIG.channels
     })
     const crossfadeController = new CrossfadeController(
+      this.guildId,
       AUDIO_CONFIG.sampleRate,
       AUDIO_CONFIG.channels
     )
@@ -2783,11 +2789,16 @@ class StreamAudioResource extends BaseAudioResource {
     return true
   }
 
-  override startCrossfade(durationMs: number, curve?: string): boolean {
+  override startCrossfade(
+    durationMs: number,
+    curve?: string,
+    style?: 'standard' | 'fusion'
+  ): boolean {
     if (!this.crossfadeController) return false
     return this.crossfadeController.startCrossfade(
       durationMs,
-      curve as FadeCurve
+      curve as FadeCurve,
+      style
     )
   }
 
@@ -2795,7 +2806,9 @@ class StreamAudioResource extends BaseAudioResource {
     targetRms: number,
     crossfadeDurationMs: number,
     transitionName?: string | null,
-    targetBeatState?: import('../../typings/playback/player.types.ts').RealtimeBeatState | null
+    targetBeatState?:
+      | import('../../typings/playback/player.types.ts').RealtimeBeatState
+      | null
   ): void {
     this.crossfadeController?.seekToEnergyMatch(
       targetRms,
@@ -2883,20 +2896,6 @@ class StreamAudioResource extends BaseAudioResource {
 
   override clearCrossfade(): void {
     this.crossfadeController?.clear()
-  }
-
-  override startShowcaseRecording(
-    preMs: number,
-    activeMs: number,
-    postMs: number,
-    name: string
-  ): void {
-    this.crossfadeController?.startShowcaseRecording(
-      preMs,
-      activeMs,
-      postMs,
-      name
-    )
   }
 
   override extractCrossfadeBuffer(): Buffer | null {
@@ -3085,6 +3084,7 @@ class StreamAudioResource extends BaseAudioResource {
 }
 
 export const createAudioResource = (
+  guildId: string,
   stream: Readable,
   type: string,
   nodelink: NodeLink,
@@ -3095,6 +3095,7 @@ export const createAudioResource = (
   enableAGC: boolean = true
 ): StreamAudioResource =>
   new StreamAudioResource(
+    guildId,
     stream,
     type,
     nodelink,
@@ -3106,6 +3107,7 @@ export const createAudioResource = (
   )
 
 export const createSeekeableAudioResource = async (
+  guildId: string,
   url: string,
   seekTime: number,
   endTime: number | undefined,
@@ -3158,6 +3160,7 @@ export const createSeekeableAudioResource = async (
       const format = hinted || (ext ? ext : 'm4a')
 
       return new StreamAudioResource(
+        guildId,
         passthroughStream,
         format,
         nodelink,
@@ -3191,6 +3194,7 @@ export const createSeekeableAudioResource = async (
     const format = meta.codec?.container || player.streamInfo?.format
 
     return new StreamAudioResource(
+      guildId,
       passthroughStream,
       format as string,
       nodelink,
@@ -3207,6 +3211,7 @@ export const createSeekeableAudioResource = async (
 }
 
 export const createPCMStream = (
+  guildId: string,
   stream: Readable,
   type: string,
   nodelink: NodeLink,

@@ -81,7 +81,9 @@ export default class QobuzSource {
         const infoExtrasMatch = content.match(infoExtrasRegex);
         if (!infoExtrasMatch)
             return null;
-        const encoded = (seed + infoExtrasMatch.groups.info + infoExtrasMatch.groups.extras).slice(0, -44);
+        const encoded = (seed +
+            infoExtrasMatch.groups.info +
+            infoExtrasMatch.groups.extras).slice(0, -44);
         return Buffer.from(encoded, 'base64').toString();
     }
     async _apiRequest(path, params = {}, options = {}) {
@@ -191,8 +193,12 @@ export default class QobuzSource {
     async _resolveTrack(id) {
         let data = await this._apiRequest('/track/get', { track_id: id });
         if (!data) {
-            const search = await this._apiRequest('/catalog/search', { query: id, type: 'tracks', limit: 1 });
-            data = search?.tracks?.items?.find(item => String(item.id) === String(id));
+            const search = await this._apiRequest('/catalog/search', {
+                query: id,
+                type: 'tracks',
+                limit: 1
+            });
+            data = search?.tracks?.items?.find((item) => String(item.id) === String(id));
         }
         if (!data)
             return { loadType: 'empty', data: {} };
@@ -200,12 +206,22 @@ export default class QobuzSource {
     }
     async _resolveAlbum(id) {
         const max = this.config.maxAlbumPlaylistLength || 100;
-        let data = await this._apiRequest('/album/get', { album_id: id, limit: Math.min(max, 50) });
+        let data = await this._apiRequest('/album/get', {
+            album_id: id,
+            limit: Math.min(max, 50)
+        });
         if (!data) {
-            const search = await this._apiRequest('/catalog/search', { query: id, type: 'albums', limit: 1 });
-            const album = search?.albums?.items?.find(item => String(item.id) === String(id) || item.qobuz_id === Number(id));
+            const search = await this._apiRequest('/catalog/search', {
+                query: id,
+                type: 'albums',
+                limit: 1
+            });
+            const album = search?.albums?.items?.find((item) => String(item.id) === String(id) || item.qobuz_id === Number(id));
             if (album) {
-                data = await this._apiRequest('/album/get', { album_id: album.id, limit: Math.min(max, 50) });
+                data = await this._apiRequest('/album/get', {
+                    album_id: album.id,
+                    limit: Math.min(max, 50)
+                });
             }
         }
         if (!data || !data.tracks)
@@ -303,7 +319,10 @@ export default class QobuzSource {
             try {
                 const unixTs = Math.floor(Date.now() / 1000);
                 const sigData = `trackgetFileUrlformat_id${formatId}intentstreamtrack_id${decodedTrack.identifier}${unixTs}${this.appSecret}`;
-                const requestSig = crypto.createHash('md5').update(sigData).digest('hex');
+                const requestSig = crypto
+                    .createHash('md5')
+                    .update(sigData)
+                    .digest('hex');
                 const data = await this._apiRequest('/track/getFileUrl', {
                     request_ts: unixTs,
                     request_sig: requestSig,
@@ -311,7 +330,8 @@ export default class QobuzSource {
                     format_id: formatId,
                     intent: 'stream'
                 });
-                if (data?.url && (!data.sample || data.sample === false || data.sample === 'false')) {
+                if (data?.url &&
+                    (!data.sample || data.sample === false || data.sample === 'false')) {
                     return { url: data.url };
                 }
                 logger('debug', 'Qobuz', `Direct stream not available (sample: ${data?.sample}), falling back to mirror.`);
@@ -333,13 +353,20 @@ export default class QobuzSource {
                 result = await this.nodelink.sources.searchWithDefault(query);
             }
             if (result.loadType !== 'search' || !result.data.length) {
-                return { exception: { message: 'No mirror found for this track.', severity: 'common' } };
+                return {
+                    exception: {
+                        message: 'No mirror found for this track.',
+                        severity: 'common'
+                    }
+                };
             }
             const best = getBestMatch(result.data, decodedTrack, {
                 allowExplicit: this.config.sources.qobuz?.allowExplicit ?? true
             });
             if (!best)
-                return { exception: { message: 'No suitable match found.', severity: 'common' } };
+                return {
+                    exception: { message: 'No suitable match found.', severity: 'common' }
+                };
             const stream = await this.nodelink.sources.getTrackUrl(best.info);
             return { newTrack: best, ...stream };
         }

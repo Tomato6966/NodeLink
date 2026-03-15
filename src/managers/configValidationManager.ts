@@ -1266,7 +1266,7 @@ export default class ConfigValidationManager {
             message: `Value "${v}" looks like an unfilled placeholder. The source may fail to authenticate at runtime.`
           })
         }
-        return true 
+        return true
       }
     }
   }

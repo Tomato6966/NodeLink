@@ -137,10 +137,11 @@ export class ProtoReader {
             case 1:
                 this.pos = Math.min(this.pos + 8, this.buffer.length);
                 break;
-            case 2:
+            case 2: {
                 const len = Number(this.readVarint());
                 this.pos = Math.min(this.pos + len, this.buffer.length);
                 break;
+            }
             case 5:
                 this.pos = Math.min(this.pos + 4, this.buffer.length);
                 break;

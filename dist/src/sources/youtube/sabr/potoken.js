@@ -1,8 +1,8 @@
 import { Buffer } from 'node:buffer';
-import { base64ToU8 } from './protor.js';
 import { appendFile } from 'node:fs/promises';
 import path from 'node:path';
 import { logger } from "../../../utils.js";
+import { base64ToU8 } from './protor.js';
 const TOKENS_LOG_PATH = path.join(process.cwd(), 'po_tokens.jsonl');
 const PO_CONFIG = {
     apiKey: 'AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw',
@@ -25,7 +25,7 @@ function u8ToBase64(u8, base64url = false) {
     if (Buffer.isEncoding?.('base64url')) {
         return Buffer.from(u8).toString('base64url');
     }
-    let s = Buffer.from(u8)
+    const s = Buffer.from(u8)
         .toString('base64')
         .replaceAll('+', '-')
         .replaceAll('/', '_');
