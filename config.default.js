@@ -553,6 +553,20 @@ export default {
       mode: 'preload', // preload or stream
       minBufferMs: 250, // Minimum buffered PCM before crossfade starts
       bufferMs: 0 // 0 = auto (use duration)
+    },
+    automix: {
+      enabled: false, // Enable intelligent transition analysis (BPM, key, energy)
+      mode: 'smart', // smart | fusion | dj_fx | radio | turntable
+      fallbackBehavior: 'fade', // fade | gapless
+      gaplessTrim: false,
+      deezerMetadata: {
+        enabled: false, // Fetch BPM/gain from Deezer for better transitions
+        useBpm: true,
+        useGain: true,
+        maxBpmDiffRatio: 0.25,
+        requestTimeoutMs: 5000,
+        tempoMatch: false
+      }
     }
   },
   voiceReceive: {

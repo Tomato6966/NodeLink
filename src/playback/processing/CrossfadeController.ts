@@ -129,6 +129,13 @@ export class CrossfadeController extends Transform {
   private _mainRmsEma = 0
   private _mainRmsPeak = 0
 
+  /**
+   * When false, _updateEnergy only maintains the lightweight RMS EMA needed
+   * for silence detection.  The heavier spectral, onset, BPM and key analysis
+   * is deferred until the player enables tracking (near crossfade zone).
+   */
+  private _energyTrackingActive = false
+
   private _onsetBuffer: number[] = []
   private _prevRmsForOnset = 0
   private _detectedMainBpm: number | null = null
@@ -632,6 +639,15 @@ export class CrossfadeController extends Transform {
 
   public setFilterBypass(bypass: boolean): void {
     this.filterBypassSetter?.(bypass)
+  }
+
+  /**
+   * Enables or disables the full energy / BPM / key analysis in _updateEnergy.
+   * When disabled only a lightweight RMS EMA is maintained for silence detection.
+   * The player should enable this when a crossfade is scheduled (next track ready).
+   */
+  public setEnergyTracking(enabled: boolean): void {
+    this._energyTrackingActive = enabled
   }
 
   /**
@@ -2072,6 +2088,7 @@ export class CrossfadeController extends Transform {
     this._mainBeatDecimate = 0
     this._mainOnsetAccum = 0
     this._mainDeltaAccum = 0
+    this._energyTrackingActive = false
     this._rtBeatTracker.reset()
     this._rtBeatState = this._rtBeatTracker.getState()
     this._lastRealtimeBpmLogSec = 0
@@ -3329,15 +3346,29 @@ export class CrossfadeController extends Transform {
   private _updateEnergy(chunk: Buffer): void {
     const samples = chunk.length >> 1
     if (samples === 0) return
+
+    // Lightweight RMS path — always runs (needed for silence detection)
     let sumSq = 0
     let count = 0
+    for (let i = 0; i < samples; i += 32) {
+      const s = chunk.readInt16LE(i * 2)
+      sumSq += s * s
+      count++
+    }
+    if (count === 0) return
+    const rms = Math.sqrt(sumSq / count) / 32768
+    this._mainRmsEma = this._mainRmsEma * 0.85 + rms * 0.15
+    this._mainRmsPeak = Math.max(this._mainRmsPeak * 0.9985, rms)
+
+    // Full spectral / onset / BPM / key analysis — only when tracking is active
+    if (!this._energyTrackingActive) return
+
     let sumBass = 0
     let sumMid = 0
     let sumTreble = 0
     let sumFlux = 0
     for (let i = 0; i < samples; i += 32) {
       const s = chunk.readInt16LE(i * 2)
-      sumSq += s * s
       this._mainSpecLowLp += this._mainSpecLowAlpha * (s - this._mainSpecLowLp)
       this._mainSpecMidLp += this._mainSpecMidAlpha * (s - this._mainSpecMidLp)
       this._mainSpecHighLp +=
@@ -3351,12 +3382,7 @@ export class CrossfadeController extends Transform {
       const composite = midBand + treble * 1.15
       sumFlux += Math.abs(composite - this._mainSpecPrevComposite)
       this._mainSpecPrevComposite = composite
-      count++
     }
-    if (count === 0) return
-    const rms = Math.sqrt(sumSq / count) / 32768 // normalized 0-1
-    this._mainRmsEma = this._mainRmsEma * 0.85 + rms * 0.15 // Fast-responding EMA
-    this._mainRmsPeak = Math.max(this._mainRmsPeak * 0.9985, rms) // Slowly decaying peak
 
     const toneTotal = sumBass + sumMid + sumTreble + 1
     const brightness = Math.max(

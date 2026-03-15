@@ -1725,6 +1725,9 @@ export class Player {
     )
       return
 
+    // Enable full energy/BPM/key analysis now that a crossfade is scheduled
+    this._getAudioStream()?.setEnergyTracking?.(true)
+
     logger(
       'info',
       'Crossfade',

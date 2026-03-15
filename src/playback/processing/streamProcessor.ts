@@ -489,6 +489,7 @@ class BaseAudioResource {
         ) => void
         setOutgoingPan?: (enabled: boolean, completionRatio?: number) => void
         setFilterBypass?: (bypass: boolean) => void
+        setEnergyTracking?: (enabled: boolean) => void
         getMainEnergy?: () => { rms: number; peak: number } | null
         getNextTrackOpeningEnergy?: () => number
         getMainTrackBpm?: () => number | null
@@ -580,6 +581,8 @@ class BaseAudioResource {
       this.setOutgoingPan(enabled, completionRatio)
     voiceStream.setFilterBypass = (bypass: boolean) =>
       this.setFilterBypass(bypass)
+    voiceStream.setEnergyTracking = (enabled: boolean) =>
+      this.setEnergyTracking(enabled)
     voiceStream.getMainEnergy = () => this.getMainEnergy()
     voiceStream.getNextTrackOpeningEnergy = () =>
       this.getNextTrackOpeningEnergy()
@@ -696,6 +699,8 @@ class BaseAudioResource {
   setOutgoingPan(_enabled: boolean, _completionRatio?: number): void {}
 
   setFilterBypass(_bypass: boolean): void {}
+
+  setEnergyTracking(_enabled: boolean): void {}
 
   clearCrossfade(): void {}
 
@@ -2836,6 +2841,10 @@ class StreamAudioResource extends BaseAudioResource {
 
   override setFilterBypass(bypass: boolean): void {
     this.crossfadeController?.setFilterBypass(bypass)
+  }
+
+  override setEnergyTracking(enabled: boolean): void {
+    this.crossfadeController?.setEnergyTracking(enabled)
   }
 
   override setIncomingPan(enabled: boolean, completionRatio?: number): void {

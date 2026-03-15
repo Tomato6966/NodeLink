@@ -289,6 +289,7 @@ export interface ExtendedAudioStream extends AudioResource {
   getMainTrackKey?: () => TrackKeyResult | null
   getNextTrackKey?: () => TrackKeyResult | null
   setFilterBypass?: (enabled: boolean) => void
+  setEnergyTracking?: (enabled: boolean) => void
   setIncomingHighpass?: (enabled: boolean, alpha?: number) => void
   setIncomingLowpass?: (
     enabled: boolean,
