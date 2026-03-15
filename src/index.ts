@@ -960,6 +960,7 @@ class NodelinkServer extends EventEmitter {
         }
 
         const send = (obj: Record<string, unknown>) => {
+          if (stopped) return
           try {
             socket.send(JSON.stringify(obj))
           } catch {
@@ -2498,6 +2499,31 @@ class NodelinkServer extends EventEmitter {
     logger('info', 'Server', 'Registered custom player interceptor')
   }
 }
+
+// Guard the master / single-process against unhandled socket errors (EPIPE,
+// ECONNRESET) that surface when a WebSocket client disconnects mid-write and
+// the underlying library has already removed listeners via removeAllListeners().
+process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
+  if (err?.code === 'EPIPE' || err?.code === 'ECONNRESET') {
+    logger('debug', 'Server', `Suppressed uncaught socket error: ${err.code}`)
+    return
+  }
+
+  logger(
+    'error',
+    'Server',
+    `Uncaught Exception: ${err.stack || err.message}`
+  )
+  process.stderr.write('', () => process.exit(1))
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger(
+    'error',
+    'Server',
+    `Unhandled Rejection at: ${promise}, reason: ${reason}`
+  )
+})
 
 if (clusterEnabled && cluster.isPrimary) {
   if (config.sources?.youtube?.getOAuthToken) {
