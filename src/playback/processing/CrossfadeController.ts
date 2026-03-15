@@ -3233,11 +3233,11 @@ export class CrossfadeController extends Transform {
         this._detectedNextBpm = Math.round(this._nextBeatState.bpm * 10) / 10
         this._nextBpmDetected = true
         const shouldLog =
-          this._nextBeatState.timeSec - this._lastRealtimeNextBpmLogSec >= 8
+          this._nextBeatState.timeSec - this._lastRealtimeNextBpmLogSec >= 30
         if (shouldLog) {
           this._lastRealtimeNextBpmLogSec = this._nextBeatState.timeSec
           logger(
-            'info',
+            'debug',
             'AutoMix',
             `Next track BPM locked in preload: ${this._detectedNextBpm} (confidence ${(this._nextBeatState.confidence * 100).toFixed(0)}%)`
           )
@@ -3367,11 +3367,11 @@ export class CrossfadeController extends Transform {
       ) {
         this._detectedMainBpm = Math.round(this._rtBeatState.bpm * 10) / 10
         const shouldLog =
-          this._rtBeatState.timeSec - this._lastRealtimeBpmLogSec >= 8
+          this._rtBeatState.timeSec - this._lastRealtimeBpmLogSec >= 30
         if (shouldLog) {
           this._lastRealtimeBpmLogSec = this._rtBeatState.timeSec
           logger(
-            'info',
+            'debug',
             'AutoMix',
             `Main track BPM locked in real-time: ${this._detectedMainBpm} (confidence ${(this._rtBeatState.confidence * 100).toFixed(0)}%)`
           )
