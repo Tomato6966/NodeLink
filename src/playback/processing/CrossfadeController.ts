@@ -146,13 +146,13 @@ export class CrossfadeController extends Transform {
   private _mainOnsetAccum = 0
   private _mainDeltaAccum = 0
 
-  private _mainKeyPcm: Buffer[] = []
-  private _mainKeyPcmBytes = 0
+  private _mainKeyBuf: Buffer | null = null
+  private _mainKeyBufOffset = 0
   private _mainKeyDetected = false
   private _detectedMainKey: KeyResult | null = null
-  /** Max bytes to capture for key detection (~10 s stereo 48 kHz 16-bit). */
-  private get _mainKeyMaxBytes(): number {
-    return this.sampleRate * this.channels * 2 * 10
+  /** Target bytes for key detection (~5 s stereo 48 kHz 16-bit). */
+  private get _mainKeyTargetBytes(): number {
+    return this.sampleRate * this.channels * 2 * 5
   }
 
   private _nextRmsEma = 0
@@ -174,12 +174,12 @@ export class CrossfadeController extends Transform {
   private _nextBeatState: RealtimeBeatState = this._nextBeatTracker.getState()
   private _lastRealtimeNextBpmLogSec = 0
 
-  private _nextKeyPcm: Buffer[] = []
-  private _nextKeyPcmBytes = 0
+  private _nextKeyBuf: Buffer | null = null
+  private _nextKeyBufOffset = 0
   private _nextKeyDetected = false
   private _detectedNextKey: KeyResult | null = null
-  private get _nextKeyMaxBytes(): number {
-    return this.sampleRate * this.channels * 2 * 10
+  private get _nextKeyTargetBytes(): number {
+    return this.sampleRate * this.channels * 2 * 5
   }
 
   private _totalNextConsumedSamples = 0
@@ -2109,8 +2109,8 @@ export class CrossfadeController extends Transform {
     this._nextBeatTracker.reset()
     this._nextBeatState = this._nextBeatTracker.getState()
     this._lastRealtimeNextBpmLogSec = 0
-    this._nextKeyPcm = []
-    this._nextKeyPcmBytes = 0
+    this._nextKeyBuf = null
+    this._nextKeyBufOffset = 0
     this._nextKeyDetected = false
     this._detectedNextKey = null
     this._mainSpecLowLp = 0
@@ -3214,7 +3214,7 @@ export class CrossfadeController extends Transform {
 
     let sumSq = 0
     let count = 0
-    for (let i = 0; i < samples; i += 32) {
+    for (let i = 0; i < samples; i += 64) {
       const s = chunk.readInt16LE(i * 2)
       sumSq += s * s
       count++
@@ -3315,19 +3315,23 @@ export class CrossfadeController extends Transform {
 
     if (
       !this._nextKeyDetected &&
-      this._nextKeyPcmBytes < this._nextKeyMaxBytes
+      this._nextKeyBufOffset < this._nextKeyTargetBytes
     ) {
-      this._nextKeyPcm.push(Buffer.from(chunk))
-      this._nextKeyPcmBytes += chunk.length
-      if (this._nextKeyPcmBytes >= this.sampleRate * this.channels * 2 * 5) {
-        const fullPcm = Buffer.concat(this._nextKeyPcm)
+      if (!this._nextKeyBuf) {
+        this._nextKeyBuf = Buffer.allocUnsafe(this._nextKeyTargetBytes)
+      }
+      const space = this._nextKeyTargetBytes - this._nextKeyBufOffset
+      const toCopy = Math.min(space, chunk.length)
+      chunk.copy(this._nextKeyBuf, this._nextKeyBufOffset, 0, toCopy)
+      this._nextKeyBufOffset += toCopy
+      if (this._nextKeyBufOffset >= this._nextKeyTargetBytes) {
         this._detectedNextKey = estimateKeyFromPcm(
-          fullPcm,
+          this._nextKeyBuf,
           this.sampleRate,
           this.channels
         )
         this._nextKeyDetected = true
-        this._nextKeyPcm = []
+        this._nextKeyBuf = null
         if (this._detectedNextKey) {
           logger(
             'info',
@@ -3347,28 +3351,32 @@ export class CrossfadeController extends Transform {
     const samples = chunk.length >> 1
     if (samples === 0) return
 
-    // Lightweight RMS path — always runs (needed for silence detection)
+    if (!this._energyTrackingActive) {
+      // Lightweight RMS-only path (silence detection)
+      let sumSq = 0
+      let count = 0
+      for (let i = 0; i < samples; i += 64) {
+        const s = chunk.readInt16LE(i * 2)
+        sumSq += s * s
+        count++
+      }
+      if (count === 0) return
+      const rms = Math.sqrt(sumSq / count) / 32768
+      this._mainRmsEma = this._mainRmsEma * 0.85 + rms * 0.15
+      this._mainRmsPeak = Math.max(this._mainRmsPeak * 0.9985, rms)
+      return
+    }
+
+    // Single merged loop: RMS + spectral + flux (stride 64)
     let sumSq = 0
     let count = 0
-    for (let i = 0; i < samples; i += 32) {
-      const s = chunk.readInt16LE(i * 2)
-      sumSq += s * s
-      count++
-    }
-    if (count === 0) return
-    const rms = Math.sqrt(sumSq / count) / 32768
-    this._mainRmsEma = this._mainRmsEma * 0.85 + rms * 0.15
-    this._mainRmsPeak = Math.max(this._mainRmsPeak * 0.9985, rms)
-
-    // Full spectral / onset / BPM / key analysis — only when tracking is active
-    if (!this._energyTrackingActive) return
-
     let sumBass = 0
     let sumMid = 0
     let sumTreble = 0
     let sumFlux = 0
-    for (let i = 0; i < samples; i += 32) {
+    for (let i = 0; i < samples; i += 64) {
       const s = chunk.readInt16LE(i * 2)
+      sumSq += s * s
       this._mainSpecLowLp += this._mainSpecLowAlpha * (s - this._mainSpecLowLp)
       this._mainSpecMidLp += this._mainSpecMidAlpha * (s - this._mainSpecMidLp)
       this._mainSpecHighLp +=
@@ -3382,7 +3390,12 @@ export class CrossfadeController extends Transform {
       const composite = midBand + treble * 1.15
       sumFlux += Math.abs(composite - this._mainSpecPrevComposite)
       this._mainSpecPrevComposite = composite
+      count++
     }
+    if (count === 0) return
+    const rms = Math.sqrt(sumSq / count) / 32768
+    this._mainRmsEma = this._mainRmsEma * 0.85 + rms * 0.15
+    this._mainRmsPeak = Math.max(this._mainRmsPeak * 0.9985, rms)
 
     const toneTotal = sumBass + sumMid + sumTreble + 1
     const brightness = Math.max(
@@ -3479,19 +3492,23 @@ export class CrossfadeController extends Transform {
 
     if (
       !this._mainKeyDetected &&
-      this._mainKeyPcmBytes < this._mainKeyMaxBytes
+      this._mainKeyBufOffset < this._mainKeyTargetBytes
     ) {
-      this._mainKeyPcm.push(Buffer.from(chunk))
-      this._mainKeyPcmBytes += chunk.length
-      if (this._mainKeyPcmBytes >= this.sampleRate * this.channels * 2 * 5) {
-        const fullPcm = Buffer.concat(this._mainKeyPcm)
+      if (!this._mainKeyBuf) {
+        this._mainKeyBuf = Buffer.allocUnsafe(this._mainKeyTargetBytes)
+      }
+      const space = this._mainKeyTargetBytes - this._mainKeyBufOffset
+      const toCopy = Math.min(space, chunk.length)
+      chunk.copy(this._mainKeyBuf, this._mainKeyBufOffset, 0, toCopy)
+      this._mainKeyBufOffset += toCopy
+      if (this._mainKeyBufOffset >= this._mainKeyTargetBytes) {
         this._detectedMainKey = estimateKeyFromPcm(
-          fullPcm,
+          this._mainKeyBuf,
           this.sampleRate,
           this.channels
         )
         this._mainKeyDetected = true
-        this._mainKeyPcm = [] // Free memory
+        this._mainKeyBuf = null
         if (this._detectedMainKey) {
           logger(
             'info',
@@ -3563,16 +3580,20 @@ export class CrossfadeController extends Transform {
   public getMainTrackKey(): KeyResult | null {
     if (
       !this._mainKeyDetected &&
-      this._mainKeyPcmBytes >= this.sampleRate * this.channels * 2 * 3
+      this._mainKeyBufOffset >= this.sampleRate * this.channels * 2 * 3
     ) {
-      const fullPcm = Buffer.concat(this._mainKeyPcm)
-      this._detectedMainKey = estimateKeyFromPcm(
-        fullPcm,
-        this.sampleRate,
-        this.channels
-      )
+      const pcm = this._mainKeyBuf
+        ? this._mainKeyBuf.subarray(0, this._mainKeyBufOffset)
+        : null
+      if (pcm) {
+        this._detectedMainKey = estimateKeyFromPcm(
+          pcm,
+          this.sampleRate,
+          this.channels
+        )
+      }
       this._mainKeyDetected = true
-      this._mainKeyPcm = [] // Free memory
+      this._mainKeyBuf = null
       if (this._detectedMainKey) {
         logger(
           'info',
@@ -3676,16 +3697,20 @@ export class CrossfadeController extends Transform {
   public getNextTrackKey(): KeyResult | null {
     if (
       !this._nextKeyDetected &&
-      this._nextKeyPcmBytes >= this.sampleRate * this.channels * 2 * 3
+      this._nextKeyBufOffset >= this.sampleRate * this.channels * 2 * 3
     ) {
-      const fullPcm = Buffer.concat(this._nextKeyPcm)
-      this._detectedNextKey = estimateKeyFromPcm(
-        fullPcm,
-        this.sampleRate,
-        this.channels
-      )
+      const pcm = this._nextKeyBuf
+        ? this._nextKeyBuf.subarray(0, this._nextKeyBufOffset)
+        : null
+      if (pcm) {
+        this._detectedNextKey = estimateKeyFromPcm(
+          pcm,
+          this.sampleRate,
+          this.channels
+        )
+      }
       this._nextKeyDetected = true
-      this._nextKeyPcm = []
+      this._nextKeyBuf = null
       if (this._detectedNextKey) {
         logger(
           'info',
