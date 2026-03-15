@@ -135,6 +135,9 @@ export class CrossfadeController extends Transform {
   private _mainBpmDetected = false
   /** Approx. onset samples per second (derived from chunk cadence). */
   private _onsetChunkMs = 20
+  private _mainBeatDecimate = 0
+  private _mainOnsetAccum = 0
+  private _mainDeltaAccum = 0
 
   private _mainKeyPcm: Buffer[] = []
   private _mainKeyPcmBytes = 0
@@ -157,6 +160,9 @@ export class CrossfadeController extends Transform {
   private _detectedNextBpm: number | null = null
   private _nextBpmDetected = false
   private _nextOnsetChunkMs = 20
+  private _nextBeatDecimate = 0
+  private _nextOnsetAccum = 0
+  private _nextDeltaAccum = 0
   private _nextBeatTracker = new RealtimeBpmTracker()
   private _nextBeatState: RealtimeBeatState = this._nextBeatTracker.getState()
   private _lastRealtimeNextBpmLogSec = 0
@@ -2063,6 +2069,9 @@ export class CrossfadeController extends Transform {
     this._prevRmsForOnset = 0
     this._detectedMainBpm = null
     this._mainBpmDetected = false
+    this._mainBeatDecimate = 0
+    this._mainOnsetAccum = 0
+    this._mainDeltaAccum = 0
     this._rtBeatTracker.reset()
     this._rtBeatState = this._rtBeatTracker.getState()
     this._lastRealtimeBpmLogSec = 0
@@ -2077,6 +2086,9 @@ export class CrossfadeController extends Transform {
     this._detectedNextBpm = null
     this._nextBpmDetected = false
     this._nextOnsetChunkMs = 20
+    this._nextBeatDecimate = 0
+    this._nextOnsetAccum = 0
+    this._nextDeltaAccum = 0
     this._nextBeatTracker.reset()
     this._nextBeatState = this._nextBeatTracker.getState()
     this._lastRealtimeNextBpmLogSec = 0
@@ -3213,17 +3225,37 @@ export class CrossfadeController extends Transform {
 
     const onset = Math.max(0, rms - this._nextPrevRmsForOnset)
     this._nextPrevRmsForOnset = rms
-    this._nextOnsetBuffer.push(onset)
-    const maxOnsets = Math.max(
-      64,
-      Math.round(20000 / Math.max(1, this._nextOnsetChunkMs))
-    )
-    if (this._nextOnsetBuffer.length > maxOnsets) {
-      this._nextOnsetBuffer.shift()
+
+    // Only maintain onset buffer until BPM fallback fires
+    if (!this._nextBpmDetected) {
+      this._nextOnsetBuffer.push(onset)
+      const maxOnsets = Math.max(
+        64,
+        Math.round(20000 / Math.max(1, this._nextOnsetChunkMs))
+      )
+      if (this._nextOnsetBuffer.length > maxOnsets) {
+        this._nextOnsetBuffer.shift()
+      }
+    } else if (this._nextOnsetBuffer.length > 0) {
+      this._nextOnsetBuffer.length = 0
     }
 
     if (chunkMs > 0) {
-      this._nextBeatState = this._nextBeatTracker.push(onset, chunkMs / 1000)
+      // Decimate beat tracker when locked
+      const locked = this._nextBeatState.locked
+      if (!locked) {
+        this._nextBeatState = this._nextBeatTracker.push(onset, chunkMs / 1000)
+      } else {
+        this._nextOnsetAccum = Math.max(this._nextOnsetAccum, onset)
+        this._nextDeltaAccum += chunkMs / 1000
+        this._nextBeatDecimate++
+        if (this._nextBeatDecimate >= 4) {
+          this._nextBeatState = this._nextBeatTracker.push(this._nextOnsetAccum, this._nextDeltaAccum)
+          this._nextOnsetAccum = 0
+          this._nextDeltaAccum = 0
+          this._nextBeatDecimate = 0
+        }
+      }
       if (
         this._nextBeatState.locked &&
         this._nextBeatState.bpm > 0 &&
@@ -3352,13 +3384,34 @@ export class CrossfadeController extends Transform {
     if (chunkMs > 0) this._onsetChunkMs = chunkMs
     const onset = Math.max(0, rms - this._prevRmsForOnset)
     this._prevRmsForOnset = rms
-    this._onsetBuffer.push(onset)
-    const maxOnsets = Math.max(64, Math.round(20000 / Math.max(1, this._onsetChunkMs)))
-    if (this._onsetBuffer.length > maxOnsets) {
-      this._onsetBuffer.shift()
+
+    // Only maintain onset buffer until BPM fallback fires — after that it's unused
+    if (!this._mainBpmDetected) {
+      this._onsetBuffer.push(onset)
+      const maxOnsets = Math.max(64, Math.round(20000 / Math.max(1, this._onsetChunkMs)))
+      if (this._onsetBuffer.length > maxOnsets) {
+        this._onsetBuffer.shift()
+      }
+    } else if (this._onsetBuffer.length > 0) {
+      this._onsetBuffer.length = 0 // free memory
     }
+
     if (chunkMs > 0) {
-      this._rtBeatState = this._rtBeatTracker.push(onset, chunkMs / 1000)
+      // Decimate beat tracker when locked — run every 4th chunk (~80ms), accumulate onset peaks
+      const locked = this._rtBeatState.locked
+      if (!locked) {
+        this._rtBeatState = this._rtBeatTracker.push(onset, chunkMs / 1000)
+      } else {
+        this._mainOnsetAccum = Math.max(this._mainOnsetAccum, onset)
+        this._mainDeltaAccum += chunkMs / 1000
+        this._mainBeatDecimate++
+        if (this._mainBeatDecimate >= 4) {
+          this._rtBeatState = this._rtBeatTracker.push(this._mainOnsetAccum, this._mainDeltaAccum)
+          this._mainOnsetAccum = 0
+          this._mainDeltaAccum = 0
+          this._mainBeatDecimate = 0
+        }
+      }
       if (
         this._rtBeatState.locked &&
         this._rtBeatState.bpm > 0 &&
