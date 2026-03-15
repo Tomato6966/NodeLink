@@ -1031,10 +1031,7 @@ class NodelinkServer extends EventEmitter {
               allocTop: lastAllocReport
             })
             if (realtimeStore.snapshots.length > PROFILER_HISTORY_MAX) {
-              realtimeStore.snapshots.splice(
-                0,
-                realtimeStore.snapshots.length - PROFILER_HISTORY_MAX
-              )
+              realtimeStore.snapshots.shift()
             }
             realtimeStore.updatedAt = Date.now()
           } catch (error) {

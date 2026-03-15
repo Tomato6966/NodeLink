@@ -1224,13 +1224,27 @@ function parseScope(payload: ProfilerPayload): {
  *
  * @returns Resource counters keyed by resource name.
  */
+// Cached results for expensive introspection calls (reused within the same tick).
+let _cachedResources: Record<string, number> | null = null
+let _cachedResourcesAt = 0
+let _cachedHandles: Record<string, number> | null = null
+let _cachedHandlesAt = 0
+let _cachedHeapSpaces: HeapSpaceEntry[] | null = null
+let _cachedHeapSpacesAt = 0
+const INTROSPECTION_TTL_MS = 1500
+
 function getMasterActiveResources(): Record<string, number> {
+  const now = Date.now()
+  if (_cachedResources && now - _cachedResourcesAt < INTROSPECTION_TTL_MS)
+    return _cachedResources
   const list =
     typeof process.getActiveResourcesInfo === 'function'
       ? process.getActiveResourcesInfo()
       : []
   const counters: Record<string, number> = {}
   for (const item of list) counters[item] = (counters[item] || 0) + 1
+  _cachedResources = counters
+  _cachedResourcesAt = now
   return counters
 }
 
@@ -1240,6 +1254,9 @@ function getMasterActiveResources(): Record<string, number> {
  * @returns Handle counters keyed by constructor name.
  */
 function getMasterActiveHandles(): Record<string, number> {
+  const now = Date.now()
+  if (_cachedHandles && now - _cachedHandlesAt < INTROSPECTION_TTL_MS)
+    return _cachedHandles
   const getter = process as ProcessWithActiveHandles
   if (typeof getter._getActiveHandles !== 'function') return {}
   const handles = getter._getActiveHandles()
@@ -1248,22 +1265,32 @@ function getMasterActiveHandles(): Record<string, number> {
     const name = handle?.constructor?.name || 'UnknownHandle'
     counters[name] = (counters[name] || 0) + 1
   }
+  _cachedHandles = counters
+  _cachedHandlesAt = now
   return counters
 }
 
 /**
  * Returns V8 heap space statistics for the master process.
+ * Result is cached for INTROSPECTION_TTL_MS to avoid duplicate V8 calls
+ * within the same profiler tick.
  *
  * @returns Serialized heap space entries.
  */
 function getMasterHeapSpaces(): HeapSpaceEntry[] {
-  return v8.getHeapSpaceStatistics().map((space) => ({
+  const now = Date.now()
+  if (_cachedHeapSpaces && now - _cachedHeapSpacesAt < INTROSPECTION_TTL_MS)
+    return _cachedHeapSpaces
+  const result = v8.getHeapSpaceStatistics().map((space) => ({
     spaceName: space.space_name,
     spaceSize: space.space_size,
     spaceUsedSize: space.space_used_size,
     spaceAvailableSize: space.space_available_size,
     physicalSpaceSize: space.physical_space_size
   }))
+  _cachedHeapSpaces = result
+  _cachedHeapSpacesAt = now
+  return result
 }
 
 /**
@@ -1283,10 +1310,14 @@ function getMasterRuntimeContext(
     events: []
   }
   const traceRequests = Array.isArray(traceStore.requests)
-    ? traceStore.requests.slice(-200)
+    ? traceStore.requests.length <= 200
+      ? traceStore.requests
+      : traceStore.requests.slice(-200)
     : []
   const traceEvents = Array.isArray(traceStore.events)
-    ? traceStore.events.slice(-200)
+    ? traceStore.events.length <= 200
+      ? traceStore.events
+      : traceStore.events.slice(-200)
     : []
   const statsSnapshot =
     nodelink?.statsManager &&
