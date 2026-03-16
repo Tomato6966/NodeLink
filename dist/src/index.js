@@ -693,6 +693,8 @@ class NodelinkServer extends EventEmitter {
                 allocTimer = null;
             };
             const send = (obj) => {
+                if (stopped)
+                    return;
                 try {
                     socket.send(JSON.stringify(obj));
                 }
@@ -755,7 +757,7 @@ class NodelinkServer extends EventEmitter {
                         allocTop: lastAllocReport
                     });
                     if (realtimeStore.snapshots.length > PROFILER_HISTORY_MAX) {
-                        realtimeStore.snapshots.splice(0, realtimeStore.snapshots.length - PROFILER_HISTORY_MAX);
+                        realtimeStore.snapshots.shift();
                     }
                     realtimeStore.updatedAt = Date.now();
                 }
@@ -1776,6 +1778,20 @@ class NodelinkServer extends EventEmitter {
         logger('info', 'Server', 'Registered custom player interceptor');
     }
 }
+// Guard the master / single-process against unhandled socket errors (EPIPE,
+// ECONNRESET) that surface when a WebSocket client disconnects mid-write and
+// the underlying library has already removed listeners via removeAllListeners().
+process.on('uncaughtException', (err) => {
+    if (err?.code === 'EPIPE' || err?.code === 'ECONNRESET') {
+        logger('debug', 'Server', `Suppressed uncaught socket error: ${err.code}`);
+        return;
+    }
+    logger('error', 'Server', `Uncaught Exception: ${err.stack || err.message}`);
+    process.stderr.write('', () => process.exit(1));
+});
+process.on('unhandledRejection', (reason, promise) => {
+    logger('error', 'Server', `Unhandled Rejection at: ${promise}, reason: ${reason}`);
+});
 if (clusterEnabled && cluster.isPrimary) {
     if (config.sources?.youtube?.getOAuthToken) {
         // dynamicly import OAuth (if enabled)

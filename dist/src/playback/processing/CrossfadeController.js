@@ -1,9 +1,6 @@
 import { Transform } from 'node:stream';
 import { logger } from "../../utils.js";
 import { RingBuffer } from "../structs/RingBuffer.js";
-import { estimateBpmFromOnsets, estimateBpmFromPcm } from "./bpmDetector.js";
-import { estimateKeyFromPcm } from "./keyDetector.js";
-import { RealtimeBpmTracker } from "./realtimeBpmTracker.js";
 const HALF_PI = Math.PI / 2;
 const TWO_PI = Math.PI * 2;
 const DEFAULT_CURVE = 'sinusoidal';
@@ -79,41 +76,12 @@ export class CrossfadeController extends Transform {
     _lpCompletionRatio = 0.5;
     _mainRmsEma = 0;
     _mainRmsPeak = 0;
-    _onsetBuffer = [];
-    _prevRmsForOnset = 0;
-    _detectedMainBpm = null;
-    _mainBpmDetected = false;
-    /** Approx. onset samples per second (derived from chunk cadence). */
-    _onsetChunkMs = 20;
-    _mainKeyPcm = [];
-    _mainKeyPcmBytes = 0;
-    _mainKeyDetected = false;
-    _detectedMainKey = null;
-    /** Max bytes to capture for key detection (~10 s stereo 48 kHz 16-bit). */
-    get _mainKeyMaxBytes() {
-        return this.sampleRate * this.channels * 2 * 10;
-    }
     _nextRmsEma = 0;
     _nextRmsPeak = 0;
     _nextOpeningEnergyAcc = 0;
     _nextOpeningEnergyMs = 0;
     _nextOpeningEnergy = 0;
     _nextOpeningWindowMs = 4000;
-    _nextOnsetBuffer = [];
-    _nextPrevRmsForOnset = 0;
-    _detectedNextBpm = null;
-    _nextBpmDetected = false;
-    _nextOnsetChunkMs = 20;
-    _nextBeatTracker = new RealtimeBpmTracker();
-    _nextBeatState = this._nextBeatTracker.getState();
-    _lastRealtimeNextBpmLogSec = 0;
-    _nextKeyPcm = [];
-    _nextKeyPcmBytes = 0;
-    _nextKeyDetected = false;
-    _detectedNextKey = null;
-    get _nextKeyMaxBytes() {
-        return this.sampleRate * this.channels * 2 * 10;
-    }
     _totalNextConsumedSamples = 0;
     _incomingGain = 1;
     /**
@@ -190,19 +158,9 @@ export class CrossfadeController extends Transform {
     _dynamicPulseHz = 0;
     _dynamicFrameCursor = 0;
     _dynamicPulsePhaseOffset = 0;
-    _rtBeatTracker = new RealtimeBpmTracker();
-    _rtBeatState = this._rtBeatTracker.getState();
-    _lastRealtimeBpmLogSec = 0;
-    _mainSpecLowLp = 0;
-    _mainSpecMidLp = 0;
-    _mainSpecHighLp = 0;
-    _mainSpecPrevComposite = 0;
     _mainSpecBrightnessEma = 0.42;
     _mainSpecMotionEma = 0.22;
     _mainSpecCentroidEma = 0.38;
-    _mainSpecLowAlpha = 0;
-    _mainSpecMidAlpha = 0;
-    _mainSpecHighAlpha = 0;
     // Live multiband unmasking for "medley-like" overlap instead of plain fade.
     _adaptiveBandBlendEnabled = true;
     _mixBandLowAlpha = 0;
@@ -635,9 +593,6 @@ export class CrossfadeController extends Transform {
         this._fusionBandHighAlpha = this._computeOnePoleAlpha(2800);
         this._fusionAmbientAlpha = this._computeOnePoleAlpha(1800);
         this._fusionMainLpAlpha = this._computeOnePoleAlpha(1700);
-        this._mainSpecLowAlpha = this._computeOnePoleAlpha(180);
-        this._mainSpecMidAlpha = this._computeOnePoleAlpha(900);
-        this._mainSpecHighAlpha = this._computeOnePoleAlpha(3200);
         this._mixBandLowAlpha = this._computeOnePoleAlpha(180);
         this._mixBandHighAlpha = this._computeOnePoleAlpha(2600);
         this.setMaxListeners(20);
@@ -813,7 +768,7 @@ export class CrossfadeController extends Transform {
      * Scans Track B's buffer and skips forward until it finds a window that
      * matches the target RMS energy and (optionally) the target beat phase.
      */
-    seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, targetBeatState) {
+    seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, _targetBeatState) {
         if (!this.ringBuffer || this.ringBuffer.length < 4)
             return;
         const rawTransition = typeof transitionName === 'string' ? transitionName : '';
@@ -870,11 +825,9 @@ export class CrossfadeController extends Transform {
             transition === 'pulse_tunnel' ||
             transition === 'filter_sweep' ||
             transition === 'highpass_dissolve';
-        // Fusion mode: prioritize beat phase alignment for transparent handoffs.
-        const targetPhase = targetBeatState?.locked && targetBeatState.bpm > 0
-            ? targetBeatState.phase
-            : null;
-        const targetBpm = targetBeatState?.bpm ?? null;
+        // Beat phase alignment removed — no real-time BPM tracking
+        const targetPhase = null;
+        const targetBpm = null;
         const energies = [];
         const transients = [];
         const phases = [];
@@ -915,30 +868,6 @@ export class CrossfadeController extends Transform {
         const mainMotionRef = Math.max(0.04, Math.min(0.9, this._mainSpecMotionEma));
         const mainCentroidRef = Math.max(0.08, Math.min(0.95, this._mainSpecCentroidEma));
         // Pre-track B analysis for phase alignment if needed
-        const bBeatTracker = new RealtimeBpmTracker();
-        if (targetPhase !== null && targetBpm) {
-            // Warm up tracker with peek data to find B's beat phase
-            const stepMs = 20;
-            const stepSamples = Math.floor((stepMs / 1000) * this.sampleRate) * this.channels;
-            for (let i = 0; i < samples - stepSamples; i += stepSamples) {
-                let sumSq = 0;
-                let count = 0;
-                for (let j = 0; j < stepSamples; j += this.channels * 2) {
-                    const sampleIndex = i + j;
-                    if (sampleIndex + this.channels > samples)
-                        break;
-                    const l = peekData.readInt16LE(sampleIndex * 2);
-                    const r = this.channels > 1 ? peekData.readInt16LE((sampleIndex + 1) * 2) : l;
-                    const mid = (l + r) * 0.5;
-                    sumSq += mid * mid;
-                    count++;
-                }
-                if (count > 0) {
-                    const rms = Math.sqrt(sumSq / count) / 32768;
-                    bBeatTracker.push(rms, stepMs / 1000);
-                }
-            }
-        }
         for (let i = 0; i <= samples - windowSamples; i += windowSamples) {
             let sumSq = 0;
             let count = 0;
@@ -1019,31 +948,7 @@ export class CrossfadeController extends Transform {
             spectralBrightness.push(bright);
             spectralMotion.push(motion);
             spectralCentroids.push(centroidNorm);
-            if (targetPhase !== null) {
-                const timeAtWindow = i / (this.sampleRate * this.channels);
-                const bState = bBeatTracker.getState();
-                const bpmRatio = targetBpm && targetBpm > 0 && bState.bpm > 0
-                    ? Math.max(targetBpm, bState.bpm) /
-                        Math.max(1e-6, Math.min(targetBpm, bState.bpm))
-                    : 1;
-                const bpmCoherent = bpmRatio <= 1.35 || (bpmRatio >= 1.8 && bpmRatio <= 2.25);
-                // Estimate phase at this window start
-                if (bState.locked &&
-                    bState.bpm > 0 &&
-                    bState.confidence >= phaseConfidenceGate &&
-                    bpmCoherent) {
-                    const period = 60 / bState.bpm;
-                    const cycles = timeAtWindow / period;
-                    const phase = (bState.phase + cycles) % 1;
-                    phases.push(phase);
-                }
-                else {
-                    phases.push(-1);
-                }
-            }
-            else {
-                phases.push(-1);
-            }
+            phases.push(-1);
         }
         if (energies.length < 2)
             return;
@@ -1699,35 +1604,12 @@ export class CrossfadeController extends Transform {
         this._entryFxLowDuckBoost = 0;
         this._entryFxAirSoftenBoost = 0;
         this._entryFxSidechainBoost = 0;
-        this._onsetBuffer = [];
-        this._prevRmsForOnset = 0;
-        this._detectedMainBpm = null;
-        this._mainBpmDetected = false;
-        this._rtBeatTracker.reset();
-        this._rtBeatState = this._rtBeatTracker.getState();
-        this._lastRealtimeBpmLogSec = 0;
         this._nextRmsEma = 0;
         this._nextRmsPeak = 0;
         this._totalNextConsumedSamples = 0;
         this._nextOpeningEnergyAcc = 0;
         this._nextOpeningEnergyMs = 0;
         this._nextOpeningEnergy = 0;
-        this._nextOnsetBuffer = [];
-        this._nextPrevRmsForOnset = 0;
-        this._detectedNextBpm = null;
-        this._nextBpmDetected = false;
-        this._nextOnsetChunkMs = 20;
-        this._nextBeatTracker.reset();
-        this._nextBeatState = this._nextBeatTracker.getState();
-        this._lastRealtimeNextBpmLogSec = 0;
-        this._nextKeyPcm = [];
-        this._nextKeyPcmBytes = 0;
-        this._nextKeyDetected = false;
-        this._detectedNextKey = null;
-        this._mainSpecLowLp = 0;
-        this._mainSpecMidLp = 0;
-        this._mainSpecHighLp = 0;
-        this._mainSpecPrevComposite = 0;
         this._mainSpecBrightnessEma = 0.42;
         this._mainSpecMotionEma = 0.22;
         this._mainSpecCentroidEma = 0.38;
@@ -1780,11 +1662,8 @@ export class CrossfadeController extends Transform {
      * a +3dB boost and clipping. We cross-fade between Equal Power and Equal Gain.
      */
     _computeCoherenceGains(gainOut, gainIn, progress) {
-        const beatLocked = this._rtBeatState.locked && this._rtBeatState.confidence > 0.45;
-        // Correlation estimation (Bio-inspired heuristic)
-        const correlation = beatLocked
-            ? 0.45 + this._rtBeatState.confidence * 0.45
-            : 0.12 + (this._dynamicToneMismatchEma < 1.1 ? 0.08 : 0);
+        const beatLocked = false;
+        const correlation = 0.12 + (this._dynamicToneMismatchEma < 1.1 ? 0.08 : 0);
         const sumSq = gainOut * gainOut + gainIn * gainIn;
         const sum = gainOut + gainIn;
         // normP: Equal-power (preserves energy for uncorrelated signals)
@@ -1885,46 +1764,10 @@ export class CrossfadeController extends Transform {
         this._fusionOutFloorPeak = Math.max(0.36, Math.min(0.66, holdPeak));
         this._fusionOutFloorTail = fusionPremium ? 0.06 : 0.05;
         this._fusionTailHoldEnabled = true;
-        const bpmA = (this._rtBeatState.locked && this._rtBeatState.bpm > 0
-            ? this._rtBeatState.bpm
-            : null) ??
-            this._detectedMainBpm ??
-            this.getMainTrackBpm();
-        const bpmB = (this._nextBeatState.locked && this._nextBeatState.bpm > 0
-            ? this._nextBeatState.bpm
-            : null) ??
-            this._detectedNextBpm ??
-            this.getNextTrackBpm();
-        if (!(bpmA && bpmA > 0 && bpmB && bpmB > 0))
-            return;
-        const fromHz = Math.max(0.7, Math.min(3.4, bpmA / 60));
-        const toHz = Math.max(0.7, Math.min(3.4, bpmB / 60));
-        const diffRatio = Math.abs(fromHz - toHz) / Math.max(fromHz, toHz, 1e-6);
-        let strength = (fusionPremium ? 0.16 : 0.13) + diffRatio * 0.52;
-        strength = Math.max(0.14, Math.min(0.4, strength));
-        this._fusionBeatMorphEnabled = diffRatio > 0.012;
-        this._fusionBeatMorphFromHz = fromHz;
-        this._fusionBeatMorphToHz = toHz;
-        this._fusionBeatMorphStrength = strength;
-        logger('debug', 'AutoMix', `Fusion profile: ${transition} BPM ${bpmA.toFixed(1)}→${bpmB.toFixed(1)} (hold ${Math.round(this._fusionOutFloorPeak * 100)}%, beat-morph ${Math.round(strength * 100)}%)`);
     }
     _bootstrapDynamicPulse() {
-        const liveBpm = this._rtBeatState.locked && this._rtBeatState.bpm > 0
-            ? this._rtBeatState.bpm
-            : null;
-        const bpm = liveBpm ??
-            this._detectedMainBpm ??
-            this.getNextTrackBpm() ??
-            this.getMainTrackBpm();
-        if (!bpm || !Number.isFinite(bpm) || bpm <= 0) {
-            this._dynamicPulseHz = 0;
-            this._dynamicPulsePhaseOffset = 0;
-            return;
-        }
-        this._dynamicPulseHz = Math.max(0.7, Math.min(3.4, bpm / 60));
-        this._dynamicPulsePhaseOffset = this._rtBeatState.locked
-            ? this._rtBeatState.phase
-            : 0;
+        this._dynamicPulseHz = 0;
+        this._dynamicPulsePhaseOffset = 0;
     }
     _computeDynamicMixState(mainL, mainR, nextL, nextR, progress) {
         if (!this._dynamicMixEnabled) {
@@ -1965,9 +1808,7 @@ export class CrossfadeController extends Transform {
         const toneOpenBoost = Math.max(0, Math.min(0.14, (this._dynamicToneMismatchEma - 1.15) * 0.18));
         const toneSoften = Math.max(0, Math.min(0.1, (0.88 - this._dynamicToneMismatchEma) * 0.16));
         const unlockedConfidence = Math.max(0, Math.min(1, transientNorm * 0.6 + energyNorm * 0.4));
-        const beatConfidence = this._rtBeatState.locked
-            ? Math.max(0, Math.min(1, this._rtBeatState.confidence))
-            : unlockedConfidence * 0.55;
+        const beatConfidence = unlockedConfidence * 0.55;
         let pulse = 0.5;
         if (this._dynamicPulseHz > 0) {
             const timeSec = this._dynamicFrameCursor / this.sampleRate;
@@ -1975,9 +1816,7 @@ export class CrossfadeController extends Transform {
             const sinus = (Math.sin(phase * Math.PI * 2) + 1) / 2;
             const distToBeat = Math.min(Math.abs(phase), Math.abs(1 - phase));
             const beatAccent = Math.max(0, 1 - distToBeat / 0.18);
-            const lockWeight = this._rtBeatState.locked
-                ? Math.max(0.35, beatConfidence)
-                : 0.22;
+            const lockWeight = 0.22;
             pulse = sinus * (1 - lockWeight) + beatAccent * lockWeight;
         }
         this._dynamicFrameCursor++;
@@ -1985,9 +1824,7 @@ export class CrossfadeController extends Transform {
         const pulseInfluence = 0.06 + beatConfidence * 0.07;
         const pivotZone = Math.max(0, 1 - Math.abs(progress - 0.58) / 0.26);
         const pivotPunch = (transientNorm * 0.55 + energyNorm * 0.35) * pivotZone;
-        const dynamicGate = this._rtBeatState.locked
-            ? 0.82 + beatConfidence * 0.18
-            : 0.74 + unlockedConfidence * 0.16;
+        const dynamicGate = 0.74 + unlockedConfidence * 0.16;
         const inBias = Math.max(-0.08, Math.min(0.24, (energyNorm * 0.1 +
             transientNorm * 0.16 +
             (pulse - 0.5) * pulseInfluence +
@@ -2520,10 +2357,8 @@ export class CrossfadeController extends Transform {
         return [gainOut, gainIn];
     }
     /**
-     * Updates live analysis for the preloaded next track (Track B).
-     *
-     * This runs continuously while Track B buffers so automix decisions can
-     * use real internal signals instead of relying on external metadata.
+     * Updates lightweight RMS analysis for the preloaded next track (Track B).
+     * Only tracks RMS energy and opening energy average.
      */
     _updateNextTrackAnalysis(chunk) {
         const samples = chunk.length >> 1;
@@ -2531,7 +2366,7 @@ export class CrossfadeController extends Transform {
             return;
         let sumSq = 0;
         let count = 0;
-        for (let i = 0; i < samples; i += 32) {
+        for (let i = 0; i < samples; i += 64) {
             const s = chunk.readInt16LE(i * 2);
             sumSq += s * s;
             count++;
@@ -2542,8 +2377,6 @@ export class CrossfadeController extends Transform {
         this._nextRmsEma = this._nextRmsEma * 0.85 + rms * 0.15;
         this._nextRmsPeak = Math.max(this._nextRmsPeak * 0.9985, rms);
         const chunkMs = (chunk.length / 2 / this.channels / this.sampleRate) * 1000;
-        if (chunkMs > 0)
-            this._nextOnsetChunkMs = chunkMs;
         if (this._nextOpeningEnergyMs < this._nextOpeningWindowMs && chunkMs > 0) {
             const remainingWindow = this._nextOpeningWindowMs - this._nextOpeningEnergyMs;
             const usedMs = Math.min(remainingWindow, chunkMs);
@@ -2554,55 +2387,10 @@ export class CrossfadeController extends Transform {
                     this._nextOpeningEnergyAcc / this._nextOpeningEnergyMs;
             }
         }
-        const onset = Math.max(0, rms - this._nextPrevRmsForOnset);
-        this._nextPrevRmsForOnset = rms;
-        this._nextOnsetBuffer.push(onset);
-        const maxOnsets = Math.max(64, Math.round(20000 / Math.max(1, this._nextOnsetChunkMs)));
-        if (this._nextOnsetBuffer.length > maxOnsets) {
-            this._nextOnsetBuffer.shift();
-        }
-        if (chunkMs > 0) {
-            this._nextBeatState = this._nextBeatTracker.push(onset, chunkMs / 1000);
-            if (this._nextBeatState.locked &&
-                this._nextBeatState.bpm > 0 &&
-                (!this._detectedNextBpm ||
-                    Math.abs(this._detectedNextBpm - this._nextBeatState.bpm) > 0.9)) {
-                this._detectedNextBpm = Math.round(this._nextBeatState.bpm * 10) / 10;
-                this._nextBpmDetected = true;
-                const shouldLog = this._nextBeatState.timeSec - this._lastRealtimeNextBpmLogSec >= 8;
-                if (shouldLog) {
-                    this._lastRealtimeNextBpmLogSec = this._nextBeatState.timeSec;
-                    logger('info', 'AutoMix', `Next track BPM locked in preload: ${this._detectedNextBpm} (confidence ${(this._nextBeatState.confidence * 100).toFixed(0)}%)`);
-                }
-            }
-        }
-        if (!this._nextBpmDetected &&
-            this._nextOnsetBuffer.length >= Math.round(6000 / this._nextOnsetChunkMs)) {
-            const onsetsPerSec = 1000 / this._nextOnsetChunkMs;
-            this._detectedNextBpm = estimateBpmFromOnsets(this._nextOnsetBuffer, onsetsPerSec);
-            this._nextBpmDetected = true;
-            if (this._detectedNextBpm) {
-                logger('info', 'AutoMix', `Next track BPM detected from preload audio: ${this._detectedNextBpm}`);
-            }
-        }
-        if (!this._nextKeyDetected &&
-            this._nextKeyPcmBytes < this._nextKeyMaxBytes) {
-            this._nextKeyPcm.push(Buffer.from(chunk));
-            this._nextKeyPcmBytes += chunk.length;
-            if (this._nextKeyPcmBytes >= this.sampleRate * this.channels * 2 * 5) {
-                const fullPcm = Buffer.concat(this._nextKeyPcm);
-                this._detectedNextKey = estimateKeyFromPcm(fullPcm, this.sampleRate, this.channels);
-                this._nextKeyDetected = true;
-                this._nextKeyPcm = [];
-                if (this._detectedNextKey) {
-                    logger('info', 'AutoMix', `Next track key detected from preload audio: ${this._detectedNextKey.key} (${this._detectedNextKey.camelot}, confidence: ${(this._detectedNextKey.confidence * 100).toFixed(0)}%)`);
-                }
-            }
-        }
     }
     /**
      * Update the smoothed RMS energy of the main stream (track A).
-     * Called on every chunk flowing through _transform.
+     * Lightweight — only tracks RMS for silence detection and basic energy.
      */
     _updateEnergy(chunk) {
         const samples = chunk.length >> 1;
@@ -2610,176 +2398,25 @@ export class CrossfadeController extends Transform {
             return;
         let sumSq = 0;
         let count = 0;
-        let sumBass = 0;
-        let sumMid = 0;
-        let sumTreble = 0;
-        let sumFlux = 0;
-        for (let i = 0; i < samples; i += 32) {
+        for (let i = 0; i < samples; i += 64) {
             const s = chunk.readInt16LE(i * 2);
             sumSq += s * s;
-            this._mainSpecLowLp += this._mainSpecLowAlpha * (s - this._mainSpecLowLp);
-            this._mainSpecMidLp += this._mainSpecMidAlpha * (s - this._mainSpecMidLp);
-            this._mainSpecHighLp +=
-                this._mainSpecHighAlpha * (s - this._mainSpecHighLp);
-            const bass = Math.abs(this._mainSpecLowLp);
-            const midBand = Math.abs(this._mainSpecMidLp - this._mainSpecLowLp);
-            const treble = Math.abs(s - this._mainSpecHighLp);
-            sumBass += bass;
-            sumMid += midBand;
-            sumTreble += treble;
-            const composite = midBand + treble * 1.15;
-            sumFlux += Math.abs(composite - this._mainSpecPrevComposite);
-            this._mainSpecPrevComposite = composite;
             count++;
         }
         if (count === 0)
             return;
-        const rms = Math.sqrt(sumSq / count) / 32768; // normalized 0-1
-        this._mainRmsEma = this._mainRmsEma * 0.85 + rms * 0.15; // Fast-responding EMA
-        this._mainRmsPeak = Math.max(this._mainRmsPeak * 0.9985, rms); // Slowly decaying peak
-        const toneTotal = sumBass + sumMid + sumTreble + 1;
-        const brightness = Math.max(0, Math.min(1, (sumTreble * 1.1 + sumMid * 0.42) / toneTotal));
-        const motion = Math.max(0, Math.min(1, sumFlux / (sumMid + sumTreble + 1) / 0.65));
-        const centroidNorm = Math.max(0, Math.min(1, (sumBass * 140 + sumMid * 900 + sumTreble * 3200) / toneTotal / 3800));
-        this._mainSpecBrightnessEma =
-            this._mainSpecBrightnessEma * 0.92 + brightness * 0.08;
-        this._mainSpecMotionEma = this._mainSpecMotionEma * 0.9 + motion * 0.1;
-        this._mainSpecCentroidEma =
-            this._mainSpecCentroidEma * 0.92 + centroidNorm * 0.08;
-        const chunkMs = (chunk.length / 2 / this.channels / this.sampleRate) * 1000;
-        if (chunkMs > 0)
-            this._onsetChunkMs = chunkMs;
-        const onset = Math.max(0, rms - this._prevRmsForOnset);
-        this._prevRmsForOnset = rms;
-        this._onsetBuffer.push(onset);
-        if (chunkMs > 0) {
-            this._rtBeatState = this._rtBeatTracker.push(onset, chunkMs / 1000);
-            if (this._rtBeatState.locked &&
-                this._rtBeatState.bpm > 0 &&
-                (!this._detectedMainBpm ||
-                    Math.abs(this._detectedMainBpm - this._rtBeatState.bpm) > 0.9)) {
-                this._detectedMainBpm = Math.round(this._rtBeatState.bpm * 10) / 10;
-                const shouldLog = this._rtBeatState.timeSec - this._lastRealtimeBpmLogSec >= 8;
-                if (shouldLog) {
-                    this._lastRealtimeBpmLogSec = this._rtBeatState.timeSec;
-                    logger('info', 'AutoMix', `Main track BPM locked in real-time: ${this._detectedMainBpm} (confidence ${(this._rtBeatState.confidence * 100).toFixed(0)}%)`);
-                }
-            }
-        }
-        if (!this._mainBpmDetected &&
-            this._onsetBuffer.length >= Math.round(8000 / this._onsetChunkMs)) {
-            const onsetsPerSec = 1000 / this._onsetChunkMs;
-            this._detectedMainBpm = estimateBpmFromOnsets(this._onsetBuffer, onsetsPerSec);
-            this._mainBpmDetected = true;
-            if (this._detectedMainBpm) {
-                logger('info', 'AutoMix', `Main track BPM detected from audio: ${this._detectedMainBpm}`);
-            }
-        }
-        if (!this._mainKeyDetected &&
-            this._mainKeyPcmBytes < this._mainKeyMaxBytes) {
-            this._mainKeyPcm.push(Buffer.from(chunk));
-            this._mainKeyPcmBytes += chunk.length;
-            if (this._mainKeyPcmBytes >= this.sampleRate * this.channels * 2 * 5) {
-                const fullPcm = Buffer.concat(this._mainKeyPcm);
-                this._detectedMainKey = estimateKeyFromPcm(fullPcm, this.sampleRate, this.channels);
-                this._mainKeyDetected = true;
-                this._mainKeyPcm = []; // Free memory
-                if (this._detectedMainKey) {
-                    logger('info', 'AutoMix', `Main track key detected from audio: ${this._detectedMainKey.key} (${this._detectedMainKey.camelot}, confidence: ${(this._detectedMainKey.confidence * 100).toFixed(0)}%)`);
-                }
-            }
-        }
+        const rms = Math.sqrt(sumSq / count) / 32768;
+        this._mainRmsEma = this._mainRmsEma * 0.85 + rms * 0.15;
+        this._mainRmsPeak = Math.max(this._mainRmsPeak * 0.9985, rms);
     }
+    _mainEnergyResult = { rms: 0, peak: 0 };
     /**
      * Returns the current smoothed energy of the main stream.
-     * Used by the player for intelligent transition point detection.
      */
     getMainEnergy() {
-        return { rms: this._mainRmsEma, peak: this._mainRmsPeak };
-    }
-    /**
-     * Calculates the average RMS energy of Track B's opening seconds
-     * from the ring buffer (non-destructive peek).
-     * Returns 0 if ring buffer is not ready.
-     */
-    /**
-     * Returns the BPM detected from the main stream's onset envelope,
-     * or null if not enough data has been accumulated yet.
-     */
-    getMainTrackBpm() {
-        if (this._rtBeatState.locked && this._rtBeatState.bpm > 0) {
-            const live = Math.round(this._rtBeatState.bpm * 10) / 10;
-            this._detectedMainBpm = live;
-            this._mainBpmDetected = true;
-            return live;
-        }
-        if (!this._mainBpmDetected &&
-            this._onsetBuffer.length >= Math.round(4000 / this._onsetChunkMs)) {
-            const onsetsPerSec = 1000 / this._onsetChunkMs;
-            this._detectedMainBpm = estimateBpmFromOnsets(this._onsetBuffer, onsetsPerSec);
-            this._mainBpmDetected = true;
-            if (this._detectedMainBpm) {
-                logger('info', 'AutoMix', `Main track BPM detected from audio (eager): ${this._detectedMainBpm}`);
-            }
-        }
-        return this._detectedMainBpm;
-    }
-    getRealtimeBeatState() {
-        return this._rtBeatState;
-    }
-    /**
-     * Returns the musical key detected from the main stream's captured PCM,
-     * or null if not enough audio has been accumulated yet.
-     */
-    getMainTrackKey() {
-        if (!this._mainKeyDetected &&
-            this._mainKeyPcmBytes >= this.sampleRate * this.channels * 2 * 3) {
-            const fullPcm = Buffer.concat(this._mainKeyPcm);
-            this._detectedMainKey = estimateKeyFromPcm(fullPcm, this.sampleRate, this.channels);
-            this._mainKeyDetected = true;
-            this._mainKeyPcm = []; // Free memory
-            if (this._detectedMainKey) {
-                logger('info', 'AutoMix', `Main track key detected from audio (eager): ${this._detectedMainKey.key} (${this._detectedMainKey.camelot})`);
-            }
-        }
-        return this._detectedMainKey;
-    }
-    /**
-     * Detects BPM from the buffered next track (Track B) ring buffer.
-     * Non-destructive — peeks up to ~10 s of PCM data.
-     * Returns null if the ring buffer is too small or detection fails.
-     */
-    getNextTrackBpm() {
-        if (this._nextBeatState.locked && this._nextBeatState.bpm > 0) {
-            const live = Math.round(this._nextBeatState.bpm * 10) / 10;
-            this._detectedNextBpm = live;
-            this._nextBpmDetected = true;
-            return live;
-        }
-        if (!this._nextBpmDetected &&
-            this._nextOnsetBuffer.length >= Math.round(4000 / this._nextOnsetChunkMs)) {
-            const onsetsPerSec = 1000 / this._nextOnsetChunkMs;
-            this._detectedNextBpm = estimateBpmFromOnsets(this._nextOnsetBuffer, onsetsPerSec);
-            this._nextBpmDetected = true;
-            if (this._detectedNextBpm) {
-                logger('info', 'AutoMix', `Next track BPM detected from preload audio (eager): ${this._detectedNextBpm}`);
-            }
-        }
-        if (this._detectedNextBpm)
-            return this._detectedNextBpm;
-        if (!this.ringBuffer ||
-            this.ringBuffer.length < Math.round(3000 * this.bytesPerMs))
-            return null;
-        const maxBytes = Math.min(Math.round(10000 * this.bytesPerMs), this.ringBuffer.length);
-        const peek = this.ringBuffer.peek(maxBytes);
-        if (!peek || peek.length < 4)
-            return null;
-        const fallback = estimateBpmFromPcm(peek, this.sampleRate, this.channels);
-        if (fallback) {
-            this._detectedNextBpm = fallback;
-            this._nextBpmDetected = true;
-        }
-        return fallback;
+        this._mainEnergyResult.rms = this._mainRmsEma;
+        this._mainEnergyResult.peak = this._mainRmsPeak;
+        return this._mainEnergyResult;
     }
     getNextTrackOpeningEnergy() {
         if (this._nextOpeningEnergyMs >= 500 && this._nextOpeningEnergy > 0) {
@@ -2802,42 +2439,6 @@ export class CrossfadeController extends Transform {
         if (count === 0)
             return 0;
         return Math.sqrt(sumSq / count) / 32768;
-    }
-    getNextTrackBeatState() {
-        return this._nextBeatState;
-    }
-    /**
-     * Detects the musical key from the buffered next track (Track B) ring buffer.
-     * Non-destructive — peeks up to ~10 s of PCM data.
-     * Uses Goertzel-based chroma analysis + Krumhansl-Kessler key profiles.
-     * Returns null if the ring buffer is too small or detection fails.
-     */
-    getNextTrackKey() {
-        if (!this._nextKeyDetected &&
-            this._nextKeyPcmBytes >= this.sampleRate * this.channels * 2 * 3) {
-            const fullPcm = Buffer.concat(this._nextKeyPcm);
-            this._detectedNextKey = estimateKeyFromPcm(fullPcm, this.sampleRate, this.channels);
-            this._nextKeyDetected = true;
-            this._nextKeyPcm = [];
-            if (this._detectedNextKey) {
-                logger('info', 'AutoMix', `Next track key detected from preload audio (eager): ${this._detectedNextKey.key} (${this._detectedNextKey.camelot})`);
-            }
-        }
-        if (this._detectedNextKey)
-            return this._detectedNextKey;
-        if (!this.ringBuffer ||
-            this.ringBuffer.length < Math.round(3000 * this.bytesPerMs))
-            return null;
-        const maxBytes = Math.min(Math.round(10000 * this.bytesPerMs), this.ringBuffer.length);
-        const peek = this.ringBuffer.peek(maxBytes);
-        if (!peek || peek.length < 4)
-            return null;
-        const fallback = estimateKeyFromPcm(peek, this.sampleRate, this.channels);
-        if (fallback) {
-            this._detectedNextKey = fallback;
-            this._nextKeyDetected = true;
-        }
-        return fallback;
     }
     _transform(chunk, _encoding, callback) {
         let data = chunk;

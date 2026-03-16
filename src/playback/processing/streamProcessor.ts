@@ -468,9 +468,7 @@ class BaseAudioResource {
           targetRms: number,
           crossfadeDurationMs: number,
           transitionName?: string | null,
-          targetBeatState?:
-            | import('../../typings/playback/player.types.ts').RealtimeBeatState
-            | null
+          targetBeatState?: unknown
         ) => void
         setIncomingGain?: (multiplier: number) => void
         setIncomingHighpass?: (enabled: boolean, peakAlpha?: number) => void
@@ -489,23 +487,8 @@ class BaseAudioResource {
         ) => void
         setOutgoingPan?: (enabled: boolean, completionRatio?: number) => void
         setFilterBypass?: (bypass: boolean) => void
-        setEnergyTracking?: (enabled: boolean) => void
         getMainEnergy?: () => { rms: number; peak: number } | null
         getNextTrackOpeningEnergy?: () => number
-        getMainTrackBpm?: () => number | null
-        getNextTrackBpm?: () => number | null
-        getRealtimeBeatState?: () =>
-          | import('../../typings/playback/player.types.ts').RealtimeBeatState
-          | null
-        getNextTrackBeatState?: () =>
-          | import('../../typings/playback/player.types.ts').RealtimeBeatState
-          | null
-        getMainTrackKey?: () =>
-          | import('../../typings/playback/player.types.ts').TrackKeyResult
-          | null
-        getNextTrackKey?: () =>
-          | import('../../typings/playback/player.types.ts').TrackKeyResult
-          | null
         getEnergySkipMs?: () => number
         getCrossfadeConsumedNextMs?: () => number
         isBridgeMode?: () => boolean
@@ -549,9 +532,7 @@ class BaseAudioResource {
       targetRms: number,
       crossfadeDurationMs: number,
       transitionName?: string | null,
-      targetBeatState?:
-        | import('../../typings/playback/player.types.ts').RealtimeBeatState
-        | null
+      targetBeatState?: unknown
     ) =>
       this.seekToEnergyMatch(
         targetRms,
@@ -581,17 +562,9 @@ class BaseAudioResource {
       this.setOutgoingPan(enabled, completionRatio)
     voiceStream.setFilterBypass = (bypass: boolean) =>
       this.setFilterBypass(bypass)
-    voiceStream.setEnergyTracking = (enabled: boolean) =>
-      this.setEnergyTracking(enabled)
     voiceStream.getMainEnergy = () => this.getMainEnergy()
     voiceStream.getNextTrackOpeningEnergy = () =>
       this.getNextTrackOpeningEnergy()
-    voiceStream.getMainTrackBpm = () => this.getMainTrackBpm()
-    voiceStream.getNextTrackBpm = () => this.getNextTrackBpm()
-    voiceStream.getRealtimeBeatState = () => this.getRealtimeBeatState()
-    voiceStream.getNextTrackBeatState = () => this.getNextTrackBeatState()
-    voiceStream.getMainTrackKey = () => this.getMainTrackKey()
-    voiceStream.getNextTrackKey = () => this.getNextTrackKey()
     voiceStream.getEnergySkipMs = () => this.getEnergySkipMs()
     voiceStream.getCrossfadeConsumedNextMs = () =>
       this.getCrossfadeConsumedNextMs()
@@ -671,9 +644,7 @@ class BaseAudioResource {
     _targetRms: number,
     _crossfadeDurationMs: number,
     _transitionName?: string | null,
-    _targetBeatState?:
-      | import('../../typings/playback/player.types.ts').RealtimeBeatState
-      | null
+    _targetBeatState?: unknown
   ): void {}
 
   setIncomingGain(_multiplier: number): void {}
@@ -699,8 +670,6 @@ class BaseAudioResource {
   setOutgoingPan(_enabled: boolean, _completionRatio?: number): void {}
 
   setFilterBypass(_bypass: boolean): void {}
-
-  setEnergyTracking(_enabled: boolean): void {}
 
   clearCrossfade(): void {}
 
@@ -737,44 +706,12 @@ class BaseAudioResource {
     return silenceDetector?.isSilent() ?? false
   }
 
-  getRealtimeBeatState():
-    | import('../../typings/playback/player.types.ts').RealtimeBeatState
-    | null {
-    return null
-  }
-
-  getNextTrackBeatState():
-    | import('../../typings/playback/player.types.ts').RealtimeBeatState
-    | null {
-    return null
-  }
-
-  getMainTrackKey():
-    | import('../../typings/playback/player.types.ts').TrackKeyResult
-    | null {
-    return null
-  }
-
-  getNextTrackKey():
-    | import('../../typings/playback/player.types.ts').TrackKeyResult
-    | null {
-    return null
-  }
-
   getMainEnergy(): { rms: number; peak: number } | null {
     return null
   }
 
   getNextTrackOpeningEnergy(): number {
     return 0
-  }
-
-  getMainTrackBpm(): number | null {
-    return null
-  }
-
-  getNextTrackBpm(): number | null {
-    return null
   }
 
   getEnergySkipMs(): number {
@@ -2811,9 +2748,7 @@ class StreamAudioResource extends BaseAudioResource {
     targetRms: number,
     crossfadeDurationMs: number,
     transitionName?: string | null,
-    targetBeatState?:
-      | import('../../typings/playback/player.types.ts').RealtimeBeatState
-      | null
+    targetBeatState?: unknown
   ): void {
     this.crossfadeController?.seekToEnergyMatch(
       targetRms,
@@ -2841,10 +2776,6 @@ class StreamAudioResource extends BaseAudioResource {
 
   override setFilterBypass(bypass: boolean): void {
     this.crossfadeController?.setFilterBypass(bypass)
-  }
-
-  override setEnergyTracking(enabled: boolean): void {
-    this.crossfadeController?.setEnergyTracking(enabled)
   }
 
   override setIncomingPan(enabled: boolean, completionRatio?: number): void {
@@ -2928,44 +2859,12 @@ class StreamAudioResource extends BaseAudioResource {
     )
   }
 
-  override getMainTrackKey():
-    | import('../../typings/playback/player.types.ts').TrackKeyResult
-    | null {
-    return this.crossfadeController?.getMainTrackKey() ?? null
-  }
-
-  override getNextTrackKey():
-    | import('../../typings/playback/player.types.ts').TrackKeyResult
-    | null {
-    return this.crossfadeController?.getNextTrackKey() ?? null
-  }
-
   override getMainEnergy(): { rms: number; peak: number } | null {
     return this.crossfadeController?.getMainEnergy() ?? null
   }
 
   override getNextTrackOpeningEnergy(): number {
     return this.crossfadeController?.getNextTrackOpeningEnergy() ?? 0
-  }
-
-  override getMainTrackBpm(): number | null {
-    return this.crossfadeController?.getMainTrackBpm() ?? null
-  }
-
-  override getNextTrackBpm(): number | null {
-    return this.crossfadeController?.getNextTrackBpm() ?? null
-  }
-
-  override getRealtimeBeatState():
-    | import('../../typings/playback/player.types.ts').RealtimeBeatState
-    | null {
-    return this.crossfadeController?.getRealtimeBeatState() ?? null
-  }
-
-  override getNextTrackBeatState():
-    | import('../../typings/playback/player.types.ts').RealtimeBeatState
-    | null {
-    return this.crossfadeController?.getNextTrackBeatState() ?? null
   }
 
   override getEffectiveRate(): number {

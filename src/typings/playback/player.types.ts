@@ -69,7 +69,7 @@ export interface CrossfadeConfig {
   duration?: number
 
   /**
-   * Blending style when AutoMix is disabled.
+   * Blending style for crossfade.
    * - `standard`: Simple volume crossfade.
    * - `fusion`: Advanced spectral/bass-aware blending.
    */
@@ -244,29 +244,8 @@ export interface AudioResource {
   stream?: VoiceAudioStream | null
 }
 
-export interface TrackKeyResult {
-  key: string
-  pitchClass: number
-  mode: 'major' | 'minor'
-  camelot: string
-  camelotNum: number
-  confidence: number
-  stability?: number
-  tonalClarity?: number
-  modeAmbiguity?: number
-}
-
 export interface TrackEnergy {
   rms: number
-}
-
-export interface RealtimeBeatState {
-  timeSec: number
-  bpm: number
-  confidence: number
-  phase: number
-  locked: boolean
-  lastBeatAgeSec: number
 }
 
 export interface ExtendedCrossfadeController {
@@ -282,14 +261,7 @@ export interface ExtendedAudioStream extends AudioResource {
   crossfadeController?: ExtendedCrossfadeController | null
   getMainEnergy?: () => TrackEnergy | null
   getNextTrackOpeningEnergy?: () => number
-  getMainTrackBpm?: () => number | null
-  getNextTrackBpm?: () => number | null
-  getRealtimeBeatState?: () => RealtimeBeatState
-  getNextTrackBeatState?: () => RealtimeBeatState | null
-  getMainTrackKey?: () => TrackKeyResult | null
-  getNextTrackKey?: () => TrackKeyResult | null
   setFilterBypass?: (enabled: boolean) => void
-  setEnergyTracking?: (enabled: boolean) => void
   setIncomingHighpass?: (enabled: boolean, alpha?: number) => void
   setIncomingLowpass?: (
     enabled: boolean,
@@ -309,7 +281,7 @@ export interface ExtendedAudioStream extends AudioResource {
     rms: number,
     durationMs: number,
     transition?: string | null,
-    targetBeatState?: RealtimeBeatState | null
+    targetBeatState?: unknown
   ) => void
   getEnergySkipMs?: () => number
   getCrossfadeConsumedNextMs?: () => number
@@ -334,13 +306,6 @@ export interface FilterStateEntry extends Record<string, unknown> {
 export interface DeezerTrackMetadata {
   bpm?: number | string | null
   gain?: number | string | null
-  [key: string]: unknown
-}
-
-export interface DeezerApiTrackResponse {
-  bpm?: number | string | null
-  gain?: number | string | null
-  error?: unknown
   [key: string]: unknown
 }
 
@@ -435,20 +400,6 @@ export interface NodeLinkOptions {
     gateThresholdLUFS?: number
     crossfade?: CrossfadeConfig
     filterTransitions?: FilterTransitionsConfig
-    automix?: {
-      enabled?: boolean
-      mode?: string
-      fallbackBehavior?: string
-      gaplessTrim?: boolean
-      deezerMetadata?: {
-        enabled?: boolean
-        useBpm?: boolean
-        useGain?: boolean
-        maxBpmDiffRatio?: number
-        requestTimeoutMs?: number
-        tempoMatch?: boolean
-      }
-    }
   }
   mix?: {
     enabled?: boolean
@@ -459,8 +410,6 @@ export interface NodeLinkOptions {
 }
 
 export type AudioOptions = NonNullable<NodeLinkOptions['audio']>
-export type AutomixConfig = NonNullable<AudioOptions['automix']>
-export type DeezerMetadataConfig = NonNullable<AutomixConfig['deezerMetadata']>
 export type AudioOptionsWithTransitions = AudioOptions & {
   filterTransitions?: FilterTransitionsConfig
 }

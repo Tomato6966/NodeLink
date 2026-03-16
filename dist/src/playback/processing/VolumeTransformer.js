@@ -123,19 +123,18 @@ export class VolumeTransformer extends Transform {
         }
         return { gainStart, gainEnd };
     }
+    _viewResult = { buffer: null, view: null, useBufferOps: true };
     _prepareView(buffer, sampleCount) {
+        this._viewResult.buffer = buffer;
         if (buffer.byteOffset % 2 === 0) {
-            return {
-                buffer,
-                view: new Int16Array(buffer.buffer, buffer.byteOffset, sampleCount),
-                useBufferOps: false
-            };
+            this._viewResult.view = new Int16Array(buffer.buffer, buffer.byteOffset, sampleCount);
+            this._viewResult.useBufferOps = false;
         }
-        return {
-            buffer,
-            view: null,
-            useBufferOps: true
-        };
+        else {
+            this._viewResult.view = null;
+            this._viewResult.useBufferOps = true;
+        }
+        return this._viewResult;
     }
     _applyLimiter(value) {
         const abs = Math.abs(value);

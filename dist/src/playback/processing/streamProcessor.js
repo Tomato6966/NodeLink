@@ -322,12 +322,6 @@ class BaseAudioResource {
         voiceStream.setFilterBypass = (bypass) => this.setFilterBypass(bypass);
         voiceStream.getMainEnergy = () => this.getMainEnergy();
         voiceStream.getNextTrackOpeningEnergy = () => this.getNextTrackOpeningEnergy();
-        voiceStream.getMainTrackBpm = () => this.getMainTrackBpm();
-        voiceStream.getNextTrackBpm = () => this.getNextTrackBpm();
-        voiceStream.getRealtimeBeatState = () => this.getRealtimeBeatState();
-        voiceStream.getNextTrackBeatState = () => this.getNextTrackBeatState();
-        voiceStream.getMainTrackKey = () => this.getMainTrackKey();
-        voiceStream.getNextTrackKey = () => this.getNextTrackKey();
         voiceStream.getEnergySkipMs = () => this.getEnergySkipMs();
         voiceStream.getCrossfadeConsumedNextMs = () => this.getCrossfadeConsumedNextMs();
         voiceStream.isBridgeMode = () => this.isBridgeMode();
@@ -404,29 +398,11 @@ class BaseAudioResource {
         const silenceDetector = this.pipes.find((p) => p instanceof SilenceDetector);
         return silenceDetector?.isSilent() ?? false;
     }
-    getRealtimeBeatState() {
-        return null;
-    }
-    getNextTrackBeatState() {
-        return null;
-    }
-    getMainTrackKey() {
-        return null;
-    }
-    getNextTrackKey() {
-        return null;
-    }
     getMainEnergy() {
         return null;
     }
     getNextTrackOpeningEnergy() {
         return 0;
-    }
-    getMainTrackBpm() {
-        return null;
-    }
-    getNextTrackBpm() {
-        return null;
     }
     getEnergySkipMs() {
         return 0;
@@ -2106,29 +2082,11 @@ class StreamAudioResource extends BaseAudioResource {
             isFinished: false
         });
     }
-    getMainTrackKey() {
-        return this.crossfadeController?.getMainTrackKey() ?? null;
-    }
-    getNextTrackKey() {
-        return this.crossfadeController?.getNextTrackKey() ?? null;
-    }
     getMainEnergy() {
         return this.crossfadeController?.getMainEnergy() ?? null;
     }
     getNextTrackOpeningEnergy() {
         return this.crossfadeController?.getNextTrackOpeningEnergy() ?? 0;
-    }
-    getMainTrackBpm() {
-        return this.crossfadeController?.getMainTrackBpm() ?? null;
-    }
-    getNextTrackBpm() {
-        return this.crossfadeController?.getNextTrackBpm() ?? null;
-    }
-    getRealtimeBeatState() {
-        return this.crossfadeController?.getRealtimeBeatState() ?? null;
-    }
-    getNextTrackBeatState() {
-        return this.crossfadeController?.getNextTrackBeatState() ?? null;
     }
     getEffectiveRate() {
         const filters = this.pipes?.find((p) => p instanceof FiltersManager);
