@@ -1,15 +1,3 @@
-import type {
-  SourceResult,
-  TrackInfo,
-  TrackStreamResult,
-  TrackUrlResult,
-  WorkerNodeLink
-} from '../typings/sources/source.types.ts'
-import type {
-  BestMatchCandidate,
-  HttpRequestResult,
-  TrackEncodeInput
-} from '../typings/utils.types.ts'
 import {
   encodeTrack,
   getBestMatch,
@@ -25,245 +13,57 @@ const YOUTUBE_URL_PATTERN =
   /https?:\/\/(?:www\.)?youtube\.com\/watch\?v=[a-zA-Z0-9_-]+/
 
 /**
- * JSON-compatible scalar or nested value used for payload narrowing.
- */
-type JsonValue = JsonRecord | JsonValue[] | string | number | boolean | null
+ * This resolves the 406 when fetching Last.fm tracks and playing them.
 
-/**
- * Object-like JSON record used to safely inspect HTTP payloads.
- */
-interface JsonRecord {
-  [key: string]: JsonValue | undefined
+*/
+
+interface TrackInfo {
+  identifier: string
+  isSeekable: boolean
+  author: string
+  length: number
+  isStream: boolean
+  position: number
+  title: string
+  uri: string
+  artworkUrl: string | null
+  isrc: string | null
+  sourceName: string
+  details: unknown[]
 }
 
-/**
- * Last.fm search types supported by the API path.
- */
-type LastFmSearchType = 'track' | 'album' | 'artist'
+interface TrackDataLike {
+  encoded: string
+  info: TrackInfo
+  pluginInfo: Record<string, unknown>
+}
 
-/**
- * Last.fm-specific runtime configuration.
- */
-interface LastFmSourceConfig {
-  /**
-   * API key used for Last.fm REST search endpoints.
-   */
+interface PlaylistData {
+  info: { name: string; selectedTrack: number }
+  pluginInfo: Record<string, unknown>
+  tracks: TrackDataLike[]
+}
+
+interface LoadResult {
+  loadType: string
+  data: unknown
+}
+
+interface ExceptionResult {
+  exception: { message: string; severity: string }
+}
+
+type ResolveResult = LoadResult | ExceptionResult
+
+interface LastFMConfig {
   apiKey?: string
 }
 
 /**
- * Runtime options consumed by the Last.fm source.
+ * This function decodes common HTML entities in a string, such as &amp; for '&' and &quot; for '"'.
  */
-interface LastFmRuntimeOptions {
-  /**
-   * Global maximum search-result limit used by several sources.
-   */
-  maxSearchResults?: number
-
-  /**
-   * Source configuration keyed by source name.
-   */
-  sources?: {
-    /**
-     * Last.fm-specific configuration.
-     */
-    lastfm?: LastFmSourceConfig
-  }
-}
-
-/**
- * Plugin metadata attached to Last.fm track results.
- */
-interface LastFmTrackPluginInfo {
-  /**
-   * YouTube URL associated with the Last.fm entry when available.
-   */
-  youtubeUrl?: string
-
-  /**
-   * Collection type represented by metadata-only results.
-   */
-  type?: 'album' | 'artist'
-}
-
-/**
- * Track payload accepted by the shared encoder.
- */
-interface LastFmTrackInfo extends TrackEncodeInput {
-  /**
-   * Whether the generated track can be seeked.
-   */
-  isSeekable: boolean
-
-  /**
-   * Canonical Last.fm URL.
-   */
-  uri: string
-
-  /**
-   * Artwork URL when available.
-   */
-  artworkUrl: string | null
-
-  /**
-   * Last.fm does not expose ISRC values directly in these paths.
-   */
-  isrc: string | null
-}
-
-/**
- * Encoded Last.fm track payload returned to callers.
- */
-interface LastFmTrackData extends BestMatchCandidate {
-  /**
-   * Base64-encoded Lavalink-compatible track payload.
-   */
-  encoded: string
-
-  /**
-   * Human-readable track information.
-   */
-  info: LastFmTrackInfo
-
-  /**
-   * Last.fm-specific metadata used by follow-up fallbacks.
-   */
-  pluginInfo: LastFmTrackPluginInfo | Record<string, never>
-}
-
-/**
- * Playlist payload returned when Last.fm resolves an album or artist page.
- */
-interface LastFmPlaylistData {
-  /**
-   * Playlist metadata block expected by the source manager.
-   */
-  info: {
-    /**
-     * Human-readable playlist name.
-     */
-    name: string
-
-    /**
-     * Default selected track index.
-     */
-    selectedTrack: number
-  }
-
-  /**
-   * Source-specific playlist metadata.
-   */
-  pluginInfo: Record<string, never>
-
-  /**
-   * Tracks resolved from embedded YouTube URLs.
-   */
-  tracks: LastFmTrackData[]
-}
-
-/**
- * Generic delegated track shape returned by other sources.
- */
-interface TrackDataLike extends BestMatchCandidate {
-  /**
-   * Encoded track string.
-   */
-  encoded: string
-
-  /**
-   * Human-readable track information.
-   */
-  info: TrackInfo
-
-  /**
-   * Source-specific metadata object.
-   */
-  pluginInfo?: Record<string, JsonValue>
-}
-
-/**
- * Source manager methods required by the Last.fm source.
- */
-interface LastFmSourceManager {
-  /**
-   * Resolves an arbitrary URL through the source manager.
-   *
-   * @param url URL to resolve.
-   * @returns Source result returned by the manager.
-   */
-  resolve: (url: string) => Promise<SourceResult>
-
-  /**
-   * Searches a source alias or source name through the manager.
-   *
-   * @param sourceTerm Search alias or source name.
-   * @param query Search query.
-   * @returns Source result returned by the manager.
-   */
-  search: (sourceTerm: string, query: string) => Promise<SourceResult>
-
-  /**
-   * Searches using the configured default search sources.
-   *
-   * @param query Search query.
-   * @returns Source result returned by the manager.
-   */
-  searchWithDefault: (query: string) => Promise<SourceResult>
-
-  /**
-   * Resolves a playable URL for a track.
-   *
-   * @param track Track information to resolve.
-   * @returns Track URL metadata.
-   */
-  getTrackUrl: (track: TrackInfo) => Promise<TrackUrlResult>
-
-  /**
-   * Loads a track stream using the source manager.
-   *
-   * @param track Track metadata.
-   * @param url Resolved URL.
-   * @param protocol Optional protocol hint.
-   * @param additionalData Optional source-specific data.
-   * @returns Track stream result.
-   */
-  getTrackStream: (
-    track: TrackInfo,
-    url: string,
-    protocol?: string,
-    additionalData?: Record<string, JsonValue>
-  ) => Promise<TrackStreamResult & { type?: string }>
-}
-
-/**
- * Exception payload returned by Last.fm operations.
- */
-interface LastFmExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-  }
-}
-
-/**
- * Decodes the small subset of HTML entities used by Last.fm pages.
- *
- * @param text Raw HTML text.
- * @returns A decoded string, or the original value when empty.
- */
-function decodeHtml(text: string | null): string | null {
-  if (!text) return text
-
+function decodeHtml(text: string | null | undefined): string {
+  if (!text) return text as string
   return text
     .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
@@ -274,50 +74,43 @@ function decodeHtml(text: string | null): string | null {
 }
 
 /**
- * Last.fm source implementation.
+ * This function decodes URL-encoded strings and replaces '+' with spaces, which is common in query parameters. It also trims whitespace from the result.
  */
+function sanitizeQuery(raw: string): string {
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(raw.replace(/\+/g, ' '))
+  } catch {
+    decoded = raw.replace(/\+/g, ' ')
+  }
+  return decoded.trim()
+}
+
+/**
+ * This heuristic determines if a Last.fm URL path corresponds to a track page or an album/artist page.
+ * It checks the third segment of the path:
+ * - If it starts with '+', it's an album page (e.g. /music/Artist/+Album).
+ * - If it does not start with '+', it's a track page (e.g. /music/Artist/Track+Title).
+ * If there are fewer than 3 segments, it defaults to treating it as an album/artist page.
+ */
+function segmentsAreTrack(segments: string[]): boolean {
+  if (segments.length < 3) return false
+  const thirdSegment = segments[2] ?? ''
+  // If the third segment starts with '+', it's an album page, so return false. Otherwise, it's a track page, so return true.
+  // This is a heuristic based on Last.fm's URL structure, where album pages have a '+' prefix in the third segment, while track pages do not.
+  return !thirdSegment.startsWith('+')
+}
+
 export default class LastFMSource {
-  /**
-   * Runtime worker context used by the source implementation.
-   */
-  public readonly nodelink: WorkerNodeLink
+  nodelink: any
+  config: LastFMConfig
+  patterns: RegExp[]
+  priority: number
+  searchTerms: string[]
+  maxSearchResults: number
+  apiKey: string | null
 
-  /**
-   * Sanitized Last.fm-specific configuration.
-   */
-  public readonly config: LastFmSourceConfig
-
-  /**
-   * URL patterns supported by this source.
-   */
-  public readonly patterns: RegExp[]
-
-  /**
-   * Match priority used by the source manager.
-   */
-  public readonly priority: number
-
-  /**
-   * Search aliases handled by this source.
-   */
-  public readonly searchTerms: string[]
-
-  /**
-   * Maximum number of search results returned by this source.
-   */
-  public readonly maxSearchResults: number
-
-  /**
-   * Optional Last.fm API key.
-   */
-  public readonly apiKey: string | null
-
-  /**
-   * Creates a new Last.fm source wrapper.
-   *
-   * @param nodelink Worker runtime used by the source implementation.
-   */
-  public constructor(nodelink: WorkerNodeLink) {
+  constructor(nodelink: any) {
     this.nodelink = nodelink
     this.config = this.getConfig()
     this.patterns = [LASTFM_PATTERN]
@@ -327,15 +120,9 @@ export default class LastFMSource {
     this.apiKey = this.config.apiKey ?? null
   }
 
-  /**
-   * Reads the Last.fm configuration from the shared runtime.
-   *
-   * @returns Sanitized Last.fm configuration limited to the fields used by this source.
-   */
-  private getConfig(): LastFmSourceConfig {
-    const options = this.nodelink.options as LastFmRuntimeOptions
+  getConfig(): LastFMConfig {
+    const options = this.nodelink.options
     const config = options.sources?.lastfm
-
     return {
       apiKey:
         typeof config?.apiKey === 'string' && config.apiKey.length > 0
@@ -344,54 +131,28 @@ export default class LastFMSource {
     }
   }
 
-  /**
-   * Reads the configured maximum number of search results.
-   *
-   * @returns A positive integer limit used by this source.
-   */
-  private getMaxSearchResults(): number {
-    const options = this.nodelink.options as LastFmRuntimeOptions
+  getMaxSearchResults(): number {
+    const options = this.nodelink.options
     const limit = options.maxSearchResults
-
     return typeof limit === 'number' && Number.isInteger(limit) && limit > 0
       ? limit
       : 10
   }
 
-  /**
-   * Announces the Last.fm source during worker initialization.
-   *
-   * @returns `true` when the source is ready to accept requests.
-   */
-  public async setup(): Promise<boolean> {
+  async setup(): Promise<boolean> {
     logger('info', 'Sources', 'Loaded Last.fm source.')
     return true
   }
 
-  /**
-   * Checks whether a URL belongs to a supported Last.fm page.
-   *
-   * @param link Candidate URL.
-   * @returns `true` when the URL matches the Last.fm pattern.
-   */
-  public isLinkMatch(link: string): boolean {
+  isLinkMatch(link: string): boolean {
     return LASTFM_PATTERN.test(link)
   }
 
-  /**
-   * Searches Last.fm either through the public HTML track search or through the
-   * REST API when an API key is configured.
-   *
-   * @param query Search query.
-   * @param _sourceTerm Search alias provided by the source manager.
-   * @param searchType Search type requested by the source manager.
-   * @returns Search results, an empty payload, or a structured exception.
-   */
-  public async search(
+  async search(
     query: string,
-    _sourceTerm?: string,
-    searchType: LastFmSearchType = 'track'
-  ): Promise<SourceResult> {
+    _sourceTerm: string,
+    searchType: string = 'track'
+  ): Promise<ResolveResult> {
     try {
       if (!this.apiKey) {
         if (searchType !== 'track') {
@@ -403,10 +164,8 @@ export default class LastFMSource {
             }
           }
         }
-
         return this.searchTracksHtml(query)
       }
-
       return this.searchApi(query, searchType)
     } catch (error) {
       return {
@@ -418,14 +177,7 @@ export default class LastFMSource {
     }
   }
 
-  /**
-   * Resolves a Last.fm track, album, or artist page into a track or playlist by
-   * delegating embedded or inferred media to other sources.
-   *
-   * @param url Public Last.fm URL.
-   * @returns A track, playlist, empty payload, or a structured exception.
-   */
-  public async resolve(url: string): Promise<SourceResult> {
+  async resolve(url: string): Promise<ResolveResult> {
     if (!LASTFM_PATTERN.test(url)) {
       return { loadType: 'empty', data: {} }
     }
@@ -436,11 +188,97 @@ export default class LastFMSource {
     }
 
     try {
+      // Determine if this is a track page or an album/artist page based on the URL segments and the presence of a '+' prefix in the third segment.
+      const isTrack = segmentsAreTrack(path)
+
+      // The artist segment is always the second segment in the path, e.g. /music/Artist/Track or /music/Artist/+Album. We decode it for use in search queries.
+      const artist = sanitizeQuery(path[1] ?? 'Unknown')
+
+      if (isTrack) {
+        // For track pages, we attempt to resolve the track by searching YouTube with various query formulations based on the track title and artist.
+        const rawTitle = path[2] ?? ''
+        const fullTitle = sanitizeQuery(rawTitle)
+
+        // We strip any "(feat. ...)" suffix from the title to create a "core title" for more effective searching, since YouTube often omits featured artists from the title.
+        const coreTitle = fullTitle.replace(/\s*\(feat\..*?\)/i, '').trim()
+
+        logger(
+          'info',
+          'LastFM',
+          `Resolving track: "${fullTitle}" by "${artist}"`
+        )
+
+        // 1st attempt: core title + "official audio"
+        if (coreTitle && coreTitle !== fullTitle) {
+          const r1 = await this.searchPreferredTracks(
+            `${artist} ${coreTitle} official audio`
+          )
+          if (r1[0]) {
+            const t = this.rewrapDelegatedTrack(r1[0], url)
+            logger(
+              'info',
+              'LastFM',
+              `Resolved via core+official: ${t.info.title}`
+            )
+            return { loadType: 'track', data: t }
+          }
+        }
+
+        // 2nd attempt: full title + "official audio"
+        const r2 = await this.searchPreferredTracks(
+          `${artist} ${fullTitle} official audio`
+        )
+        if (r2[0]) {
+          const t = this.rewrapDelegatedTrack(r2[0], url)
+          logger(
+            'info',
+            'LastFM',
+            `Resolved via full+official: ${t.info.title}`
+          )
+          return { loadType: 'track', data: t }
+        }
+
+        // 3rd attempt: core title only
+        if (coreTitle && coreTitle !== fullTitle) {
+          const r3 = await this.searchPreferredTracks(`${artist} ${coreTitle}`)
+          if (r3[0]) {
+            const t = this.rewrapDelegatedTrack(r3[0], url)
+            logger('info', 'LastFM', `Resolved via core title: ${t.info.title}`)
+            return { loadType: 'track', data: t }
+          }
+        }
+
+        // 4th attempt: full title only (last resort)
+        const r4 = await this.searchPreferredTracks(`${artist} ${fullTitle}`)
+        if (r4[0]) {
+          const t = this.rewrapDelegatedTrack(r4[0], url)
+          logger(
+            'info',
+            'LastFM',
+            `Resolved via full title fallback: ${t.info.title}`
+          )
+          return { loadType: 'track', data: t }
+        }
+
+        logger(
+          'error',
+          'LastFM',
+          `No tracks found for: "${fullTitle}" by "${artist}"`
+        )
+        return {
+          exception: {
+            message: 'No matching tracks found for this Last.fm track',
+            severity: 'fault'
+          }
+        }
+      }
+
+      // For album/artist pages, we attempt to extract any linked YouTube URLs from the page HTML and resolve them as tracks. We treat the entire page as a "playlist" of these tracks.
       const { body, error, statusCode } = await http1makeRequest(url, {
         method: 'GET'
       })
-
       const html = this.getTextBody({ body })
+
       if (error || statusCode !== 200 || !html) {
         logger(
           'error',
@@ -455,78 +293,21 @@ export default class LastFMSource {
         }
       }
 
-      const artist = decodeURIComponent(
-        (path[1] ?? 'Unknown').replace(/\+/g, ' ')
-      )
-
-      let trackTitle = 'Unknown'
-      if (path[2] === '_' && path[3]) {
-        trackTitle = decodeURIComponent(path[3].replace(/\+/g, ' '))
-      } else if (path[2]) {
-        trackTitle = decodeURIComponent(path[2].replace(/\+/g, ' '))
-      }
-
-      const isTrack = path.includes('_') || path.length >= 4
-      if (isTrack) {
-        const officialSearch = await this.searchPreferredTracks(
-          `${artist} - ${trackTitle} official audio`
-        )
-
-        const officialTrack = officialSearch[0]
-        if (officialTrack) {
-          const bestTrack = this.rewrapDelegatedTrack(officialTrack, url)
-          logger(
-            'info',
-            'LastFM',
-            `Found official audio track: ${bestTrack.info.title} by ${bestTrack.info.author}`
-          )
-          return { loadType: 'track', data: bestTrack }
-        }
-
-        logger(
-          'warn',
-          'LastFM',
-          'No official audio found, attempting to search without "official audio" qualifier'
-        )
-
-        const fallbackSearch = await this.searchPreferredTracks(
-          `${artist} - ${trackTitle}`
-        )
-
-        const fallbackTrack = fallbackSearch[0]
-        if (fallbackTrack) {
-          const bestTrack = this.rewrapDelegatedTrack(fallbackTrack, url)
-          logger(
-            'info',
-            'LastFM',
-            `Found track via fallback: ${bestTrack.info.title} by ${bestTrack.info.author}`
-          )
-          return { loadType: 'track', data: bestTrack }
-        }
-
-        logger('error', 'LastFM', 'No tracks found for this Last.fm track')
-        return {
-          exception: {
-            message: 'No matching tracks found for this Last.fm track',
-            severity: 'fault'
-          }
-        }
+      // We use the artist name as the collection title for artist pages, and for album pages we use "Album Title - Artist". We also decode any URL-encoded characters and replace '+' with spaces for readability.
+      let collectionTitle = artist
+      if (path.length >= 3) {
+        // Strip any leading '+' from the third segment (which indicates an album page) and decode it to get the album title, then combine it with the artist name for the collection title.
+        collectionTitle = sanitizeQuery((path[2] ?? '').replace(/^\+/, ''))
       }
 
       const youtubeUrls = this.extractYouTubeUrls(html)
-      const tracks: LastFmTrackData[] = []
+      const tracks: TrackDataLike[] = []
 
       for (const youtubeUrl of youtubeUrls) {
         const youtubeResult = await this.getSourceManager()?.resolve(youtubeUrl)
-        if (!youtubeResult) {
-          continue
-        }
-
+        if (!youtubeResult) continue
         const delegatedTrack = this.extractTrackDataLike(youtubeResult)
-        if (!delegatedTrack) {
-          continue
-        }
-
+        if (!delegatedTrack) continue
         tracks.push(this.rewrapDelegatedTrack(delegatedTrack, url, youtubeUrl))
       }
 
@@ -534,16 +315,16 @@ export default class LastFMSource {
         logger(
           'info',
           'LastFM',
-          `Resolved playlist: ${trackTitle} - ${artist} with ${tracks.length} tracks`
+          `Resolved playlist: "${collectionTitle}" - "${artist}" with ${tracks.length} tracks`
         )
-
-        const playlist: LastFmPlaylistData = {
-          info: { name: `${trackTitle} - ${artist}`, selectedTrack: 0 },
-          pluginInfo: {},
-          tracks
+        return {
+          loadType: 'playlist',
+          data: {
+            info: { name: `${collectionTitle} - ${artist}`, selectedTrack: 0 },
+            pluginInfo: {},
+            tracks
+          } as PlaylistData
         }
-
-        return { loadType: 'playlist', data: playlist }
       }
 
       logger(
@@ -564,17 +345,7 @@ export default class LastFMSource {
     }
   }
 
-  /**
-   * Resolves a playable stream URL for a Last.fm track by preferring a stored
-   * YouTube URL and otherwise falling back to YouTube Music or the configured
-   * default search sources.
-   *
-   * @param decodedTrack Decoded Last.fm track information.
-   * @returns Delegated track URL metadata or a structured exception.
-   */
-  public async getTrackUrl(
-    decodedTrack: TrackInfo & { pluginInfo?: LastFmTrackPluginInfo }
-  ): Promise<TrackUrlResult | LastFmExceptionResult> {
+  async getTrackUrl(decodedTrack: any): Promise<any> {
     const sourceManager = this.getSourceManager()
     if (!sourceManager) {
       return {
@@ -590,7 +361,6 @@ export default class LastFMSource {
       if (youtubeUrl) {
         const youtubeResult = await sourceManager.resolve(youtubeUrl)
         const delegatedTrack = this.extractTrackDataLike(youtubeResult)
-
         if (delegatedTrack) {
           const streamInfo = await sourceManager.getTrackUrl(
             delegatedTrack.info
@@ -643,41 +413,34 @@ export default class LastFMSource {
     }
   }
 
-  /**
-   * Loads a stream by delegating to the source manager entry that owns the
-   * resolved playback URL.
-   *
-   * @param track Track metadata.
-   * @param url Resolved playback URL.
-   * @param protocol Optional protocol hint.
-   * @param additionalData Optional source-specific data.
-   * @returns The delegated track stream result.
-   */
-  public async loadStream(
-    track: TrackInfo,
+  async loadStream(
+    track: any,
     url: string,
     protocol?: string,
-    additionalData?: Record<string, JsonValue>
-  ): Promise<TrackStreamResult & { type?: string }> {
+    additionalData?: unknown
+  ): Promise<any> {
     const sourceManager = this.getSourceManager()
     if (!sourceManager) {
       throw new Error('Source manager is not available for Last.fm streaming')
     }
-
     return sourceManager.getTrackStream(track, url, protocol, additionalData)
   }
 
   /**
-   * Parses a Last.fm URL into path segments relevant for this source.
+   * Parses a Last.fm URL into path segments with the 'music' prefix retained
+   * and any locale prefix stripped, so callers always receive segments starting
+   * at ['music', artist, ...].
    *
-   * @param url Public Last.fm URL.
-   * @returns Parsed path segments or `null` when the URL shape is unsupported.
+   * Examples:
+   *   /music/Kodak+Black/ZEZE+...  → ['music', 'Kodak+Black', 'ZEZE+...']
+   *   /fr/music/Artist/+Album      → ['music', 'Artist', '+Album']
    */
-  private parsePath(url: string): string[] | null {
+  parsePath(url: string): string[] | null {
     try {
       const urlObject = new URL(url)
       const path = urlObject.pathname.split('/').filter(Boolean)
 
+      // Strip a leading 2-char locale prefix, e.g. /fr/music/...
       if (path.length > 1 && path[0]?.length === 2 && path[1] === 'music') {
         path.shift()
       }
@@ -690,77 +453,40 @@ export default class LastFMSource {
     }
   }
 
-  /**
-   * Extracts all YouTube URLs embedded in a Last.fm page.
-   *
-   * @param html Raw Last.fm page HTML.
-   * @returns Unique YouTube URLs found in the page.
-   */
-  private extractYouTubeUrls(html: string): string[] {
+  extractYouTubeUrls(html: string): string[] {
     const urls = new Set<string>()
-
     const playMatch = html.match(YOUTUBE_LINK_PATTERN)
-    if (playMatch?.[1]) {
-      urls.add(playMatch[1])
-    }
+    if (playMatch?.[1]) urls.add(playMatch[1])
 
     const regex = new RegExp(YOUTUBE_URL_PATTERN, 'g')
     let match: RegExpExecArray | null
     match = regex.exec(html)
     while (match !== null) {
-      if (match[0]) {
-        urls.add(match[0])
-      }
+      if (match[0]) urls.add(match[0])
       match = regex.exec(html)
     }
-
     return Array.from(urls)
   }
 
-  /**
-   * Searches preferred sources for a Last.fm-derived query, starting with
-   * YouTube Music.
-   *
-   * @param query Search query.
-   * @returns Resolved track array suitable for reuse or matching.
-   */
-  private async searchPreferredTracks(query: string): Promise<TrackDataLike[]> {
+  async searchPreferredTracks(query: string): Promise<TrackDataLike[]> {
     const sourceManager = this.getSourceManager()
-    if (!sourceManager) {
-      return []
-    }
+    if (!sourceManager) return []
 
     const searchResult = await sourceManager.search('ytmsearch', query)
     const preferredTracks = this.extractTrackArray(searchResult)
-    if (preferredTracks.length > 0) {
-      return preferredTracks
-    }
+    if (preferredTracks.length > 0) return preferredTracks
 
     const fallbackResult = await sourceManager.searchWithDefault(query)
     return this.extractTrackArray(fallbackResult)
   }
 
-  /**
-   * Searches the Last.fm REST API.
-   *
-   * @param query Search query.
-   * @param searchType Requested search type.
-   * @returns Search results or a structured exception.
-   */
-  private async searchApi(
-    query: string,
-    searchType: LastFmSearchType
-  ): Promise<SourceResult> {
-    const typeMap: Record<
-      LastFmSearchType,
-      { method: string; param: 'track' | 'album' | 'artist' }
-    > = {
+  async searchApi(query: string, searchType: string): Promise<ResolveResult> {
+    const typeMap: Record<string, { method: string; param: string }> = {
       track: { method: 'track.search', param: 'track' },
       album: { method: 'album.search', param: 'album' },
       artist: { method: 'artist.search', param: 'artist' }
     }
     const selected = typeMap[searchType]
-
     const url =
       `https://ws.audioscrobbler.com/2.0/?method=${selected.method}` +
       `&${selected.param}=${encodeURIComponent(query)}` +
@@ -769,8 +495,8 @@ export default class LastFMSource {
     const { body, statusCode, error } = await http1makeRequest(url, {
       method: 'GET'
     })
-
     const payload = this.parseJsonBody(body)
+
     if (error || statusCode !== 200 || !payload) {
       return {
         exception: {
@@ -782,12 +508,7 @@ export default class LastFMSource {
 
     if (this.getValue(payload, 'error') !== undefined) {
       const message = this.getString(payload, 'message') ?? 'Last.fm API error'
-      return {
-        exception: {
-          message,
-          severity: 'fault'
-        }
-      }
+      return { exception: { message, severity: 'fault' } }
     }
 
     const results = this.mapApiResults(payload, searchType)
@@ -796,17 +517,10 @@ export default class LastFMSource {
       : { loadType: 'empty', data: {} }
   }
 
-  /**
-   * Maps a Last.fm API response into encoded track or collection entries.
-   *
-   * @param body Parsed Last.fm API response.
-   * @param searchType Requested search type.
-   * @returns Encoded track-like results.
-   */
-  private mapApiResults(
-    body: JsonRecord,
-    searchType: LastFmSearchType
-  ): LastFmTrackData[] {
+  mapApiResults(
+    body: Record<string, unknown>,
+    searchType: string
+  ): TrackDataLike[] {
     const results = this.getRecord(body, 'results')
 
     if (searchType === 'album') {
@@ -814,10 +528,9 @@ export default class LastFMSource {
         ? this.getRecord(results, 'albummatches')
         : null
       const albums = albumMatches ? this.getArray(albumMatches, 'album') : []
-
       return albums
         .map((item) => this.getRecordFromValue(item))
-        .filter((item): item is JsonRecord => item !== null)
+        .filter((item): item is Record<string, unknown> => item !== null)
         .filter(
           (item) =>
             typeof this.getValue(item, 'name') === 'string' &&
@@ -840,10 +553,9 @@ export default class LastFMSource {
       const artists = artistMatches
         ? this.getArray(artistMatches, 'artist')
         : []
-
       return artists
         .map((item) => this.getRecordFromValue(item))
-        .filter((item): item is JsonRecord => item !== null)
+        .filter((item): item is Record<string, unknown> => item !== null)
         .filter((item) => typeof this.getValue(item, 'name') === 'string')
         .map((item) =>
           this.buildCollectionResult(
@@ -859,10 +571,9 @@ export default class LastFMSource {
       ? this.getRecord(results, 'trackmatches')
       : null
     const tracks = trackMatches ? this.getArray(trackMatches, 'track') : []
-
     return tracks
       .map((item) => this.getRecordFromValue(item))
-      .filter((item): item is JsonRecord => item !== null)
+      .filter((item): item is Record<string, unknown> => item !== null)
       .filter(
         (item) =>
           typeof this.getValue(item, 'name') === 'string' &&
@@ -877,19 +588,13 @@ export default class LastFMSource {
       )
   }
 
-  /**
-   * Searches the public Last.fm HTML track-search page when no API key is available.
-   *
-   * @param query Search query.
-   * @returns Search results or a structured exception.
-   */
-  private async searchTracksHtml(query: string): Promise<SourceResult> {
+  async searchTracksHtml(query: string): Promise<ResolveResult> {
     const url = `https://www.last.fm/search/tracks?q=${encodeURIComponent(query)}`
     const { body, statusCode, error } = await http1makeRequest(url, {
       method: 'GET'
     })
-
     const html = this.getTextBody({ body })
+
     if (error || statusCode !== 200 || !html) {
       return {
         exception: {
@@ -905,17 +610,10 @@ export default class LastFMSource {
       : { loadType: 'empty', data: {} }
   }
 
-  /**
-   * Parses the Last.fm HTML track-search page into encoded track entries.
-   *
-   * @param html Raw search-result HTML.
-   * @returns Encoded track results.
-   */
-  private parseTrackSearchHtml(html: string): LastFmTrackData[] {
-    const results: LastFmTrackData[] = []
+  parseTrackSearchHtml(html: string): TrackDataLike[] {
+    const results: TrackDataLike[] = []
     const regex =
       /data-youtube-url="([^"]+)"[\s\S]*?data-track-name="([^"]+)"[\s\S]*?data-track-url="([^"]+)"[\s\S]*?data-artist-name="([^"]+)"/g
-
     let match: RegExpExecArray | null
     match = regex.exec(html)
     while (match !== null) {
@@ -926,35 +624,23 @@ export default class LastFMSource {
       const fullUrl = trackUrl.startsWith('http')
         ? trackUrl
         : `https://www.last.fm${trackUrl}`
-
       results.push(
         this.buildTrackResult(title, artist, fullUrl, {
           youtubeUrl: youtubeUrl || undefined
         })
       )
-
       match = regex.exec(html)
     }
-
     return results
   }
 
-  /**
-   * Builds an encoded Last.fm track result.
-   *
-   * @param title Human-readable track title.
-   * @param artist Human-readable artist name.
-   * @param url Canonical Last.fm URL.
-   * @param pluginInfo Optional track metadata.
-   * @returns Encoded track payload.
-   */
-  private buildTrackResult(
+  buildTrackResult(
     title: string,
     artist: string,
     url: string,
-    pluginInfo: LastFmTrackPluginInfo | Record<string, never> = {}
-  ): LastFmTrackData {
-    const info: LastFmTrackInfo = {
+    pluginInfo: Record<string, unknown> = {}
+  ): TrackDataLike {
+    const info: TrackInfo = {
       identifier: url || `${artist} - ${title}`,
       isSeekable: true,
       author: artist,
@@ -968,27 +654,16 @@ export default class LastFMSource {
       sourceName: 'lastfm',
       details: []
     }
-
     return { encoded: encodeTrack(info), info, pluginInfo }
   }
 
-  /**
-   * Builds an encoded metadata-only collection result used for album and artist
-   * search matches.
-   *
-   * @param title Human-readable collection title.
-   * @param author Human-readable author label.
-   * @param url Canonical Last.fm URL.
-   * @param type Collection type stored in plugin metadata.
-   * @returns Encoded track payload.
-   */
-  private buildCollectionResult(
+  buildCollectionResult(
     title: string,
     author: string,
     url: string,
-    type: 'album' | 'artist'
-  ): LastFmTrackData {
-    const info: LastFmTrackInfo = {
+    type: string
+  ): TrackDataLike {
+    const info: TrackInfo = {
       identifier: url || title,
       isSeekable: false,
       author,
@@ -1002,35 +677,24 @@ export default class LastFMSource {
       sourceName: 'lastfm',
       details: []
     }
-
     return { encoded: encodeTrack(info), info, pluginInfo: { type } }
   }
 
-  /**
-   * Rewraps a delegated track as a Last.fm track, preserving useful plugin
-   * metadata and re-encoding the updated payload so `encoded` matches `info`.
-   *
-   * @param track Delegated track payload returned by another source.
-   * @param url Canonical Last.fm URL that should become the public URI.
-   * @param youtubeUrl Optional YouTube URL used for direct follow-up playback.
-   * @returns A re-encoded Last.fm track payload.
-   */
-  private rewrapDelegatedTrack(
+  rewrapDelegatedTrack(
     track: TrackDataLike,
     url: string,
     youtubeUrl?: string
-  ): LastFmTrackData {
+  ): TrackDataLike {
     const pluginInfo = this.getPluginInfoRecord(track.pluginInfo)
     const storedYoutubeUrl = pluginInfo.youtubeUrl
-    const lastFmPluginInfo: LastFmTrackPluginInfo = {
+    const lastFmPluginInfo: Record<string, string> = {
       youtubeUrl:
         youtubeUrl ||
         (typeof storedYoutubeUrl === 'string'
           ? storedYoutubeUrl
           : track.info.uri)
     }
-
-    const info: LastFmTrackInfo = {
+    const info: TrackInfo = {
       identifier: track.info.identifier,
       isSeekable: track.info.isSeekable,
       author: track.info.author,
@@ -1044,31 +708,15 @@ export default class LastFMSource {
       sourceName: 'lastfm',
       details: []
     }
-
-    return {
-      encoded: encodeTrack(info),
-      info,
-      pluginInfo: lastFmPluginInfo
-    }
+    return { encoded: encodeTrack(info), info, pluginInfo: lastFmPluginInfo }
   }
 
-  /**
-   * Extracts a delegated track from a source-manager result, supporting direct
-   * track responses and the first track inside playlists.
-   *
-   * @param result Delegated source result.
-   * @returns A usable delegated track or `null`.
-   */
-  private extractTrackDataLike(result: SourceResult): TrackDataLike | null {
-    const trackData = result.data as JsonValue | TrackDataLike | undefined
+  extractTrackDataLike(result: LoadResult): TrackDataLike | null {
+    const trackData = result.data as TrackDataLike
     if (result.loadType === 'track' && this.isTrackDataLike(trackData)) {
       return trackData
     }
-
-    const playlistData = result.data as
-      | JsonValue
-      | { tracks: TrackDataLike[] }
-      | undefined
+    const playlistData = result.data as PlaylistData
     if (
       result.loadType === 'playlist' &&
       this.isTrackCollection(playlistData) &&
@@ -1076,41 +724,24 @@ export default class LastFMSource {
     ) {
       return playlistData.tracks[0] ?? null
     }
-
     return null
   }
 
-  /**
-   * Extracts an array of delegated tracks from a source-manager search result.
-   *
-   * @param result Source-manager search result.
-   * @returns Delegated track array suitable for best-match selection.
-   */
-  private extractTrackArray(result: SourceResult): TrackDataLike[] {
-    const resultData = result.data as JsonValue | TrackDataLike[] | undefined
-
+  extractTrackArray(result: LoadResult): TrackDataLike[] {
+    const resultData = result.data
     if (
       result.loadType === 'search' &&
       Array.isArray(resultData) &&
       resultData.every((item) => this.isTrackDataLike(item))
     ) {
-      return resultData
+      return resultData as TrackDataLike[]
     }
-
     return []
   }
 
-  /**
-   * Maps a scored best-match candidate back to the original delegated track
-   * payload returned by the search pipeline.
-   *
-   * @param tracks Candidate delegated tracks.
-   * @param candidate Best-match candidate selected by the scoring helper.
-   * @returns The original delegated track payload or `null` when no exact match exists.
-   */
-  private findTrackDataByCandidate(
+  findTrackDataByCandidate(
     tracks: TrackDataLike[],
-    candidate: BestMatchCandidate
+    candidate: TrackDataLike
   ): TrackDataLike | null {
     return (
       tracks.find(
@@ -1122,183 +753,87 @@ export default class LastFMSource {
     )
   }
 
-  /**
-   * Returns the source manager narrowed to the methods used by this source.
-   *
-   * @returns The narrowed source manager or `null` when unavailable.
-   */
-  private getSourceManager(): LastFmSourceManager | null {
-    const sourceManager = this.nodelink.sources as
-      | LastFmSourceManager
-      | undefined
-    return sourceManager ?? null
+  getSourceManager(): any {
+    return this.nodelink.sources ?? null
   }
 
-  /**
-   * Converts a buffered HTTP body into text.
-   *
-   * @param response HTTP helper response carrying the buffered body.
-   * @returns A UTF-8 string when the body is text-like, otherwise `null`.
-   */
-  private getTextBody(
-    response: Pick<HttpRequestResult, 'body'>
-  ): string | null {
-    if (typeof response.body === 'string') {
-      return response.body
-    }
-
-    if (Buffer.isBuffer(response.body)) {
-      return response.body.toString('utf8')
-    }
-
+  getTextBody(response: { body: unknown }): string | null {
+    if (typeof response.body === 'string') return response.body
+    if (Buffer.isBuffer(response.body)) return response.body.toString('utf8')
     return null
   }
 
-  /**
-   * Parses a JSON-capable response body into a record.
-   *
-   * @param body Raw HTTP response body.
-   * @returns A JSON record or `null` when the payload is not object-like.
-   */
-  private parseJsonBody(body: HttpRequestResult['body']): JsonRecord | null {
+  parseJsonBody(body: unknown): Record<string, unknown> | null {
     if (
       body &&
       typeof body === 'object' &&
       !Array.isArray(body) &&
-      !Buffer.isBuffer(body)
+      !Buffer.isBuffer(body as Buffer)
     ) {
-      return body as JsonRecord
+      return body as Record<string, unknown>
     }
-
     const textBody = this.getTextBody({ body })
-    if (!textBody) {
-      return null
-    }
-
+    if (!textBody) return null
     try {
       const parsed = JSON.parse(textBody)
       return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? (parsed as JsonRecord)
+        ? (parsed as Record<string, unknown>)
         : null
     } catch {
       return null
     }
   }
 
-  /**
-   * Reads a nested record property from a JSON record.
-   *
-   * @param record Source record.
-   * @param key Property name to read.
-   * @returns The nested record or `null` when the property is not an object.
-   */
-  private getRecord(record: JsonRecord, key: string): JsonRecord | null {
+  getRecord(
+    record: Record<string, unknown>,
+    key: string
+  ): Record<string, unknown> | null {
     return this.getRecordFromValue(record[key])
   }
 
-  /**
-   * Converts a JSON value into a record when possible.
-   *
-   * @param value Candidate JSON value.
-   * @returns The record representation or `null`.
-   */
-  private getRecordFromValue(value?: JsonValue): JsonRecord | null {
+  getRecordFromValue(value: unknown): Record<string, unknown> | null {
     return value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as JsonRecord)
+      ? (value as Record<string, unknown>)
       : null
   }
 
-  /**
-   * Reads an arbitrary property value from a JSON record.
-   *
-   * @param record Source record.
-   * @param key Property name to read.
-   * @returns The property value or `undefined` when absent.
-   */
-  private getValue(record: JsonRecord, key: string): JsonValue | undefined {
+  getValue(record: Record<string, unknown>, key: string): unknown {
     return record[key]
   }
 
-  /**
-   * Reads an array property from a JSON record.
-   *
-   * @param record Source record.
-   * @param key Property name to read.
-   * @returns The nested array or an empty array when the property is not an array.
-   */
-  private getArray(record: JsonRecord, key: string): JsonValue[] {
+  getArray(record: Record<string, unknown>, key: string): unknown[] {
     const value = this.getValue(record, key)
     return Array.isArray(value) ? value : []
   }
 
-  /**
-   * Reads a string-like field from a JSON record.
-   *
-   * @param record Source record.
-   * @param key Property name to read.
-   * @returns The normalized string value or `null`.
-   */
-  private getString(record: JsonRecord, key: string): string | null {
+  getString(record: Record<string, unknown>, key: string): string | null {
     const value = this.getValue(record, key)
-
-    if (typeof value === 'string') {
-      return value
-    }
-
-    if (typeof value === 'number') {
-      return String(value)
-    }
-
+    if (typeof value === 'string') return value
+    if (typeof value === 'number') return String(value)
     return null
   }
 
-  /**
-   * Converts an arbitrary plugin metadata value into a string-compatible record.
-   *
-   * @param value Plugin metadata value returned by a delegated source.
-   * @returns A string-compatible record with invalid entries removed.
-   */
-  private getPluginInfoRecord(
-    value?: Record<string, JsonValue>
-  ): LastFmTrackPluginInfo & Record<string, string> {
-    if (!value) {
-      return {}
+  getPluginInfoRecord(value: unknown): Record<string, string> {
+    if (!value) return {}
+    const result: Record<string, string> = {}
+    for (const [key, entry] of Object.entries(
+      value as Record<string, unknown>
+    )) {
+      if (typeof entry === 'string') result[key] = entry
+      else if (typeof entry === 'number') result[key] = String(entry)
     }
-
-    const result: LastFmTrackPluginInfo & Record<string, string> = {}
-
-    for (const [key, entry] of Object.entries(value)) {
-      if (typeof entry === 'string') {
-        result[key] = entry
-      } else if (typeof entry === 'number') {
-        result[key] = String(entry)
-      }
-    }
-
     return result
   }
 
-  /**
-   * Checks whether an arbitrary value is a valid delegated track payload.
-   *
-   * @param value Candidate value returned by delegated source calls.
-   * @returns `true` when the value is a usable delegated track payload.
-   */
-  private isTrackDataLike(
-    value: JsonValue | TrackDataLike | undefined
-  ): value is TrackDataLike {
-    const record = this.getRecordFromValue(value as JsonValue)
-    if (!record) {
-      return false
-    }
-
+  isTrackDataLike(value: unknown): value is TrackDataLike {
+    const record = this.getRecordFromValue(value)
+    if (!record) return false
     const encoded = this.getValue(record, 'encoded')
     const info = this.getRecord(record, 'info')
     const title = info ? this.getValue(info, 'title') : undefined
     const author = info ? this.getValue(info, 'author') : undefined
     const length = info ? this.getValue(info, 'length') : undefined
     const uri = info ? this.getValue(info, 'uri') : undefined
-
     return (
       typeof encoded === 'string' &&
       !!info &&
@@ -1309,24 +844,13 @@ export default class LastFMSource {
     )
   }
 
-  /**
-   * Checks whether a value exposes a valid playlist-like `tracks` array.
-   *
-   * @param value Candidate source result payload.
-   * @returns `true` when the value contains a valid `tracks` array.
-   */
-  private isTrackCollection(
-    value: JsonValue | { tracks: TrackDataLike[] } | undefined
-  ): value is { tracks: TrackDataLike[] } {
-    const record = this.getRecordFromValue(value as JsonValue)
-    if (!record) {
-      return false
-    }
-
+  isTrackCollection(value: unknown): value is PlaylistData {
+    const record = this.getRecordFromValue(value)
+    if (!record) return false
     const tracks = this.getValue(record, 'tracks')
     return (
       Array.isArray(tracks) &&
-      tracks.every((track) => this.isTrackDataLike(track as JsonValue))
+      tracks.every((track) => this.isTrackDataLike(track))
     )
   }
 }
