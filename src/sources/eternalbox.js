@@ -35,11 +35,21 @@ export default class EternalboxSource {
     this.config = nodelink.options.sources?.eternalbox || {}
     this.baseUrl = this.config.baseUrl || 'https://eternalboxmirror.xyz'
     this.searchTerms = ['eternalbox', 'ebox', 'jukebox']
+
+    const mirrors = [
+      'eternalboxmirror\\.xyz',
+      'eternalbox\\.floriegl\\.tech',
+      'eternal\\.floriegl\\.tech',
+      'forever\\.reheated\\.org',
+      'jukebox\\.justdavi\\.dev',
+      'eternalbox\\.dev'
+    ].join('|')
+
     this.patterns = [
-      /https?:\/\/(?:www\.)?eternalboxmirror\.xyz\/jukebox_go\.html\?id=([A-Za-z0-9]+)/i,
-      /https?:\/\/(?:www\.)?eternalboxmirror\.xyz\/api\/analysis\/analyse\/([A-Za-z0-9]+)/i,
-      /https?:\/\/(?:www\.)?eternalboxmirror\.xyz\/api\/audio\/jukebox\/([A-Za-z0-9]+)/i,
-      /https?:\/\/(?:www\.)?eternalboxmirror\.xyz\/api\/audio\/jukebox\/([A-Za-z0-9]+)\/location/i
+      new RegExp(`https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/jukebox_go\\.html\\?id=([A-Za-z0-9]+)`, 'i'),
+      new RegExp(`https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/analysis\\/analyse\\/([A-Za-z0-9]+)`, 'i'),
+      new RegExp(`https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/audio\\/jukebox\\/([A-Za-z0-9]+)`, 'i'),
+      new RegExp(`https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/audio\\/jukebox\\/([A-Za-z0-9]+)\\/location`, 'i')
     ]
     this.priority = 60
     this.cache = new Map()
@@ -91,10 +101,12 @@ export default class EternalboxSource {
     const id = this._extractId(url)
     if (!id) return { loadType: 'empty', data: {} }
 
+    const baseUrl = this._extractBaseUrl(url)
+
     try {
       const [analysisPayload, ogAudioSource] = await Promise.all([
-        this._fetchAnalysis(id),
-        this._fetchOgAudioSource(id)
+        this._fetchAnalysis(id, baseUrl),
+        this._fetchOgAudioSource(id, baseUrl)
       ])
       if (!analysisPayload?.info) return { loadType: 'empty', data: {} }
 
@@ -107,7 +119,8 @@ export default class EternalboxSource {
         analysisPayload,
         id,
         ogAudioSource,
-        spotifyData
+        spotifyData,
+        baseUrl
       )
 
       if (this._isEternalEnabled() && analysisPayload?.analysis) {
@@ -132,12 +145,14 @@ export default class EternalboxSource {
       }
     }
 
+    const baseUrl = this._extractBaseUrl(track.uri)
+
     return {
-      url: this._buildStreamUrl(id),
+      url: this._buildStreamUrl(id, baseUrl),
       protocol: 'https',
       format: 'm4a',
       additionalData: {
-        headers: this._buildStreamHeaders(id)
+        headers: this._buildStreamHeaders(id, baseUrl)
       }
     }
   }
@@ -145,8 +160,9 @@ export default class EternalboxSource {
   async loadStream(_decodedTrack, url, _protocol, additionalData) {
     try {
       const id = this._extractId(url)
+      const baseUrl = this._extractBaseUrl(url)
       const headers = {
-        ...this._buildStreamHeaders(id),
+        ...this._buildStreamHeaders(id, baseUrl),
         ...(additionalData?.headers || {})
       }
 
@@ -257,8 +273,8 @@ export default class EternalboxSource {
     return this._buildTrack({ info }, id)
   }
 
-  async _fetchAnalysis(id) {
-    const url = `${this.baseUrl}/api/analysis/analyse/${id}`
+  async _fetchAnalysis(id, baseUrl = this.baseUrl) {
+    const url = `${baseUrl}/api/analysis/analyse/${id}`
     const { body, statusCode } = await http1makeRequest(url, {
       headers: this._buildApiHeaders(id)
     })
@@ -266,7 +282,13 @@ export default class EternalboxSource {
     return body
   }
 
-  _buildTrack(payload, id, ogAudioSource = null, spotifyData = null) {
+  _buildTrack(
+    payload,
+    id,
+    ogAudioSource = null,
+    spotifyData = null,
+    baseUrl = this.baseUrl
+  ) {
     const info = payload?.info || payload || {}
     const analysis = payload?.analysis || null
     const spotifyTitle = spotifyData?.name || null
@@ -298,7 +320,7 @@ export default class EternalboxSource {
       isStream,
       position: 0,
       title,
-      uri: info?.url || this._buildJukeboxUrl(id),
+      uri: info?.url || this._buildJukeboxUrl(id, baseUrl),
       artworkUrl:
         spotifyData?.album?.images?.[0]?.url ||
         info?.artwork ||
@@ -314,9 +336,9 @@ export default class EternalboxSource {
     const pluginInfo = {
       service: info?.service || null,
       sourceUrl: info?.url || null,
-      analysisUrl: `${this.baseUrl}/api/analysis/analyse/${id}`,
-      streamUrl: this._buildStreamUrl(id),
-      ogAudioSourceUrl: `${this.baseUrl}/api/audio/jukebox/${id}/location`,
+      analysisUrl: `${baseUrl}/api/analysis/analyse/${id}`,
+      streamUrl: this._buildStreamUrl(id, baseUrl),
+      ogAudioSourceUrl: `${baseUrl}/api/audio/jukebox/${id}/location`,
       ogAudioSource: ogAudioSource
     }
 
@@ -366,17 +388,26 @@ export default class EternalboxSource {
     return null
   }
 
+  _extractBaseUrl(input) {
+    try {
+      if (typeof input !== 'string') return this.baseUrl
+      const url = new URL(input)
+      if (url.protocol.startsWith('http')) return url.origin
+    } catch (_e) {}
+    return this.baseUrl
+  }
+
   _looksLikeId(value) {
     return typeof value === 'string' && /^[A-Za-z0-9]{10,40}$/.test(value)
   }
 
-  _buildJukeboxUrl(id) {
-    if (!id) return this.baseUrl
-    return `${this.baseUrl}/jukebox_go.html?id=${id}`
+  _buildJukeboxUrl(id, baseUrl = this.baseUrl) {
+    if (!id) return baseUrl
+    return `${baseUrl}/jukebox_go.html?id=${id}`
   }
 
-  _buildStreamUrl(id) {
-    return `${this.baseUrl}/api/audio/jukebox/${id}`
+  _buildStreamUrl(id, baseUrl = this.baseUrl) {
+    return `${baseUrl}/api/audio/jukebox/${id}`
   }
 
   _buildApiHeaders() {
@@ -385,18 +416,18 @@ export default class EternalboxSource {
     }
   }
 
-  _buildStreamHeaders(id) {
+  _buildStreamHeaders(id, baseUrl = this.baseUrl) {
     return {
       Accept: '*/*',
-      Referer: this._buildJukeboxUrl(id),
-      Origin: this.baseUrl,
+      Referer: this._buildJukeboxUrl(id, baseUrl),
+      Origin: baseUrl,
       'User-Agent':
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
     }
   }
 
-  async _fetchOgAudioSource(id) {
-    const url = `${this.baseUrl}/api/audio/jukebox/${id}/location`
+  async _fetchOgAudioSource(id, baseUrl = this.baseUrl) {
+    const url = `${baseUrl}/api/audio/jukebox/${id}/location`
     try {
       const { body, statusCode } = await http1makeRequest(url, {
         headers: this._buildApiHeaders(id)

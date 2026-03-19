@@ -941,7 +941,7 @@ export class Player {
       }
       const spotify = pluginInfo.spotify
       const links = {
-        jukeboxPage: `https://eternalboxmirror.xyz/jukebox_go.html?id=${info.identifier}`,
+        jukeboxPage: info.uri,
         analysisUrl: pluginInfo.analysisUrl || null,
         streamUrl: pluginInfo.streamUrl || null,
         ogAudioSource: pluginInfo.ogAudioSource || null,
