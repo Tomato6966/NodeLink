@@ -121,7 +121,7 @@ export default class CipherManager {
             headers,
             body: requestBody,
             disableBodyCompression: true,
-            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+            proxy: this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()
         });
         if (error || statusCode !== 200) {
             throw new Error(`Failed to get STS: ${error?.message || body?.message || 'Invalid response'}`);
@@ -187,7 +187,7 @@ export default class CipherManager {
             headers,
             body: requestBody,
             disableBodyCompression: true,
-            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+            proxy: this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()
         });
         logger('debug', 'YouTube-Cipher', `Received from cipher service (Status: ${statusCode}): ${JSON.stringify(body, null, 2)}`);
         if (error || statusCode !== 200) {

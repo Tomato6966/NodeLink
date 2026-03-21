@@ -118,7 +118,7 @@ export default class TV extends BaseClient {
             body: requestBody,
             method: 'POST',
             disableBodyCompression: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+        proxy: this.getProxy()
           }
         )
 
@@ -152,7 +152,7 @@ export default class TV extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager, itag) {
+  async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',
@@ -165,7 +165,8 @@ export default class TV extends BaseClient {
       decodedTrack.identifier,
       context,
       headers,
-      cipherManager
+      cipherManager,
+      proxy
     )
 
     if (statusCode !== 200) {

@@ -19,10 +19,74 @@ const CHUNK_SIZE = 64 * 1024;
 const MAX_RETRIES = 3;
 const MAX_URL_REFRESH = 10;
 const VISITOR_DATA_INTERVAL = 3600000;
+class YouTubeProxyManager {
+    constructor(proxies) {
+        this.proxies = (proxies || []).map((p) => ({
+            url: typeof p === 'string' ? p : p.url,
+            type: p.type || 'forward',
+            failures: 0,
+            lastFailure: 0,
+            activeRequests: 0,
+            score: 100,
+            latency: 0
+        }));
+    }
+    getBestProxy() {
+        if (!this.proxies.length)
+            return undefined;
+        const now = Date.now();
+        const available = this.proxies.filter((p) => {
+            if (p.score <= 0)
+                return now - p.lastFailure > 600000;
+            if (p.failures > 5)
+                return now - p.lastFailure > 60000;
+            return true;
+        });
+        const list = available.length ? available : this.proxies;
+        list.sort((a, b) => {
+            if (b.score !== a.score)
+                return b.score - a.score;
+            if (a.activeRequests !== b.activeRequests)
+                return a.activeRequests - b.activeRequests;
+            return a.latency - b.latency;
+        });
+        const topCount = Math.min(3, list.length);
+        const selected = list[Math.floor(Math.random() * topCount)];
+        selected.activeRequests++;
+        return { ...selected };
+    }
+    report(proxyUrl, success, status, latency = 0) {
+        const p = this.proxies.find((pr) => pr.url === proxyUrl);
+        if (!p)
+            return;
+        if (p.activeRequests > 0)
+            p.activeRequests--;
+        if (latency > 0) {
+            p.latency = p.latency === 0 ? latency : p.latency * 0.8 + latency * 0.2;
+        }
+        if (success) {
+            p.score = Math.min(100, p.score + 5);
+            p.failures = 0;
+        }
+        else {
+            p.failures++;
+            p.lastFailure = Date.now();
+            let penalty = 10;
+            if (status === 403)
+                penalty = 50;
+            if (status === 429)
+                penalty = 30;
+            if (status === 503)
+                penalty = 20;
+            p.score = Math.max(0, p.score - penalty);
+        }
+    }
+}
 export default class YouTubeSource {
     constructor(nodelink) {
         this.nodelink = nodelink;
         this.config = nodelink.options.sources.youtube;
+        this.proxyManager = new YouTubeProxyManager(this.config.proxies || []);
         this.additionalsSourceName = ['ytmusic'];
         this.searchTerms = ['ytsearch', 'ytmsearch'];
         this.recommendationTerm = ['ytrec'];
@@ -53,14 +117,12 @@ export default class YouTubeSource {
         };
     }
     getProxy(rotate = true) {
-        if (!this.config.proxies || !Array.isArray(this.config.proxies) || this.config.proxies.length === 0) {
-            return undefined;
+        return this.proxyManager.getBestProxy(rotate);
+    }
+    reportProxyStatus(proxy, success, status) {
+        if (proxy?.url) {
+            this.proxyManager.report(proxy.url, success, status);
         }
-        const proxy = this.config.proxies[this.proxyIndex];
-        if (rotate) {
-            this.proxyIndex = (this.proxyIndex + 1) % this.config.proxies.length;
-        }
-        return proxy;
     }
     async setup() {
         logger('info', 'YouTube', 'Setting up YouTube source...');
@@ -113,7 +175,6 @@ export default class YouTubeSource {
             this.cipherManager.setPlayerScriptUrl(cachedPlayerScript);
             logger('debug', 'YouTube', 'Player script URL loaded from cache.');
         }
-        // Não vamos poder mais deixar um cache de visitorData, 1 de fevereiro, youtube mudou a forma como ele interage com o visitorData
         let visitorFound = false;
         let playerScriptUrl = null;
         try {
@@ -145,8 +206,7 @@ export default class YouTubeSource {
                 const { body: guideData, error: guideError, statusCode: guideStatusCode } = await makeRequest('https://www.youtube.com/youtubei/v1/guide', {
                     method: 'POST',
                     body: { context: this.ytContext },
-                    disableBodyCompression: true,
-                    proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+                    disableBodyCompression: true
                 });
                 if (!guideError &&
                     guideStatusCode === 200 &&
@@ -183,7 +243,6 @@ export default class YouTubeSource {
             if (!client)
                 continue;
             try {
-                this.getProxy(true); // Rotate proxy for each client attempt
                 logger('debug', 'YouTube', `Attempting ${searchType} search with client: ${clientName}`);
                 const result = await client.search(query, searchType, this.ytContext);
                 if (result && result.loadType === 'search') {
@@ -362,7 +421,6 @@ export default class YouTubeSource {
             const androidClient = this.clients.Android;
             if (androidClient) {
                 try {
-                    this.getProxy(true); // Rotate proxy
                     logger('debug', 'YouTube', 'Attempting to resolve playlist with Android client.');
                     const result = await androidClient.resolve(processUrl, sourceType, this.ytContext, this.cipherManager);
                     if (result &&
@@ -403,7 +461,6 @@ export default class YouTubeSource {
                 continue;
             }
             try {
-                this.getProxy(true); // Rotate proxy
                 logger('debug', 'YouTube', `Attempting to resolve URL with client: ${clientName}`);
                 const result = await client.resolve(processUrl, sourceType, this.ytContext, this.cipherManager);
                 if (result &&
@@ -485,8 +542,11 @@ export default class YouTubeSource {
             try {
                 logger('debug', 'YouTube', `Attempting to get track URL for ${decodedTrack.title} with client: ${clientName}`);
                 const proxyToUse = this.getProxy(true);
-                const urlData = await client.getTrackUrl(decodedTrack, this.ytContext, this.cipherManager, itag);
+                const proxyStartTime = Date.now();
+                const urlData = await client.getTrackUrl(decodedTrack, this.ytContext, this.cipherManager, itag, proxyToUse);
+                const proxyLatency = Date.now() - proxyStartTime;
                 if (urlData.exception) {
+                    this.reportProxyStatus(proxyToUse, false, urlData.exception.status || 500, proxyLatency);
                     clientErrors.push({
                         client: clientName,
                         message: urlData.exception.message
@@ -495,6 +555,7 @@ export default class YouTubeSource {
                     continue;
                 }
                 if (urlData.protocol === 'sabr') {
+                    this.reportProxyStatus(proxyToUse, true, 200, proxyLatency);
                     const bestAudio = urlData.formats
                         ?.filter((f) => f.mimeType?.includes('audio'))
                         .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
@@ -510,10 +571,11 @@ export default class YouTubeSource {
                         method: 'GET',
                         headers: { Range: 'bytes=0-0' },
                         streamOnly: true,
-                        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+                        proxy: proxyToUse
                     });
                     if (check.stream)
                         check.stream.destroy();
+                    this.reportProxyStatus(proxyToUse, !check.error && (check.statusCode === 200 || check.statusCode === 206), check.statusCode, Date.now() - proxyStartTime);
                     if (!check.error &&
                         (check.statusCode === 200 || check.statusCode === 206)) {
                         let contentLength = null;
@@ -542,10 +604,11 @@ export default class YouTubeSource {
                             method: 'GET',
                             headers: { Range: 'bytes=0-0' },
                             streamOnly: true,
-                            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+                            proxy: proxyToUse
                         });
                         if (hlsCheck.stream)
                             hlsCheck.stream.destroy();
+                        this.reportProxyStatus(proxyToUse, !hlsCheck.error && (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206), hlsCheck.statusCode, Date.now() - proxyStartTime);
                         if (!hlsCheck.error &&
                             (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)) {
                             logger('debug', 'YouTube', `HLS fallback check successful for client ${clientName}.`);
@@ -567,10 +630,11 @@ export default class YouTubeSource {
                         method: 'GET',
                         headers: { Range: 'bytes=0-0' },
                         streamOnly: true,
-                        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+                        proxy: proxyToUse
                     });
                     if (hlsCheck.stream)
                         hlsCheck.stream.destroy();
+                    this.reportProxyStatus(proxyToUse, !hlsCheck.error && (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206), hlsCheck.statusCode, Date.now() - proxyStartTime);
                     if (!hlsCheck.error &&
                         (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)) {
                         logger('debug', 'YouTube', `HLS-only check successful for client ${clientName}.`);
@@ -900,7 +964,7 @@ export default class YouTubeSource {
                         method: 'GET',
                         headers: { Range: 'bytes=0-0' },
                         streamOnly: true,
-                        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+                        proxy: this.getProxy()
                     });
                     if (rangeResponse.stream)
                         rangeResponse.stream.destroy();
@@ -915,12 +979,14 @@ export default class YouTubeSource {
                 logger('debug', 'YouTube', `Using range buffering for ${decodedTrack.title} (${Math.round(contentLength / 1024 / 1024)}MB)`);
                 return this._streamWithRangeRequests(url, contentLength, decodedTrack, cancelSignal, streamKey, additionalData);
             }
+            const fetchStartTime = Date.now();
             const response = await http1makeRequest(url, {
                 method: 'GET',
                 streamOnly: true,
                 proxy: additionalData?.proxy || this.getProxy(),
                 timeout: 20000
             });
+            this.reportProxyStatus(additionalData?.proxy || this.getProxy(false), !response.error && (response.statusCode === 200 || response.statusCode === 206), response.statusCode, Date.now() - fetchStartTime);
             if (response.statusCode !== 200 && response.statusCode !== 206) {
                 throw new Error(`HTTP status ${response.statusCode}`);
             }
@@ -1048,6 +1114,7 @@ export default class YouTubeSource {
             const start = position;
             const end = Math.min(start + CHUNK_SIZE - 1, contentLength - 1);
             try {
+                const fetchStartTime = Date.now();
                 const result = await http1makeRequest(currentUrl, {
                     method: 'GET',
                     headers: { Range: `bytes=${start}-${end}` },
@@ -1057,6 +1124,7 @@ export default class YouTubeSource {
                 });
                 const responseStream = result.stream;
                 const { error, statusCode } = result;
+                this.reportProxyStatus(additionalData?.proxy || this.getProxy(false), !error && (statusCode === 200 || statusCode === 206), statusCode, Date.now() - fetchStartTime);
                 if (destroyed || cancelSignal.aborted) {
                     if (responseStream && !responseStream.destroyed) {
                         responseStream.destroy();

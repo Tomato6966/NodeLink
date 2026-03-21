@@ -39,7 +39,7 @@ class LiveChat {
                             continuation
                         },
                         disableBodyCompression: true,
-                        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+                        proxy: this.source.getProxy()
                     });
                     if (statusCode !== 200 || !chatResponse) {
                         logger('warn', 'YouTube-LiveChat', `Polling failed for ${videoId}: Status ${statusCode}`);

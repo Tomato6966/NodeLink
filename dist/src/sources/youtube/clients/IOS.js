@@ -92,7 +92,7 @@ export default class IOS extends BaseClient {
                     body: requestBody,
                     method: 'POST',
                     disableBodyCompression: true,
-                    proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+                    proxy: this.getProxy()
                 });
                 if (statusCode !== 200) {
                     const errMsg = `Failed to fetch playlist. Status: ${statusCode}`;
@@ -111,10 +111,10 @@ export default class IOS extends BaseClient {
                 return { loadType: 'empty', data: {} };
         }
     }
-    async getTrackUrl(decodedTrack, context, cipherManager, itag) {
+    async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
         const sourceName = decodedTrack.sourceName || 'youtube';
         logger('debug', 'youtube-ios', `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`);
-        const { body: playerResponse, statusCode } = await this._makePlayerRequest(decodedTrack.identifier, context, {}, cipherManager);
+        const { body: playerResponse, statusCode } = await this._makePlayerRequest(decodedTrack.identifier, context, {}, cipherManager, proxy);
         if (statusCode !== 200) {
             const message = `Failed to get player data for stream. Status: ${statusCode}`;
             logger('error', 'youtube-ios', message);

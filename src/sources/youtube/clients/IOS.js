@@ -120,7 +120,7 @@ export default class IOS extends BaseClient {
             body: requestBody,
             method: 'POST',
             disableBodyCompression: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+        proxy: this.getProxy()
           }
         )
 
@@ -153,7 +153,7 @@ export default class IOS extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager, itag) {
+  async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',
@@ -165,7 +165,8 @@ export default class IOS extends BaseClient {
       decodedTrack.identifier,
       context,
       {},
-      cipherManager
+      cipherManager,
+      proxy
     )
 
     if (statusCode !== 200) {

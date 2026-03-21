@@ -43,7 +43,7 @@ export default class WebRemix extends BaseClient {
             },
             body: requestBody,
             disableBodyCompression: true,
-            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+            proxy: this.getProxy()
         });
         if (error || statusCode !== 200) {
             const message = error?.message ||
@@ -154,7 +154,7 @@ export default class WebRemix extends BaseClient {
                         'X-Goog-Api-Format-Version': '2'
                     },
                     disableBodyCompression: true,
-                    proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+                    proxy: this.getProxy()
                 });
                 if (statusCode !== 200 || !res) {
                     return { loadType: 'empty', data: {} };

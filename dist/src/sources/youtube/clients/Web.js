@@ -38,7 +38,7 @@ export default class Web extends BaseClient {
             },
             body: requestBody,
             disableBodyCompression: true,
-            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+            proxy: this.getProxy()
         });
         if (error || statusCode !== 200) {
             const message = error?.message ||
@@ -152,7 +152,7 @@ export default class Web extends BaseClient {
                     body: requestBody,
                     method: 'POST',
                     disableBodyCompression: true,
-                    proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+                    proxy: this.getProxy()
                 });
                 if (statusCode !== 200 || playlistResponse?.error) {
                     const errMsg = playlistResponse?.error?.message ||
@@ -172,7 +172,7 @@ export default class Web extends BaseClient {
                 return { loadType: 'empty', data: {} };
         }
     }
-    async getTrackUrl(decodedTrack, context, cipherManager, itag) {
+    async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
         if (this.oauth && this.oauth.accessToken) {
             await this.oauth.getAccessToken();
         }
@@ -217,7 +217,7 @@ export default class Web extends BaseClient {
                     },
                     body: requestBody,
                     disableBodyCompression: true,
-                    proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+                    proxy: proxy || this.getProxy()
                 });
                 const streamingData = playerResponse.streamingData || playerResponse.streaming_data;
                 const serverAbrUrl = streamingData?.serverAbrStreamingUrl ||
@@ -292,7 +292,7 @@ export default class Web extends BaseClient {
             },
             body: requestBody,
             disableBodyCompression: true,
-            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+            proxy: this.getProxy()
         });
         if (error || statusCode !== 200) {
             throw new Error(`Search failed for chapters: ${error?.message || statusCode}`);

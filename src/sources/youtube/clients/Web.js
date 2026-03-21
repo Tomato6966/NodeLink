@@ -54,7 +54,7 @@ export default class Web extends BaseClient {
       },
       body: requestBody,
       disableBodyCompression: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+        proxy: this.getProxy()
     })
 
     if (error || statusCode !== 200) {
@@ -216,7 +216,7 @@ export default class Web extends BaseClient {
             body: requestBody,
             method: 'POST',
             disableBodyCompression: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+        proxy: this.getProxy()
           }
         )
 
@@ -251,7 +251,7 @@ export default class Web extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager, itag) {
+  async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
     if (this.oauth && this.oauth.accessToken) {
       await this.oauth.getAccessToken()
     }
@@ -307,7 +307,7 @@ export default class Web extends BaseClient {
             },
             body: requestBody,
             disableBodyCompression: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+            proxy: proxy || this.getProxy()
           }
         )
 
@@ -407,7 +407,7 @@ export default class Web extends BaseClient {
       },
       body: requestBody,
       disableBodyCompression: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+        proxy: this.getProxy()
     })
 
     if (error || statusCode !== 200) {

@@ -349,8 +349,7 @@ async function fetchChannelInfo(channelId, makeRequest, context) {
           },
           browseId: channelId
         },
-        disableBodyCompression: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+        disableBodyCompression: true
       }
     )
 
@@ -1550,8 +1549,8 @@ export class BaseClient {
     this.oauth = oauth
   }
 
-  getProxy() {
-    return this.nodelink.sources?.getSource?.('youtube')?.getProxy?.(false)
+  getProxy(_rotate = false) {
+    return undefined
   }
 
   getClient() {
@@ -1582,7 +1581,7 @@ export class BaseClient {
     return { loadType: 'empty', data: {} }
   }
 
-  async _makePlayerRequest(videoId, context, headers, cipherManager) {
+  async _makePlayerRequest(videoId, context, headers, cipherManager, proxy) {
     const apiEndpoint = this.getApiEndpoint()
     const requestBody = {
       context: this.getClient(context),
@@ -1652,7 +1651,7 @@ export class BaseClient {
         },
         body: requestBody,
         disableBodyCompression: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+        proxy: proxy || this.getProxy()
       }
     )
 
@@ -1665,7 +1664,7 @@ export class BaseClient {
     return response
   }
 
-  async _makeNextRequest(videoId, context, headers) {
+  async _makeNextRequest(videoId, context, headers, proxy) {
     const apiEndpoint = this.getApiEndpoint()
     const requestBody = {
       context: this.getClient(context),
@@ -1687,7 +1686,7 @@ export class BaseClient {
         },
         body: requestBody,
         disableBodyCompression: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+        proxy: proxy || this.getProxy()
       }
     )
 
@@ -2411,7 +2410,7 @@ export class BaseClient {
             },
             method: 'POST',
             disableBodyCompression: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+        proxy: this.getProxy()
           }
         )
 
@@ -2444,7 +2443,7 @@ export class BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager) {
+  async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
     const _sourceName = decodedTrack.sourceName || 'youtube'
 
     const headers = this.oauth ? await this.getAuthHeaders() : {}
@@ -2452,7 +2451,8 @@ export class BaseClient {
       decodedTrack.identifier,
       context,
       headers,
-      cipherManager
+      cipherManager,
+      proxy
     )
 
     if (statusCode !== 200) {

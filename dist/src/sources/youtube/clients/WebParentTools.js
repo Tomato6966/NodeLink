@@ -53,8 +53,8 @@ export default class WebParentTools extends BaseClient {
                 return { loadType: 'empty', data: {} };
         }
     }
-    async getTrackUrl(decodedTrack, context, cipherManager, itag) {
-        const { body: playerResponse, statusCode } = await this._makePlayerRequest(decodedTrack.identifier, context, {}, cipherManager);
+    async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
+        const { body: playerResponse, statusCode } = await this._makePlayerRequest(decodedTrack.identifier, context, {}, cipherManager, proxy);
         if (statusCode !== 200) {
             return {
                 exception: {
@@ -69,7 +69,7 @@ export default class WebParentTools extends BaseClient {
     requirePlayerScript() {
         return true;
     }
-    async _makePlayerRequest(videoId, context, headers, cipherManager) {
+    async _makePlayerRequest(videoId, context, headers, cipherManager, proxy) {
         const requestBody = {
             context: this.getClient(context),
             videoId: videoId,
@@ -101,7 +101,7 @@ export default class WebParentTools extends BaseClient {
             },
             body: requestBody,
             disableBodyCompression: true,
-            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+            proxy: proxy || this.getProxy()
         });
         return response;
     }
