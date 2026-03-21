@@ -905,7 +905,7 @@ export default class YouTubeSource {
             const response = await http1makeRequest(url, {
                 method: 'GET',
                 streamOnly: true,
-                proxy: proxyToUse,
+                proxy: additionalData?.proxy || this.getProxy(),
                 timeout: 20000
             });
             if (response.statusCode !== 200 && response.statusCode !== 206) {
@@ -1039,7 +1039,7 @@ export default class YouTubeSource {
                     method: 'GET',
                     headers: { Range: `bytes=${start}-${end}` },
                     streamOnly: true,
-                    proxy: proxyToUse,
+                    proxy: additionalData?.proxy || this.getProxy(),
                     timeout: 20000
                 });
                 const responseStream = result.stream;

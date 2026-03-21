@@ -61,12 +61,14 @@ export default class YouTubeSource {
     }
   }
 
-  getProxy() {
+  getProxy(rotate = true) {
     if (!this.config.proxies || !Array.isArray(this.config.proxies) || this.config.proxies.length === 0) {
       return undefined
     }
     const proxy = this.config.proxies[this.proxyIndex]
-    this.proxyIndex = (this.proxyIndex + 1) % this.config.proxies.length
+    if (rotate) {
+      this.proxyIndex = (this.proxyIndex + 1) % this.config.proxies.length
+    }
     return proxy
   }
 
@@ -1358,7 +1360,7 @@ export default class YouTubeSource {
       const response = await http1makeRequest(url, {
         method: 'GET',
         streamOnly: true,
-        proxy: proxyToUse,
+        proxy: additionalData?.proxy || this.getProxy(),
         timeout: 20000
       })
 
@@ -1518,7 +1520,7 @@ export default class YouTubeSource {
           method: 'GET',
           headers: { Range: `bytes=${start}-${end}` },
           streamOnly: true,
-          proxy: proxyToUse,
+          proxy: additionalData?.proxy || this.getProxy(),
           timeout: 20000
         })
 
