@@ -15,6 +15,7 @@ import { resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import v8 from 'node:v8';
 import { isMainThread, parentPort, workerData as rawWorkerData, Worker } from 'node:worker_threads';
+import { createHeadQueue, dequeueHeadQueue, enqueueHeadQueue, getHeadQueueLength } from "./headQueue.js";
 import * as utils from "../utils.js";
 const __filename = fileURLToPath(import.meta.url);
 const getActiveResourcesBreakdown = () => {
@@ -82,7 +83,7 @@ if (isMainThread) {
     const SCALE_UP_THRESHOLD = specConfig.scaleUpThreshold ?? 30;
     const SCALE_UP_COOLDOWN_MS = specConfig.scaleCooldownMs ?? 1000;
     const workerPool = [];
-    const taskQueue = [];
+    const taskQueue = createHeadQueue();
     let lastScaleUpAt = 0;
     let nextThreadId = initialThreadCount + 1;
     nodelink.logger('info', 'SourceWorker', `Starting ${initialThreadCount}/${maxThreadCount} micro-worker(s) for API tasks...`);
@@ -158,7 +159,7 @@ if (isMainThread) {
         const now = Date.now();
         if (now - lastScaleUpAt < SCALE_UP_COOLDOWN_MS)
             return;
-        const totalLoad = getTotalLoad() + taskQueue.length;
+        const totalLoad = getTotalLoad() + getHeadQueueLength(taskQueue);
         const threshold = workerPool.length * SCALE_UP_THRESHOLD;
         if (totalLoad <= threshold)
             return;
@@ -340,7 +341,7 @@ if (isMainThread) {
      * @internal
      */
     function processNextTask() {
-        if (taskQueue.length === 0)
+        if (getHeadQueueLength(taskQueue) === 0)
             return;
         maybeScaleUpMicroWorkers();
         let bestWorker = null;
@@ -354,11 +355,11 @@ if (isMainThread) {
             }
         }
         if (bestWorker) {
-            const task = taskQueue.shift();
+            const task = dequeueHeadQueue(taskQueue);
             if (task) {
                 bestWorker.load++;
                 bestWorker.postMessage(task);
-                if (taskQueue.length > 0)
+                if (getHeadQueueLength(taskQueue) > 0)
                     setImmediate(processNextTask);
             }
         }
@@ -370,7 +371,7 @@ if (isMainThread) {
         if (msg.type !== 'sourceTask')
             return;
         if (msg.payload) {
-            taskQueue.push(msg.payload);
+            enqueueHeadQueue(taskQueue, msg.payload);
             maybeScaleUpMicroWorkers();
             processNextTask();
         }

@@ -1,3 +1,7 @@
+import type {
+  BestMatchCandidate,
+  TrackEncodeInput
+} from '../typings/utils.types.ts'
 import {
   encodeTrack,
   getBestMatch,
@@ -29,7 +33,7 @@ interface TrackInfo {
   artworkUrl: string | null
   isrc: string | null
   sourceName: string
-  details: unknown[]
+  details: TrackEncodeInput['details']
 }
 
 interface TrackDataLike {
@@ -487,6 +491,15 @@ export default class LastFMSource {
       artist: { method: 'artist.search', param: 'artist' }
     }
     const selected = typeMap[searchType]
+    if (!selected) {
+      return {
+        exception: {
+          message: `Unsupported Last.fm search type: ${searchType}`,
+          severity: 'common'
+        }
+      }
+    }
+
     const url =
       `https://ws.audioscrobbler.com/2.0/?method=${selected.method}` +
       `&${selected.param}=${encodeURIComponent(query)}` +
@@ -686,7 +699,7 @@ export default class LastFMSource {
     youtubeUrl?: string
   ): TrackDataLike {
     const pluginInfo = this.getPluginInfoRecord(track.pluginInfo)
-    const storedYoutubeUrl = pluginInfo.youtubeUrl
+    const storedYoutubeUrl = pluginInfo['youtubeUrl']
     const lastFmPluginInfo: Record<string, string> = {
       youtubeUrl:
         youtubeUrl ||
@@ -741,7 +754,7 @@ export default class LastFMSource {
 
   findTrackDataByCandidate(
     tracks: TrackDataLike[],
-    candidate: TrackDataLike
+    candidate: BestMatchCandidate
   ): TrackDataLike | null {
     return (
       tracks.find(

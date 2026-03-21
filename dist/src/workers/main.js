@@ -25,6 +25,7 @@ import StatsManager from "../managers/statsManager.js";
 import TrackCacheManager from "../managers/trackCacheManager.js";
 import { getWebmOpusProfilerStats } from "../playback/demuxers/WebmOpus.js";
 import { bufferPool } from "../playback/structs/BufferPool.js";
+import { createHeadQueue, dequeueHeadQueue, enqueueHeadQueue, getHeadQueueLength } from "./headQueue.js";
 import { cleanupHttpAgents, initLogger, logger } from "../utils.js";
 import { createVoiceRelay } from "../voice/voiceRelay.js";
 let playerClassPromise = null;
@@ -374,7 +375,7 @@ const handleProfilerCommand = async (payload) => {
         });
         let queuedCommands = 0;
         for (const entry of guildQueues.values()) {
-            queuedCommands += entry.queue.length;
+            queuedCommands += getHeadQueueLength(entry.queue);
         }
         const sourceManagerDebug = nodelink.sources
             ? {
@@ -1247,7 +1248,7 @@ function startTimers(hibernating = false) {
                 isHibernating,
                 players: localPlayers,
                 playingPlayers: localPlayingPlayers,
-                commandQueueLength: Array.from(guildQueues.values()).reduce((acc, curr) => acc + curr.queue.length, 0),
+                commandQueueLength: Array.from(guildQueues.values()).reduce((acc, curr) => acc + getHeadQueueLength(curr.queue), 0),
                 cpu: { nodelinkLoad },
                 eventLoopLag: hndl.mean / 1e6,
                 memory: {
@@ -1383,16 +1384,17 @@ function cancelStream(streamId) {
  */
 async function processQueue(queueKey) {
     const queueEntry = guildQueues.get(queueKey);
-    if (!queueEntry || queueEntry.queue.length === 0) {
+    if (!queueEntry || getHeadQueueLength(queueEntry.queue) === 0) {
         if (queueEntry) {
             queueEntry.processing = false;
-            if (queueEntry.queue.length === 0)
+            if (getHeadQueueLength(queueEntry.queue) === 0) {
                 guildQueues.delete(queueKey);
+            }
         }
         return;
     }
     queueEntry.processing = true;
-    const queued = queueEntry.queue.shift();
+    const queued = dequeueHeadQueue(queueEntry.queue);
     if (!queued) {
         queueEntry.processing = false;
         return;
@@ -1707,13 +1709,13 @@ async function processQueue(queueKey) {
     }
     finally {
         const queueEntry = guildQueues.get(queueKey);
-        if (queueEntry && queueEntry.queue.length > 0) {
+        if (queueEntry && getHeadQueueLength(queueEntry.queue) > 0) {
             setImmediate(() => processQueue(queueKey));
         }
         else {
             if (queueEntry) {
                 queueEntry.processing = false;
-                if (queueEntry.queue.length === 0)
+                if (getHeadQueueLength(queueEntry.queue) === 0)
                     guildQueues.delete(queueKey);
             }
         }
@@ -1733,12 +1735,14 @@ function enqueueCommand(type, requestId, payload) {
         : guildIdFromPayload;
     if (!guildQueues.has(queueKey)) {
         guildQueues.set(queueKey, {
-            queue: [],
+            queue: createHeadQueue(),
             processing: false
         });
     }
     const queueEntry = guildQueues.get(queueKey);
-    queueEntry?.queue.push({ type, requestId, payload });
+    if (queueEntry) {
+        enqueueHeadQueue(queueEntry.queue, { type, requestId, payload });
+    }
     if (!queueEntry?.processing)
         setImmediate(() => processQueue(queueKey));
 }

@@ -26,8 +26,10 @@ export const dequeueHeadQueue = <T>(queue: HeadQueue<T>): T | undefined => {
     return undefined
   }
 
-  const item = queue.items[queue.head]
-  queue.head++
+  const head = queue.head
+  const item = queue.items[head]
+  queue.items[head] = undefined as unknown as T
+  queue.head = head + 1
 
   if (queue.head === queue.items.length) {
     queue.items.length = 0
