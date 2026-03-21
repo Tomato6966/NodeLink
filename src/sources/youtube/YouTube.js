@@ -756,6 +756,7 @@ export default class YouTubeSource {
           'YouTube',
           `Attempting to get track URL for ${decodedTrack.title} with client: ${clientName}`
         )
+        const proxyToUse = this.getProxy();
         const urlData = await client.getTrackUrl(
           decodedTrack,
           this.ytContext,
@@ -821,7 +822,7 @@ export default class YouTubeSource {
               'YouTube',
               `URL pre-flight check successful for client ${clientName}.`
             )
-            const result = { ...urlData, additionalData: { contentLength } }
+            const result = { ...urlData, additionalData: { contentLength, proxy: proxyToUse } }
             this.nodelink.trackCacheManager.set(
               'youtube',
               decodedTrack.identifier,
@@ -1357,7 +1358,8 @@ export default class YouTubeSource {
       const response = await http1makeRequest(url, {
         method: 'GET',
         streamOnly: true,
-        timeout: 10000
+        proxy: proxyToUse,
+        timeout: 20000
       })
 
       if (response.statusCode !== 200 && response.statusCode !== 206) {
@@ -1516,7 +1518,8 @@ export default class YouTubeSource {
           method: 'GET',
           headers: { Range: `bytes=${start}-${end}` },
           streamOnly: true,
-          timeout: 10000
+          proxy: proxyToUse,
+          timeout: 20000
         })
 
         const responseStream = result.stream
