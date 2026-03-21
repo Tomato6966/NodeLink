@@ -53,6 +53,8 @@ export interface HttpProxyConfig {
   username?: string
   /** Optional proxy password for basic auth. */
   password?: string
+  /** Proxy type. 'reverse' uses URL prefixing. */
+  type?: 'reverse' | 'forward'
 }
 
 /**
