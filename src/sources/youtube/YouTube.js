@@ -267,6 +267,7 @@ export default class YouTubeSource {
       if (!client) continue
 
       try {
+        this.getProxy(true); // Rotate proxy for each client attempt
         logger(
           'debug',
           'YouTube',
@@ -557,6 +558,7 @@ export default class YouTubeSource {
       const androidClient = this.clients.Android
       if (androidClient) {
         try {
+          this.getProxy(true); // Rotate proxy
           logger(
             'debug',
             'YouTube',
@@ -628,6 +630,7 @@ export default class YouTubeSource {
       }
 
       try {
+        this.getProxy(true); // Rotate proxy
         logger(
           'debug',
           'YouTube',
@@ -758,7 +761,7 @@ export default class YouTubeSource {
           'YouTube',
           `Attempting to get track URL for ${decodedTrack.title} with client: ${clientName}`
         )
-        const proxyToUse = this.getProxy();
+        const proxyToUse = this.getProxy(true);
         const urlData = await client.getTrackUrl(
           decodedTrack,
           this.ytContext,
@@ -1353,7 +1356,8 @@ export default class YouTubeSource {
           contentLength,
           decodedTrack,
           cancelSignal,
-          streamKey
+          streamKey,
+          additionalData
         )
       }
 
@@ -1443,7 +1447,8 @@ export default class YouTubeSource {
     contentLength,
     decodedTrack,
     cancelSignal,
-    streamKey
+    streamKey,
+    additionalData
   ) {
     const stream = new PassThrough({ highWaterMark: CHUNK_SIZE * 2 })
     let position = 0
@@ -1689,6 +1694,7 @@ export default class YouTubeSource {
         }
 
         currentUrl = newUrlData.url
+        additionalData = newUrlData.additionalData
         errors = 0
         logger(
           'debug',

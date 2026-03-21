@@ -52,12 +52,14 @@ export default class YouTubeSource {
             }
         };
     }
-    getProxy() {
+    getProxy(rotate = true) {
         if (!this.config.proxies || !Array.isArray(this.config.proxies) || this.config.proxies.length === 0) {
             return undefined;
         }
         const proxy = this.config.proxies[this.proxyIndex];
-        this.proxyIndex = (this.proxyIndex + 1) % this.config.proxies.length;
+        if (rotate) {
+            this.proxyIndex = (this.proxyIndex + 1) % this.config.proxies.length;
+        }
         return proxy;
     }
     async setup() {
@@ -181,6 +183,7 @@ export default class YouTubeSource {
             if (!client)
                 continue;
             try {
+                this.getProxy(true); // Rotate proxy for each client attempt
                 logger('debug', 'YouTube', `Attempting ${searchType} search with client: ${clientName}`);
                 const result = await client.search(query, searchType, this.ytContext);
                 if (result && result.loadType === 'search') {
@@ -359,6 +362,7 @@ export default class YouTubeSource {
             const androidClient = this.clients.Android;
             if (androidClient) {
                 try {
+                    this.getProxy(true); // Rotate proxy
                     logger('debug', 'YouTube', 'Attempting to resolve playlist with Android client.');
                     const result = await androidClient.resolve(processUrl, sourceType, this.ytContext, this.cipherManager);
                     if (result &&
@@ -399,6 +403,7 @@ export default class YouTubeSource {
                 continue;
             }
             try {
+                this.getProxy(true); // Rotate proxy
                 logger('debug', 'YouTube', `Attempting to resolve URL with client: ${clientName}`);
                 const result = await client.resolve(processUrl, sourceType, this.ytContext, this.cipherManager);
                 if (result &&
@@ -471,7 +476,7 @@ export default class YouTubeSource {
                 continue;
             try {
                 logger('debug', 'YouTube', `Attempting to get track URL for ${decodedTrack.title} with client: ${clientName}`);
-                const proxyToUse = this.getProxy();
+                const proxyToUse = this.getProxy(true);
                 const urlData = await client.getTrackUrl(decodedTrack, this.ytContext, this.cipherManager, itag);
                 if (urlData.exception) {
                     clientErrors.push({
@@ -900,7 +905,7 @@ export default class YouTubeSource {
             }
             if (contentLength && contentLength > 0) {
                 logger('debug', 'YouTube', `Using range buffering for ${decodedTrack.title} (${Math.round(contentLength / 1024 / 1024)}MB)`);
-                return this._streamWithRangeRequests(url, contentLength, decodedTrack, cancelSignal, streamKey);
+                return this._streamWithRangeRequests(url, contentLength, decodedTrack, cancelSignal, streamKey, additionalData);
             }
             const response = await http1makeRequest(url, {
                 method: 'GET',
@@ -971,7 +976,7 @@ export default class YouTubeSource {
             };
         }
     }
-    _streamWithRangeRequests(url, contentLength, decodedTrack, cancelSignal, streamKey) {
+    _streamWithRangeRequests(url, contentLength, decodedTrack, cancelSignal, streamKey, additionalData) {
         const stream = new PassThrough({ highWaterMark: CHUNK_SIZE * 2 });
         let position = 0;
         let errors = 0;
@@ -1165,6 +1170,7 @@ export default class YouTubeSource {
                     throw new Error('No valid URL from getTrackUrl');
                 }
                 currentUrl = newUrlData.url;
+                additionalData = newUrlData.additionalData;
                 errors = 0;
                 logger('debug', 'YouTube', `URL recovered for ${decodedTrack.title} (resume at ${position} bytes, attempt ${refreshes}, cause: ${causeError?.message})`);
                 fetching = false;

@@ -1551,7 +1551,7 @@ export class BaseClient {
   }
 
   getProxy() {
-    return this.nodelink.sources?.getSource?.('youtube')?.getProxy?.()
+    return this.nodelink.sources?.getSource?.('youtube')?.getProxy?.(false)
   }
 
   getClient() {

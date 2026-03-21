@@ -1225,7 +1225,7 @@ export class BaseClient {
         this.oauth = oauth;
     }
     getProxy() {
-        return this.nodelink.sources?.getSource?.('youtube')?.getProxy?.();
+        return this.nodelink.sources?.getSource?.('youtube')?.getProxy?.(false);
     }
     getClient() {
         throw new Error('Not implemented');
