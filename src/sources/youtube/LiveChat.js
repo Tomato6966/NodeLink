@@ -63,7 +63,8 @@ class LiveChat {
                 context: this.source.ytContext,
                 continuation
               },
-              disableBodyCompression: true
+              disableBodyCompression: true,
+        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
             }
           )
 

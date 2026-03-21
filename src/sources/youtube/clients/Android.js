@@ -67,7 +67,8 @@ export default class Android extends BaseClient {
               this.getClient(context).client.clientVersion
           },
           body: requestBody,
-          disableBodyCompression: true
+          disableBodyCompression: true,
+        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
         }
       )
 
@@ -282,7 +283,8 @@ export default class Android extends BaseClient {
             },
             body: requestBody,
             method: 'POST',
-            disableBodyCompression: true
+            disableBodyCompression: true,
+        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
           }
         )
 

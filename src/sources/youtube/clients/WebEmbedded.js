@@ -57,7 +57,8 @@ export default class WebEmbedded extends BaseClient {
         'X-Goog-Api-Format-Version': '2'
       },
       body: requestBody,
-      disableBodyCompression: true
+      disableBodyCompression: true,
+        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
     })
 
     if (error || statusCode !== 200) {
@@ -218,7 +219,8 @@ export default class WebEmbedded extends BaseClient {
             },
             body: requestBody,
             method: 'POST',
-            disableBodyCompression: true
+            disableBodyCompression: true,
+        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
           }
         )
 
@@ -299,7 +301,8 @@ export default class WebEmbedded extends BaseClient {
         'User-Agent': this.getClient(context).client.userAgent
       },
       body: requestBody,
-      disableBodyCompression: true
+      disableBodyCompression: true,
+        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
     })
 
     if (error || statusCode !== 200) {

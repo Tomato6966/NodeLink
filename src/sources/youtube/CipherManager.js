@@ -204,7 +204,8 @@ export default class CipherManager {
         method: 'POST',
         headers,
         body: requestBody,
-        disableBodyCompression: true
+        disableBodyCompression: true,
+        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
       }
     )
 
@@ -323,7 +324,8 @@ export default class CipherManager {
         method: 'POST',
         headers,
         body: requestBody,
-        disableBodyCompression: true
+        disableBodyCompression: true,
+        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
       }
     )
 

@@ -306,6 +306,16 @@ export default {
       getOAuthToken: false,
       hl: 'en',
       gl: 'US',
+      proxies: [
+        /* {
+          url: "http://proxy1:port",
+          username: "username",
+          password: "password"
+        },
+        {
+          url: "http://proxy2:port"
+        } */
+      ],
       fallbackSources: [
         'soundcloud',
         'deezer',

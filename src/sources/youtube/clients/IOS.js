@@ -119,7 +119,8 @@ export default class IOS extends BaseClient {
             headers: { 'User-Agent': this.getClient(context).client.userAgent },
             body: requestBody,
             method: 'POST',
-            disableBodyCompression: true
+            disableBodyCompression: true,
+        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
           }
         )
 
