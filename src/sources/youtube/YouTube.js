@@ -1308,7 +1308,7 @@ export default class YouTubeSource {
       let contentLength = additionalData?.contentLength || null
 
       if (!contentLength) {
-        const testResponse = await http1makeRequest(url, { method: 'HEAD' })
+        const testResponse = await http1makeRequest(url, { method: 'HEAD', timeout: 5000 })
 
         if (testResponse.headers?.['content-length']) {
           contentLength = Number.parseInt(
@@ -1357,7 +1357,7 @@ export default class YouTubeSource {
       const response = await http1makeRequest(url, {
         method: 'GET',
         streamOnly: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
+        timeout: 10000
       })
 
       if (response.statusCode !== 200 && response.statusCode !== 206) {
@@ -1516,7 +1516,6 @@ export default class YouTubeSource {
           method: 'GET',
           headers: { Range: `bytes=${start}-${end}` },
           streamOnly: true,
-        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.(),
           timeout: 10000
         })
 
