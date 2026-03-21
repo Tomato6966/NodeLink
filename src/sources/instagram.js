@@ -1,7 +1,13 @@
 import { PassThrough } from 'node:stream'
 import { URLSearchParams } from 'node:url'
 
-import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.ts'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger,
+  makeRequest
+} from '../utils.ts'
 
 export default class InstagramSource {
   constructor(nodelink) {
@@ -103,6 +109,303 @@ export default class InstagramSource {
 
   isLinkMatch(link) {
     return this.patterns.some((pattern) => pattern.test(link))
+  }
+
+  _decodeHtmlEntities(value) {
+    if (!value) return value
+
+    return value
+      .replace(/&amp;/g, '&')
+      .replace(/&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .trim()
+  }
+
+  _extractMetaContent(html, property) {
+    if (!html || !property) return null
+
+    const patterns = [
+      new RegExp(
+        `<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']+)["']`,
+        'i'
+      ),
+      new RegExp(
+        `<meta[^>]+content=["']([^"']+)["'][^>]+property=["']${property}["']`,
+        'i'
+      )
+    ]
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern)
+      if (match?.[1]) {
+        return this._decodeHtmlEntities(match[1])
+      }
+    }
+
+    return null
+  }
+
+  _parseAudioOgMetadata(ogTitle, ogDescription) {
+    const normalizedOgTitle = (ogTitle || '')
+      .replace(/\s+on Instagram$/i, '')
+      .trim()
+
+    let author = null
+    let title = null
+
+    if (normalizedOgTitle.includes(' | ')) {
+      const [parsedAuthor, ...titleParts] = normalizedOgTitle.split(' | ')
+      author = parsedAuthor?.trim() || null
+      title = titleParts.join(' | ').trim() || null
+    }
+
+    if ((!author || !title) && ogDescription) {
+      const descMatch = ogDescription.match(
+        /Listen to (.+?) on Instagram and watch reels using (.+?) audio/i
+      )
+      if (descMatch) {
+        author ||= descMatch[1]?.trim() || null
+        title ||= descMatch[2]?.trim() || null
+      }
+    }
+
+    const normalizedTitle = title || normalizedOgTitle || 'Instagram Audio'
+    const searchQuery = [author, title].filter(Boolean).join(' ').trim()
+
+    return {
+      author: author || 'User Unknown',
+      title: normalizedTitle,
+      searchQuery: searchQuery || normalizedTitle
+    }
+  }
+
+  _normalizeMirrorText(value) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/[|()[\]{}]/g, ' ')
+      .replace(/feat\.?/g, ' ')
+      .replace(/ft\.?/g, ' ')
+      .replace(/[^\p{L}\p{N}\s-]/gu, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  _tokenizeMirrorText(value) {
+    const ignored = new Set([
+      'official',
+      'audio',
+      'video',
+      'lyrics',
+      'lyric',
+      'prod',
+      'version',
+      'music'
+    ])
+
+    return this._normalizeMirrorText(value)
+      .split(' ')
+      .filter((token) => token.length > 1 && !ignored.has(token))
+  }
+
+  _isMirrorCandidateAcceptable(original, candidateInfo) {
+    if (!candidateInfo) return false
+
+    const candidateText = this._normalizeMirrorText(
+      `${candidateInfo.title || ''} ${candidateInfo.author || ''}`
+    )
+    const titleTokens = this._tokenizeMirrorText(original.title)
+    const authorTokens =
+      original.author && original.author !== 'User Unknown'
+        ? this._tokenizeMirrorText(original.author)
+        : []
+
+    if (titleTokens.length > 0) {
+      const titleMatches = titleTokens.filter((token) =>
+        candidateText.includes(token)
+      ).length
+      const minimumTitleMatches = Math.max(
+        1,
+        Math.ceil(titleTokens.length * 0.5)
+      )
+
+      if (titleMatches < minimumTitleMatches) {
+        return false
+      }
+    }
+
+    if (authorTokens.length === 0) {
+      return true
+    }
+
+    const authorMatches = authorTokens.filter((token) =>
+      candidateText.includes(token)
+    ).length
+
+    return authorMatches > 0
+  }
+
+  async _fetchAudioOgMetadata(audioId) {
+    if (!audioId) {
+      return {
+        data: null,
+        exception: { message: 'Audio ID not provided', severity: 'common' }
+      }
+    }
+
+    const pageUrl = `https://www.instagram.com/reels/audio/${audioId}/`
+
+    let response = null
+    try {
+      response = await makeRequest(pageUrl, {
+        method: 'GET',
+        headers: {
+          Accept:
+            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'User-Agent': 'facebookexternalhit/1.1'
+        },
+        disableBodyCompression: true
+      })
+    } catch (e) {
+      return {
+        data: null,
+        exception: {
+          message: `Failed to fetch Instagram audio page: ${e.message}`,
+          severity: 'fault'
+        }
+      }
+    }
+
+    const body = response?.body
+    if (response?.statusCode !== 200 || typeof body !== 'string') {
+      return {
+        data: null,
+        exception: {
+          message: `Failed to fetch Instagram audio page. Status: ${response?.statusCode}`,
+          severity: 'common'
+        }
+      }
+    }
+
+    const ogTitle = this._extractMetaContent(body, 'og:title')
+    const ogDescription = this._extractMetaContent(body, 'og:description')
+    const ogImage = this._extractMetaContent(body, 'og:image')
+
+    if (!ogTitle && !ogDescription) {
+      return {
+        data: null,
+        exception: {
+          message: 'Instagram audio metadata not found in page HTML.',
+          severity: 'common'
+        }
+      }
+    }
+
+    const parsed = this._parseAudioOgMetadata(ogTitle, ogDescription)
+
+    return {
+      data: {
+        author: parsed.author,
+        title: parsed.title,
+        thumbnail: ogImage || '',
+        length: -1,
+        isStream: false,
+        isSeekable: true,
+        description: ogDescription || '',
+        searchQuery: parsed.searchQuery
+      },
+      exception: null
+    }
+  }
+
+  async _resolveAudioMirrorTrack(decodedTrack, preferredQuery = null) {
+    const yt = this.nodelink.sources?.getSource('youtube')
+    if (!yt?.search) {
+      return {
+        exception: {
+          message: 'YouTube source is not available for Instagram audio mirror.',
+          severity: 'fault'
+        }
+      }
+    }
+
+    const queries = [
+      preferredQuery || '',
+      `${decodedTrack.author || ''} - ${decodedTrack.title || ''}`.trim(),
+      `"${decodedTrack.title || ''}" ${decodedTrack.author || ''}`.trim(),
+      `${decodedTrack.title || ''} ${decodedTrack.author || ''}`.trim(),
+      `${decodedTrack.author || ''} ${decodedTrack.title || ''}`.trim(),
+      decodedTrack.title || '',
+      decodedTrack.author || ''
+    ].filter(Boolean)
+
+    const triedQueries = new Set()
+    const searchModes = [
+      { type: 'youtube', label: 'YouTube' },
+      { type: 'ytmsearch', label: 'YouTube Music' }
+    ]
+
+    for (const query of queries) {
+      for (const searchMode of searchModes) {
+        const queryKey = `${searchMode.type}:${query}`
+        if (triedQueries.has(queryKey)) continue
+        triedQueries.add(queryKey)
+
+        let searchResult = null
+        try {
+          searchResult = await yt.search(query, searchMode.type)
+        } catch (e) {
+          logger(
+            'debug',
+            'Sources',
+            `Instagram audio mirror lookup failed on ${searchMode.label} search for "${query}": ${e.message}`
+          )
+          continue
+        }
+
+        if (
+          searchResult.loadType !== 'search' ||
+          !Array.isArray(searchResult.data) ||
+          searchResult.data.length === 0
+        ) {
+          continue
+        }
+
+        const acceptableMatches = searchResult.data.filter((candidate) =>
+          this._isMirrorCandidateAcceptable(decodedTrack, candidate?.info)
+        )
+
+        if (acceptableMatches.length === 0) {
+          logger(
+            'debug',
+            'Sources',
+            `Rejected low-confidence ${searchMode.label} mirror candidates for "${query}".`
+          )
+          continue
+        }
+
+        const bestMatch =
+          getBestMatch(acceptableMatches, decodedTrack) ||
+          acceptableMatches[0]
+
+        if (!bestMatch?.info) continue
+
+        const streamInfo = await this.nodelink.sources.getTrackUrl(
+          bestMatch.info
+        )
+        if (!streamInfo?.exception) {
+          return { newTrack: bestMatch, ...streamInfo }
+        }
+      }
+    }
+
+    return {
+      exception: {
+        message: 'No playable YouTube mirror found for Instagram audio.',
+        severity: 'fault'
+      }
+    }
   }
 
   _extractInfo(url) {
@@ -568,7 +871,17 @@ export default class InstagramSource {
         await this._fetchFromGraphQL(contentId, pathSegment))
     } else if (type === 'audio') {
       ;({ data: trackData, exception: fetchError } =
-        await this._fetchFromAudioAPI(contentId))
+        await this._fetchAudioOgMetadata(contentId))
+
+      if (fetchError) {
+        logger(
+          'debug',
+          'Sources',
+          `Instagram audio OG metadata fallback triggered for ${contentId}: ${fetchError.message}`
+        )
+        ;({ data: trackData, exception: fetchError } =
+          await this._fetchFromAudioAPI(contentId))
+      }
     } else {
       return {
         exception: {
@@ -608,7 +921,9 @@ export default class InstagramSource {
     return {
       encoded: encodeTrack(trackInfo),
       info: trackInfo,
-      pluginInfo: {}
+      pluginInfo: {
+        description: trackData.description || null
+      }
     }
   }
 
@@ -632,6 +947,40 @@ export default class InstagramSource {
       ;({ data: trackData, exception: fetchError } =
         await this._fetchFromGraphQL(contentId, pathSegment))
     } else if (type === 'audio') {
+      let mirrorTrack = track
+      let preferredQuery = null
+
+      if (
+        !track.title ||
+        track.title === 'Instagram Audio' ||
+        track.author === 'User Unknown'
+      ) {
+        const ogMetadata = await this._fetchAudioOgMetadata(contentId)
+        if (!ogMetadata.exception && ogMetadata.data) {
+          mirrorTrack = {
+            ...track,
+            title: ogMetadata.data.title || track.title,
+            author: ogMetadata.data.author || track.author,
+            artworkUrl: ogMetadata.data.thumbnail || track.artworkUrl
+          }
+          preferredQuery = ogMetadata.data.searchQuery || null
+        }
+      }
+
+      const mirrorResult = await this._resolveAudioMirrorTrack(
+        mirrorTrack,
+        preferredQuery
+      )
+      if (!mirrorResult?.exception) {
+        return mirrorResult
+      }
+
+      logger(
+        'warn',
+        'Sources',
+        `Instagram audio mirror failed for ${contentId}: ${mirrorResult.exception.message}. Falling back to direct stream lookup.`
+      )
+
       ;({ data: trackData, exception: fetchError } =
         await this._fetchFromAudioAPI(contentId))
     } else {
