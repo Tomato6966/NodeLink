@@ -32,6 +32,12 @@ import type {
   LoadStreamPayload,
   PCMStream
 } from '../typings/workers/worker.types.ts'
+import {
+  createHeadQueue,
+  dequeueHeadQueue,
+  enqueueHeadQueue,
+  getHeadQueueLength
+} from './headQueue.ts'
 import * as utils from '../utils.ts'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -122,7 +128,7 @@ if (isMainThread) {
   const SCALE_UP_THRESHOLD = specConfig.scaleUpThreshold ?? 30
   const SCALE_UP_COOLDOWN_MS = specConfig.scaleCooldownMs ?? 1000
   const workerPool: MicroWorker[] = []
-  const taskQueue: TaskData[] = []
+  const taskQueue = createHeadQueue<TaskData>()
   let lastScaleUpAt = 0
   let nextThreadId = initialThreadCount + 1
 
@@ -224,7 +230,7 @@ if (isMainThread) {
     const now = Date.now()
     if (now - lastScaleUpAt < SCALE_UP_COOLDOWN_MS) return
 
-    const totalLoad = getTotalLoad() + taskQueue.length
+    const totalLoad = getTotalLoad() + getHeadQueueLength(taskQueue)
     const threshold = workerPool.length * SCALE_UP_THRESHOLD
     if (totalLoad <= threshold) return
 
@@ -453,7 +459,7 @@ if (isMainThread) {
    * @internal
    */
   function processNextTask(): void {
-    if (taskQueue.length === 0) return
+    if (getHeadQueueLength(taskQueue) === 0) return
 
     maybeScaleUpMicroWorkers()
 
@@ -472,12 +478,12 @@ if (isMainThread) {
     }
 
     if (bestWorker) {
-      const task = taskQueue.shift()
+      const task = dequeueHeadQueue(taskQueue)
       if (task) {
         bestWorker.load++
         bestWorker.postMessage(task)
 
-        if (taskQueue.length > 0) setImmediate(processNextTask)
+        if (getHeadQueueLength(taskQueue) > 0) setImmediate(processNextTask)
       }
     }
   }
@@ -488,7 +494,7 @@ if (isMainThread) {
   process.on('message', (msg: { type: string; payload?: TaskData }) => {
     if (msg.type !== 'sourceTask') return
     if (msg.payload) {
-      taskQueue.push(msg.payload)
+      enqueueHeadQueue(taskQueue, msg.payload)
       maybeScaleUpMicroWorkers()
       processNextTask()
     }

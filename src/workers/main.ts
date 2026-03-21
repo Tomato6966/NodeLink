@@ -43,6 +43,12 @@ import type {
   WorkerNodeLink,
   WorkerPlayer
 } from '../typings/workers/worker.types.ts'
+import {
+  createHeadQueue,
+  dequeueHeadQueue,
+  enqueueHeadQueue,
+  getHeadQueueLength
+} from './headQueue.ts'
 import { cleanupHttpAgents, initLogger, logger } from '../utils.ts'
 import { createVoiceRelay } from '../voice/voiceRelay.ts'
 
@@ -609,7 +615,7 @@ const handleProfilerCommand = async (
 
     let queuedCommands = 0
     for (const entry of guildQueues.values()) {
-      queuedCommands += entry.queue.length
+      queuedCommands += getHeadQueueLength(entry.queue)
     }
 
     const sourceManagerDebug = nodelink.sources
@@ -1684,7 +1690,7 @@ function startTimers(hibernating = false): void {
         players: localPlayers,
         playingPlayers: localPlayingPlayers,
         commandQueueLength: Array.from(guildQueues.values()).reduce(
-          (acc, curr) => acc + curr.queue.length,
+          (acc, curr) => acc + getHeadQueueLength(curr.queue),
           0
         ),
         cpu: { nodelinkLoad },
@@ -1885,16 +1891,18 @@ function cancelStream(streamId: string): boolean {
  */
 async function processQueue(queueKey: string): Promise<void> {
   const queueEntry = guildQueues.get(queueKey)
-  if (!queueEntry || queueEntry.queue.length === 0) {
+  if (!queueEntry || getHeadQueueLength(queueEntry.queue) === 0) {
     if (queueEntry) {
       queueEntry.processing = false
-      if (queueEntry.queue.length === 0) guildQueues.delete(queueKey)
+      if (getHeadQueueLength(queueEntry.queue) === 0) {
+        guildQueues.delete(queueKey)
+      }
     }
     return
   }
 
   queueEntry.processing = true
-  const queued = queueEntry.queue.shift()
+  const queued = dequeueHeadQueue(queueEntry.queue)
   if (!queued) {
     queueEntry.processing = false
     return
@@ -2311,12 +2319,13 @@ async function processQueue(queueKey: string): Promise<void> {
     if (requestId) sendCommandError(requestId, getErrorMessage(e))
   } finally {
     const queueEntry = guildQueues.get(queueKey)
-    if (queueEntry && queueEntry.queue.length > 0) {
+    if (queueEntry && getHeadQueueLength(queueEntry.queue) > 0) {
       setImmediate(() => processQueue(queueKey))
     } else {
       if (queueEntry) {
         queueEntry.processing = false
-        if (queueEntry.queue.length === 0) guildQueues.delete(queueKey)
+        if (getHeadQueueLength(queueEntry.queue) === 0)
+          guildQueues.delete(queueKey)
       }
     }
   }
@@ -2342,13 +2351,15 @@ function enqueueCommand(
 
   if (!guildQueues.has(queueKey)) {
     guildQueues.set(queueKey, {
-      queue: [] as WorkerCommand[],
+      queue: createHeadQueue<WorkerCommand>(),
       processing: false
     })
   }
 
   const queueEntry = guildQueues.get(queueKey)
-  queueEntry?.queue.push({ type, requestId, payload })
+  if (queueEntry) {
+    enqueueHeadQueue(queueEntry.queue, { type, requestId, payload })
+  }
 
   if (!queueEntry?.processing) setImmediate(() => processQueue(queueKey))
 }

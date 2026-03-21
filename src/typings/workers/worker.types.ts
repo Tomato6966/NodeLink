@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream'
+import type { HeadQueue } from '../../workers/headQueue.ts'
 import type {
   LoggerFn,
   LyricsManagerLike,
@@ -49,7 +50,7 @@ export interface WorkerCommand {
  * Per-guild command queue entry.
  */
 export interface GuildQueueEntry {
-  queue: WorkerCommand[]
+  queue: HeadQueue<WorkerCommand>
   processing: boolean
 }
 
