@@ -736,14 +736,26 @@ export default class YouTubeSource {
       const cached = this.nodelink.trackCacheManager.get(
         'youtube',
         decodedTrack.identifier
-      )
+      );
       if (cached) {
-        logger(
-          'debug',
-          'YouTube',
-          `Using cached URL for ${decodedTrack.identifier}`
-        )
-        return cached
+        const cachedProxyUrl = cached.additionalData?.proxy?.url;
+        const currentProxies = this.config.proxies || [];
+        const isProxyStillValid = !cachedProxyUrl || currentProxies.some(p => p.url === cachedProxyUrl);
+
+        if (isProxyStillValid) {
+          logger(
+            'debug',
+            'YouTube',
+            `Using cached URL for ${decodedTrack.identifier}`
+          );
+          return cached;
+        } else {
+          logger(
+            'debug',
+            'YouTube',
+            `Cached proxy for ${decodedTrack.identifier} is no longer in config. Forcing refresh...`
+          );
+        }
       }
     }
 
