@@ -49,7 +49,8 @@ export default class Android extends BaseClient {
                     'X-YouTube-Client-Version': this.getClient(context).client.clientVersion
                 },
                 body: requestBody,
-                disableBodyCompression: true
+                disableBodyCompression: true,
+                proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
             });
             if (error || statusCode !== 200) {
                 const message = error?.message ||
@@ -196,7 +197,8 @@ export default class Android extends BaseClient {
                     },
                     body: requestBody,
                     method: 'POST',
-                    disableBodyCompression: true
+                    disableBodyCompression: true,
+                    proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
                 });
                 if (statusCode !== 200) {
                     const errMsg = `Failed to fetch playlist. Status: ${statusCode}`;

@@ -37,7 +37,8 @@ export default class Web extends BaseClient {
                 'X-Goog-Api-Format-Version': '2'
             },
             body: requestBody,
-            disableBodyCompression: true
+            disableBodyCompression: true,
+            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
         });
         if (error || statusCode !== 200) {
             const message = error?.message ||
@@ -150,7 +151,8 @@ export default class Web extends BaseClient {
                     },
                     body: requestBody,
                     method: 'POST',
-                    disableBodyCompression: true
+                    disableBodyCompression: true,
+                    proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
                 });
                 if (statusCode !== 200 || playlistResponse?.error) {
                     const errMsg = playlistResponse?.error?.message ||
@@ -214,7 +216,8 @@ export default class Web extends BaseClient {
                         Referer: `https://www.youtube.com/watch?v=${decodedTrack.identifier}`
                     },
                     body: requestBody,
-                    disableBodyCompression: true
+                    disableBodyCompression: true,
+                    proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
                 });
                 const streamingData = playerResponse.streamingData || playerResponse.streaming_data;
                 const serverAbrUrl = streamingData?.serverAbrStreamingUrl ||
@@ -288,7 +291,8 @@ export default class Web extends BaseClient {
                 'User-Agent': this.getClient(context).client.userAgent
             },
             body: requestBody,
-            disableBodyCompression: true
+            disableBodyCompression: true,
+            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
         });
         if (error || statusCode !== 200) {
             throw new Error(`Search failed for chapters: ${error?.message || statusCode}`);

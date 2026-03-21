@@ -303,7 +303,8 @@ async function fetchChannelInfo(channelId, makeRequest, context) {
                 },
                 browseId: channelId
             },
-            disableBodyCompression: true
+            disableBodyCompression: true,
+            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
         });
         if (statusCode !== 200 || !channelResponse) {
             logger('warn', 'fetchChannelInfo', `Bad status code or empty response: ${statusCode}`);
@@ -1223,6 +1224,9 @@ export class BaseClient {
         this.name = name;
         this.oauth = oauth;
     }
+    getProxy() {
+        return this.nodelink.sources?.getSource?.('youtube')?.getProxy?.();
+    }
     getClient() {
         throw new Error('Not implemented');
     }
@@ -1302,7 +1306,8 @@ export class BaseClient {
                 ...headers
             },
             body: requestBody,
-            disableBodyCompression: true
+            disableBodyCompression: true,
+            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
         });
         if (response.statusCode !== 200) {
             const message = `Failed to get player data. Status: ${response.statusCode}`;
@@ -1329,7 +1334,8 @@ export class BaseClient {
                 ...headers
             },
             body: requestBody,
-            disableBodyCompression: true
+            disableBodyCompression: true,
+            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
         });
         return response;
     }
@@ -1777,7 +1783,8 @@ export class BaseClient {
                         racyCheckOk: true
                     },
                     method: 'POST',
-                    disableBodyCompression: true
+                    disableBodyCompression: true,
+                    proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
                 });
                 if (statusCode !== 200 || playlistResponse?.error) {
                     const errMsg = playlistResponse?.error?.message ||

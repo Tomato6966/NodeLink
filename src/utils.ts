@@ -1482,11 +1482,17 @@ async function http1makeRequest(
 
   while (true) {
     try {
-      const url = new URL(urlString)
+      let finalUrl = urlString
+      if (proxy?.type === 'reverse' || (proxy?.url && !proxy.username && !proxy.url.includes(':', 7))) {
+        finalUrl = `${proxy.url.replace(/\/+$/, '')}/${urlString}`
+        logger('debug', 'Network', `Using reverse proxy: ${proxy.url} for ${urlString}`)
+      }
+
+      const url = new URL(finalUrl)
       const isHttps = url.protocol === 'https:'
       let agent = options.agent
 
-      if (!agent) {
+      if (!agent && proxy?.url && !finalUrl.startsWith(proxy.url)) {
         if (proxy?.url) {
           const proxyAgent = await getProxyAgent()
           if (proxyAgent) {
@@ -1522,7 +1528,7 @@ async function http1makeRequest(
 
       const newOptions = { ...options, agent }
 
-      return await _internalHttp1Request(urlString, newOptions)
+      return await _internalHttp1Request(finalUrl, newOptions)
     } catch (err) {
       const error = err as NodeJS.ErrnoException
       const code = error.code ? String(error.code) : ''

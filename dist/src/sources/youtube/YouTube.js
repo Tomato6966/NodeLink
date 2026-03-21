@@ -39,6 +39,7 @@ export default class YouTubeSource {
         this.liveChat = new YouTubeLiveChat(nodelink, this);
         this.activeStreams = new Map();
         this.mirrorFallbackInFlight = new Set();
+        this.proxyIndex = 0;
         this.ytContext = {
             client: {
                 screenDensityFloat: 1,
@@ -50,6 +51,14 @@ export default class YouTubeSource {
                 visitorData: null
             }
         };
+    }
+    getProxy() {
+        if (!this.config.proxies || !Array.isArray(this.config.proxies) || this.config.proxies.length === 0) {
+            return undefined;
+        }
+        const proxy = this.config.proxies[this.proxyIndex];
+        this.proxyIndex = (this.proxyIndex + 1) % this.config.proxies.length;
+        return proxy;
     }
     async setup() {
         logger('info', 'YouTube', 'Setting up YouTube source...');
@@ -134,7 +143,8 @@ export default class YouTubeSource {
                 const { body: guideData, error: guideError, statusCode: guideStatusCode } = await makeRequest('https://www.youtube.com/youtubei/v1/guide', {
                     method: 'POST',
                     body: { context: this.ytContext },
-                    disableBodyCompression: true
+                    disableBodyCompression: true,
+                    proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
                 });
                 if (!guideError &&
                     guideStatusCode === 200 &&
@@ -485,7 +495,8 @@ export default class YouTubeSource {
                     const check = await http1makeRequest(urlData.url, {
                         method: 'GET',
                         headers: { Range: 'bytes=0-0' },
-                        streamOnly: true
+                        streamOnly: true,
+                        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
                     });
                     if (check.stream)
                         check.stream.destroy();
@@ -516,7 +527,8 @@ export default class YouTubeSource {
                         const hlsCheck = await http1makeRequest(urlData.hlsUrl, {
                             method: 'GET',
                             headers: { Range: 'bytes=0-0' },
-                            streamOnly: true
+                            streamOnly: true,
+                            proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
                         });
                         if (hlsCheck.stream)
                             hlsCheck.stream.destroy();
@@ -540,7 +552,8 @@ export default class YouTubeSource {
                     const hlsCheck = await http1makeRequest(urlData.hlsUrl, {
                         method: 'GET',
                         headers: { Range: 'bytes=0-0' },
-                        streamOnly: true
+                        streamOnly: true,
+                        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
                     });
                     if (hlsCheck.stream)
                         hlsCheck.stream.destroy();
@@ -861,7 +874,7 @@ export default class YouTubeSource {
                 throw new Error('No direct URL');
             let contentLength = additionalData?.contentLength || null;
             if (!contentLength) {
-                const testResponse = await http1makeRequest(url, { method: 'HEAD' });
+                const testResponse = await http1makeRequest(url, { method: 'HEAD', timeout: 5000 });
                 if (testResponse.headers?.['content-length']) {
                     contentLength = Number.parseInt(testResponse.headers['content-length'], 10);
                 }
@@ -872,7 +885,8 @@ export default class YouTubeSource {
                     const rangeResponse = await http1makeRequest(url, {
                         method: 'GET',
                         headers: { Range: 'bytes=0-0' },
-                        streamOnly: true
+                        streamOnly: true,
+                        proxy: (typeof this.getProxy === 'function' ? this.getProxy() : this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()) || this.source?.getProxy?.()
                     });
                     if (rangeResponse.stream)
                         rangeResponse.stream.destroy();
@@ -889,7 +903,8 @@ export default class YouTubeSource {
             }
             const response = await http1makeRequest(url, {
                 method: 'GET',
-                streamOnly: true
+                streamOnly: true,
+                timeout: 10000
             });
             if (response.statusCode !== 200 && response.statusCode !== 206) {
                 throw new Error(`HTTP status ${response.statusCode}`);
