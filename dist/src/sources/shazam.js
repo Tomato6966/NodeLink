@@ -190,22 +190,8 @@ export default class ShazamSource {
         }
         try {
             const query = `${decodedTrack.title} ${decodedTrack.author}`;
-            let searchResult = { loadType: 'empty', data: {} };
-            let searchTracks = [];
-            if (decodedTrack.isrc) {
-                searchResult = await sourceManager.search('ytmsearch', `"${decodedTrack.isrc}"`);
-                searchTracks = this.extractTrackArray(searchResult);
-                if (searchTracks.length > 0) {
-                    logger('debug', 'Shazam', `Found result via ISRC: ${decodedTrack.isrc}`);
-                }
-            }
-            if (searchTracks.length === 0) {
-                if (decodedTrack.isrc) {
-                    logger('debug', 'Shazam', `ISRC search failed for ${decodedTrack.isrc}, falling back to text query`);
-                }
-                searchResult = await sourceManager.search('ytmsearch', query);
-                searchTracks = this.extractTrackArray(searchResult);
-            }
+            let searchResult = await sourceManager.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
+            let searchTracks = this.extractTrackArray(searchResult);
             if (searchTracks.length === 0) {
                 searchResult = await sourceManager.searchWithDefault(query);
                 searchTracks = this.extractTrackArray(searchResult);

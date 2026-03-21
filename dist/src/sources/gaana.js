@@ -289,13 +289,13 @@ export default class GaanaSource {
         catch (e) {
             logger('debug', 'Gaana', `Direct stream fetch failed for ${decodedTrack.title}: ${e.message}`);
         }
-        logger('warn', 'Gaana', `Direct playback for ${decodedTrack.title} failed. Falling back to YouTube matching.`);
+        logger('warn', 'Gaana', `Direct playback for ${decodedTrack.title} failed. Falling back to default search matching.`);
         const searchResult = await this.nodelink.sources.searchWithDefault(`${decodedTrack.title} ${decodedTrack.author}`);
         const bestMatch = getBestMatch(searchResult.data, decodedTrack);
         if (!bestMatch)
             return {
                 exception: {
-                    message: 'No suitable alternative found on YouTube.',
+                    message: 'No suitable alternative found in default search.',
                     severity: 'fault'
                 }
             };

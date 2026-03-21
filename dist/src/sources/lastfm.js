@@ -245,12 +245,8 @@ export default class LastFMSource {
                 }
             }
             const query = `${decodedTrack.title} ${decodedTrack.author}`.trim();
-            let searchResult = await sourceManager.search('ytmsearch', query);
-            let searchTracks = this.extractTrackArray(searchResult);
-            if (searchTracks.length === 0) {
-                searchResult = await sourceManager.searchWithDefault(query);
-                searchTracks = this.extractTrackArray(searchResult);
-            }
+            const searchResult = await sourceManager.searchWithDefault(query);
+            const searchTracks = this.extractTrackArray(searchResult);
             if (searchTracks.length === 0) {
                 return {
                     exception: {
@@ -334,10 +330,6 @@ export default class LastFMSource {
         const sourceManager = this.getSourceManager();
         if (!sourceManager)
             return [];
-        const searchResult = await sourceManager.search('ytmsearch', query);
-        const preferredTracks = this.extractTrackArray(searchResult);
-        if (preferredTracks.length > 0)
-            return preferredTracks;
         const fallbackResult = await sourceManager.searchWithDefault(query);
         return this.extractTrackArray(fallbackResult);
     }

@@ -1126,7 +1126,7 @@ export default class DeezerSource {
         logger(
           'warn',
           'Deezer',
-          `Direct stream failed for ${decodedTrack.title}: ${this.getErrorMessage(error)}. Falling back to YouTube.`
+          `Direct stream failed for ${decodedTrack.title}: ${this.getErrorMessage(error)}. Falling back to default search.`
         )
       }
     }
@@ -1140,24 +1140,11 @@ export default class DeezerSource {
       )
     }
 
-    let searchResult: SourceResult | null = null
-    if (decodedTrack.isrc) {
-      searchResult = await sourceManager.search(
-        'ytmsearch',
-        `"${decodedTrack.isrc}"`
-      )
-      if (this.extractTrackData(searchResult).length === 0) {
-        searchResult = await sourceManager.search(
-          'ytmsearch',
-          `${decodedTrack.title} ${decodedTrack.author}`
-        )
-      }
-    }
+    const query = `${decodedTrack.title} ${decodedTrack.author}`
+    let searchResult = await sourceManager.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query)
 
-    if (!searchResult || this.extractTrackData(searchResult).length === 0) {
-      searchResult = await sourceManager.searchWithDefault(
-        `${decodedTrack.title} ${decodedTrack.author}`
-      )
+    if (this.extractTrackData(searchResult).length === 0) {
+      searchResult = await sourceManager.searchWithDefault(query)
     }
 
     const candidates = this.extractTrackData(searchResult)

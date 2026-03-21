@@ -526,22 +526,14 @@ export default class AppleMusicSource {
         }
         const query = this._buildSearchQuery(decodedTrack, isExplicit);
         try {
-            let searchResult;
-            if (decodedTrack.isrc) {
-                searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch');
-                if (searchResult.loadType !== 'search' ||
-                    searchResult.data.length === 0) {
-                    searchResult = null;
-                }
-            }
-            if (!searchResult) {
-                searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch');
-            }
-            if (searchResult.loadType !== 'search' ||
+            let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
+            if (!searchResult ||
+                searchResult.loadType !== 'search' ||
                 searchResult.data.length === 0) {
                 searchResult = await this.nodelink.sources.searchWithDefault(query);
             }
-            if (searchResult.loadType !== 'search' ||
+            if (!searchResult ||
+                searchResult.loadType !== 'search' ||
                 searchResult.data.length === 0) {
                 return {
                     exception: { message: 'No alternative found.', severity: 'fault' }

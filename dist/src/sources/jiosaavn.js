@@ -179,7 +179,7 @@ export default class JioSaavnSource {
             };
         }
         catch (e) {
-            logger('warn', 'JioSaavn', `Direct stream failed for ${decodedTrack.title}: ${e.message}. Falling back to YouTube.`);
+            logger('warn', 'JioSaavn', `Direct stream failed for ${decodedTrack.title}: ${e.message}. Falling back to default search.`);
         }
         const searchResult = await this.nodelink.sources.searchWithDefault(`${decodedTrack.title} ${decodedTrack.author}`);
         const bestMatch = getBestMatch(searchResult.data, decodedTrack);

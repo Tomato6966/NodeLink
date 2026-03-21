@@ -388,7 +388,7 @@ export default class VKMusicSource {
             this.nodelink.trackCacheManager.set('vkmusic', decodedTrack.identifier, result, 1000 * 60 * 60 * 2);
             return result;
         }
-        logger('warn', 'VKMusic', 'Native stream not found, falling back to YouTube');
+        logger('warn', 'VKMusic', 'Native stream not found, falling back to default search');
         const searchRes = await this.nodelink.sources.searchWithDefault(`${decodedTrack.title} ${decodedTrack.author}`);
         if (searchRes.loadType === 'search' && searchRes.data.length > 0) {
             return {

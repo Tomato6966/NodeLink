@@ -216,7 +216,7 @@ export default class JioSaavnSource {
       logger(
         'warn',
         'JioSaavn',
-        `Direct stream failed for ${decodedTrack.title}: ${e.message}. Falling back to YouTube.`
+        `Direct stream failed for ${decodedTrack.title}: ${e.message}. Falling back to default search.`
       )
     }
 

@@ -303,10 +303,7 @@ export default class NeteaseSource {
                 return { url: streamUrl, protocol: 'https' };
             }
             const query = `${decodedTrack.title} ${decodedTrack.author}`.trim();
-            let searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch');
-            if (searchResult.loadType !== 'search' || !searchResult.data?.length) {
-                searchResult = await this.nodelink.sources.searchWithDefault(query);
-            }
+            let searchResult = await this.nodelink.sources.searchWithDefault(query);
             if (searchResult.loadType !== 'search' || !searchResult.data?.length) {
                 return {
                     exception: {

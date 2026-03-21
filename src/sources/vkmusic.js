@@ -452,7 +452,7 @@ export default class VKMusicSource {
     logger(
       'warn',
       'VKMusic',
-      'Native stream not found, falling back to YouTube'
+      'Native stream not found, falling back to default search'
     )
     const searchRes = await this.nodelink.sources.searchWithDefault(
       `${decodedTrack.title} ${decodedTrack.author}`

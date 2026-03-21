@@ -373,7 +373,7 @@ export default class GaanaSource {
     logger(
       'warn',
       'Gaana',
-      `Direct playback for ${decodedTrack.title} failed. Falling back to YouTube matching.`
+      `Direct playback for ${decodedTrack.title} failed. Falling back to default search matching.`
     )
 
     const searchResult = await this.nodelink.sources.searchWithDefault(
@@ -384,7 +384,7 @@ export default class GaanaSource {
     if (!bestMatch)
       return {
         exception: {
-          message: 'No suitable alternative found on YouTube.',
+          message: 'No suitable alternative found in default search.',
           severity: 'fault'
         }
       }

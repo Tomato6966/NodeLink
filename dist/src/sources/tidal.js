@@ -345,19 +345,11 @@ export default class TidalSource {
             if (direct) {
                 return { url: direct.url, protocol: 'https', format: direct.format };
             }
-            logger('debug', 'Tidal', `Falling back to YouTube mirror for: ${decodedTrack.title}`);
+            logger('debug', 'Tidal', `Falling back to default search mirror for: ${decodedTrack.title}`);
             const query = `${decodedTrack.title} ${decodedTrack.author}`;
-            let searchResult;
-            if (decodedTrack.isrc) {
-                searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch');
-                if (searchResult.loadType !== 'search' ||
-                    searchResult.data.length === 0)
-                    searchResult = null;
-            }
-            if (!searchResult) {
-                searchResult = await this.nodelink.sources.search('youtube', query, 'ytmsearch');
-            }
-            if (searchResult.loadType !== 'search' ||
+            let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
+            if (!searchResult ||
+                searchResult.loadType !== 'search' ||
                 searchResult.data.length === 0) {
                 searchResult = await this.nodelink.sources.searchWithDefault(query);
             }

@@ -234,15 +234,6 @@ export default class InstagramSource {
         };
     }
     async _resolveAudioMirrorTrack(decodedTrack, preferredQuery = null) {
-        const yt = this.nodelink.sources?.getSource('youtube');
-        if (!yt?.search) {
-            return {
-                exception: {
-                    message: 'YouTube source is not available for Instagram audio mirror.',
-                    severity: 'fault'
-                }
-            };
-        }
         const queries = [
             preferredQuery || '',
             `${decodedTrack.author || ''} - ${decodedTrack.title || ''}`.trim(),
@@ -253,47 +244,40 @@ export default class InstagramSource {
             decodedTrack.author || ''
         ].filter(Boolean);
         const triedQueries = new Set();
-        const searchModes = [
-            { type: 'youtube', label: 'YouTube' },
-            { type: 'ytmsearch', label: 'YouTube Music' }
-        ];
         for (const query of queries) {
-            for (const searchMode of searchModes) {
-                const queryKey = `${searchMode.type}:${query}`;
-                if (triedQueries.has(queryKey))
-                    continue;
-                triedQueries.add(queryKey);
-                let searchResult = null;
-                try {
-                    searchResult = await yt.search(query, searchMode.type);
-                }
-                catch (e) {
-                    logger('debug', 'Sources', `Instagram audio mirror lookup failed on ${searchMode.label} search for "${query}": ${e.message}`);
-                    continue;
-                }
-                if (searchResult.loadType !== 'search' ||
-                    !Array.isArray(searchResult.data) ||
-                    searchResult.data.length === 0) {
-                    continue;
-                }
-                const acceptableMatches = searchResult.data.filter((candidate) => this._isMirrorCandidateAcceptable(decodedTrack, candidate?.info));
-                if (acceptableMatches.length === 0) {
-                    logger('debug', 'Sources', `Rejected low-confidence ${searchMode.label} mirror candidates for "${query}".`);
-                    continue;
-                }
-                const bestMatch = getBestMatch(acceptableMatches, decodedTrack) ||
-                    acceptableMatches[0];
-                if (!bestMatch?.info)
-                    continue;
-                const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info);
-                if (!streamInfo?.exception) {
-                    return { newTrack: bestMatch, ...streamInfo };
-                }
+            if (triedQueries.has(query))
+                continue;
+            triedQueries.add(query);
+            let searchResult = null;
+            try {
+                searchResult = await this.nodelink.sources.searchWithDefault(query);
+            }
+            catch (e) {
+                logger('debug', 'Sources', `Instagram audio mirror lookup failed on search for "${query}": ${e.message}`);
+                continue;
+            }
+            if (searchResult.loadType !== 'search' ||
+                !Array.isArray(searchResult.data) ||
+                searchResult.data.length === 0) {
+                continue;
+            }
+            const acceptableMatches = searchResult.data.filter((candidate) => this._isMirrorCandidateAcceptable(decodedTrack, candidate?.info));
+            if (acceptableMatches.length === 0) {
+                logger('debug', 'Sources', `Rejected low-confidence mirror candidates for "${query}".`);
+                continue;
+            }
+            const bestMatch = getBestMatch(acceptableMatches, decodedTrack) ||
+                acceptableMatches[0];
+            if (!bestMatch?.info)
+                continue;
+            const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info);
+            if (!streamInfo?.exception) {
+                return { newTrack: bestMatch, ...streamInfo };
             }
         }
         return {
             exception: {
-                message: 'No playable YouTube mirror found for Instagram audio.',
+                message: 'No playable mirror found for Instagram audio.',
                 severity: 'fault'
             }
         };

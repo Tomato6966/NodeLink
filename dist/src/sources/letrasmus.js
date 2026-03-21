@@ -294,13 +294,8 @@ export default class LetrasMusSource {
                 }
             }
             const query = `${decodedTrack.title} ${decodedTrack.author}`.trim();
-            let searchResult = await sourceManager.search('ytmsearch', query);
+            let searchResult = await sourceManager.searchWithDefault(query);
             let searchTracks = searchResult.data;
-            if (searchResult.loadType !== 'search' ||
-                !this.isTrackDataArray(searchTracks)) {
-                searchResult = await sourceManager.searchWithDefault(query);
-                searchTracks = searchResult.data;
-            }
             if (searchResult.loadType !== 'search' ||
                 !this.isTrackDataArray(searchTracks) ||
                 searchTracks.length === 0) {

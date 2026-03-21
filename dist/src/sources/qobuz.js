@@ -345,10 +345,7 @@ export default class QobuzSource {
     async _getMirrorUrl(decodedTrack) {
         const query = `${decodedTrack.title} ${decodedTrack.author}`;
         try {
-            let result = null;
-            if (decodedTrack.isrc) {
-                result = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch');
-            }
+            let result = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
             if (!result || result.loadType !== 'search' || !result.data.length) {
                 result = await this.nodelink.sources.searchWithDefault(query);
             }

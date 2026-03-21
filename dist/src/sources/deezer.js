@@ -397,22 +397,17 @@ export default class DeezerSource {
                 }
             }
             catch (error) {
-                logger('warn', 'Deezer', `Direct stream failed for ${decodedTrack.title}: ${this.getErrorMessage(error)}. Falling back to YouTube.`);
+                logger('warn', 'Deezer', `Direct stream failed for ${decodedTrack.title}: ${this.getErrorMessage(error)}. Falling back to default search.`);
             }
         }
         const sourceManager = this.getSourceManager();
         if (!sourceManager) {
             return this.createException('No source manager is available for fallback resolution.', 'fault', 'StreamLink');
         }
-        let searchResult = null;
-        if (decodedTrack.isrc) {
-            searchResult = await sourceManager.search('ytmsearch', `"${decodedTrack.isrc}"`);
-            if (this.extractTrackData(searchResult).length === 0) {
-                searchResult = await sourceManager.search('ytmsearch', `${decodedTrack.title} ${decodedTrack.author}`);
-            }
-        }
-        if (!searchResult || this.extractTrackData(searchResult).length === 0) {
-            searchResult = await sourceManager.searchWithDefault(`${decodedTrack.title} ${decodedTrack.author}`);
+        const query = `${decodedTrack.title} ${decodedTrack.author}`;
+        let searchResult = await sourceManager.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
+        if (this.extractTrackData(searchResult).length === 0) {
+            searchResult = await sourceManager.searchWithDefault(query);
         }
         const candidates = this.extractTrackData(searchResult);
         const bestMatch = getBestMatch(candidates, decodedTrack);

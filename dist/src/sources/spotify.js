@@ -1449,17 +1449,7 @@ export default class SpotifySource {
         }
         const searchQuery = this._buildSearchQuery(decodedTrack, isExplicit);
         try {
-            let searchResult;
-            if (decodedTrack.isrc) {
-                searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch');
-                if (searchResult.loadType !== 'search' ||
-                    searchResult.data.length === 0) {
-                    searchResult = await this.nodelink.sources.search('youtube', searchQuery, 'ytmsearch');
-                }
-            }
-            else {
-                searchResult = await this.nodelink.sources.search('youtube', searchQuery, 'ytmsearch');
-            }
+            let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : searchQuery);
             if (searchResult.loadType !== 'search' ||
                 searchResult.data.length === 0) {
                 searchResult =

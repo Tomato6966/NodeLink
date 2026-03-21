@@ -550,18 +550,9 @@ export default class YandexMusicSource {
     async _getMirrorUrl(decodedTrack, originalError) {
         try {
             const searchQuery = this._buildSearchQuery(decodedTrack);
-            let searchResult;
-            if (decodedTrack.isrc) {
-                searchResult = await this.nodelink.sources.search('youtube', `"${decodedTrack.isrc}"`, 'ytmsearch');
-                if (searchResult.loadType !== 'search' ||
-                    searchResult.data.length === 0) {
-                    searchResult = await this.nodelink.sources.search('youtube', searchQuery, 'ytmsearch');
-                }
-            }
-            else {
-                searchResult = await this.nodelink.sources.search('youtube', searchQuery, 'ytmsearch');
-            }
-            if (searchResult.loadType !== 'search' ||
+            let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : searchQuery);
+            if (!searchResult ||
+                searchResult.loadType !== 'search' ||
                 searchResult.data.length === 0) {
                 searchResult =
                     await this.nodelink.sources.searchWithDefault(searchQuery);
