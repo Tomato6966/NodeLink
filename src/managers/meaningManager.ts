@@ -1,84 +1,14 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import type {
+  DecodedMeaningTrack,
+  MeaningLoadResult,
+  MeaningManagerContext,
+  MeaningSourceConstructor,
+  MeaningSourceInstance
+} from '../typings/meanings/meaning.types.ts'
 import { logger } from '../utils.ts'
-
-/**
- * Minimal track info used by meaning providers.
- * @public
- */
-interface MeaningTrackInfo {
-  sourceName?: string
-  title?: string
-  author?: string
-}
-
-/**
- * Minimal decoded track payload accepted by loadMeaning.
- * @public
- */
-interface DecodedMeaningTrack {
-  info?: MeaningTrackInfo
-}
-
-/**
- * Meaning payload returned by providers.
- * @public
- */
-interface MeaningData {
-  provider?: string
-  [key: string]: unknown
-}
-
-/**
- * Error payload returned by providers.
- * @public
- */
-interface MeaningErrorData {
-  message: string
-  severity: string
-  [key: string]: unknown
-}
-
-/**
- * Unified meaning load result.
- * @public
- */
-type MeaningLoadResult =
-  | { loadType: 'meaning'; data: MeaningData }
-  | { loadType: 'empty'; data: Record<string, never> }
-  | { loadType: 'error'; data: MeaningErrorData }
-
-/**
- * Runtime interface for a meaning source module.
- * @public
- */
-interface MeaningSourceInstance {
-  priority?: number
-  setup: () => Promise<boolean>
-  getMeaning: (
-    trackInfo: MeaningTrackInfo,
-    language?: string
-  ) => Promise<MeaningLoadResult>
-}
-
-/**
- * Constructor signature for meaning providers.
- * @public
- */
-type MeaningSourceConstructor = new (
-  nodelink: MeaningManagerContext
-) => MeaningSourceInstance
-
-/**
- * Minimal context required by MeaningManager.
- * @public
- */
-interface MeaningManagerContext {
-  options: Record<string, unknown> & {
-    meanings?: Record<string, { enabled?: boolean } | undefined>
-  }
-}
 
 /**
  * Checks whether a meaning source is enabled in config.

@@ -1,6 +1,16 @@
 import { translateMany, translateText } from '../modules/googleTranslate.js';
 import { getBestMatch, http1makeRequest, logger } from "../utils.js";
+/**
+ * Letras suggest endpoint used to discover candidate tracks.
+ * @internal
+ */
 const SOLR_ENDPOINT = 'https://solr.sscdn.co/letras/m1/';
+/**
+ * Normalizes query text to improve candidate matching.
+ * @param text - Raw title or author text.
+ * @returns Sanitized text without noisy tokens.
+ * @internal
+ */
 const cleanText = (text) => {
     if (!text)
         return '';
@@ -14,10 +24,16 @@ const cleanText = (text) => {
         .replace(/\s+/g, ' ')
         .trim();
 };
+/**
+ * Builds ranked query variations for Letras search.
+ * @param trackInfo - Track metadata used to assemble queries.
+ * @returns Candidate query strings ordered by relevance.
+ * @internal
+ */
 const buildSearchCandidates = (trackInfo) => {
     const candidates = new Set();
-    const rawTitle = trackInfo?.title || '';
-    const rawAuthor = trackInfo?.author || '';
+    const rawTitle = trackInfo.title || '';
+    const rawAuthor = trackInfo.author || '';
     const cleanedTitle = cleanText(rawTitle);
     const cleanedAuthor = cleanText(rawAuthor);
     const pushCandidate = (title, author) => {
@@ -40,7 +56,7 @@ const buildSearchCandidates = (trackInfo) => {
         const parts = title.split(sep).map((part) => part.trim());
         if (parts.length < 2)
             return null;
-        return [parts[0], parts.slice(1).join(sep).trim()];
+        return [parts[0] || '', parts.slice(1).join(sep).trim()];
     };
     const dashSplit = splitTitle(rawTitle, ' - ');
     if (dashSplit) {
@@ -68,7 +84,13 @@ const buildSearchCandidates = (trackInfo) => {
             pushCandidate(leftClean, cleanedAuthor);
     }
     if (rawAuthorLower && rawTitleLower.includes(rawAuthorLower)) {
-        const stripped = cleanText(rawTitle.replace(new RegExp(rawAuthor, 'ig'), ''));
+        let stripped = '';
+        try {
+            stripped = cleanText(rawTitle.replace(new RegExp(rawAuthor, 'ig'), ''));
+        }
+        catch {
+            stripped = cleanText(rawTitle);
+        }
         if (stripped) {
             pushCandidate(stripped, cleanedAuthor);
             candidates.add(stripped);
@@ -80,23 +102,36 @@ const buildSearchCandidates = (trackInfo) => {
     }
     return Array.from(candidates);
 };
+/**
+ * Parses JSONP responses from Letras suggest endpoint.
+ * @param body - Raw endpoint response.
+ * @returns Parsed Solr payload or null when invalid.
+ * @internal
+ */
 const parseJsonp = (body) => {
-    if (!body)
-        return null;
     const trimmed = body.trim();
-    if (trimmed.startsWith('LetrasSug(') && trimmed.endsWith(')')) {
-        return JSON.parse(trimmed.slice('LetrasSug('.length, -1));
+    try {
+        if (trimmed.startsWith('LetrasSug(') && trimmed.endsWith(')')) {
+            return JSON.parse(trimmed.slice('LetrasSug('.length, -1));
+        }
+        const start = trimmed.indexOf('(');
+        const end = trimmed.lastIndexOf(')');
+        if (start !== -1 && end > start) {
+            return JSON.parse(trimmed.slice(start + 1, end));
+        }
+        return JSON.parse(trimmed);
     }
-    const start = trimmed.indexOf('(');
-    const end = trimmed.lastIndexOf(')');
-    if (start !== -1 && end > start) {
-        return JSON.parse(trimmed.slice(start + 1, end));
+    catch {
+        return null;
     }
-    return JSON.parse(trimmed);
 };
+/**
+ * Decodes HTML entities into plain unicode text.
+ * @param text - Encoded HTML fragment.
+ * @returns Decoded text.
+ * @internal
+ */
 const decodeHtml = (text) => {
-    if (!text)
-        return text;
     let out = text
         .replace(/&amp;/g, '&')
         .replace(/&quot;/g, '"')
@@ -104,29 +139,42 @@ const decodeHtml = (text) => {
         .replace(/&#x27;/gi, "'")
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>');
-    out = out.replace(/&#(\d+);/g, (_, dec) => {
+    out = out.replace(/&#(\d+);/g, (match, dec) => {
         const code = Number(dec);
         if (!Number.isFinite(code))
-            return _;
+            return match;
         return String.fromCodePoint(code);
     });
-    out = out.replace(/&#x([0-9a-f]+);/gi, (_, hex) => {
-        const code = parseInt(hex, 16);
+    out = out.replace(/&#x([0-9a-f]+);/gi, (match, hex) => {
+        const code = Number.parseInt(hex, 16);
         if (!Number.isFinite(code))
-            return _;
+            return match;
         return String.fromCodePoint(code);
     });
     return out;
 };
+/**
+ * Extracts OpenGraph metadata from HTML content.
+ * @param html - Full page HTML.
+ * @param property - OpenGraph property name.
+ * @returns Metadata value or null when absent.
+ * @internal
+ */
 const extractMeta = (html, property) => {
     const re1 = new RegExp(`<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']+)["'][^>]*>`, 'i');
     const re2 = new RegExp(`<meta[^>]+content=["']([^"']+)[^>]+property=["']${property}["'][^>]*>`, 'i');
     const match = html.match(re1) || html.match(re2);
-    return match ? decodeHtml(match[1]) : null;
+    return match?.[1] ? decodeHtml(match[1]) : null;
 };
+/**
+ * Extracts OMQ lyric metadata block from Letras HTML.
+ * @param html - Full page HTML.
+ * @returns Parsed lyric metadata or null.
+ * @internal
+ */
 const extractOmqLyric = (html) => {
     const match = html.match(/_omq\.push\(\['ui\/lyric',\s*({[\s\S]*?})\s*,/i);
-    if (!match)
+    if (!match?.[1])
         return null;
     try {
         return JSON.parse(match[1]);
@@ -135,9 +183,15 @@ const extractOmqLyric = (html) => {
         return null;
     }
 };
+/**
+ * Extracts OMQ meaning metadata block from Letras HTML.
+ * @param html - Full page HTML.
+ * @returns Parsed meaning metadata or null.
+ * @internal
+ */
 const extractOmqMeaning = (html) => {
     const match = html.match(/_omq\.push\(\['ui\/lyric',\s*({[\s\S]*?})\s*,\s*({[\s\S]*?})\s*,/i);
-    if (!match)
+    if (!match?.[2])
         return null;
     try {
         return JSON.parse(match[2]);
@@ -146,13 +200,19 @@ const extractOmqMeaning = (html) => {
         return null;
     }
 };
+/**
+ * Extracts title and paragraphs from the meaning section.
+ * @param html - Full page HTML.
+ * @returns Normalized meaning block.
+ * @internal
+ */
 const extractMeaning = (html) => {
     const match = html.match(/<div class="lyric-meaning[^>]*">([\s\S]*?)<\/div>/i);
-    if (!match)
+    if (!match?.[1])
         return { title: null, body: [] };
     let block = match[1];
     const titleMatch = block.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
-    const title = titleMatch
+    const title = titleMatch?.[1]
         ? decodeHtml(titleMatch[1].replace(/<[^>]+>/g, ''))
         : null;
     block = block.replace(/<h3[^>]*>[\s\S]*?<\/h3>/i, '');
@@ -160,8 +220,10 @@ const extractMeaning = (html) => {
     const pRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi;
     let pMatch;
     while ((pMatch = pRegex.exec(block))) {
-        let text = pMatch[1];
-        text = text.replace(/<br\s*\/?>/gi, '\n');
+        const paragraphBlock = pMatch[1];
+        if (!paragraphBlock)
+            continue;
+        let text = paragraphBlock.replace(/<br\s*\/?>/gi, '\n');
         text = text.replace(/<[^>]+>/g, '');
         text = decodeHtml(text);
         const lines = text
@@ -184,6 +246,12 @@ const extractMeaning = (html) => {
     }
     return { title, body: paragraphs };
 };
+/**
+ * Converts a Solr document into internal track info.
+ * @param doc - Solr candidate document.
+ * @returns Normalized Letras track payload.
+ * @internal
+ */
 const buildLetrasTrackInfo = (doc) => {
     const uri = `https://www.letras.mus.br/${doc.dns}/${doc.url}/`;
     return {
@@ -194,12 +262,19 @@ const buildLetrasTrackInfo = (doc) => {
         sourceName: 'letrasmus'
     };
 };
+/**
+ * Queries Letras suggest endpoint and maps valid candidates.
+ * @param query - Search query string.
+ * @param limit - Maximum results to map.
+ * @returns Candidate list for best-match scoring.
+ * @internal
+ */
 const searchLetras = async (query, limit = 10) => {
     const url = `${SOLR_ENDPOINT}?q=${encodeURIComponent(query)}&wt=json&callback=LetrasSug`;
     const { body, statusCode, error } = await http1makeRequest(url, {
         method: 'GET'
     });
-    if (error || statusCode !== 200 || !body)
+    if (error || statusCode !== 200 || typeof body !== 'string')
         return [];
     const parsed = parseJsonp(body);
     const docs = parsed?.response?.docs || [];
@@ -208,19 +283,59 @@ const searchLetras = async (query, limit = 10) => {
         .slice(0, limit)
         .map((doc) => ({ info: buildLetrasTrackInfo(doc) }));
 };
+/**
+ * Reads translated text from translate module payload.
+ * @param result - Translation module response payload.
+ * @returns Translation text or null.
+ * @internal
+ */
+const getTranslationText = (result) => {
+    if (!result || typeof result !== 'object')
+        return null;
+    const record = result;
+    return typeof record['translation'] === 'string'
+        ? record['translation']
+        : null;
+};
 export default class LetrasMusMeaning {
+    nodelink;
+    priority;
+    /**
+     * Creates a new Letras meaning provider.
+     * @param nodelink - Runtime NodeLink context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
         this.priority = 70;
     }
+    /**
+     * Initializes the provider.
+     * @returns Always true for this provider.
+     */
     async setup() {
         return true;
     }
+    /**
+     * Loads meaning details for a track from Letras.
+     * @param trackInfo - Track metadata used to resolve/search candidates.
+     * @param language - Optional target language code for translation.
+     * @returns Meaning payload, empty result, or provider error.
+     */
     async getMeaning(trackInfo, language) {
         try {
             let candidates = [];
-            if (trackInfo.sourceName === 'letrasmus') {
-                candidates = [{ info: trackInfo }];
+            if (trackInfo.sourceName === 'letrasmus' && trackInfo.uri) {
+                candidates = [
+                    {
+                        info: {
+                            title: trackInfo.title || 'Unknown',
+                            author: trackInfo.author || 'Unknown',
+                            length: typeof trackInfo.length === 'number' ? trackInfo.length : 0,
+                            uri: trackInfo.uri,
+                            sourceName: 'letrasmus'
+                        }
+                    }
+                ];
             }
             else {
                 const searchCandidates = buildSearchCandidates(trackInfo);
@@ -232,16 +347,20 @@ export default class LetrasMusMeaning {
                 }
                 if (results.length) {
                     const matchTarget = {
-                        ...trackInfo,
                         title: cleanText(trackInfo.title),
-                        author: cleanText(trackInfo.author)
+                        author: cleanText(trackInfo.author),
+                        length: typeof trackInfo.length === 'number' ? trackInfo.length : 0,
+                        uri: trackInfo.uri ?? null
                     };
                     const best = getBestMatch(results, matchTarget);
                     const ordered = [];
-                    if (best?.info)
-                        ordered.push(best);
+                    if (best?.info?.uri) {
+                        const bestCandidate = results.find((item) => item.info.uri === best.info.uri);
+                        if (bestCandidate)
+                            ordered.push(bestCandidate);
+                    }
                     for (const item of results) {
-                        if (!best || item.info.uri !== best.info?.uri)
+                        if (!best || item.info.uri !== best.info.uri)
                             ordered.push(item);
                     }
                     candidates = ordered;
@@ -262,7 +381,7 @@ export default class LetrasMusMeaning {
                     : `${letrasTrack.uri}/`;
                 const url = `${baseUrl}significado.html`;
                 const { body: fetchedBody, statusCode, error } = await http1makeRequest(url, { method: 'GET' });
-                if (error || statusCode !== 200 || !fetchedBody)
+                if (error || statusCode !== 200 || typeof fetchedBody !== 'string')
                     continue;
                 const meaningCheck = extractMeaning(fetchedBody);
                 if (!meaningCheck.body.length)
@@ -285,11 +404,14 @@ export default class LetrasMusMeaning {
             if (language) {
                 const sourceLang = 'pt';
                 try {
-                    const translatedParagraphs = await translateMany(meaning.body.map(decodeHtml), sourceLang, language);
-                    const translatedTitle = meaning.title
+                    const translatedParagraphsRaw = await translateMany(meaning.body.map((value) => decodeHtml(value)), sourceLang, language);
+                    const translatedParagraphs = Array.isArray(translatedParagraphsRaw)
+                        ? translatedParagraphsRaw.map((value) => String(value))
+                        : [];
+                    const translatedTitleResult = meaning.title
                         ? await translateText(decodeHtml(meaning.title), sourceLang, language)
                         : null;
-                    const translatedDescription = ogDescription
+                    const translatedDescriptionResult = ogDescription
                         ? await translateText(decodeHtml(ogDescription), sourceLang, language)
                         : null;
                     translated = {
@@ -297,23 +419,27 @@ export default class LetrasMusMeaning {
                             source: sourceLang,
                             target: language
                         },
-                        title: translatedTitle?.translation || null,
-                        description: translatedDescription?.translation || null,
+                        title: getTranslationText(translatedTitleResult),
+                        description: getTranslationText(translatedDescriptionResult),
                         paragraphs: translatedParagraphs
                     };
                 }
                 catch (e) {
-                    logger('warn', 'Meaning', `Translate failed: ${e.message}`);
+                    logger('warn', 'Meaning', `Translate failed: ${e instanceof Error ? e.message : String(e)}`);
                 }
             }
+            if (!meaning.body.length) {
+                return { loadType: 'empty', data: {} };
+            }
             return {
-                loadType: meaning.body.length ? 'meaning' : 'empty',
+                loadType: 'meaning',
                 data: {
                     title: meaning.title || ogTitle || null,
                     description: ogDescription || null,
                     paragraphs: meaning.body,
                     translation: translated,
                     url: meaningUrl,
+                    type: 'track',
                     meaningMeta: {
                         id: meaningMeta?.ID || null,
                         localeId: meaningMeta?.LocaleID || null,
@@ -332,10 +458,11 @@ export default class LetrasMusMeaning {
             };
         }
         catch (e) {
-            logger('error', 'Meaning', `Letras meaning error: ${e.message}`);
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Meaning', `Letras meaning error: ${message}`);
             return {
                 loadType: 'error',
-                data: { message: e.message, severity: 'fault' }
+                data: { message, severity: 'fault' }
             };
         }
     }
