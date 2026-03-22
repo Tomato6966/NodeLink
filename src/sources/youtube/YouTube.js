@@ -132,9 +132,9 @@ export default class YouTubeSource {
     return this.proxyManager.getBestProxy(rotate)
   }
 
-  reportProxyStatus(proxy, success, status) {
+  reportProxyStatus(proxy, success, status, latency = 0) {
     if (proxy?.url) {
-      this.proxyManager.report(proxy.url, success, status)
+      this.proxyManager.report(proxy.url, success, status, latency)
     }
   }
 
@@ -335,7 +335,15 @@ export default class YouTubeSource {
           'YouTube',
           `Attempting ${searchType} search with client: ${clientName}`
         )
-        const result = await client.search(query, searchType, this.ytContext)
+        const searchProxy =
+          clientName === 'Android' ? this.getProxy(true) : undefined
+        const result = await client.search(
+          query,
+          searchType,
+          this.ytContext,
+          searchProxy,
+          this.reportProxyStatus.bind(this)
+        )
 
         if (result && result.loadType === 'search') {
           logger(

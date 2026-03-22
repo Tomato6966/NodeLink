@@ -36,7 +36,13 @@ export default class Android extends BaseClient {
     return false
   }
 
-  async search(query, type, context) {
+  async search(
+    query,
+    type,
+    context,
+    proxy,
+    reportProxyStatus = () => {}
+  ) {
     const sourceName = 'youtube'
 
     let params = 'EgIQAQ%3D%3D' // Default to track (video)
@@ -49,6 +55,8 @@ export default class Android extends BaseClient {
       params
     }
 
+    const searchProxy = proxy || this.getProxy()
+    const searchStart = Date.now()
     try {
       const {
         body: searchResult,
@@ -68,8 +76,15 @@ export default class Android extends BaseClient {
           },
           body: requestBody,
           disableBodyCompression: true,
-        proxy: this.getProxy()
+          proxy: searchProxy
         }
+      )
+
+      reportProxyStatus(
+        searchProxy,
+        !error && statusCode === 200,
+        statusCode,
+        Date.now() - searchStart
       )
 
       if (error || statusCode !== 200) {
@@ -182,6 +197,7 @@ export default class Android extends BaseClient {
 
       return { loadType: 'search', data: tracks }
     } catch (e) {
+      reportProxyStatus(searchProxy, false, 500, Date.now() - searchStart)
       logger(
         'error',
         'YouTube-Android',
@@ -271,6 +287,8 @@ export default class Android extends BaseClient {
         if (playlistId.startsWith('RD') && currentVideoId) {
           requestBody.videoId = currentVideoId
         }
+        const playlistProxy = this.getProxy()
+        const playlistStart = Date.now()
         const { body: playlistResponse, statusCode } = await makeRequest(
           `${apiEndpoint}/youtubei/v1/next`,
           {
@@ -284,8 +302,15 @@ export default class Android extends BaseClient {
             body: requestBody,
             method: 'POST',
             disableBodyCompression: true,
-        proxy: this.getProxy()
+            proxy: playlistProxy
           }
+        )
+
+        reportProxyStatus(
+          playlistProxy,
+          statusCode === 200,
+          statusCode,
+          Date.now() - playlistStart
         )
 
         if (statusCode !== 200) {

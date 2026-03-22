@@ -26,7 +26,7 @@ export default class Android extends BaseClient {
     requirePlayerScript() {
         return false;
     }
-    async search(query, type, context) {
+    async search(query, type, context, proxy, reportProxyStatus = () => { }) {
         const sourceName = 'youtube';
         let params = 'EgIQAQ%3D%3D'; // Default to track (video)
         if (type === 'playlist' || type === 'album')
@@ -38,6 +38,8 @@ export default class Android extends BaseClient {
             query: query,
             params
         };
+        const searchProxy = proxy || this.getProxy();
+        const searchStart = Date.now();
         try {
             const { body: searchResult, error, statusCode } = await makeRequest('https://youtubei.googleapis.com/youtubei/v1/search', {
                 method: 'POST',
@@ -50,8 +52,9 @@ export default class Android extends BaseClient {
                 },
                 body: requestBody,
                 disableBodyCompression: true,
-                proxy: this.getProxy()
+                proxy: searchProxy
             });
+            reportProxyStatus(searchProxy, !error && statusCode === 200, statusCode, Date.now() - searchStart);
             if (error || statusCode !== 200) {
                 const message = error?.message ||
                     `Failed to load results from ${sourceName}. Status: ${statusCode}`;
@@ -127,6 +130,7 @@ export default class Android extends BaseClient {
             return { loadType: 'search', data: tracks };
         }
         catch (e) {
+            reportProxyStatus(searchProxy, false, 500, Date.now() - searchStart);
             logger('error', 'YouTube-Android', `Exception during search for '${query}': ${e.message}`);
             return {
                 exception: { message: e.message, severity: 'fault', cause: 'Exception' }
@@ -188,6 +192,8 @@ export default class Android extends BaseClient {
                 if (playlistId.startsWith('RD') && currentVideoId) {
                     requestBody.videoId = currentVideoId;
                 }
+                const playlistProxy = this.getProxy();
+                const playlistStart = Date.now();
                 const { body: playlistResponse, statusCode } = await makeRequest(`${apiEndpoint}/youtubei/v1/next`, {
                     headers: {
                         'User-Agent': this.getClient(context).client.userAgent,
@@ -198,8 +204,9 @@ export default class Android extends BaseClient {
                     body: requestBody,
                     method: 'POST',
                     disableBodyCompression: true,
-                    proxy: this.getProxy()
+                    proxy: playlistProxy
                 });
+                reportProxyStatus(playlistProxy, statusCode === 200, statusCode, Date.now() - playlistStart);
                 if (statusCode !== 200) {
                     const errMsg = `Failed to fetch playlist. Status: ${statusCode}`;
                     logger('error', 'youtube-android', `Error loading playlist ${playlistId}: ${errMsg}`);
