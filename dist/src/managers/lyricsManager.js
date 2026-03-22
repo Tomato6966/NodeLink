@@ -9,7 +9,7 @@ var __rewriteRelativeImportExtension = (this && this.__rewriteRelativeImportExte
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { alignLyrics } from '../modules/lyricsAligner.js';
+import { alignLyrics } from "../modules/lyricsAligner.js";
 import { logger } from "../utils.js";
 const getErrorMessage = (error) => error instanceof Error ? error.message : String(error);
 const isTrackInfoLike = (value) => typeof value === 'object' && value !== null;

@@ -1,37 +1,65 @@
-function similarity(s1, s2) {
+import type {
+  AlignableLyricsLine,
+  FlattenedYouTubeWord,
+  PendingDeviation,
+  SequenceMatch,
+  YouTubeLyricsAlignmentData
+} from '../typings/modules/lyricsAligner.types.ts'
+
+/**
+ * Calculates normalized similarity between two strings.
+ * @param s1 - First string.
+ * @param s2 - Second string.
+ * @returns Similarity score between 0 and 1.
+ * @internal
+ */
+function similarity(s1: string, s2: string): number {
   const longer = s1.length > s2.length ? s1 : s2
   const shorter = s1.length > s2.length ? s2 : s1
   const longerLength = longer.length
   if (longerLength === 0) return 1.0
-  return (
-    (longerLength - editDistance(longer, shorter)) / parseFloat(longerLength)
-  )
+  return (longerLength - editDistance(longer, shorter)) / Number(longerLength)
 }
 
-function editDistance(s1, s2) {
-  s1 = s1.toLowerCase()
-  s2 = s2.toLowerCase()
-  const costs = []
-  for (let i = 0; i <= s1.length; i++) {
+/**
+ * Computes Levenshtein edit distance.
+ * @param s1 - First string.
+ * @param s2 - Second string.
+ * @returns Edit distance between two strings.
+ * @internal
+ */
+function editDistance(s1: string, s2: string): number {
+  let left = s1.toLowerCase()
+  let right = s2.toLowerCase()
+  const costs: number[] = []
+
+  for (let i = 0; i <= left.length; i++) {
     let lastValue = i
-    for (let j = 0; j <= s2.length; j++) {
-      if (i == 0) costs[j] = j
-      else {
-        if (j > 0) {
-          let newValue = costs[j - 1]
-          if (s1.charAt(i - 1) != s2.charAt(j - 1))
-            newValue = Math.min(Math.min(newValue, lastValue), costs[j]) + 1
-          costs[j - 1] = lastValue
-          lastValue = newValue
+    for (let j = 0; j <= right.length; j++) {
+      if (i === 0) {
+        costs[j] = j
+      } else if (j > 0) {
+        let newValue = costs[j - 1] ?? 0
+        if (left.charAt(i - 1) !== right.charAt(j - 1)) {
+          newValue = Math.min(Math.min(newValue, lastValue), costs[j] ?? 0) + 1
         }
+        costs[j - 1] = lastValue
+        lastValue = newValue
       }
     }
-    if (i > 0) costs[s2.length] = lastValue
+    if (i > 0) costs[right.length] = lastValue
   }
-  return costs[s2.length]
+
+  return costs[right.length] ?? 0
 }
 
-function cleanWord(text) {
+/**
+ * Normalizes a word for matching.
+ * @param text - Input token.
+ * @returns Normalized token.
+ * @internal
+ */
+function cleanWord(text?: string): string {
   if (!text) return ''
   return text
     .replace(/\[.*?\]/g, '')
@@ -40,20 +68,28 @@ function cleanWord(text) {
     .replace(/[^a-z0-9]/g, '')
 }
 
-function flattenYouTubeLyrics(ytLyrics) {
-  const words = []
+/**
+ * Converts YouTube caption payload into flat timed words.
+ * @param ytLyrics - YouTube caption payload.
+ * @returns Flattened word sequence.
+ * @internal
+ */
+function flattenYouTubeLyrics(
+  ytLyrics?: YouTubeLyricsAlignmentData | null
+): FlattenedYouTubeWord[] {
+  const words: FlattenedYouTubeWord[] = []
   if (!ytLyrics?.lines) return words
 
   for (const line of ytLyrics.lines) {
     if (line.text && /^\[.*\]$/.test(line.text.trim())) continue
 
     if (line.words) {
-      for (const w of line.words) {
-        const clean = cleanWord(w.text)
+      for (const word of line.words) {
+        const clean = cleanWord(word.text)
         if (clean.length > 0) {
           words.push({
             text: clean,
-            time: parseInt(w.timestamp || w.time || 0)
+            time: parseInt(String(word.timestamp ?? word.time ?? 0), 10)
           })
         }
       }
@@ -62,58 +98,74 @@ function flattenYouTubeLyrics(ytLyrics) {
       const lineWords = lineText.split(/\s+/)
       const durationPerWord = (line.duration || 2000) / (lineWords.length || 1)
 
-      lineWords.forEach((w, i) => {
-        const clean = cleanWord(w)
+      lineWords.forEach((word, index) => {
+        const clean = cleanWord(word)
         if (clean.length > 0) {
           words.push({
             text: clean,
-            time: parseInt(line.time) + i * durationPerWord
+            time: parseInt(String(line.time), 10) + index * durationPerWord
           })
         }
       })
     }
   }
+
   return words
 }
 
-function getLineWords(text) {
+/**
+ * Splits a line into normalized words.
+ * @param text - Input line text.
+ * @returns Normalized non-empty words.
+ * @internal
+ */
+function getLineWords(text?: string): string[] {
   if (!text) return []
   return text
     .split(/\s+/)
     .map(cleanWord)
-    .filter((w) => w.length > 0)
+    .filter((word) => word.length > 0)
 }
 
+/**
+ * Finds best matching YouTube sequence for target words.
+ * @param targetWords - Target words from HQ line.
+ * @param ytWords - Flattened YouTube words.
+ * @param startIndex - Start index for search.
+ * @param searchWindowEnd - Max timestamp allowed for search.
+ * @returns Best sequence match or null.
+ * @internal
+ */
 function findBestSequenceMatch(
-  targetWords,
-  ytWords,
-  startIndex,
-  searchWindowEnd
-) {
+  targetWords: string[],
+  ytWords: FlattenedYouTubeWord[],
+  startIndex: number,
+  searchWindowEnd: number
+): SequenceMatch | null {
   if (targetWords.length === 0) return null
   const keys = targetWords.slice(0, 5)
   if (keys.length === 0) return null
 
-  let bestMatch = null
+  let bestMatch: SequenceMatch | null = null
   let maxScore = 0
 
   for (let i = startIndex; i < ytWords.length; i++) {
     const yw = ytWords[i]
+    if (!yw) break
     if (yw.time > searchWindowEnd) break
 
-    if (similarity(keys[0], yw.text) > 0.75) {
+    if (similarity(keys[0] || '', yw.text) > 0.75) {
       let matchCount = 1
       const checkLen = Math.min(keys.length, ytWords.length - i)
 
       let ytOffset = 0
       for (let k = 1; k < checkLen; k++) {
-        if (i + k + ytOffset < ytWords.length) {
-          if (similarity(keys[k], ytWords[i + k + ytOffset].text) > 0.75) {
-            matchCount++
-          } else if (
-            i + k + ytOffset + 1 < ytWords.length &&
-            similarity(keys[k], ytWords[i + k + ytOffset + 1].text) > 0.75
-          ) {
+        const candidate = ytWords[i + k + ytOffset]
+        if (candidate && similarity(keys[k] || '', candidate.text) > 0.75) {
+          matchCount++
+        } else {
+          const offsetCandidate = ytWords[i + k + ytOffset + 1]
+          if (offsetCandidate && similarity(keys[k] || '', offsetCandidate.text) > 0.75) {
             matchCount++
             ytOffset++
           }
@@ -121,7 +173,6 @@ function findBestSequenceMatch(
       }
 
       const score = matchCount / keys.length
-
       if (score > maxScore && score >= 0.7) {
         maxScore = score
         bestMatch = { index: i, time: yw.time, score }
@@ -133,26 +184,36 @@ function findBestSequenceMatch(
   return bestMatch
 }
 
-export function alignLyrics(hqLyrics, youtubeData) {
+/**
+ * Aligns HQ lyrics lines with YouTube timing reference.
+ * @param hqLyrics - High-quality lyrics lines.
+ * @param youtubeData - YouTube caption payload.
+ * @returns Aligned lyric lines preserving original content.
+ * @public
+ */
+export function alignLyrics(
+  hqLyrics: AlignableLyricsLine[],
+  youtubeData?: YouTubeLyricsAlignmentData | null
+): AlignableLyricsLine[] {
   if (!hqLyrics?.length || !youtubeData?.lines) return hqLyrics
 
   const ytWords = flattenYouTubeLyrics(youtubeData)
   if (ytWords.length === 0) return hqLyrics
 
-  const alignedLines = []
+  const alignedLines: AlignableLyricsLine[] = []
 
   let lastYtIndex = 0
   let currentOffset = 0
   let offsetInitialized = false
+  let pendingDeviation: PendingDeviation | null = null
 
-  let pendingDeviation = null
   const MAX_JUMP_MS = 2500
   const SEARCH_LOOKAHEAD = 25000
 
   for (let i = 0; i < hqLyrics.length; i++) {
     const line = hqLyrics[i]
+    if (!line) continue
     const words = getLineWords(line.text)
-
     const predictedYtTime = line.time + currentOffset
 
     const match = findBestSequenceMatch(
