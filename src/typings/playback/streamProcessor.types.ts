@@ -484,11 +484,6 @@ export type ResamplingQuality =
   | 'linear'
 
 /**
- * Internal numeric ID for libsamplerate converter types.
- */
-export type ConverterType = number
-
-/**
  * Representation of an audio tag extracted from an FLV container.
  */
 export interface FLVAudioTag {

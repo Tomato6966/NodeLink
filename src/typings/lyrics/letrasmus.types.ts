@@ -201,9 +201,3 @@ export type LetrasMusLyricsResult =
   | { loadType: 'lyrics'; data: LetrasLyricsData }
   | { loadType: 'empty'; data: Record<string, never> }
   | { loadType: 'error'; data: { message: string; severity: string } }
-
-/**
- * Minimal runtime context accepted by Letras lyrics provider.
- * @public
- */
-export type NodelinkInstanceForLetrasLyrics = object

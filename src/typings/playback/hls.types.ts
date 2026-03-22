@@ -153,23 +153,6 @@ export interface HLSAudioRendition {
 }
 
 /**
- * Map of audio groups to their renditions.
- * Key is the GROUP-ID from EXT-X-MEDIA.
- *
- * @example
- * ```ts
- * const groups: HLSAudioGroups = {
- *   'audio-group-1': [
- *     { uri: 'en.m3u8', language: 'en', name: 'English', default: 'YES' },
- *     { uri: 'es.m3u8', language: 'es', name: 'Español' }
- *   ]
- * }
- * ```
- * @public
- */
-export type HLSAudioGroups = Record<string, HLSAudioRendition[]>
-
-/**
  * Parsed HLS master playlist structure.
  * Contains variant streams and audio renditions.
  *
@@ -181,7 +164,7 @@ export interface HLSMasterPlaylist {
   /** Available variant streams sorted by bandwidth */
   variants: HLSVariant[]
   /** Audio rendition groups */
-  audioGroups: HLSAudioGroups
+  audioGroups: Record<string, HLSAudioRendition[]>
 }
 
 /**

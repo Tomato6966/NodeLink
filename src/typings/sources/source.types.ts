@@ -3,7 +3,6 @@
  * @module typings/source.types
  */
 
-import type { Socket } from 'node:net'
 import type { Readable } from 'node:stream'
 import type { Worker as NodeWorker } from 'node:worker_threads'
 import type {
@@ -790,9 +789,3 @@ export interface RoutePlannerManager {
   /** Get an IP address */
   getIP?: () => string | null | undefined
 }
-
-/**
- * Socket map entry
- * @internal
- */
-export type SocketMap = Map<string, Socket>

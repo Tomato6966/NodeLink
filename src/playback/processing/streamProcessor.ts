@@ -30,7 +30,6 @@ import type {
   AudioConfig,
   AudioConstants,
   BufferThresholds,
-  ConverterType,
   ErrorResponse,
   FAAD2DecoderLike,
   FlvDemuxerLike,
@@ -144,9 +143,9 @@ const EMPTY_BUFFER: Buffer = Buffer.alloc(0)
 const _getResamplerConverterType = (
   quality: ResamplingQuality,
   libSampleRate: LibSampleRateModule
-): ConverterType => {
+): number => {
   const types = libSampleRate.ConverterType
-  const qualityMap: Record<string, ConverterType> = {
+  const qualityMap: Record<string, number> = {
     best: types.SRC_SINC_BEST_QUALITY,
     medium: types.SRC_SINC_MEDIUM_QUALITY,
     fastest: types.SRC_SINC_FASTEST,

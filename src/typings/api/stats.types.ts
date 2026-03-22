@@ -187,4 +187,6 @@ export interface WorkerMetricsEntry {
  * Dictionary of worker metrics keyed by worker ID.
  * @public
  */
-export type WorkerMetricsPayload = Record<string, WorkerMetricsEntry>
+export interface WorkerMetricsPayload {
+  [workerId: string]: WorkerMetricsEntry
+}

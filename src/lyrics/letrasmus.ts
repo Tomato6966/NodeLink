@@ -8,8 +8,7 @@ import type {
   LetrasSolrResponse,
   LetrasSubtitleApiResponse,
   LetrasSubtitleRawEntry,
-  LetrasTranslationLanguageEntry,
-  NodelinkInstanceForLetrasLyrics
+  LetrasTranslationLanguageEntry
 } from '../typings/lyrics/letrasmus.types.ts'
 
 /**
@@ -246,13 +245,13 @@ export default class LetrasMusLyrics {
   /**
    * Runtime NodeLink context.
    */
-  public readonly nodelink: NodelinkInstanceForLetrasLyrics
+  public readonly nodelink: object
 
   /**
    * Creates a new Letras lyrics provider.
    * @param nodelink - Runtime NodeLink context.
    */
-  public constructor(nodelink: NodelinkInstanceForLetrasLyrics) {
+  public constructor(nodelink: object) {
     this.nodelink = nodelink
   }
 

@@ -1,10 +1,9 @@
 import { getBestMatch, logger, makeRequest } from '../utils.ts'
 import type { TrackInfo } from '../typings/sources/source.types.ts'
-import type { LyricsLine } from '../typings/lyrics/musixmatch.types.ts'
+import type { LyricsLine, LyricsResult } from '../typings/lyrics/musixmatch.types.ts'
 import type {
   DeezerGraphqlResponse,
   DeezerJwtResponse,
-  DeezerLyricsResult,
   DeezerSearchCandidate,
   NodelinkInstanceForDeezerLyrics
 } from '../typings/lyrics/deezer.types.ts'
@@ -89,7 +88,7 @@ export default class DeezerLyrics {
    * @param trackInfo - Track metadata from manager.
    * @returns Lyrics payload or empty result.
    */
-  public async getLyrics(trackInfo: TrackInfo): Promise<DeezerLyricsResult> {
+  public async getLyrics(trackInfo: TrackInfo): Promise<LyricsResult> {
     const jwt = await this._getJwt()
     if (!jwt) return { loadType: 'empty', data: {} }
 

@@ -1,6 +1,5 @@
 import type { TrackInfo, SourceResult } from '../sources/source.types.ts'
 import type { BestMatchCandidate, BestMatchTrackInfo } from '../utils.types.ts'
-import type { LyricsResult } from './musixmatch.types.ts'
 
 /**
  * JWT payload returned by Deezer anonymous auth endpoint.
@@ -150,9 +149,3 @@ export interface NodelinkInstanceForDeezerLyrics {
    */
   sources: DeezerLyricsSourceManager
 }
-
-/**
- * Unified result returned by Deezer lyrics provider.
- * @public
- */
-export type DeezerLyricsResult = LyricsResult

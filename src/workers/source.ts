@@ -20,7 +20,6 @@ import type {
   LiveChatPayload,
   LiveChatPollResult,
   MicroWorker,
-  SocketMap,
   SourceWorkerConfig,
   TaskData,
   TrackInfo,
@@ -249,7 +248,7 @@ if (isMainThread) {
     createMicroWorker(i + 1)
   }
 
-  const sockets: SocketMap = new Map()
+  const sockets: Map<string, Socket> = new Map()
 
   /**
    * Gets or creates a Unix socket connection to the specified path

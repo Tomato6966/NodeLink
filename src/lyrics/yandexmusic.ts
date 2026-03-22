@@ -1,13 +1,12 @@
 import crypto from 'node:crypto'
 import { http1makeRequest, logger } from '../utils.ts'
-import type { LyricsLine } from '../typings/lyrics/musixmatch.types.ts'
+import type { LyricsLine, LyricsResult } from '../typings/lyrics/musixmatch.types.ts'
 import type {
   NodelinkInstanceForYandexLyrics,
   YandexHttpResult,
   YandexLyricsApiResponse,
   YandexLyricsSignPayload,
-  YandexLyricsTrackInfo,
-  YandexMusicLyricsResult
+  YandexLyricsTrackInfo
 } from '../typings/lyrics/yandexmusic.types.ts'
 
 /**
@@ -84,7 +83,7 @@ export default class YandexMusicLyrics {
    */
   public async getLyrics(
     trackInfo: YandexLyricsTrackInfo
-  ): Promise<YandexMusicLyricsResult> {
+  ): Promise<LyricsResult> {
     if (!trackInfo?.identifier || !this.accessToken) {
       return { loadType: 'empty', data: {} }
     }

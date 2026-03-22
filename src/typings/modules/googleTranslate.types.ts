@@ -1,10 +1,4 @@
 /**
- * Mapping of Google Translate language codes to human-readable names.
- * @public
- */
-export type GoogleLanguageMap = Record<string, string>
-
-/**
  * Raw payload returned by Google Translate endpoint.
  * @public
  */

@@ -1,17 +1,48 @@
 import { Transform } from 'node:stream';
 import { encodeTrack, getVersion, http1makeRequest, logger } from "../utils.js";
+/**
+ * Default user agent for HTTP source requests.
+ * @internal
+ */
 const DEFAULT_HTTP_USER_AGENT = `NodeLink/${getVersion()} (https://github.com/PerformanC/NodeLink)`;
+/**
+ * Extracts file extension from URL.
+ * @param rawUrl - Input URL.
+ * @returns Lowercased extension without dot.
+ * @internal
+ */
 const extractUrlExtension = (rawUrl) => {
-    const sanitized = String(rawUrl || '')
-        .split('?')[0]
-        .split('#')[0];
+    const sanitized = String(rawUrl || '').split('?')[0]?.split('#')[0] || '';
     const lastSlash = sanitized.lastIndexOf('/');
     const lastDot = sanitized.lastIndexOf('.');
     if (lastDot === -1 || lastDot < lastSlash)
         return '';
     return sanitized.slice(lastDot + 1).toLowerCase();
 };
+/**
+ * Normalizes header value from unknown/object/string[] to string.
+ * @param value - Header value.
+ * @returns Header string.
+ * @internal
+ */
+const headerToString = (value) => Array.isArray(value) ? String(value[0] || '') : String(value || '');
+/**
+ * Transform stream that strips ICY metadata blocks and emits parsed metadata.
+ * @internal
+ */
 class IcyMetadataTransform extends Transform {
+    metaInt;
+    onMetadata;
+    audioBytesRemaining;
+    pendingMetaLength;
+    metaChunks;
+    metaBytes;
+    lastSignature;
+    /**
+     * Creates a new ICY metadata transform.
+     * @param metaInt - Metadata interval in bytes.
+     * @param onMetadata - Metadata callback.
+     */
     constructor(metaInt, onMetadata) {
         super();
         this.metaInt = metaInt;
@@ -22,20 +53,25 @@ class IcyMetadataTransform extends Transform {
         this.metaBytes = 0;
         this.lastSignature = null;
     }
+    /**
+     * Emits parsed metadata payload if content changed.
+     * @param raw - Raw metadata block.
+     * @internal
+     */
     _emitMetadata(raw) {
         const cleaned = raw.replace(/\0+$/, '').trim();
         if (!cleaned)
             return;
         const fields = {};
         const regex = /([A-Za-z0-9]+)='([^']*)'/g;
-        let match = null;
+        let match;
         while ((match = regex.exec(cleaned))) {
-            fields[match[1].toLowerCase()] = match[2];
+            fields[(match[1] || '').toLowerCase()] = match[2] || '';
         }
         const payload = {
             raw: cleaned,
-            streamTitle: fields.streamtitle || null,
-            streamUrl: fields.streamurl || null,
+            streamTitle: fields['streamtitle'] || null,
+            streamUrl: fields['streamurl'] || null,
             fields
         };
         const signature = payload.raw;
@@ -44,6 +80,13 @@ class IcyMetadataTransform extends Transform {
             this.onMetadata?.(payload);
         }
     }
+    /**
+     * Processes audio and metadata chunks.
+     * @param chunk - Incoming stream chunk.
+     * @param _encoding - Stream encoding.
+     * @param callback - Transform callback.
+     * @internal
+     */
     _transform(chunk, _encoding, callback) {
         try {
             let offset = 0;
@@ -63,7 +106,7 @@ class IcyMetadataTransform extends Transform {
                 else if (this.pendingMetaLength === -1) {
                     if (offset >= chunk.length)
                         break;
-                    this.pendingMetaLength = chunk[offset] * 16;
+                    this.pendingMetaLength = (chunk[offset] || 0) * 16;
                     offset += 1;
                     this.metaChunks = [];
                     this.metaBytes = 0;
@@ -96,19 +139,64 @@ class IcyMetadataTransform extends Transform {
         }
     }
 }
+/**
+ * Generic HTTP source.
+ * @public
+ */
 export default class HttpSource {
+    /**
+     * Runtime NodeLink context.
+     */
+    nodelink;
+    /**
+     * Source-specific configuration.
+     */
+    config;
+    /**
+     * Source search term prefixes.
+     */
+    searchTerms;
+    /**
+     * Source priority.
+     */
+    priority;
+    /**
+     * Creates a new HTTP source instance.
+     * @param nodelink - Runtime NodeLink context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        this.config = nodelink.options.sources?.http || {};
+        const rawHttpConfig = nodelink.options.sources?.['http'];
+        this.config =
+            rawHttpConfig &&
+                typeof rawHttpConfig === 'object' &&
+                'userAgent' in rawHttpConfig &&
+                typeof rawHttpConfig.userAgent === 'string'
+                ? { userAgent: rawHttpConfig.userAgent }
+                : {};
         this.searchTerms = [];
         this.priority = 10;
     }
+    /**
+     * Initializes provider resources.
+     * @returns Always true for this provider.
+     */
     async setup() {
         return true;
     }
+    /**
+     * Search handler delegates to resolve for HTTP source.
+     * @param query - URL query.
+     * @returns Resolve result.
+     */
     async search(query) {
         return this.resolve(query);
     }
+    /**
+     * Resolves an HTTP URL into track payload.
+     * @param url - Target URL.
+     * @returns Resolve result payload.
+     */
     async resolve(url) {
         try {
             const userAgent = this.config.userAgent || DEFAULT_HTTP_USER_AGENT;
@@ -122,23 +210,23 @@ export default class HttpSource {
                 method: 'HEAD',
                 headers: requestHeaders
             });
-            const headContentType = data.headers?.['content-type'] || '';
-            const headOk = !data.error &&
-                (data.statusCode || 0) < 400 &&
-                isValidMediaType(headContentType);
+            const headContentType = headerToString(data.headers?.['content-type']);
+            const headOk = !data.error && (data.statusCode || 0) < 400 && isValidMediaType(headContentType);
             if (!headOk) {
                 const getData = await http1makeRequest(url, {
                     method: 'GET',
                     streamOnly: true,
                     headers: requestHeaders
                 });
-                if (getData?.stream)
-                    getData.stream.destroy();
+                const previewStream = getData?.stream;
+                if (previewStream && typeof previewStream.destroy === 'function') {
+                    previewStream.destroy();
+                }
                 data = getData;
             }
             if (data.error) {
                 return {
-                    exception: { message: data.error.message, severity: 'common' }
+                    exception: { message: String(data.error), severity: 'common' }
                 };
             }
             if ((data.statusCode || 0) >= 400) {
@@ -149,10 +237,9 @@ export default class HttpSource {
                     }
                 };
             }
-            const headers = data.headers || {};
-            const contentType = headers['content-type'] || '';
-            const isValidMedia = isValidMediaType(contentType);
-            if (!isValidMedia) {
+            const headers = data.headers;
+            const contentType = headerToString(headers?.['content-type']);
+            if (!isValidMediaType(contentType)) {
                 return {
                     exception: {
                         message: `Unsupported content type: ${contentType}`,
@@ -160,38 +247,52 @@ export default class HttpSource {
                     }
                 };
             }
-            const isStream = Boolean(headers['icy-metaint']) || !('content-length' in headers);
+            const hasContentLength = 'content-length' in (headers || {});
+            const isStream = Boolean(headers?.['icy-metaint']) || !hasContentLength;
             return {
                 loadType: 'track',
                 data: this.buildTrack(url, headers, isStream)
             };
         }
         catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
             return {
                 exception: {
-                    message: `Failed to resolve URL: ${err.message}`,
+                    message: `Failed to resolve URL: ${message}`,
                     severity: 'common'
                 }
             };
         }
     }
+    /**
+     * Builds track payload for resolved URL and headers.
+     * @param url - Source URL.
+     * @param headers - Response headers.
+     * @param isStream - Whether source is stream.
+     * @returns Resolved track payload.
+     * @internal
+     */
     buildTrack(url, headers, isStream) {
-        const title = headers['icy-name'] ||
-            headers['content-disposition'].split('filename="')[1].split('"')[0] ||
+        const headerRecord = (headers || {});
+        const contentDisposition = headerToString(headerRecord['content-disposition']);
+        const fileNameMatch = contentDisposition.match(/filename="([^"]+)"/i);
+        const title = headerToString(headerRecord['icy-name']) ||
+            fileNameMatch?.[1] ||
             'Unknown';
-        const description = headers['icy-description'] || '';
-        const genre = headers['icy-genre'] || '';
-        const stationUrl = headers['icy-url'] || url;
-        const icyBr = headers['icy-br'];
-        const audioInfo = headers['ice-audio-info'];
-        const bitrate = Number.parseInt(icyBr || audioInfo?.split(';')?.[0]?.split('=')?.[1] || 0, 10);
+        const description = headerToString(headerRecord['icy-description']);
+        const genre = headerToString(headerRecord['icy-genre']);
+        const stationUrl = headerToString(headerRecord['icy-url']) || url;
+        const icyBr = headerToString(headerRecord['icy-br']);
+        const audioInfo = headerToString(headerRecord['ice-audio-info']);
+        const bitrate = Number.parseInt(icyBr || audioInfo.split(';')?.[0]?.split('=')?.[1] || '0', 10);
         let artworkUrl = null;
+        const contentType = headerToString(headerRecord['content-type']);
         if (url.startsWith('https://cdn.discordapp.com') &&
-            headers['content-type']?.includes('video/')) {
+            contentType.includes('video/')) {
             const cleanedUrl = url.endsWith('&') ? url.slice(0, -1) : url;
             const base = cleanedUrl.replace('https://cdn.discordapp.com', 'https://media.discordapp.net');
             const separator = base.includes('?') ? '&' : '?';
-            artworkUrl = `${base}${separator}format=webp`; // will choose webp over jpeg, since its discord's default format ig.
+            artworkUrl = `${base}${separator}format=webp`;
         }
         const track = {
             identifier: url,
@@ -206,8 +307,9 @@ export default class HttpSource {
             isrc: null,
             sourceName: 'http'
         };
+        const encodedTrack = { ...track, details: [] };
         return {
-            encoded: encodeTrack(track),
+            encoded: encodeTrack(encodedTrack),
             info: track,
             pluginInfo: {
                 bitrate,
@@ -219,9 +321,20 @@ export default class HttpSource {
             }
         };
     }
+    /**
+     * Returns playable URL for HTTP tracks.
+     * @param info - Track info payload.
+     * @returns URL and protocol tuple.
+     */
     getTrackUrl(info) {
         return { url: info.uri, protocol: 'http' };
     }
+    /**
+     * Loads stream for HTTP track.
+     * @param _decodedTrack - Decoded track payload (unused).
+     * @param url - Stream URL.
+     * @returns Stream payload or exception.
+     */
     async loadStream(_decodedTrack, url) {
         try {
             const userAgent = this.config.userAgent || DEFAULT_HTTP_USER_AGENT;
@@ -235,23 +348,26 @@ export default class HttpSource {
             };
             const response = await http1makeRequest(url, opts);
             if (response.error)
-                throw response.error;
-            const headers = response.headers || {};
-            const contentType = headers['content-type'] || '';
+                throw new Error(String(response.error));
+            const headers = (response.headers || {});
+            const contentType = headerToString(headers['content-type']);
             const extensionType = !contentType || contentType === 'application/octet-stream'
                 ? extractUrlExtension(url)
                 : '';
             const resolvedType = extensionType || contentType;
             const httpStream = response.stream;
+            if (!httpStream) {
+                throw new Error('No stream returned from HTTP source');
+            }
             let outputStream = httpStream;
-            const metaInt = Number.parseInt(headers['icy-metaint'], 10);
+            const metaInt = Number.parseInt(headerToString(headers['icy-metaint']), 10);
             if (Number.isFinite(metaInt) && metaInt > 0) {
                 const icyHeaders = {
-                    name: headers['icy-name'] || null,
-                    description: headers['icy-description'] || null,
-                    genre: headers['icy-genre'] || null,
-                    url: headers['icy-url'] || null,
-                    bitrate: headers['icy-br'] || null
+                    name: headerToString(headers['icy-name']) || null,
+                    description: headerToString(headers['icy-description']) || null,
+                    genre: headerToString(headers['icy-genre']) || null,
+                    url: headerToString(headers['icy-url']) || null,
+                    bitrate: headerToString(headers['icy-br']) || null
                 };
                 const metadataStream = new IcyMetadataTransform(metaInt, (metadata) => {
                     outputStream.emit('icyMetadata', {
@@ -273,8 +389,9 @@ export default class HttpSource {
             return { stream: outputStream, type: resolvedType };
         }
         catch (err) {
-            logger('error', 'Sources', `Failed to load http stream: ${err.message}`);
-            return { exception: { message: err.message, severity: 'common' } };
+            const message = err instanceof Error ? err.message : String(err);
+            logger('error', 'Sources', `Failed to load http stream: ${message}`);
+            return { exception: { message, severity: 'common' } };
         }
     }
 }

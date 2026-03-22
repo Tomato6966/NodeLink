@@ -3,12 +3,12 @@ import type {
   BestMatchTrackInfo
 } from '../typings/utils.types.ts'
 import type {
+  MeaningLoadResult,
   MeaningTrackInfo,
   MeaningTranslation
 } from '../typings/meanings/meaning.types.ts'
 import type {
   LetrasCandidate,
-  LetrasMeaningResult,
   LetrasTrackInfo,
   MeaningBlock,
   OmqLyricPayload,
@@ -372,7 +372,7 @@ export default class LetrasMusMeaning {
   async getMeaning(
     trackInfo: MeaningTrackInfo,
     language?: string
-  ): Promise<LetrasMeaningResult> {
+  ): Promise<MeaningLoadResult> {
     try {
       let candidates: LetrasCandidate[] = []
       if (trackInfo.sourceName === 'letrasmus' && trackInfo.uri) {

@@ -1,6 +1,5 @@
 import type { TrackInfo } from '../sources/source.types.ts'
 import type { HttpRequestResult } from '../utils.types.ts'
-import type { LyricsResult } from './musixmatch.types.ts'
 
 /**
  * Signature payload used by Yandex lyrics API.
@@ -126,12 +125,6 @@ export type YandexLyricsTrackInfo = Pick<
   TrackInfo,
   'identifier' | 'title'
 >
-
-/**
- * Unified result returned by Yandex lyrics provider.
- * @public
- */
-export type YandexMusicLyricsResult = LyricsResult
 
 /**
  * Minimal HTTP result used by yandex helper methods.

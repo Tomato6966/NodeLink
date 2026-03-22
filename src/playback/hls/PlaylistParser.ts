@@ -1,6 +1,5 @@
 import type {
   HLSAttributes,
-  HLSAudioGroups,
   HLSAudioRendition,
   HLSByteRange,
   HLSMasterPlaylist,
@@ -123,9 +122,9 @@ export function parse(content: string, baseUrl: string): HLSPlaylist {
 export function parseMaster(
   lines: string[],
   baseUrl: string
-): { variants: HLSVariant[]; audioGroups: HLSAudioGroups } {
+): { variants: HLSVariant[]; audioGroups: Record<string, HLSAudioRendition[]> } {
   const variants: HLSVariant[] = []
-  const audioGroups: HLSAudioGroups = {}
+  const audioGroups: Record<string, HLSAudioRendition[]> = {}
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]

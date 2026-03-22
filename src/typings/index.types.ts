@@ -201,7 +201,7 @@ export interface NodelinkExtensions {
   /**
    * HTTP middleware functions
    */
-  middlewares: MiddlewareExtension[]
+  middlewares: ApiMiddlewareExtension[]
 
   /**
    * Track data modifiers
@@ -418,13 +418,6 @@ export interface HttpResponse {
  * @public
  */
 export interface RouteExtension extends ApiRouteExtension {}
-
-/**
- * HTTP middleware extension executed before route resolution.
- * @remarks Returning true stops further processing.
- * @public
- */
-export type MiddlewareExtension = ApiMiddlewareExtension
 
 /**
  * Track data modifier function

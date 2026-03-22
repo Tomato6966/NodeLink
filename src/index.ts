@@ -46,7 +46,6 @@ import type {
   GitInfo,
   IBunSocketWrapper,
   NodelinkServer as INodelinkServer,
-  MiddlewareExtension,
   NodelinkExtensions,
   NodelinkServerType,
   NodelinkSocketType,
@@ -63,6 +62,7 @@ import type {
   VoiceRelay,
   WebSocketInterceptorExtension
 } from './typings/index.types.ts'
+import type { ApiMiddlewareExtension } from './typings/api/api.types.ts'
 import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types.ts'
 import { parseVoiceFrameHeader } from './voice/voiceFrames.ts'
 import { createVoiceRelay } from './voice/voiceRelay.ts'
@@ -2449,7 +2449,7 @@ class NodelinkServer extends EventEmitter {
    * @param fn - Middleware function
    * @public
    */
-  registerMiddleware(fn: MiddlewareExtension): void {
+  registerMiddleware(fn: ApiMiddlewareExtension): void {
     this.extensions.middlewares.push(fn)
     logger('info', 'Server', 'Registered custom REST interceptor (middleware)')
   }

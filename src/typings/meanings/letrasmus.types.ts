@@ -2,7 +2,6 @@ import type {
   BestMatchCandidate,
   BestMatchTrackInfo
 } from '../utils.types.ts'
-import type { MeaningLoadResult } from './meaning.types.ts'
 
 /**
  * Typed track payload used by Letras provider matching.
@@ -72,9 +71,3 @@ export interface MeaningBlock {
   title: string | null
   body: string[]
 }
-
-/**
- * Unified return type for Letras meaning provider.
- * @public
- */
-export type LetrasMeaningResult = MeaningLoadResult

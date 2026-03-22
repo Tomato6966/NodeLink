@@ -1,6 +1,5 @@
 import { http1makeRequest } from '../utils.ts'
 import type {
-  GoogleLanguageMap,
   GoogleTranslateResponseBody,
   GoogleTranslationResult
 } from '../typings/modules/googleTranslate.types.ts'
@@ -22,7 +21,7 @@ const GOOGLE_TRANSLATE_ENDPOINT =
  * Supported language code map for Google Translate.
  * @public
  */
-export const GoogleLanguages: GoogleLanguageMap = {
+export const GoogleLanguages: Record<string, string> = {
   auto: 'Detect language',
   af: 'Afrikaans',
   sq: 'Albanian',

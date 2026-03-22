@@ -34,7 +34,6 @@ import type {
   CreatePlayerPayload,
   GuildQueueEntry,
   LoadStreamPayload,
-  NodeLinkConfig,
   PCMStream,
   RestorePlayerPayload,
   WorkerCommand,
@@ -43,6 +42,7 @@ import type {
   WorkerNodeLink,
   WorkerPlayer
 } from '../typings/workers/worker.types.ts'
+import type { NodelinkConfig as NodeLinkConfig } from '../typings/config/config.types.ts'
 import {
   createHeadQueue,
   dequeueHeadQueue,

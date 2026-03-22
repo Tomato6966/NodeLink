@@ -277,8 +277,7 @@ export interface NodeLinkOptions {
   }
 }
 
-export type AudioOptions = NonNullable<NodeLinkOptions['audio']>
-export type AudioOptionsWithTransitions = AudioOptions & {
+export type AudioOptionsWithTransitions = NonNullable<NodeLinkOptions['audio']> & {
   filterTransitions?: FilterTransitionsConfig
 }
 

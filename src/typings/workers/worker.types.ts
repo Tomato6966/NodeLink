@@ -1,5 +1,6 @@
 import type { Readable } from 'node:stream'
 import type { HeadQueue } from '../../workers/headQueue.ts'
+import type { NodelinkConfig as NodeLinkConfig } from '../config/config.types.ts'
 import type {
   LoggerFn,
   LyricsManagerLike,
@@ -21,16 +22,6 @@ import type {
   TrackStreamResult,
   TrackUrlResult
 } from '../sources/source.types.ts'
-
-/**
- * NodeLink configuration shape.
- */
-export type NodeLinkConfig = typeof import('../../../config.default.js').default
-
-/**
- * Logger signature used by worker components.
- */
-export type WorkerLogger = LoggerFn
 
 /**
  * Worker's IPC or TCP command payload.
@@ -81,12 +72,12 @@ export interface WorkerExtensions extends Record<string, unknown> {
  */
 export interface WorkerNodeLink extends NodeLink {
   options: NodeLinkConfig & NodeLink['options']
-  logger: WorkerLogger
+  logger: LoggerFn
   voiceRelay?: NodeLink['voiceRelay']
   statsManager: WorkerStatsManager
   credentialManager: CredentialManagerLike
   trackCacheManager: TrackCacheManagerLike
-  sources: WorkerSourceManager
+  sources: SourceManagerBase
   lyrics: WorkerLyricsManager | null
   meanings: MeaningManagerLike | null
   routePlanner: RoutePlannerManagerLike
@@ -149,11 +140,6 @@ export type WorkerPlayer = {
   play: (track: PlayPayload) => Promise<unknown>
   destroy: (disconnect?: boolean) => void
 } & Record<string, unknown>
-
-/**
- * Source manager interface with worker-only helpers.
- */
-export type WorkerSourceManager = SourceManagerBase
 
 /**
  * Stats manager used in workers.

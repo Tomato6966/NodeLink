@@ -3,7 +3,6 @@ import { http1makeRequest, logger } from '../utils.ts'
 import type {
   EncodedSpotifySecretEntry,
   SpotifyLocalTokenResponse,
-  SpotifySecretDictionary,
   SpotifyServerTimeResponse
 } from '../typings/modules/spotifyAuth.types.ts'
 
@@ -97,8 +96,8 @@ async function ensureTotpSecrets(): Promise<void> {
 
     const secrets =
       typeof res.body === 'string'
-        ? (JSON.parse(res.body) as SpotifySecretDictionary)
-        : (res.body as SpotifySecretDictionary)
+        ? (JSON.parse(res.body) as Record<string, number[]>)
+        : (res.body as Record<string, number[]>)
 
     const versions = Object.keys(secrets).map(Number)
     const newestVersion = Math.max(...versions).toString()

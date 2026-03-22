@@ -15,12 +15,6 @@ export interface EncodedSpotifySecretEntry {
 }
 
 /**
- * Remote secret dictionary payload from spot-secrets-go.
- * @public
- */
-export type SpotifySecretDictionary = Record<string, number[]>
-
-/**
  * Response payload for Spotify server time endpoint.
  * @public
  */
