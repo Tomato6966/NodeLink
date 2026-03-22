@@ -5,7 +5,7 @@ import {
   logger
 } from '../utils.ts'
 import { fetchCanvas } from '../modules/spotifyCanvas.js'
-import { getLocalToken } from '../modules/spotifyAuth.js'
+import { getLocalToken } from '../modules/spotifyAuth.ts'
 
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1'
 const SPOTIFY_CLIENT_API_URL = 'https://spclient.wg.spotify.com'
@@ -235,7 +235,7 @@ export default class SpotifySource {
     if (!this.spDc) return
 
     try {
-      const { getLocalToken } = await import('../modules/spotifyAuth.js')
+      const { getLocalToken } = await import('../modules/spotifyAuth.ts')
       const tokenData = await getLocalToken(this.spDc, 'mobile-web-player')
       if (tokenData?.accessToken) {
         this.mobileToken = tokenData.accessToken

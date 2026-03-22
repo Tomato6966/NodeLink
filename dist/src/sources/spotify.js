@@ -1,6 +1,6 @@
 import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
 import { fetchCanvas } from '../modules/spotifyCanvas.js';
-import { getLocalToken } from '../modules/spotifyAuth.js';
+import { getLocalToken } from "../modules/spotifyAuth.js";
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1';
 const SPOTIFY_CLIENT_API_URL = 'https://spclient.wg.spotify.com';
 const SPOTIFY_INTERNAL_API_URL = 'https://api-partner.spotify.com/pathfinder/v2/query';
@@ -191,7 +191,7 @@ export default class SpotifySource {
         if (!this.spDc)
             return;
         try {
-            const { getLocalToken } = await import('../modules/spotifyAuth.js');
+            const { getLocalToken } = await import("../modules/spotifyAuth.js");
             const tokenData = await getLocalToken(this.spDc, 'mobile-web-player');
             if (tokenData?.accessToken) {
                 this.mobileToken = tokenData.accessToken;
