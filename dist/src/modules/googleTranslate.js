@@ -1,6 +1,18 @@
 import { http1makeRequest } from "../utils.js";
+/**
+ * Fallback key used when no custom Google Translate key is configured.
+ * @internal
+ */
 const DEFAULT_API_KEY = 'AIzaSyDLEeFI5OtFBwYBIoK_jj5m32rZK5CkCXA';
+/**
+ * Google Translate endpoint used by the lightweight translation helpers.
+ * @internal
+ */
 const GOOGLE_TRANSLATE_ENDPOINT = 'https://translate-pa.googleapis.com/v1/translate';
+/**
+ * Supported language code map for Google Translate.
+ * @public
+ */
 export const GoogleLanguages = {
     auto: 'Detect language',
     af: 'Afrikaans',
@@ -137,6 +149,15 @@ export const GoogleLanguages = {
     yo: 'Yoruba',
     zu: 'Zulu'
 };
+/**
+ * Builds the full request URL for Google Translate endpoint.
+ * @param text - Text to translate.
+ * @param sourceLang - Source language code.
+ * @param targetLang - Target language code.
+ * @param apiKey - API key for the endpoint.
+ * @returns Fully qualified request URL.
+ * @internal
+ */
 const buildTranslateUrl = (text, sourceLang, targetLang, apiKey) => {
     const params = new URLSearchParams({
         'params.client': 'gtx',
@@ -148,22 +169,42 @@ const buildTranslateUrl = (text, sourceLang, targetLang, apiKey) => {
     });
     return `${GOOGLE_TRANSLATE_ENDPOINT}?${params}`;
 };
+/**
+ * Translates a single text payload.
+ * @param text - Text to translate.
+ * @param sourceLang - Source language code.
+ * @param targetLang - Target language code.
+ * @param apiKey - Optional API key override.
+ * @returns Translation result with text and source language.
+ * @throws Error when API call fails or response is invalid.
+ * @public
+ */
 export async function translateText(text, sourceLang, targetLang, apiKey) {
     if (!text)
         return { translation: '', sourceLanguage: sourceLang };
-    const key = apiKey || process.env.GOOGLE_TRANSLATE_KEY || DEFAULT_API_KEY;
+    const key = apiKey || process.env['GOOGLE_TRANSLATE_KEY'] || DEFAULT_API_KEY;
     const url = buildTranslateUrl(text, sourceLang, targetLang, key);
     const { body, statusCode, error } = await http1makeRequest(url, {
         method: 'GET'
     });
-    if (error || statusCode !== 200 || !body?.translation) {
-        throw new Error(`Translate failed: ${error?.message || statusCode}`);
+    const payload = body;
+    if (error || statusCode !== 200 || !payload?.translation) {
+        throw new Error(`Translate failed: ${error || statusCode}`);
     }
     return {
-        translation: body.translation,
-        sourceLanguage: body.sourceLanguage || sourceLang
+        translation: payload.translation,
+        sourceLanguage: payload.sourceLanguage || sourceLang
     };
 }
+/**
+ * Translates a list of texts sequentially.
+ * @param texts - Text list to translate.
+ * @param sourceLang - Source language code.
+ * @param targetLang - Target language code.
+ * @param apiKey - Optional API key override.
+ * @returns Array of translated text values.
+ * @public
+ */
 export async function translateMany(texts, sourceLang, targetLang, apiKey) {
     const results = [];
     for (const text of texts) {
