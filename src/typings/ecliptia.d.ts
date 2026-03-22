@@ -21,6 +21,20 @@ declare module '@ecliptia/seekable-stream' {
     meta: SeekMeta
   }
 
+  export interface SeekCustomResponse extends Readable {
+    statusCode?: number
+    headers?: Record<string, string | string[] | number | undefined>
+    resume?: () => void
+  }
+
+  export type SeekCustomRequestFn = (
+    url: string | URL,
+    options: {
+      method?: string
+      headers?: Record<string, string>
+    }
+  ) => Promise<SeekCustomResponse>
+
   /**
    * Creates a seekable stream for the given URL.
    *
@@ -33,7 +47,8 @@ declare module '@ecliptia/seekable-stream' {
     url: string,
     startTime: number,
     endTime?: number,
-    options?: Record<string, unknown>
+    httpHeaders?: Record<string, unknown>,
+    customRequestFn?: SeekCustomRequestFn
   ): Promise<SeekResult>
 }
 

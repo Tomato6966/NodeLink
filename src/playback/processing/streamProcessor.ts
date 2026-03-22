@@ -19,6 +19,11 @@ import type {
   StreamInfo
 } from '../../typings/playback/player.types.ts'
 import type {
+  HttpProxyConfig,
+  HttpRequestHeaders,
+  HttpResponseHeaders
+} from '../../typings/utils.types.ts'
+import type {
   AACConfig,
   AACDecoderStreamOptions,
   ADTSFrameInfo,
@@ -44,7 +49,7 @@ import type {
   SeekableStreamMeta,
   SymphoniaDecoderLike
 } from '../../typings/playback/streamProcessor.types.ts'
-import { logger } from '../../utils.ts'
+import { http1makeRequest, logger } from '../../utils.ts'
 import FlvDemuxer from '../demuxers/Flv.ts'
 import WebmOpusDemuxer from '../demuxers/WebmOpus.ts'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.ts'
@@ -292,11 +297,74 @@ const _toArrayBufferWithFileStart = (
   return ab
 }
 
+const _isHttpProxyConfig = (value: unknown): value is HttpProxyConfig => {
+  if (!value || typeof value !== 'object') return false
+
+  const proxy = value as Record<string, unknown>
+  if (typeof proxy['url'] !== 'string' || proxy['url'].length === 0) return false
+  if (
+    proxy['username'] !== undefined &&
+    typeof proxy['username'] !== 'string'
+  )
+    return false
+  if (
+    proxy['password'] !== undefined &&
+    typeof proxy['password'] !== 'string'
+  )
+    return false
+  if (
+    proxy['type'] !== undefined &&
+    proxy['type'] !== 'forward' &&
+    proxy['type'] !== 'reverse'
+  )
+    return false
+
+  return true
+}
+
+const _extractSeekProxy = (
+  streamInfo: StreamInfo
+): HttpProxyConfig | undefined => {
+  const additionalData = streamInfo?.additionalData as
+    | Record<string, unknown>
+    | undefined
+
+  return _isHttpProxyConfig(additionalData?.['proxy'])
+    ? (additionalData['proxy'] as HttpProxyConfig)
+    : undefined
+}
+
 async function _fetchRange(
   url: string,
   start: number,
-  endInclusive: number
+  endInclusive: number,
+  proxy?: HttpProxyConfig
 ): Promise<Buffer> {
+  if (proxy) {
+    const response = await http1makeRequest(url, {
+      method: 'GET',
+      headers: {
+        Range: `bytes=${start}-${endInclusive}`
+      } as HttpRequestHeaders,
+      responseType: 'buffer',
+      proxy
+    })
+
+    if (response.statusCode !== 200 && response.statusCode !== 206) {
+      throw new Error(`HTTP ${response.statusCode ?? 0} while fetching range`)
+    }
+
+    if (Buffer.isBuffer(response.body)) {
+      return response.body
+    }
+
+    if (response.body instanceof Uint8Array) {
+      return Buffer.from(response.body)
+    }
+
+    throw new Error('Invalid binary response body while fetching range')
+  }
+
   const res = await fetch(url, {
     headers: { Range: `bytes=${start}-${endInclusive}` }
   })
@@ -307,7 +375,31 @@ async function _fetchRange(
   return Buffer.from(ab)
 }
 
-async function _openRangeStream(url: string, start: number): Promise<Readable> {
+async function _openRangeStream(
+  url: string,
+  start: number,
+  proxy?: HttpProxyConfig
+): Promise<Readable> {
+  if (proxy) {
+    const response = await http1makeRequest(url, {
+      method: 'GET',
+      headers: {
+        Range: `bytes=${start}-`
+      } as HttpRequestHeaders,
+      streamOnly: true,
+      proxy
+    })
+
+    if (
+      (response.statusCode !== 200 && response.statusCode !== 206) ||
+      !response.stream
+    ) {
+      throw new Error(`HTTP ${response.statusCode ?? 0} while opening range stream`)
+    }
+
+    return response.stream as Readable
+  }
+
   const res = await fetch(url, {
     headers: { Range: `bytes=${start}-` }
   })
@@ -328,7 +420,8 @@ const _seekOffset = (res: MP4BoxSeekResult): number => {
 
 async function _buildMp4SeekOptions(
   url: string,
-  seekTimeMs: number
+  seekTimeMs: number,
+  proxy?: HttpProxyConfig
 ): Promise<MP4ToAACStreamOptions> {
   const mp4Box = await getMP4Box()
   const mp4 = mp4Box.createFile() as unknown as MP4BoxFile
@@ -349,7 +442,7 @@ async function _buildMp4SeekOptions(
 
     try {
       for (let i = 0; i < MAX_FETCHES && !readyInfo; i++) {
-        const buf = await _fetchRange(url, nextStart, nextStart + CHUNK - 1)
+        const buf = await _fetchRange(url, nextStart, nextStart + CHUNK - 1, proxy)
         const ab = _toArrayBufferWithFileStart(buf, nextStart)
 
         prefetch.push({ fileStart: nextStart, data: ab })
@@ -404,6 +497,52 @@ async function _buildMp4SeekOptions(
     prefetch,
     baseFileStart: startOffset,
     seekTimeSec
+  }
+}
+
+type SeekableResponseLike = Readable & {
+  statusCode?: number
+  headers?: HttpResponseHeaders
+}
+
+const _createSeekableProxyRequest = (
+  proxy?: HttpProxyConfig
+):
+  | (((
+      requestUrl: string | URL,
+      options: {
+        method?: string
+        headers?: Record<string, string>
+      }
+    ) => Promise<SeekableResponseLike>))
+  | undefined => {
+  if (!proxy) return undefined
+
+  return async (
+    requestUrl: string | URL,
+    options: {
+      method?: string
+      headers?: Record<string, string>
+    }
+  ): Promise<SeekableResponseLike> => {
+    const response = await http1makeRequest(
+      typeof requestUrl === 'string' ? requestUrl : requestUrl.toString(),
+      {
+        method: options?.method ?? 'GET',
+        headers: (options?.headers ?? {}) as HttpRequestHeaders,
+        streamOnly: true,
+        proxy
+      }
+    )
+
+    if (!response.stream) {
+      throw new Error('Failed to open proxied seek request stream')
+    }
+
+    const stream = response.stream as SeekableResponseLike
+    stream.statusCode = response.statusCode
+    stream.headers = response.headers
+    return stream
   }
 }
 
@@ -2682,6 +2821,7 @@ export const createSeekeableAudioResource = async (
     const hinted = String(player.streamInfo?.format ?? '').toLowerCase()
     const ext = _extFromUrl(url)
     const containerGuess = hinted || ext
+    const seekProxy = _extractSeekProxy(player.streamInfo)
 
     logger(
       'debug',
@@ -2690,9 +2830,13 @@ export const createSeekeableAudioResource = async (
     )
 
     if (_isMp4Format(containerGuess)) {
-      const mp4Seek = await _buildMp4SeekOptions(url, seekTime)
+      const mp4Seek = await _buildMp4SeekOptions(url, seekTime, seekProxy)
 
-      const ranged = await _openRangeStream(url, mp4Seek.baseFileStart ?? 0)
+      const ranged = await _openRangeStream(
+        url,
+        mp4Seek.baseFileStart ?? 0,
+        seekProxy
+      )
 
       const passthroughStream = new PassThrough({
         highWaterMark: AUDIO_CONFIG.highWaterMark
@@ -2735,7 +2879,8 @@ export const createSeekeableAudioResource = async (
       url,
       seekTime,
       endTime,
-      {}
+      {},
+      _createSeekableProxyRequest(seekProxy)
     )) as { stream: Readable; meta: SeekableStreamMeta }
 
     const passthroughStream = new PassThrough({

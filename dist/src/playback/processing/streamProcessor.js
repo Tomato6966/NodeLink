@@ -4,7 +4,7 @@ import FAAD2NodeDecoder from '@ecliptia/faad2-wasm/faad2_node_decoder.js';
 import { SeekError, seekableStream } from '@ecliptia/seekable-stream';
 import { SymphoniaDecoder } from '@toddynnn/symphonia-decoder';
 import { normalizeFormat, SupportedFormats } from "../../constants.js";
-import { logger } from "../../utils.js";
+import { http1makeRequest, logger } from "../../utils.js";
 import FlvDemuxer from "../demuxers/Flv.js";
 import WebmOpusDemuxer from "../demuxers/WebmOpus.js";
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from "../opus/Opus.js";
@@ -186,7 +186,51 @@ const _toArrayBufferWithFileStart = (buf, fileStart) => {
     ab.fileStart = fileStart;
     return ab;
 };
-async function _fetchRange(url, start, endInclusive) {
+const _isHttpProxyConfig = (value) => {
+    if (!value || typeof value !== 'object')
+        return false;
+    const proxy = value;
+    if (typeof proxy['url'] !== 'string' || proxy['url'].length === 0)
+        return false;
+    if (proxy['username'] !== undefined &&
+        typeof proxy['username'] !== 'string')
+        return false;
+    if (proxy['password'] !== undefined &&
+        typeof proxy['password'] !== 'string')
+        return false;
+    if (proxy['type'] !== undefined &&
+        proxy['type'] !== 'forward' &&
+        proxy['type'] !== 'reverse')
+        return false;
+    return true;
+};
+const _extractSeekProxy = (streamInfo) => {
+    const additionalData = streamInfo?.additionalData;
+    return _isHttpProxyConfig(additionalData?.['proxy'])
+        ? additionalData['proxy']
+        : undefined;
+};
+async function _fetchRange(url, start, endInclusive, proxy) {
+    if (proxy) {
+        const response = await http1makeRequest(url, {
+            method: 'GET',
+            headers: {
+                Range: `bytes=${start}-${endInclusive}`
+            },
+            responseType: 'buffer',
+            proxy
+        });
+        if (response.statusCode !== 200 && response.statusCode !== 206) {
+            throw new Error(`HTTP ${response.statusCode ?? 0} while fetching range`);
+        }
+        if (Buffer.isBuffer(response.body)) {
+            return response.body;
+        }
+        if (response.body instanceof Uint8Array) {
+            return Buffer.from(response.body);
+        }
+        throw new Error('Invalid binary response body while fetching range');
+    }
     const res = await fetch(url, {
         headers: { Range: `bytes=${start}-${endInclusive}` }
     });
@@ -196,7 +240,22 @@ async function _fetchRange(url, start, endInclusive) {
     const ab = await res.arrayBuffer();
     return Buffer.from(ab);
 }
-async function _openRangeStream(url, start) {
+async function _openRangeStream(url, start, proxy) {
+    if (proxy) {
+        const response = await http1makeRequest(url, {
+            method: 'GET',
+            headers: {
+                Range: `bytes=${start}-`
+            },
+            streamOnly: true,
+            proxy
+        });
+        if ((response.statusCode !== 200 && response.statusCode !== 206) ||
+            !response.stream) {
+            throw new Error(`HTTP ${response.statusCode ?? 0} while opening range stream`);
+        }
+        return response.stream;
+    }
     const res = await fetch(url, {
         headers: { Range: `bytes=${start}-` }
     });
@@ -212,7 +271,7 @@ const _seekOffset = (res) => {
     const off = res && typeof res === 'object' ? res.offset : undefined;
     return off ?? NaN;
 };
-async function _buildMp4SeekOptions(url, seekTimeMs) {
+async function _buildMp4SeekOptions(url, seekTimeMs, proxy) {
     const mp4Box = await getMP4Box();
     const mp4 = mp4Box.createFile();
     const prefetch = [];
@@ -228,7 +287,7 @@ async function _buildMp4SeekOptions(url, seekTimeMs) {
         const MAX_FETCHES = 40;
         try {
             for (let i = 0; i < MAX_FETCHES && !readyInfo; i++) {
-                const buf = await _fetchRange(url, nextStart, nextStart + CHUNK - 1);
+                const buf = await _fetchRange(url, nextStart, nextStart + CHUNK - 1, proxy);
                 const ab = _toArrayBufferWithFileStart(buf, nextStart);
                 prefetch.push({ fileStart: nextStart, data: ab });
                 const appended = mp4.appendBuffer(ab);
@@ -272,6 +331,25 @@ async function _buildMp4SeekOptions(url, seekTimeMs) {
         seekTimeSec
     };
 }
+const _createSeekableProxyRequest = (proxy) => {
+    if (!proxy)
+        return undefined;
+    return async (requestUrl, options) => {
+        const response = await http1makeRequest(typeof requestUrl === 'string' ? requestUrl : requestUrl.toString(), {
+            method: options?.method ?? 'GET',
+            headers: (options?.headers ?? {}),
+            streamOnly: true,
+            proxy
+        });
+        if (!response.stream) {
+            throw new Error('Failed to open proxied seek request stream');
+        }
+        const stream = response.stream;
+        stream.statusCode = response.statusCode;
+        stream.headers = response.headers;
+        return stream;
+    };
+};
 /**
  * Immutable counter of processed frames.
  * Ensures the song position in Lavalink doesn't break when using Nightcore/Vaporwave.
@@ -2038,10 +2116,11 @@ export const createSeekeableAudioResource = async (guildId, url, seekTime, endTi
         const hinted = String(player.streamInfo?.format ?? '').toLowerCase();
         const ext = _extFromUrl(url);
         const containerGuess = hinted || ext;
+        const seekProxy = _extractSeekProxy(player.streamInfo);
         logger('debug', 'StreamProcessor', `createSeekeableAudioResource called for ${url} | seekTime: ${seekTime}ms | containerGuess: ${containerGuess}`);
         if (_isMp4Format(containerGuess)) {
-            const mp4Seek = await _buildMp4SeekOptions(url, seekTime);
-            const ranged = await _openRangeStream(url, mp4Seek.baseFileStart ?? 0);
+            const mp4Seek = await _buildMp4SeekOptions(url, seekTime, seekProxy);
+            const ranged = await _openRangeStream(url, mp4Seek.baseFileStart ?? 0, seekProxy);
             const passthroughStream = new PassThrough({
                 highWaterMark: AUDIO_CONFIG.highWaterMark
             });
@@ -2056,7 +2135,7 @@ export const createSeekeableAudioResource = async (guildId, url, seekTime, endTi
             const format = hinted || (ext ? ext : 'm4a');
             return new StreamAudioResource(guildId, passthroughStream, format, nodelink, initialFilters, volume, audioMixer, returnPCM, returnPCM ? true : (player.loudnessNormalizer ?? enableAGC));
         }
-        const { stream, meta } = (await seekableStream(url, seekTime, endTime, {}));
+        const { stream, meta } = (await seekableStream(url, seekTime, endTime, {}, _createSeekableProxyRequest(seekProxy)));
         const passthroughStream = new PassThrough({
             highWaterMark: AUDIO_CONFIG.highWaterMark
         });
