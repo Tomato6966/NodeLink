@@ -1,13 +1,42 @@
 import { getBestMatch, logger, makeRequest } from "../utils.js";
+/**
+ * Deezer lyrics provider backed by Deezer GraphQL endpoint.
+ * @public
+ */
 export default class DeezerLyrics {
+    /**
+     * Runtime NodeLink context.
+     */
+    nodelink;
+    /**
+     * Cached Deezer JWT token.
+     */
+    jwt;
+    /**
+     * JWT expiration timestamp in milliseconds.
+     */
+    jwtExpiry;
+    /**
+     * Creates a new Deezer lyrics provider.
+     * @param nodelink - Runtime NodeLink context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
         this.jwt = null;
         this.jwtExpiry = 0;
     }
+    /**
+     * Initializes provider resources.
+     * @returns Always true for this provider.
+     */
     async setup() {
         return true;
     }
+    /**
+     * Retrieves and caches Deezer JWT used by lyrics endpoint.
+     * @returns JWT token or null when unavailable.
+     * @internal
+     */
     async _getJwt() {
         if (this.jwt && Date.now() < this.jwtExpiry)
             return this.jwt;
@@ -15,7 +44,9 @@ export default class DeezerLyrics {
             const { body, error } = await makeRequest('https://auth.deezer.com/login/anonymous?jo=p&rto=c', { method: 'GET' });
             if (error)
                 throw new Error('Request failed');
-            const data = typeof body === 'string' ? JSON.parse(body) : body;
+            const data = typeof body === 'string'
+                ? JSON.parse(body)
+                : body;
             if (!data?.jwt)
                 throw new Error('No JWT in response');
             this.jwt = data.jwt;
@@ -23,10 +54,15 @@ export default class DeezerLyrics {
             return this.jwt;
         }
         catch (e) {
-            logger('error', 'Lyrics', `Deezer JWT fetch failed: ${e.message}`);
+            logger('error', 'Lyrics', `Deezer JWT fetch failed: ${e instanceof Error ? e.message : String(e)}`);
             return null;
         }
     }
+    /**
+     * Loads lyrics for a track.
+     * @param trackInfo - Track metadata from manager.
+     * @returns Lyrics payload or empty result.
+     */
     async getLyrics(trackInfo) {
         const jwt = await this._getJwt();
         if (!jwt)
@@ -35,12 +71,16 @@ export default class DeezerLyrics {
         if (trackInfo.sourceName !== 'deezer') {
             const query = `${trackInfo.title} ${trackInfo.author}`;
             const searchRes = await this.nodelink.sources.search('deezer', query);
-            if (searchRes.loadType !== 'search' || !searchRes.data?.length)
+            const searchData = searchRes.data;
+            if (searchRes.loadType !== 'search' || !Array.isArray(searchData) || searchData.length === 0) {
                 return { loadType: 'empty', data: {} };
-            const bestMatch = getBestMatch(searchRes.data, trackInfo);
+            }
+            const candidates = searchData;
+            const bestMatch = getBestMatch(candidates, trackInfo);
             if (!bestMatch)
                 return { loadType: 'empty', data: {} };
-            trackId = bestMatch.info.identifier;
+            const matchedCandidate = bestMatch;
+            trackId = matchedCandidate.info.identifier;
         }
         try {
             const query = `query GetLyrics($trackId: String!) {
@@ -101,10 +141,12 @@ fragment SynchronizedLines on Lyrics {
                 },
                 disableBodyCompression: true
             });
-            const data = typeof res.body === 'string' ? JSON.parse(res.body) : res.body;
-            if (res.error || !data?.data?.track?.lyrics)
+            const data = typeof res.body === 'string'
+                ? JSON.parse(res.body)
+                : res.body;
+            const lyrics = data?.data?.track?.lyrics;
+            if (res.error || !lyrics)
                 return { loadType: 'empty', data: {} };
-            const lyrics = data.data.track.lyrics;
             let lines = [];
             let synced = false;
             if (lyrics.synchronizedWordByWordLines?.length) {
@@ -132,7 +174,7 @@ fragment SynchronizedLines on Lyrics {
                 lines = lyrics.text
                     .split(/\r?\n/)
                     .map((text) => ({ time: 0, duration: 0, text: text.trim() }))
-                    .filter((l) => l.text.length > 0);
+                    .filter((line) => line.text.length > 0);
             }
             return {
                 loadType: 'lyrics',
@@ -144,7 +186,7 @@ fragment SynchronizedLines on Lyrics {
             };
         }
         catch (e) {
-            logger('error', 'Lyrics', `Deezer lyrics request failed: ${e.message}`);
+            logger('error', 'Lyrics', `Deezer lyrics request failed: ${e instanceof Error ? e.message : String(e)}`);
             return { loadType: 'empty', data: {} };
         }
     }
