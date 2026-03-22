@@ -43,8 +43,6 @@ const VALID_FADING_CURVES = new Set([
   'baby'
 ])
 const VALID_FADING_TYPES = new Set(['volume', 'tape', 'both', 'scratch'])
-const VALID_CROSSFADE_CURVES = new Set(['linear', 'sine', 'sinusoidal'])
-const VALID_CROSSFADE_MODES = new Set(['preload', 'stream'])
 const VALID_VOICE_FORMATS = new Set(['opus', 'pcm_s16le'])
 const VALID_ROUTE_STRATEGIES = new Set([
   'RotateOnBan',
@@ -365,49 +363,6 @@ export default class ConfigValidationManager {
             value: ducking.targetVolume,
             validate: (v: number) => typeof v === 'number' && v >= 0 && v <= 1
           }
-        )
-      }
-    }
-
-    const crossfade = audio?.crossfade
-    if (crossfade) {
-      rules.push(
-        this.booleanRule('audio.crossfade.enabled', crossfade.enabled),
-        this.nonNegativeIntRule('audio.crossfade.duration', crossfade.duration),
-        this.enumRule(
-          'audio.crossfade.curve',
-          crossfade.curve,
-          VALID_CROSSFADE_CURVES
-        ),
-        this.enumRule(
-          'audio.crossfade.mode',
-          crossfade.mode,
-          VALID_CROSSFADE_MODES
-        ),
-        this.nonNegativeIntRule(
-          'audio.crossfade.minBufferMs',
-          crossfade.minBufferMs
-        ),
-        this.nonNegativeIntRule('audio.crossfade.bufferMs', crossfade.bufferMs)
-      )
-
-      if (crossfade.bufferMs !== 0) {
-        rules.push(
-          this.intMustNotExceed(
-            'audio.crossfade.minBufferMs',
-            crossfade.minBufferMs,
-            crossfade.bufferMs,
-            'audio.crossfade.bufferMs'
-          )
-        )
-      } else if (crossfade.enabled && crossfade.duration > 0) {
-        rules.push(
-          this.intMustNotExceed(
-            'audio.crossfade.minBufferMs',
-            crossfade.minBufferMs,
-            crossfade.duration,
-            'audio.crossfade.duration'
-          )
         )
       }
     }

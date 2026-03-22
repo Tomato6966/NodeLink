@@ -218,11 +218,6 @@ function getPlayerPatchPayload(body) {
         (!fading || typeof fading !== 'object' || Array.isArray(fading))) {
         return null;
     }
-    const crossfade = payload.crossfade;
-    if (crossfade !== undefined &&
-        (!crossfade || typeof crossfade !== 'object' || Array.isArray(crossfade))) {
-        return null;
-    }
     const voice = payload.voice === undefined ? undefined : getVoicePayload(payload.voice);
     if (payload.voice !== undefined && !voice) {
         return null;
@@ -246,7 +241,6 @@ function getPlayerPatchPayload(body) {
         loudnessNormalizer,
         filters: filtersValue,
         fading,
-        crossfade,
         voice: voice ?? undefined
     };
 }
@@ -298,51 +292,6 @@ function sanitizeFadingConfig(raw) {
     updateSection('seek');
     updateSection('pause');
     updateSection('resume');
-    return safe;
-}
-/**
- * Sanitizes the crossfade configuration to the runtime-supported shape.
- *
- * @param raw - Raw crossfade payload.
- * @returns Safe crossfade configuration object plus the route-only
- * `triggerNow` flag.
- */
-function sanitizeCrossfadeConfig(raw) {
-    const safe = {
-        enabled: false,
-        duration: 0,
-        curve: 'sinusoidal',
-        mode: 'preload',
-        minBufferMs: 250,
-        bufferMs: 0,
-        triggerNow: false
-    };
-    if (!isObjectRecord(raw)) {
-        return safe;
-    }
-    const payload = raw;
-    safe.enabled = payload.enabled === true;
-    const duration = payload.duration;
-    if (typeof duration === 'number' && Number.isFinite(duration)) {
-        safe.duration = Math.max(0, duration);
-    }
-    const curve = payload.curve;
-    if (typeof curve === 'string') {
-        safe.curve = curve;
-    }
-    const mode = payload.mode;
-    if (mode === 'stream' || mode === 'preload') {
-        safe.mode = mode;
-    }
-    const minBufferMs = payload.minBufferMs;
-    if (typeof minBufferMs === 'number' && Number.isFinite(minBufferMs)) {
-        safe.minBufferMs = Math.max(0, minBufferMs);
-    }
-    const bufferMs = payload.bufferMs;
-    if (typeof bufferMs === 'number' && Number.isFinite(bufferMs)) {
-        safe.bufferMs = Math.max(0, bufferMs);
-    }
-    safe.triggerNow = payload.triggerNow === true;
     return safe;
 }
 /**
@@ -543,20 +492,6 @@ async function applyPlayerPatch(runtime, session, guildId, payload, query) {
     }
     if (payload.fading !== undefined) {
         await session.players.setFading(guildId, sanitizeFadingConfig(payload.fading));
-    }
-    if (payload.crossfade !== undefined) {
-        const sanitizedCrossfade = sanitizeCrossfadeConfig(payload.crossfade);
-        await session.players.setCrossfade(guildId, sanitizedCrossfade);
-        if (sanitizedCrossfade.triggerNow) {
-            const player = session.players.get(guildId);
-            if (player?.triggerCrossfade) {
-                const duration = typeof sanitizedCrossfade.duration === 'number' &&
-                    Number.isFinite(sanitizedCrossfade.duration)
-                    ? sanitizedCrossfade.duration
-                    : undefined;
-                await player.triggerCrossfade(duration);
-            }
-        }
     }
     if (payload.loudnessNormalizer !== undefined) {
         await session.players.setLoudnessNormalizer(guildId, payload.loudnessNormalizer);

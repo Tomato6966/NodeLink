@@ -18,7 +18,6 @@ import type {
   NodeLink,
   StreamInfo
 } from '../../typings/playback/player.types.ts'
-import type { FadeCurve } from '../../typings/playback/processing.types.ts'
 import type {
   AACConfig,
   AACDecoderStreamOptions,
@@ -51,7 +50,6 @@ import WebmOpusDemuxer from '../demuxers/WebmOpus.ts'
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from '../opus/Opus.ts'
 import { bufferPool } from '../structs/BufferPool.ts'
 import { RingBuffer } from '../structs/RingBuffer.ts'
-import { CrossfadeController } from './CrossfadeController.ts'
 import { FadeTransformer } from './FadeTransformer.ts'
 import { TapeTransformer } from './TapeTransformer.ts'
 import { ScratchTransformer } from './ScratchTransformer.ts'
@@ -455,124 +453,18 @@ class BaseAudioResource {
   protected _assignStream(stream: Transform): void {
     const voiceStream = stream as unknown as VoiceAudioStream &
       Transform & {
-        prepareCrossfade?: (
-          nextStream: Readable,
-          options: {
-            durationMs: number
-            minBufferMs?: number
-            bufferMs?: number
-          }
-        ) => boolean
-        startCrossfade?: (durationMs: number, curve?: string) => boolean
-        seekToEnergyMatch?: (
-          targetRms: number,
-          crossfadeDurationMs: number,
-          transitionName?: string | null,
-          targetBeatState?: unknown
-        ) => void
-        setIncomingGain?: (multiplier: number) => void
-        setIncomingHighpass?: (enabled: boolean, peakAlpha?: number) => void
-        setIncomingLowpass?: (
-          enabled: boolean,
-          peakAlpha?: number,
-          completionRatio?: number
-        ) => void
-        setIncomingPan?: (enabled: boolean, completionRatio?: number) => void
-        setIncomingEcho?: (
-          enabled: boolean,
-          delayMs?: number,
-          mix?: number,
-          feedback?: number,
-          completionRatio?: number
-        ) => void
-        setOutgoingPan?: (enabled: boolean, completionRatio?: number) => void
-        setFilterBypass?: (bypass: boolean) => void
-        getMainEnergy?: () => { rms: number; peak: number } | null
-        getNextTrackOpeningEnergy?: () => number
-        getEnergySkipMs?: () => number
-        getCrossfadeConsumedNextMs?: () => number
-        isBridgeMode?: () => boolean
-        isFlushed?: () => boolean
-        isBridgeDraining?: () => boolean
-        startShowcaseRecording?: (
-          preMs: number,
-          activeMs: number,
-          postMs: number,
-          name: string
-        ) => void
-        clearCrossfade?: () => void
-        getCrossfadeState?: () => {
-          active: boolean
-          bufferedMs: number
-          targetMs: number
-        }
         checkTapeRampCompleted?: () => boolean
         scratchTo?: (
           durationMs: number,
           style: import('../../typings/playback/processing.types.ts').ScratchStyle
         ) => void
         checkScratchEffectCompleted?: () => boolean
-        extractCrossfadeBuffer?: () => Buffer | null
         getEffectiveRate?: () => number
         getRMS?: () => number
         isSilent?: () => boolean
       }
     voiceStream.setVolume = (volume: number) => this.setVolume(volume)
     voiceStream.setFilters = (filters: FiltersState) => this.setFilters(filters)
-    voiceStream.prepareCrossfade = (
-      nextStream: Readable,
-      options: { durationMs: number; minBufferMs?: number; bufferMs?: number }
-    ) => this.prepareCrossfade(nextStream, options)
-    voiceStream.startCrossfade = (
-      durationMs: number,
-      curve?: string,
-      style?: 'standard' | 'fusion'
-    ) => this.startCrossfade(durationMs, curve, style)
-    voiceStream.seekToEnergyMatch = (
-      targetRms: number,
-      crossfadeDurationMs: number,
-      transitionName?: string | null,
-      targetBeatState?: unknown
-    ) =>
-      this.seekToEnergyMatch(
-        targetRms,
-        crossfadeDurationMs,
-        transitionName,
-        targetBeatState
-      )
-    voiceStream.setIncomingGain = (multiplier: number) =>
-      this.setIncomingGain(multiplier)
-    voiceStream.setIncomingHighpass = (enabled: boolean, peakAlpha?: number) =>
-      this.setIncomingHighpass(enabled, peakAlpha)
-    voiceStream.setIncomingLowpass = (
-      enabled: boolean,
-      peakAlpha?: number,
-      completionRatio?: number
-    ) => this.setIncomingLowpass(enabled, peakAlpha, completionRatio)
-    voiceStream.setIncomingPan = (enabled: boolean, completionRatio?: number) =>
-      this.setIncomingPan(enabled, completionRatio)
-    voiceStream.setIncomingEcho = (
-      enabled: boolean,
-      delayMs?: number,
-      mix?: number,
-      feedback?: number,
-      completionRatio?: number
-    ) => this.setIncomingEcho(enabled, delayMs, mix, feedback, completionRatio)
-    voiceStream.setOutgoingPan = (enabled: boolean, completionRatio?: number) =>
-      this.setOutgoingPan(enabled, completionRatio)
-    voiceStream.setFilterBypass = (bypass: boolean) =>
-      this.setFilterBypass(bypass)
-    voiceStream.getMainEnergy = () => this.getMainEnergy()
-    voiceStream.getNextTrackOpeningEnergy = () =>
-      this.getNextTrackOpeningEnergy()
-    voiceStream.getEnergySkipMs = () => this.getEnergySkipMs()
-    voiceStream.getCrossfadeConsumedNextMs = () =>
-      this.getCrossfadeConsumedNextMs()
-    voiceStream.isBridgeMode = () => this.isBridgeMode()
-    voiceStream.isFlushed = () => this.isFlushed()
-    voiceStream.isBridgeDraining = () => this.isBridgeDraining()
-    voiceStream.clearCrossfade = () => this.clearCrossfade()
-    voiceStream.getCrossfadeState = () => this.getCrossfadeState()
     voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted()
     voiceStream.scratchTo = (
       durationMs: number,
@@ -580,7 +472,6 @@ class BaseAudioResource {
     ) => this.scratchTo(durationMs, style)
     voiceStream.checkScratchEffectCompleted = () =>
       this.checkScratchEffectCompleted()
-    voiceStream.extractCrossfadeBuffer = () => this.extractCrossfadeBuffer()
     voiceStream.getEffectiveRate = () => this.getEffectiveRate()
     voiceStream.getRMS = () => this.getRMS()
     voiceStream.isSilent = () => this.isSilent()
@@ -625,67 +516,6 @@ class BaseAudioResource {
     this._end()
   }
 
-  prepareCrossfade(
-    _nextStream: Readable,
-    _options: { durationMs: number; minBufferMs?: number; bufferMs?: number }
-  ): boolean {
-    return false
-  }
-
-  startCrossfade(
-    _durationMs: number,
-    _curve?: string,
-    _style?: 'standard' | 'fusion'
-  ): boolean {
-    return false
-  }
-
-  seekToEnergyMatch(
-    _targetRms: number,
-    _crossfadeDurationMs: number,
-    _transitionName?: string | null,
-    _targetBeatState?: unknown
-  ): void {}
-
-  setIncomingGain(_multiplier: number): void {}
-
-  setIncomingHighpass(_enabled: boolean, _peakAlpha?: number): void {}
-
-  setIncomingLowpass(
-    _enabled: boolean,
-    _peakAlpha?: number,
-    _completionRatio?: number
-  ): void {}
-
-  setIncomingPan(_enabled: boolean, _completionRatio?: number): void {}
-
-  setIncomingEcho(
-    _enabled: boolean,
-    _delayMs?: number,
-    _mix?: number,
-    _feedback?: number,
-    _completionRatio?: number
-  ): void {}
-
-  setOutgoingPan(_enabled: boolean, _completionRatio?: number): void {}
-
-  setFilterBypass(_bypass: boolean): void {}
-
-  clearCrossfade(): void {}
-
-  getCrossfadeState(): {
-    active: boolean
-    bufferedMs: number
-    targetMs: number
-    isFinished: boolean
-  } {
-    return { active: false, bufferedMs: 0, targetMs: 0, isFinished: false }
-  }
-
-  extractCrossfadeBuffer(): Buffer | null {
-    return null
-  }
-
   getEffectiveRate(): number {
     return 1.0
   }
@@ -708,30 +538,6 @@ class BaseAudioResource {
 
   getMainEnergy(): { rms: number; peak: number } | null {
     return null
-  }
-
-  getNextTrackOpeningEnergy(): number {
-    return 0
-  }
-
-  getEnergySkipMs(): number {
-    return 0
-  }
-
-  getCrossfadeConsumedNextMs(): number {
-    return 0
-  }
-
-  isBridgeMode(): boolean {
-    return false
-  }
-
-  isFlushed(): boolean {
-    return false
-  }
-
-  isBridgeDraining(): boolean {
-    return false
   }
 
   checkTapeRampCompleted(): boolean {
@@ -2391,7 +2197,6 @@ class FLVToAACStream extends Transform {
 
 class StreamAudioResource extends BaseAudioResource {
   private nodelink: NodeLink
-  private crossfadeController: CrossfadeController | null = null
   private frameCounter: PCMFrameCounter | null = null
 
   constructor(
@@ -2636,12 +2441,6 @@ class StreamAudioResource extends BaseAudioResource {
       sampleRate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels
     })
-    const crossfadeController = new CrossfadeController(
-      this.guildId,
-      AUDIO_CONFIG.sampleRate,
-      AUDIO_CONFIG.channels
-    )
-    this.crossfadeController = crossfadeController
 
     const silenceDetector = new SilenceDetector({
       sampleRate: AUDIO_CONFIG.sampleRate,
@@ -2665,28 +2464,17 @@ class StreamAudioResource extends BaseAudioResource {
 
     opusEncoder.setDTX(false)
 
-    crossfadeController.filterProcessor = (chunk: Buffer) =>
-      filters.process(chunk)
-    crossfadeController.filterBypassSetter = (bypass: boolean) => {
-      filters.bypass = bypass
-    }
-    crossfadeController.filterStateResetter = () => {
-      filters.resetState()
-    }
-
     const streams: Transform[] = [
       pcmStream,
       frameCounter,
       silenceDetector,
       filters,
-      crossfadeController,
       flowController
     ]
     this.pipes?.push(
       frameCounter,
       silenceDetector,
       filters,
-      crossfadeController,
       flowController
     )
 
@@ -2722,149 +2510,12 @@ class StreamAudioResource extends BaseAudioResource {
     this._assignStream(opusEncoder)
   }
 
-  override prepareCrossfade(
-    nextStream: Readable,
-    options: { durationMs: number; minBufferMs?: number; bufferMs?: number }
-  ): boolean {
-    if (!this.crossfadeController) return false
-    this.crossfadeController.prepareNextStream(nextStream, options)
-    return true
-  }
-
-  override startCrossfade(
-    durationMs: number,
-    curve?: string,
-    style?: 'standard' | 'fusion'
-  ): boolean {
-    if (!this.crossfadeController) return false
-    return this.crossfadeController.startCrossfade(
-      durationMs,
-      curve as FadeCurve,
-      style
-    )
-  }
-
-  override seekToEnergyMatch(
-    targetRms: number,
-    crossfadeDurationMs: number,
-    transitionName?: string | null,
-    targetBeatState?: unknown
-  ): void {
-    this.crossfadeController?.seekToEnergyMatch(
-      targetRms,
-      crossfadeDurationMs,
-      transitionName,
-      targetBeatState
-    )
-  }
-
-  override setIncomingHighpass(enabled: boolean, peakAlpha?: number): void {
-    this.crossfadeController?.setIncomingHighpass(enabled, peakAlpha)
-  }
-
-  override setIncomingLowpass(
-    enabled: boolean,
-    peakAlpha?: number,
-    completionRatio?: number
-  ): void {
-    this.crossfadeController?.setIncomingLowpass(
-      enabled,
-      peakAlpha,
-      completionRatio
-    )
-  }
-
-  override setFilterBypass(bypass: boolean): void {
-    this.crossfadeController?.setFilterBypass(bypass)
-  }
-
-  override setIncomingPan(enabled: boolean, completionRatio?: number): void {
-    this.crossfadeController?.setIncomingPan(enabled, completionRatio)
-  }
-
-  override setIncomingEcho(
-    enabled: boolean,
-    delayMs?: number,
-    mix?: number,
-    feedback?: number,
-    completionRatio?: number
-  ): void {
-    this.crossfadeController?.setIncomingEcho(
-      enabled,
-      delayMs,
-      mix,
-      feedback,
-      completionRatio
-    )
-  }
-
-  override setOutgoingPan(enabled: boolean, completionRatio?: number): void {
-    this.crossfadeController?.setOutgoingPan(enabled, completionRatio)
-  }
-
-  override getEnergySkipMs(): number {
-    return this.crossfadeController?.getEnergySkipMs() ?? 0
-  }
-
-  override setIncomingGain(multiplier: number): void {
-    this.crossfadeController?.setIncomingGain(multiplier)
-  }
-
-  override isBridgeMode(): boolean {
-    return this.crossfadeController?.isBridgeMode() ?? false
-  }
-
-  override isFlushed(): boolean {
-    return this.crossfadeController?.isFlushed() ?? false
-  }
-
-  override isBridgeDraining(): boolean {
-    return this.crossfadeController?.isBridgeDraining() ?? false
-  }
-
   getConsumedMs(): number {
     return this.frameCounter?.getConsumedMs() ?? 0
   }
 
-  /**
-   * How many ms of Track B audio the CrossfadeController has consumed
-   * from its ring buffer since the last startCrossfade() call.
-   */
-  override getCrossfadeConsumedNextMs(): number {
-    return this.crossfadeController?.getConsumedMs() ?? 0
-  }
-
-  override clearCrossfade(): void {
-    this.crossfadeController?.clear()
-  }
-
-  override extractCrossfadeBuffer(): Buffer | null {
-    if (!this.crossfadeController) return null
-    return this.crossfadeController.extractRemainingBuffer()
-  }
-
-  override getCrossfadeState(): {
-    active: boolean
-    bufferedMs: number
-    targetMs: number
-    isFinished: boolean
-  } {
-    return (
-      this.crossfadeController?.getState() ?? {
-        active: false,
-        bufferedMs: 0,
-        targetMs: 0,
-        isFinished: false
-      }
-    )
-  }
-
   override getMainEnergy(): { rms: number; peak: number } | null {
-    return this.crossfadeController?.getMainEnergy() ?? null
-  }
-
-  override getNextTrackOpeningEnergy(): number {
-    return this.crossfadeController?.getNextTrackOpeningEnergy() ?? 0
+    return null
   }
 
   override getEffectiveRate(): number {

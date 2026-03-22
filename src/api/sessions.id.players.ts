@@ -7,7 +7,6 @@ import type {
 } from '../typings/api/api.types.ts'
 import type { Session } from '../typings/index.types.ts'
 import type {
-  CrossfadeConfig,
   FadingConfig,
   FiltersState,
   PlayerStateJSON,
@@ -102,11 +101,6 @@ interface PlayerPatchPayload {
    * Optional fading configuration payload.
    */
   fading?: ApiRequest['body']
-
-  /**
-   * Optional crossfade configuration payload.
-   */
-  crossfade?: ApiRequest['body']
 
   /**
    * Voice state update payload.
@@ -224,11 +218,6 @@ interface PlayerPatchBodyInput {
   fading?: ApiRequest['body']
 
   /**
-   * Candidate crossfade payload.
-   */
-  crossfade?: ApiRequest['body']
-
-  /**
    * Candidate voice payload.
    */
   voice?: ApiRequest['body']
@@ -272,46 +261,6 @@ interface FadingConfigInput {
   seek?: FadingSectionInput
   pause?: FadingSectionInput
   resume?: FadingSectionInput
-}
-
-/**
- * Raw crossfade payload before validation.
- */
-interface CrossfadeConfigInput {
-  /**
-   * Candidate master enable toggle.
-   */
-  enabled?: boolean
-
-  /**
-   * Candidate crossfade duration.
-   */
-  duration?: number
-
-  /**
-   * Candidate curve name.
-   */
-  curve?: string
-
-  /**
-   * Candidate crossfade mode.
-   */
-  mode?: string
-
-  /**
-   * Candidate preload buffer floor.
-   */
-  minBufferMs?: number
-
-  /**
-   * Candidate active buffer size.
-   */
-  bufferMs?: number
-
-  /**
-   * Candidate immediate trigger flag.
-   */
-  triggerNow?: boolean
 }
 
 /**
@@ -360,19 +309,6 @@ interface SessionPlayerEntry {
 }
 
 /**
- * Local player handle used for manual crossfade triggering.
- */
-interface TriggerablePlayerHandle {
-  /**
-   * Triggers a crossfade immediately.
-   *
-   * @param durationMs - Optional crossfade duration override.
-   * @returns Promise resolving to `true` when the trigger was accepted.
-   */
-  triggerCrossfade?: (durationMs?: number) => Promise<boolean>
-}
-
-/**
  * Runtime player manager contract required by the player route.
  */
 interface PlayersRoutePlayerManager {
@@ -380,14 +316,6 @@ interface PlayersRoutePlayerManager {
    * Registry of players for the current session.
    */
   players: Map<string, SessionPlayerEntry>
-
-  /**
-   * Retrieves a player handle by guild identifier.
-   *
-   * @param guildId - Target guild identifier.
-   * @returns Player handle or `undefined`.
-   */
-  get: (guildId: string) => TriggerablePlayerHandle | undefined
 
   /**
    * Creates or returns the player for a guild.
@@ -506,18 +434,6 @@ interface PlayersRoutePlayerManager {
   ) => Promise<boolean | object>
 
   /**
-   * Applies crossfade configuration.
-   *
-   * @param guildId - Target guild identifier.
-   * @param crossfadeConfig - Sanitized crossfade configuration.
-   * @returns Promise resolving once the command is applied.
-   */
-  setCrossfade: (
-    guildId: string,
-    crossfadeConfig?: CrossfadeConfig
-  ) => Promise<boolean | object>
-
-  /**
    * Toggles loudness normalization.
    *
    * @param guildId - Target guild identifier.
@@ -611,17 +527,6 @@ interface PlayersRoutePathParams {
    * Optional guild identifier.
    */
   guildId?: string
-}
-
-/**
- * Sanitized crossfade configuration including the route-only `triggerNow` flag.
- */
-interface SanitizedCrossfadeConfig extends CrossfadeConfig {
-  /**
-   * Whether the route should trigger the crossfade immediately after applying
-   * the configuration.
-   */
-  triggerNow: boolean
 }
 
 /**
@@ -922,14 +827,6 @@ function getPlayerPatchPayload(
     return null
   }
 
-  const crossfade = payload.crossfade
-  if (
-    crossfade !== undefined &&
-    (!crossfade || typeof crossfade !== 'object' || Array.isArray(crossfade))
-  ) {
-    return null
-  }
-
   const voice =
     payload.voice === undefined ? undefined : getVoicePayload(payload.voice)
   if (payload.voice !== undefined && !voice) {
@@ -957,7 +854,6 @@ function getPlayerPatchPayload(
     loudnessNormalizer,
     filters: filtersValue as FiltersState | undefined,
     fading,
-    crossfade,
     voice: voice ?? undefined
   }
 }
@@ -1025,62 +921,6 @@ function sanitizeFadingConfig(raw: ApiRequest['body']): FadingConfig {
   updateSection('pause')
   updateSection('resume')
 
-  return safe
-}
-
-/**
- * Sanitizes the crossfade configuration to the runtime-supported shape.
- *
- * @param raw - Raw crossfade payload.
- * @returns Safe crossfade configuration object plus the route-only
- * `triggerNow` flag.
- */
-function sanitizeCrossfadeConfig(
-  raw: ApiRequest['body']
-): SanitizedCrossfadeConfig {
-  const safe: SanitizedCrossfadeConfig = {
-    enabled: false,
-    duration: 0,
-    curve: 'sinusoidal',
-    mode: 'preload',
-    minBufferMs: 250,
-    bufferMs: 0,
-    triggerNow: false
-  }
-
-  if (!isObjectRecord(raw)) {
-    return safe
-  }
-
-  const payload = raw as CrossfadeConfigInput
-  safe.enabled = payload.enabled === true
-
-  const duration = payload.duration
-  if (typeof duration === 'number' && Number.isFinite(duration)) {
-    safe.duration = Math.max(0, duration)
-  }
-
-  const curve = payload.curve
-  if (typeof curve === 'string') {
-    safe.curve = curve as CrossfadeConfig['curve']
-  }
-
-  const mode = payload.mode
-  if (mode === 'stream' || mode === 'preload') {
-    safe.mode = mode
-  }
-
-  const minBufferMs = payload.minBufferMs
-  if (typeof minBufferMs === 'number' && Number.isFinite(minBufferMs)) {
-    safe.minBufferMs = Math.max(0, minBufferMs)
-  }
-
-  const bufferMs = payload.bufferMs
-  if (typeof bufferMs === 'number' && Number.isFinite(bufferMs)) {
-    safe.bufferMs = Math.max(0, bufferMs)
-  }
-
-  safe.triggerNow = payload.triggerNow === true
   return safe
 }
 
@@ -1368,23 +1208,6 @@ async function applyPlayerPatch(
       guildId,
       sanitizeFadingConfig(payload.fading)
     )
-  }
-
-  if (payload.crossfade !== undefined) {
-    const sanitizedCrossfade = sanitizeCrossfadeConfig(payload.crossfade)
-    await session.players.setCrossfade(guildId, sanitizedCrossfade)
-
-    if (sanitizedCrossfade.triggerNow) {
-      const player = session.players.get(guildId)
-      if (player?.triggerCrossfade) {
-        const duration =
-          typeof sanitizedCrossfade.duration === 'number' &&
-          Number.isFinite(sanitizedCrossfade.duration)
-            ? sanitizedCrossfade.duration
-            : undefined
-        await player.triggerCrossfade(duration)
-      }
-    }
   }
 
   if (payload.loudnessNormalizer !== undefined) {

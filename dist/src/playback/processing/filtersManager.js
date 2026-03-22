@@ -56,7 +56,7 @@ export class FiltersManager extends Transform {
     filterInstances;
     /**
      * When true, _transform passes chunks through without processing.
-     * Used by CrossfadeController to avoid double-processing: the upstream
+     * Used by transition handling to avoid double-processing: the upstream
      * _transform would advance stateful filter buffers (echo delay lines,
      * reverb decay) with Track A data while filterProcessor separately
      * processes Track B — causing cross-contamination and 2x state advance.
@@ -180,7 +180,7 @@ export class FiltersManager extends Transform {
      * Unlike the previous implementation, this does NOT re-apply
      * _lastRawFilters.  Re-applying was causing zombie filter instances:
      * the old automix filters (lowpass, echo, reverb, etc.) got re-created
-     * with fresh transition timers.  When _completeCrossfade later called
+     * with fresh transition timers.  When transition completion later called
      * update({}), these zombies survived via isActive()===true (animation
      * still pending), leaking 4+ seconds of dying filters onto Track C
      * (the "filtro retardatário" bug).
@@ -190,7 +190,7 @@ export class FiltersManager extends Transform {
      * player sets new filters.  Extension filters (from plugins) are
      * preserved but flushed.
      *
-     * Called by CrossfadeController when the blend finishes (bypass goes
+     * Called when blend handling finishes (bypass goes
      * ON immediately before this, so no audio flows through filters).
      */
     resetState() {

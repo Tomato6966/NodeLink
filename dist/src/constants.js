@@ -152,7 +152,7 @@ export const HLS_SEGMENT_DOWNLOAD_CONCURRENCY_LIMIT = 5;
  * - **Track Events**: TRACK_START, TRACK_END, TRACK_STUCK, TRACK_EXCEPTION
  * - **Player State Events**: PLAYER_UPDATE, PAUSE, SEEK, VOLUME_CHANGED, FILTERS_CHANGED
  * - **Player Lifecycle Events**: PLAYER_CREATED, PLAYER_DESTROYED
- * - **Mix Events**: MIX_STARTED, MIX_ENDED (for track mixing/crossfading)
+ * - **Mix Events**: MIX_STARTED, MIX_ENDED (for track mixing)
  * - **Special Events**: ETERNALBOX_INFO, ETERNALBOX_JUMP (for continuous playback)
  * - **Stream Events**: STREAM_METADATA (for live stream metadata updates)
  *
@@ -199,9 +199,9 @@ export const GatewayEvents = {
     PLAYER_RECONNECTING: 'PlayerReconnectingEvent',
     /** Player successfully connected to voice */
     PLAYER_CONNECTED: 'PlayerConnectedEvent',
-    /** Track mixing started (crossfade begin) */
+    /** Track mixing started */
     MIX_STARTED: 'MixStartedEvent',
-    /** Track mixing ended (crossfade complete) */
+    /** Track mixing ended */
     MIX_ENDED: 'MixEndedEvent',
     /** EternalBox continuous playback info update */
     ETERNALBOX_INFO: 'EternalBoxInfoEvent',
@@ -225,7 +225,6 @@ export const GatewayEvents = {
  * - `REPLACED`: Track was replaced by another track (should not auto-advance)
  * - `CLEANUP`: Track ended due to cleanup/destroy operation (internal)
  * - `GAPLESS`: Track ended for gapless transition (seamless playback)
- * - `CROSSFADE`: Track ended because crossfade overlap started
  *
  * @example
  * ```ts
@@ -253,9 +252,7 @@ export const EndReasons = {
     /** Track ended due to cleanup or player destruction */
     CLEANUP: 'cleanup',
     /** Track ended for gapless transition to next track */
-    GAPLESS: 'gapless',
-    /** Track ended because crossfade overlap started */
-    CROSSFADE: 'crossfading'
+    GAPLESS: 'gapless'
 };
 /**
  * Supported audio format identifiers for stream processing

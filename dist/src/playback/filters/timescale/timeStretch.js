@@ -194,7 +194,7 @@ export default class TimeStretch {
         return segment;
     }
     /**
-     * Mixes the new segment with the previous overlap using a linear crossfade.
+     * Mixes the new segment with the previous overlap using a linear blend.
      * @param segment - The new audio segment.
      */
     _mixSegment(segment) {

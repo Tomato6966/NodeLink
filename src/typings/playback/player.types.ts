@@ -1,11 +1,9 @@
-import type { Readable } from 'node:stream'
 import type { VoiceAudioStream, VoiceConnection } from '@performanc/voice'
 import type { TrackData } from '../index.types.ts'
 import type {
   TrackStreamResult,
   TrackUrlResult
 } from '../sources/source.types.ts'
-import type { FadeCurve } from './processing.types.ts'
 
 /**
  * Runtime filter settings applied to an audio stream.
@@ -36,64 +34,6 @@ export interface FadingConfig {
   seek?: FadingSection
   pause?: FadingSection
   resume?: FadingSection
-}
-
-/**
- * Supported crossfade modes.
- */
-export type CrossfadeMode = 'preload' | 'stream'
-
-/**
- * Crossfade configuration for overlapping tracks.
- *
- * @example
- * ```ts
- * const crossfade: CrossfadeConfig = {
- *   enabled: true,
- *   duration: 5000,
- *   curve: 'sinusoidal',
- *   mode: 'preload',
- *   minBufferMs: 250
- * }
- * ```
- */
-export interface CrossfadeConfig {
-  /**
-   * Enables the overlap mechanism between tracks.
-   */
-  enabled?: boolean
-
-  /**
-   * Default duration for the overlap (ms).
-   */
-  duration?: number
-
-  /**
-   * Blending style for crossfade.
-   * - `standard`: Simple volume crossfade.
-   * - `fusion`: Advanced spectral/bass-aware blending.
-   */
-  style?: 'standard' | 'fusion'
-
-  /**
-   * Fading curve to use during standard crossfade.
-   */
-  curve?: FadeCurve
-
-  /**
-   * Overlap trigger mode.
-   */
-  mode?: CrossfadeMode
-
-  /**
-   * Minimum buffered audio (ms) required.
-   */
-  minBufferMs?: number
-
-  /**
-   * Maximum buffer window for the next track (ms).
-   */
-  bufferMs?: number
 }
 
 /**
@@ -193,45 +133,9 @@ export interface AudioResource {
   ): void
   checkScratchEffectCompleted?(): boolean
   /**
-   * Buffers the next PCM stream for crossfading.
-   */
-  prepareCrossfade?: (
-    stream: Readable,
-    options: { durationMs: number; minBufferMs?: number; bufferMs?: number }
-  ) => boolean
-  /**
-   * Starts crossfading with the buffered PCM stream.
-   */
-  startCrossfade?: (
-    durationMs: number,
-    curve?: string,
-    style?: 'standard' | 'fusion'
-  ) => boolean
-  /**
-   * Applies a gain multiplier only to incoming Track B during crossfade.
-   */
-  setIncomingGain?: (multiplier: number) => void
-  /**
-   * Clears any buffered crossfade data.
-   */
-  clearCrossfade?: () => void
-  /**
-   * Reports buffered crossfade state.
-   */
-  getCrossfadeState?: () => {
-    active: boolean
-    bufferedMs: number
-    targetMs: number
-    isFinished: boolean
-  }
-  /**
    * Reports the current effective playback rate (combining all filters and effects).
    */
   getEffectiveRate?: () => number
-  /**
-   * Extracts left-over crossfade buffer data.
-   */
-  extractCrossfadeBuffer?: () => Buffer | null
   /**
    * Returns the current RMS level of the audio stream.
    */
@@ -248,43 +152,8 @@ export interface TrackEnergy {
   rms: number
 }
 
-export interface ExtendedCrossfadeController {
-  onBridgeDrained?: (() => void) | null
-  onBridgeStarving?: (() => void) | null
-  setPumpPaused?: (paused: boolean) => void
-}
-
 export interface ExtendedAudioStream extends AudioResource {
-  isBridgeDraining?: () => boolean
-  isBridgeMode?: () => boolean
-  isFlushed?: () => boolean
-  crossfadeController?: ExtendedCrossfadeController | null
   getMainEnergy?: () => TrackEnergy | null
-  getNextTrackOpeningEnergy?: () => number
-  setFilterBypass?: (enabled: boolean) => void
-  setIncomingHighpass?: (enabled: boolean, alpha?: number) => void
-  setIncomingLowpass?: (
-    enabled: boolean,
-    alpha?: number,
-    completionRatio?: number
-  ) => void
-  setIncomingPan?: (enabled: boolean, completionRatio?: number) => void
-  setIncomingEcho?: (
-    enabled: boolean,
-    delay: number,
-    mix: number,
-    feedback: number,
-    completionRatio?: number
-  ) => void
-  setOutgoingPan?: (enabled: boolean, completionRatio?: number) => void
-  seekToEnergyMatch?: (
-    rms: number,
-    durationMs: number,
-    transition?: string | null,
-    targetBeatState?: unknown
-  ) => void
-  getEnergySkipMs?: () => number
-  getCrossfadeConsumedNextMs?: () => number
 }
 
 export interface FilterTransitionsConfig {
@@ -398,7 +267,6 @@ export interface NodeLinkOptions {
     resamplingQuality?: string
     lookaheadMs?: number
     gateThresholdLUFS?: number
-    crossfade?: CrossfadeConfig
     filterTransitions?: FilterTransitionsConfig
   }
   mix?: {
@@ -539,7 +407,6 @@ export interface PlayerStateJSON {
   track: PlayerTrack | null
   volume: number
   fading?: FadingConfig | undefined
-  crossfade?: CrossfadeConfig | undefined
   loudnessNormalizer: boolean
   paused: boolean
   filters: FiltersState

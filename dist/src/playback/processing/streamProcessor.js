@@ -10,7 +10,6 @@ import WebmOpusDemuxer from "../demuxers/WebmOpus.js";
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from "../opus/Opus.js";
 import { bufferPool } from "../structs/BufferPool.js";
 import { RingBuffer } from "../structs/RingBuffer.js";
-import { CrossfadeController } from "./CrossfadeController.js";
 import { FadeTransformer } from "./FadeTransformer.js";
 import { TapeTransformer } from "./TapeTransformer.js";
 import { ScratchTransformer } from "./ScratchTransformer.js";
@@ -310,29 +309,9 @@ class BaseAudioResource {
         const voiceStream = stream;
         voiceStream.setVolume = (volume) => this.setVolume(volume);
         voiceStream.setFilters = (filters) => this.setFilters(filters);
-        voiceStream.prepareCrossfade = (nextStream, options) => this.prepareCrossfade(nextStream, options);
-        voiceStream.startCrossfade = (durationMs, curve, style) => this.startCrossfade(durationMs, curve, style);
-        voiceStream.seekToEnergyMatch = (targetRms, crossfadeDurationMs, transitionName, targetBeatState) => this.seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, targetBeatState);
-        voiceStream.setIncomingGain = (multiplier) => this.setIncomingGain(multiplier);
-        voiceStream.setIncomingHighpass = (enabled, peakAlpha) => this.setIncomingHighpass(enabled, peakAlpha);
-        voiceStream.setIncomingLowpass = (enabled, peakAlpha, completionRatio) => this.setIncomingLowpass(enabled, peakAlpha, completionRatio);
-        voiceStream.setIncomingPan = (enabled, completionRatio) => this.setIncomingPan(enabled, completionRatio);
-        voiceStream.setIncomingEcho = (enabled, delayMs, mix, feedback, completionRatio) => this.setIncomingEcho(enabled, delayMs, mix, feedback, completionRatio);
-        voiceStream.setOutgoingPan = (enabled, completionRatio) => this.setOutgoingPan(enabled, completionRatio);
-        voiceStream.setFilterBypass = (bypass) => this.setFilterBypass(bypass);
-        voiceStream.getMainEnergy = () => this.getMainEnergy();
-        voiceStream.getNextTrackOpeningEnergy = () => this.getNextTrackOpeningEnergy();
-        voiceStream.getEnergySkipMs = () => this.getEnergySkipMs();
-        voiceStream.getCrossfadeConsumedNextMs = () => this.getCrossfadeConsumedNextMs();
-        voiceStream.isBridgeMode = () => this.isBridgeMode();
-        voiceStream.isFlushed = () => this.isFlushed();
-        voiceStream.isBridgeDraining = () => this.isBridgeDraining();
-        voiceStream.clearCrossfade = () => this.clearCrossfade();
-        voiceStream.getCrossfadeState = () => this.getCrossfadeState();
         voiceStream.checkTapeRampCompleted = () => this.checkTapeRampCompleted();
         voiceStream.scratchTo = (durationMs, style) => this.scratchTo(durationMs, style);
         voiceStream.checkScratchEffectCompleted = () => this.checkScratchEffectCompleted();
-        voiceStream.extractCrossfadeBuffer = () => this.extractCrossfadeBuffer();
         voiceStream.getEffectiveRate = () => this.getEffectiveRate();
         voiceStream.getRMS = () => this.getRMS();
         voiceStream.isSilent = () => this.isSilent();
@@ -362,27 +341,6 @@ class BaseAudioResource {
     destroy() {
         this._end();
     }
-    prepareCrossfade(_nextStream, _options) {
-        return false;
-    }
-    startCrossfade(_durationMs, _curve, _style) {
-        return false;
-    }
-    seekToEnergyMatch(_targetRms, _crossfadeDurationMs, _transitionName, _targetBeatState) { }
-    setIncomingGain(_multiplier) { }
-    setIncomingHighpass(_enabled, _peakAlpha) { }
-    setIncomingLowpass(_enabled, _peakAlpha, _completionRatio) { }
-    setIncomingPan(_enabled, _completionRatio) { }
-    setIncomingEcho(_enabled, _delayMs, _mix, _feedback, _completionRatio) { }
-    setOutgoingPan(_enabled, _completionRatio) { }
-    setFilterBypass(_bypass) { }
-    clearCrossfade() { }
-    getCrossfadeState() {
-        return { active: false, bufferedMs: 0, targetMs: 0, isFinished: false };
-    }
-    extractCrossfadeBuffer() {
-        return null;
-    }
     getEffectiveRate() {
         return 1.0;
     }
@@ -400,24 +358,6 @@ class BaseAudioResource {
     }
     getMainEnergy() {
         return null;
-    }
-    getNextTrackOpeningEnergy() {
-        return 0;
-    }
-    getEnergySkipMs() {
-        return 0;
-    }
-    getCrossfadeConsumedNextMs() {
-        return 0;
-    }
-    isBridgeMode() {
-        return false;
-    }
-    isFlushed() {
-        return false;
-    }
-    isBridgeDraining() {
-        return false;
     }
     checkTapeRampCompleted() {
         return false;
@@ -1795,7 +1735,6 @@ class FLVToAACStream extends Transform {
 }
 class StreamAudioResource extends BaseAudioResource {
     nodelink;
-    crossfadeController = null;
     frameCounter = null;
     constructor(guildId, stream, type, nodelink, initialFilters = {}, volume = 1.0, audioMixer = null, returnPCM = false, enableAGC = true) {
         super(guildId);
@@ -1952,8 +1891,6 @@ class StreamAudioResource extends BaseAudioResource {
             sampleRate: AUDIO_CONFIG.sampleRate,
             channels: AUDIO_CONFIG.channels
         });
-        const crossfadeController = new CrossfadeController(this.guildId, AUDIO_CONFIG.sampleRate, AUDIO_CONFIG.channels);
-        this.crossfadeController = crossfadeController;
         const silenceDetector = new SilenceDetector({
             sampleRate: AUDIO_CONFIG.sampleRate,
             channels: AUDIO_CONFIG.channels,
@@ -1965,22 +1902,14 @@ class StreamAudioResource extends BaseAudioResource {
             channels: AUDIO_CONFIG.channels
         });
         opusEncoder.setDTX(false);
-        crossfadeController.filterProcessor = (chunk) => filters.process(chunk);
-        crossfadeController.filterBypassSetter = (bypass) => {
-            filters.bypass = bypass;
-        };
-        crossfadeController.filterStateResetter = () => {
-            filters.resetState();
-        };
         const streams = [
             pcmStream,
             frameCounter,
             silenceDetector,
             filters,
-            crossfadeController,
             flowController
         ];
-        this.pipes?.push(frameCounter, silenceDetector, filters, crossfadeController, flowController);
+        this.pipes?.push(frameCounter, silenceDetector, filters, flowController);
         if (nodelink.extensions?.audioInterceptors) {
             for (const interceptorFactory of nodelink.extensions // biome-ignore lint/suspicious/noExplicitAny: dynamic extension types
                 .audioInterceptors) {
@@ -2009,84 +1938,11 @@ class StreamAudioResource extends BaseAudioResource {
         });
         this._assignStream(opusEncoder);
     }
-    prepareCrossfade(nextStream, options) {
-        if (!this.crossfadeController)
-            return false;
-        this.crossfadeController.prepareNextStream(nextStream, options);
-        return true;
-    }
-    startCrossfade(durationMs, curve, style) {
-        if (!this.crossfadeController)
-            return false;
-        return this.crossfadeController.startCrossfade(durationMs, curve, style);
-    }
-    seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, targetBeatState) {
-        this.crossfadeController?.seekToEnergyMatch(targetRms, crossfadeDurationMs, transitionName, targetBeatState);
-    }
-    setIncomingHighpass(enabled, peakAlpha) {
-        this.crossfadeController?.setIncomingHighpass(enabled, peakAlpha);
-    }
-    setIncomingLowpass(enabled, peakAlpha, completionRatio) {
-        this.crossfadeController?.setIncomingLowpass(enabled, peakAlpha, completionRatio);
-    }
-    setFilterBypass(bypass) {
-        this.crossfadeController?.setFilterBypass(bypass);
-    }
-    setIncomingPan(enabled, completionRatio) {
-        this.crossfadeController?.setIncomingPan(enabled, completionRatio);
-    }
-    setIncomingEcho(enabled, delayMs, mix, feedback, completionRatio) {
-        this.crossfadeController?.setIncomingEcho(enabled, delayMs, mix, feedback, completionRatio);
-    }
-    setOutgoingPan(enabled, completionRatio) {
-        this.crossfadeController?.setOutgoingPan(enabled, completionRatio);
-    }
-    getEnergySkipMs() {
-        return this.crossfadeController?.getEnergySkipMs() ?? 0;
-    }
-    setIncomingGain(multiplier) {
-        this.crossfadeController?.setIncomingGain(multiplier);
-    }
-    isBridgeMode() {
-        return this.crossfadeController?.isBridgeMode() ?? false;
-    }
-    isFlushed() {
-        return this.crossfadeController?.isFlushed() ?? false;
-    }
-    isBridgeDraining() {
-        return this.crossfadeController?.isBridgeDraining() ?? false;
-    }
     getConsumedMs() {
         return this.frameCounter?.getConsumedMs() ?? 0;
     }
-    /**
-     * How many ms of Track B audio the CrossfadeController has consumed
-     * from its ring buffer since the last startCrossfade() call.
-     */
-    getCrossfadeConsumedNextMs() {
-        return this.crossfadeController?.getConsumedMs() ?? 0;
-    }
-    clearCrossfade() {
-        this.crossfadeController?.clear();
-    }
-    extractCrossfadeBuffer() {
-        if (!this.crossfadeController)
-            return null;
-        return this.crossfadeController.extractRemainingBuffer();
-    }
-    getCrossfadeState() {
-        return (this.crossfadeController?.getState() ?? {
-            active: false,
-            bufferedMs: 0,
-            targetMs: 0,
-            isFinished: false
-        });
-    }
     getMainEnergy() {
-        return this.crossfadeController?.getMainEnergy() ?? null;
-    }
-    getNextTrackOpeningEnergy() {
-        return this.crossfadeController?.getNextTrackOpeningEnergy() ?? 0;
+        return null;
     }
     getEffectiveRate() {
         const filters = this.pipes?.find((p) => p instanceof FiltersManager);
