@@ -26,6 +26,15 @@ export default class CipherManager {
         }, 12 * 60 * 60 * 1000);
         this.stsCacheInterval.unref();
     }
+    _getYouTubeSource() {
+        return this.nodelink?.sources?.getSource?.('youtube');
+    }
+    _pickProxy(rotate = true) {
+        return this._getYouTubeSource()?.getProxy?.(rotate);
+    }
+    _reportProxyStatus(proxy, success, status, latency = 0) {
+        this._getYouTubeSource()?.reportProxyStatus?.(proxy, success, status, latency);
+    }
     cleanup() {
         if (this.stsCacheInterval) {
             clearInterval(this.stsCacheInterval);
@@ -89,7 +98,18 @@ export default class CipherManager {
             return cachedSts;
         }
         if (!this.config.url) {
-            const { body: scriptContent, error, statusCode } = await makeRequest(playerUrl, { method: 'GET' });
+            const proxy = this._pickProxy(true);
+            const startTime = Date.now();
+            let response;
+            try {
+                response = await makeRequest(playerUrl, { method: 'GET', proxy });
+            }
+            catch (err) {
+                this._reportProxyStatus(proxy, false, 500, Date.now() - startTime);
+                throw err;
+            }
+            const { body: scriptContent, error, statusCode } = response;
+            this._reportProxyStatus(proxy, !error && statusCode === 200, statusCode, Date.now() - startTime);
             if (error || statusCode !== 200) {
                 logger('error', 'YouTube-Cipher', `Failed to fetch player script for timestamp: ${error?.message || `Status ${statusCode}`}`);
                 throw new Error(`Failed to fetch player script for timestamp: ${error?.message || `Status ${statusCode}`}`);
@@ -116,13 +136,24 @@ export default class CipherManager {
             headers.Authorization = this.config.token;
         }
         logger('debug', 'YouTube-Cipher', `Fetching STS via /get_sts: ${playerUrl}`);
-        const { body, error, statusCode } = await makeRequest(`${this.config.url}/get_sts`, {
-            method: 'POST',
-            headers,
-            body: requestBody,
-            disableBodyCompression: true,
-            proxy: this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()
-        });
+        const proxy = this._pickProxy(true);
+        const startTime = Date.now();
+        let stsResponse;
+        try {
+            stsResponse = await makeRequest(`${this.config.url}/get_sts`, {
+                method: 'POST',
+                headers,
+                body: requestBody,
+                disableBodyCompression: true,
+                proxy
+            });
+        }
+        catch (err) {
+            this._reportProxyStatus(proxy, false, 500, Date.now() - startTime);
+            throw err;
+        }
+        const { body, error, statusCode } = stsResponse;
+        this._reportProxyStatus(proxy, !error && statusCode === 200, statusCode, Date.now() - startTime);
         if (error || statusCode !== 200) {
             throw new Error(`Failed to get STS: ${error?.message || body?.message || 'Invalid response'}`);
         }
@@ -145,7 +176,15 @@ export default class CipherManager {
             if (this.config.token) {
                 headers.Authorization = this.config.token;
             }
-            const { statusCode, error } = await http1makeRequest(`${this.config.url}/`, { method: 'GET', timeout: 5000, headers });
+            const proxy = this._pickProxy(true);
+            const startTime = Date.now();
+            const { statusCode, error } = await http1makeRequest(`${this.config.url}/`, {
+                method: 'GET',
+                timeout: 5000,
+                headers,
+                proxy
+            });
+            this._reportProxyStatus(proxy, !error && statusCode === 200, statusCode, Date.now() - startTime);
             if (error || statusCode !== 200) {
                 logger('warn', 'YouTube-Cipher', `Cipher server at ${this.config.url} is offline or unreachable. Status: ${statusCode || 'N/A'}`);
                 return false;
@@ -154,6 +193,7 @@ export default class CipherManager {
             return true;
         }
         catch (_e) {
+            this._reportProxyStatus(undefined, false, 500, 0);
             logger('warn', 'YouTube-Cipher', `Cipher server at ${this.config.url} is offline or unreachable.`);
             return false;
         }
@@ -182,13 +222,24 @@ export default class CipherManager {
         }
         logger('debug', 'YouTube-Cipher', `Resolving URL via /resolve_url: ${streamUrl}`);
         logger('debug', 'YouTube-Cipher', `Sending to cipher service: ${JSON.stringify(requestBody, null, 2)}`);
-        const { body, error, statusCode } = await makeRequest(`${this.config.url}/resolve_url`, {
-            method: 'POST',
-            headers,
-            body: requestBody,
-            disableBodyCompression: true,
-            proxy: this.nodelink?.sources?.getSource?.('youtube')?.getProxy?.()
-        });
+        const proxy = this._pickProxy(true);
+        const startTime = Date.now();
+        let resolveResponse;
+        try {
+            resolveResponse = await makeRequest(`${this.config.url}/resolve_url`, {
+                method: 'POST',
+                headers,
+                body: requestBody,
+                disableBodyCompression: true,
+                proxy
+            });
+        }
+        catch (err) {
+            this._reportProxyStatus(proxy, false, 500, Date.now() - startTime);
+            throw err;
+        }
+        const { body, error, statusCode } = resolveResponse;
+        this._reportProxyStatus(proxy, !error && statusCode === 200, statusCode, Date.now() - startTime);
         logger('debug', 'YouTube-Cipher', `Received from cipher service (Status: ${statusCode}): ${JSON.stringify(body, null, 2)}`);
         if (error || statusCode !== 200) {
             throw new Error(`Failed to resolve URL: ${error?.message || body?.message || 'Invalid response'}`);
@@ -201,12 +252,24 @@ export default class CipherManager {
     }
     async _fetchPlayerScriptFromWatchPage(videoId) {
         const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-        const { body: watchPage, error, statusCode } = await makeRequest(watchUrl, {
-            method: 'GET',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
-            }
-        });
+        const proxy = this._pickProxy(true);
+        const startTime = Date.now();
+        let response;
+        try {
+            response = await makeRequest(watchUrl, {
+                method: 'GET',
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+                },
+                proxy
+            });
+        }
+        catch (err) {
+            this._reportProxyStatus(proxy, false, 500, Date.now() - startTime);
+            throw err;
+        }
+        const { body: watchPage, error, statusCode } = response;
+        this._reportProxyStatus(proxy, !error && statusCode === 200, statusCode, Date.now() - startTime);
         if (error || statusCode !== 200) {
             throw new Error(`Failed to fetch watch page for player script: ${error?.message || statusCode}`);
         }
