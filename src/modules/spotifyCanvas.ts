@@ -1,12 +1,29 @@
-function readVarint(buffer, offset) {
+import type {
+  SpotifyCanvasArtist,
+  SpotifyCanvasDecodedResponse,
+  SpotifyCanvasEntry,
+  SpotifyCanvasFetchResult,
+  SpotifyCanvasVarintResult
+} from '../typings/modules/spotifyCanvas.types.ts'
+
+/**
+ * Reads a protobuf varint from the provided buffer.
+ * @param buffer - Input binary payload.
+ * @param offset - Start offset.
+ * @returns Decoded varint value and next cursor offset.
+ * @throws Error when offset is outside buffer bounds.
+ * @internal
+ */
+function readVarint(buffer: Buffer, offset: number): SpotifyCanvasVarintResult {
   let val = 0
   let shift = 0
-  let byte
+  let byte = 0
   let current = offset
 
   do {
     if (current >= buffer.length) throw new Error('Varint out of bounds')
-    byte = buffer[current++]
+    byte = buffer[current] ?? 0
+    current += 1
     val |= (byte & 127) << shift
     shift += 7
   } while (byte & 128)
@@ -14,7 +31,16 @@ function readVarint(buffer, offset) {
   return { val, next: current }
 }
 
-function skipField(buffer, offset, wireType) {
+/**
+ * Skips a protobuf field by wire type.
+ * @param buffer - Input binary payload.
+ * @param offset - Field offset.
+ * @param wireType - Protobuf wire type.
+ * @returns Next cursor offset after skipping the field.
+ * @throws Error when wire type is unsupported.
+ * @internal
+ */
+function skipField(buffer: Buffer, offset: number, wireType: number): number {
   if (wireType === 0) return readVarint(buffer, offset).next
   if (wireType === 1) return offset + 8
   if (wireType === 2) {
@@ -25,23 +51,37 @@ function skipField(buffer, offset, wireType) {
   throw new Error(`Unsupported wire type: ${wireType}`)
 }
 
-function decodeArtist(buffer) {
+/**
+ * Decodes an embedded artist protobuf message.
+ * @param buffer - Artist message payload.
+ * @returns Parsed artist metadata.
+ * @internal
+ */
+function decodeArtist(buffer: Buffer): SpotifyCanvasArtist {
   let offset = 0
-  const artist = { artistUri: '', artistName: '', artistImgUrl: '' }
+  const artist: SpotifyCanvasArtist = {
+    artistUri: '',
+    artistName: '',
+    artistImgUrl: ''
+  }
+
   while (offset < buffer.length) {
     try {
       const key = readVarint(buffer, offset)
       offset = key.next
       const wireType = key.val & 7
       const fieldNumber = key.val >>> 3
+
       if (wireType !== 2) {
         offset = skipField(buffer, offset, wireType)
         continue
       }
+
       const len = readVarint(buffer, offset)
       offset = len.next
       const valBuf = buffer.subarray(offset, offset + len.val)
       offset += len.val
+
       switch (fieldNumber) {
         case 1:
           artist.artistUri = valBuf.toString('utf8')
@@ -57,32 +97,47 @@ function decodeArtist(buffer) {
       break
     }
   }
+
   return artist
 }
 
-function decodeCanvas(buffer) {
+/**
+ * Decodes a single canvas protobuf message.
+ * @param buffer - Canvas message payload.
+ * @returns Parsed canvas entry.
+ * @internal
+ */
+function decodeCanvas(buffer: Buffer): SpotifyCanvasEntry {
   let offset = 0
-  const canvas = {
+  const canvas: SpotifyCanvasEntry = {
     id: '',
     canvasUrl: '',
     trackUri: '',
-    artist: {},
+    artist: {
+      artistUri: '',
+      artistName: '',
+      artistImgUrl: ''
+    },
     canvasUri: ''
   }
+
   while (offset < buffer.length) {
     try {
       const key = readVarint(buffer, offset)
       offset = key.next
       const wireType = key.val & 7
       const fieldNumber = key.val >>> 3
+
       if (wireType !== 2) {
         offset = skipField(buffer, offset, wireType)
         continue
       }
+
       const len = readVarint(buffer, offset)
       offset = len.next
       const valBuf = buffer.subarray(offset, offset + len.val)
       offset += len.val
+
       switch (fieldNumber) {
         case 1:
           canvas.id = valBuf.toString('utf8')
@@ -104,18 +159,27 @@ function decodeCanvas(buffer) {
       break
     }
   }
+
   return canvas
 }
 
-function decodeCanvasResponse(buffer) {
+/**
+ * Decodes the canvaz service response payload.
+ * @param buffer - Full protobuf response payload.
+ * @returns Decoded canvas list object.
+ * @internal
+ */
+function decodeCanvasResponse(buffer: Buffer): SpotifyCanvasDecodedResponse {
   let offset = 0
-  const canvases = []
+  const canvases: SpotifyCanvasEntry[] = []
+
   while (offset < buffer.length) {
     try {
       const key = readVarint(buffer, offset)
       offset = key.next
       const wireType = key.val & 7
       const fieldNumber = key.val >>> 3
+
       if (fieldNumber === 1 && wireType === 2) {
         const len = readVarint(buffer, offset)
         offset = len.next
@@ -129,34 +193,36 @@ function decodeCanvasResponse(buffer) {
       break
     }
   }
+
   return { canvasesList: canvases }
 }
 
-export async function fetchCanvas(trackUri, token) {
+/**
+ * Fetches Spotify canvas metadata for a track URI.
+ * @param trackUri - Spotify track URI (`spotify:track:...`).
+ * @param token - Spotify bearer token.
+ * @returns Decoded canvas payload or null when unavailable.
+ * @public
+ */
+export async function fetchCanvas(
+  trackUri: string,
+  token: string
+): Promise<SpotifyCanvasFetchResult | null> {
   try {
     const trackUriBuf = Buffer.from(trackUri)
-    const trackBuf = Buffer.concat([
-      Buffer.from([0x0a, trackUriBuf.length]),
-      trackUriBuf
-    ])
-    const requestBuf = Buffer.concat([
-      Buffer.from([0x0a, trackBuf.length]),
-      trackBuf
-    ])
+    const trackBuf = Buffer.concat([Buffer.from([0x0a, trackUriBuf.length]), trackUriBuf])
+    const requestBuf = Buffer.concat([Buffer.from([0x0a, trackBuf.length]), trackBuf])
 
-    const res = await fetch(
-      'https://spclient.wg.spotify.com/canvaz-cache/v0/canvases',
-      {
-        method: 'POST',
-        body: requestBuf,
-        headers: {
-          Accept: 'application/protobuf',
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': 'Spotify/9.0.34.593 iOS/18.4 (iPhone15,3)',
-          Authorization: `Bearer ${token}`
-        }
+    const res = await fetch('https://spclient.wg.spotify.com/canvaz-cache/v0/canvases', {
+      method: 'POST',
+      body: requestBuf,
+      headers: {
+        Accept: 'application/protobuf',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'Spotify/9.0.34.593 iOS/18.4 (iPhone15,3)',
+        Authorization: `Bearer ${token}`
       }
-    )
+    })
 
     if (!res.ok) return null
 

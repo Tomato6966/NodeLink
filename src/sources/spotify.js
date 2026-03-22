@@ -4,7 +4,7 @@ import {
   http1makeRequest,
   logger
 } from '../utils.ts'
-import { fetchCanvas } from '../modules/spotifyCanvas.js'
+import { fetchCanvas } from '../modules/spotifyCanvas.ts'
 import { getLocalToken } from '../modules/spotifyAuth.ts'
 
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1'

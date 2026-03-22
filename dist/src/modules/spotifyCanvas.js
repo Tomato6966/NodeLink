@@ -1,17 +1,35 @@
+/**
+ * Reads a protobuf varint from the provided buffer.
+ * @param buffer - Input binary payload.
+ * @param offset - Start offset.
+ * @returns Decoded varint value and next cursor offset.
+ * @throws Error when offset is outside buffer bounds.
+ * @internal
+ */
 function readVarint(buffer, offset) {
     let val = 0;
     let shift = 0;
-    let byte;
+    let byte = 0;
     let current = offset;
     do {
         if (current >= buffer.length)
             throw new Error('Varint out of bounds');
-        byte = buffer[current++];
+        byte = buffer[current] ?? 0;
+        current += 1;
         val |= (byte & 127) << shift;
         shift += 7;
     } while (byte & 128);
     return { val, next: current };
 }
+/**
+ * Skips a protobuf field by wire type.
+ * @param buffer - Input binary payload.
+ * @param offset - Field offset.
+ * @param wireType - Protobuf wire type.
+ * @returns Next cursor offset after skipping the field.
+ * @throws Error when wire type is unsupported.
+ * @internal
+ */
 function skipField(buffer, offset, wireType) {
     if (wireType === 0)
         return readVarint(buffer, offset).next;
@@ -25,9 +43,19 @@ function skipField(buffer, offset, wireType) {
         return offset + 4;
     throw new Error(`Unsupported wire type: ${wireType}`);
 }
+/**
+ * Decodes an embedded artist protobuf message.
+ * @param buffer - Artist message payload.
+ * @returns Parsed artist metadata.
+ * @internal
+ */
 function decodeArtist(buffer) {
     let offset = 0;
-    const artist = { artistUri: '', artistName: '', artistImgUrl: '' };
+    const artist = {
+        artistUri: '',
+        artistName: '',
+        artistImgUrl: ''
+    };
     while (offset < buffer.length) {
         try {
             const key = readVarint(buffer, offset);
@@ -60,13 +88,23 @@ function decodeArtist(buffer) {
     }
     return artist;
 }
+/**
+ * Decodes a single canvas protobuf message.
+ * @param buffer - Canvas message payload.
+ * @returns Parsed canvas entry.
+ * @internal
+ */
 function decodeCanvas(buffer) {
     let offset = 0;
     const canvas = {
         id: '',
         canvasUrl: '',
         trackUri: '',
-        artist: {},
+        artist: {
+            artistUri: '',
+            artistName: '',
+            artistImgUrl: ''
+        },
         canvasUri: ''
     };
     while (offset < buffer.length) {
@@ -107,6 +145,12 @@ function decodeCanvas(buffer) {
     }
     return canvas;
 }
+/**
+ * Decodes the canvaz service response payload.
+ * @param buffer - Full protobuf response payload.
+ * @returns Decoded canvas list object.
+ * @internal
+ */
 function decodeCanvasResponse(buffer) {
     let offset = 0;
     const canvases = [];
@@ -133,17 +177,18 @@ function decodeCanvasResponse(buffer) {
     }
     return { canvasesList: canvases };
 }
+/**
+ * Fetches Spotify canvas metadata for a track URI.
+ * @param trackUri - Spotify track URI (`spotify:track:...`).
+ * @param token - Spotify bearer token.
+ * @returns Decoded canvas payload or null when unavailable.
+ * @public
+ */
 export async function fetchCanvas(trackUri, token) {
     try {
         const trackUriBuf = Buffer.from(trackUri);
-        const trackBuf = Buffer.concat([
-            Buffer.from([0x0a, trackUriBuf.length]),
-            trackUriBuf
-        ]);
-        const requestBuf = Buffer.concat([
-            Buffer.from([0x0a, trackBuf.length]),
-            trackBuf
-        ]);
+        const trackBuf = Buffer.concat([Buffer.from([0x0a, trackUriBuf.length]), trackUriBuf]);
+        const requestBuf = Buffer.concat([Buffer.from([0x0a, trackBuf.length]), trackBuf]);
         const res = await fetch('https://spclient.wg.spotify.com/canvaz-cache/v0/canvases', {
             method: 'POST',
             body: requestBuf,

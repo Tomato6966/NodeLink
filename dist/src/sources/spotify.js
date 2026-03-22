@@ -1,5 +1,5 @@
 import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
-import { fetchCanvas } from '../modules/spotifyCanvas.js';
+import { fetchCanvas } from "../modules/spotifyCanvas.js";
 import { getLocalToken } from "../modules/spotifyAuth.js";
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1';
 const SPOTIFY_CLIENT_API_URL = 'https://spclient.wg.spotify.com';
