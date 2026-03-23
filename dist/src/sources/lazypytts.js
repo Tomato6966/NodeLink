@@ -6,17 +6,57 @@ const DEFAULT_SERVICE = 'Cerence';
 const DEFAULT_VOICE = 'Luciana';
 const DEFAULT_MAX_TEXT_LENGTH = 3000;
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * LazyPy TTS source implementation.
+ * @public
+ */
 export default class LazyPyTtsSource {
+    /**
+     * Runtime NodeLink context.
+     */
+    nodelink;
+    /**
+     * LazyPy source config block.
+     */
+    config;
+    /**
+     * Search aliases.
+     */
+    searchTerms;
+    /**
+     * URL patterns.
+     */
+    patterns;
+    /**
+     * Source priority.
+     */
+    priority;
+    /**
+     * Voice services cache.
+     */
+    services;
+    /**
+     * Creates a LazyPy TTS source.
+     * @param nodelink - Runtime NodeLink context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        this.config = this.nodelink.options.sources?.lazypytts || {};
+        const sourceConfig = this.nodelink.options.sources?.['lazypytts'];
+        this.config =
+            sourceConfig && typeof sourceConfig === 'object'
+                ? sourceConfig
+                : {};
         this.searchTerms = ['lazypytts', 'lazytts'];
         this.patterns = [/^lazypytts:/i, /^lazytts:/i];
         this.priority = 50;
         this.services = new Map();
     }
+    /**
+     * Initializes source and loads voices metadata.
+     * @returns False when source is disabled.
+     */
     async setup() {
-        if (this.config.enabled === false) {
+        if (this.config['enabled'] === false) {
             logger('debug', 'LazyPy', 'LazyPy TTS source is disabled.');
             return false;
         }
@@ -24,57 +64,94 @@ export default class LazyPyTtsSource {
         logger('info', 'Sources', 'Loaded LazyPy TTS source.');
         return true;
     }
+    /**
+     * Fetches and caches available voices.
+     * @returns Promise resolved when fetch/caching flow finishes.
+     */
     async _fetchVoices() {
         try {
-            const cached = this.nodelink.credentialManager.get('lazypytts_voices');
-            if (cached?.services) {
-                this._applyVoiceCache(cached);
-                logger('debug', 'LazyPy', `Loaded ${cached.totalVoices || 0} LazyPy voices from CredentialManager.`);
+            const cached = this.nodelink.credentialManager?.get('lazypytts_voices') || null;
+            const cachedRecord = this.asRecord(cached);
+            if (cachedRecord && this.asRecord(cachedRecord['services'])) {
+                this._applyVoiceCache(cachedRecord);
+                logger('debug', 'LazyPy', `Loaded ${this.asNumber(cachedRecord['totalVoices']) || 0} LazyPy voices from CredentialManager.`);
                 return;
             }
             const { body, error, statusCode } = await makeRequest(VOICES_URL, {
                 method: 'GET'
             });
-            if (error || statusCode !== 200 || !body || typeof body !== 'object') {
-                logger('error', 'LazyPy', `Failed to fetch LazyPy voices: ${error?.message || `Status ${statusCode}`}`);
+            const bodyObject = this.asRecord(body);
+            if (error || statusCode !== 200 || !bodyObject) {
+                logger('error', 'LazyPy', `Failed to fetch LazyPy voices: ${error || `Status ${statusCode}`}`);
                 return;
             }
-            const summary = this._ingestVoices(body);
-            this.nodelink.credentialManager.set('lazypytts_voices', summary.cache, CACHE_TTL_MS);
+            const summary = this._ingestVoices(bodyObject);
+            this.nodelink.credentialManager?.set('lazypytts_voices', summary.cache, CACHE_TTL_MS);
             logger('debug', 'LazyPy', `Fetched ${summary.totalVoices} LazyPy voices across ${summary.serviceCount} services.`);
         }
-        catch (e) {
-            logger('error', 'LazyPy', `Exception fetching LazyPy voices: ${e.message}`);
+        catch (error) {
+            logger('error', 'LazyPy', `Exception fetching LazyPy voices: ${this.getErrorMessage(error)}`);
         }
     }
+    /**
+     * Applies cached voices payload.
+     * @param cache - Cached voice payload.
+     */
     _applyVoiceCache(cache) {
         this.services.clear();
-        for (const [key, service] of Object.entries(cache.services || {})) {
-            const voices = new Map(Object.entries(service.voices || {}));
+        const services = this.asRecord(cache['services']) || {};
+        for (const [key, serviceValue] of Object.entries(services)) {
+            const service = this.asRecord(serviceValue);
+            if (!service)
+                continue;
+            const voicesRecord = this.asRecord(service['voices']) || {};
+            const voices = new Map(Object.entries(voicesRecord)
+                .map(([voiceKey, voicePayload]) => {
+                const voice = this.asRecord(voicePayload);
+                const id = this.asString(voice?.['id']);
+                const name = this.asString(voice?.['name']);
+                return id && name ? [voiceKey, { id, name }] : null;
+            })
+                .filter((entry) => entry !== null));
+            const defaultVoiceRecord = this.asRecord(service['defaultVoice']);
+            const defaultVoiceId = this.asString(defaultVoiceRecord?.['id']);
+            const defaultVoiceName = this.asString(defaultVoiceRecord?.['name']);
             this.services.set(key, {
                 key,
-                name: service.name,
-                charLimit: service.charLimit ?? null,
-                countBytes: !!service.countBytes,
+                name: this.asString(service['name']) || key,
+                charLimit: this.asNumber(service['charLimit']),
+                countBytes: this.asBoolean(service['countBytes']) ?? false,
                 voices,
-                defaultVoice: service.defaultVoice || null
+                defaultVoice: defaultVoiceId && defaultVoiceName
+                    ? { id: defaultVoiceId, name: defaultVoiceName }
+                    : null
             });
         }
     }
+    /**
+     * Ingests remote voices payload into in-memory cache.
+     * @param data - Voice payload.
+     * @returns Cache summary object.
+     */
     _ingestVoices(data) {
         this.services.clear();
         let totalVoices = 0;
-        for (const [serviceName, serviceData] of Object.entries(data)) {
-            if (!serviceData || !Array.isArray(serviceData.voices))
+        for (const [serviceName, serviceDataRaw] of Object.entries(data)) {
+            const serviceData = this.asRecord(serviceDataRaw);
+            const voicesRaw = serviceData ? serviceData['voices'] : null;
+            if (!serviceData || !Array.isArray(voicesRaw))
                 continue;
             const serviceKey = this._normalizeKey(serviceName);
             if (!serviceKey)
                 continue;
             const voices = new Map();
             let defaultVoice = null;
-            for (const voice of serviceData.voices) {
-                const voiceId = String(voice.vid ?? voice.id ?? voice.name ?? '').trim();
-                const voiceName = String(voice.name ?? voice.vid ?? voiceId).trim();
+            for (const voiceRaw of voicesRaw) {
+                const voice = this.asRecord(voiceRaw);
+                if (!voice)
+                    continue;
+                const voiceId = String(voice['vid'] ?? voice['id'] ?? voice['name'] ?? '').trim();
+                const voiceName = String(voice['name'] ?? voice['vid'] ?? voiceId).trim();
                 if (!voiceId && !voiceName)
                     continue;
                 const payload = { id: voiceId || voiceName, name: voiceName || voiceId };
@@ -91,10 +168,8 @@ export default class LazyPyTtsSource {
             this.services.set(serviceKey, {
                 key: serviceKey,
                 name: serviceName,
-                charLimit: Number.isFinite(serviceData.charLimit)
-                    ? serviceData.charLimit
-                    : null,
-                countBytes: Boolean(serviceData.countBytes),
+                charLimit: this.asNumber(serviceData['charLimit']),
+                countBytes: this.asBoolean(serviceData['countBytes']) ?? false,
                 voices,
                 defaultVoice
             });
@@ -114,35 +189,59 @@ export default class LazyPyTtsSource {
         };
         return { totalVoices, serviceCount: this.services.size, cache };
     }
+    /**
+     * Normalizes user-facing keys.
+     * @param value - Raw key.
+     * @returns Normalized key.
+     */
     _normalizeKey(value) {
         return String(value || '')
             .toLowerCase()
             .replace(/[^a-z0-9]/g, '');
     }
+    /**
+     * Decodes URL-encoded input safely.
+     * @param value - Raw input.
+     * @returns Decoded string.
+     */
     _safeDecode(value) {
         if (!value)
             return '';
         try {
-            return decodeURIComponent(value);
+            return decodeURIComponent(String(value));
         }
         catch {
             return String(value);
         }
     }
+    /**
+     * Looks up a service by name.
+     * @param name - Service name.
+     * @returns Service payload or null.
+     */
     _getService(name) {
         const key = this._normalizeKey(name);
         if (!key)
             return null;
         return this.services.get(key) || null;
     }
+    /**
+     * Returns first available service.
+     * @returns Service payload or null.
+     */
     _getFirstService() {
         return this.services.values().next().value || null;
     }
+    /**
+     * Finds first service containing requested voice.
+     * @param voiceName - Voice name.
+     * @returns Matching service/voice pair or null.
+     */
     _findServiceForVoice(voiceName) {
         const voiceKey = this._normalizeKey(voiceName);
         if (!voiceKey)
             return null;
-        const preferred = this._getService(this.config.service);
+        const preferred = this._getService(this.config['service']);
         if (preferred) {
             const voice = preferred.voices.get(voiceKey);
             if (voice)
@@ -155,6 +254,11 @@ export default class LazyPyTtsSource {
         }
         return null;
     }
+    /**
+     * Parses query-string style TTS command.
+     * @param raw - Raw command text.
+     * @returns Parsed input object or null.
+     */
     _parseQueryString(raw) {
         if (!raw.includes('='))
             return null;
@@ -170,6 +274,11 @@ export default class LazyPyTtsSource {
             text: params.get('text') || ''
         };
     }
+    /**
+     * Parses colon style TTS command.
+     * @param raw - Raw command text.
+     * @returns Parsed input object.
+     */
     _parseColonInput(raw) {
         const parts = raw.split(':');
         if (parts.length >= 3 && this._getService(parts[0])) {
@@ -187,10 +296,15 @@ export default class LazyPyTtsSource {
         }
         return { text: raw };
     }
+    /**
+     * Parses user input into service/voice/text components.
+     * @param query - Raw input query.
+     * @returns Parsed input object.
+     */
     _parseInput(query) {
         let raw = String(query || '').trim();
         if (!raw)
-            return { text: '' };
+            return { service: '', voice: '', text: '' };
         raw = raw.replace(/^lazypytts:/i, '').replace(/^lazytts:/i, '');
         const parsed = this._parseQueryString(raw) || this._parseColonInput(raw);
         return {
@@ -199,10 +313,15 @@ export default class LazyPyTtsSource {
             text: this._safeDecode(parsed.text)
         };
     }
+    /**
+     * Resolves final service/voice request.
+     * @param parsed - Parsed input payload.
+     * @returns Resolved request payload.
+     */
     _resolveRequest(parsed) {
-        const configService = this.config.service || DEFAULT_SERVICE;
-        const configVoice = this.config.voice || DEFAULT_VOICE;
-        const enforceConfig = this.config.enforceConfig === true;
+        const configService = this.asString(this.config['service']) || DEFAULT_SERVICE;
+        const configVoice = this.asString(this.config['voice']) || DEFAULT_VOICE;
+        const enforceConfig = this.config['enforceConfig'] === true;
         const text = (parsed.text || '').trim();
         let serviceName = enforceConfig ? configService : parsed.service;
         const voiceName = enforceConfig ? configVoice : parsed.voice;
@@ -243,14 +362,25 @@ export default class LazyPyTtsSource {
             service
         };
     }
+    /**
+     * Returns max text length for selected service.
+     * @param service - Selected service payload.
+     * @returns Max text length.
+     */
     _getMaxTextLength(service) {
-        const configLimit = Number.isFinite(this.config.maxTextLength) &&
-            this.config.maxTextLength > 0
-            ? this.config.maxTextLength
+        const configLimit = Number.isFinite(this.config['maxTextLength']) &&
+            Number(this.config['maxTextLength']) > 0
+            ? Number(this.config['maxTextLength'])
             : DEFAULT_MAX_TEXT_LENGTH;
         const serviceLimit = service?.charLimit && service.charLimit > 0 ? service.charLimit : null;
         return serviceLimit ? Math.min(serviceLimit, configLimit) : configLimit;
     }
+    /**
+     * Validates text length against limits.
+     * @param text - Input text.
+     * @param service - Selected service payload.
+     * @returns Validation payload when overflow happens.
+     */
     _validateTextLength(text, service) {
         const maxLength = this._getMaxTextLength(service);
         const countBytes = service?.countBytes ?? false;
@@ -289,15 +419,26 @@ export default class LazyPyTtsSource {
             const track = this.buildTrack(resolved);
             return { loadType: 'track', data: track };
         }
-        catch (e) {
+        catch (error) {
+            const message = this.getErrorMessage(error);
             return {
-                exception: { message: e.message, severity: 'fault', cause: 'Exception' }
+                exception: { message, severity: 'fault', cause: 'Exception' }
             };
         }
     }
+    /**
+     * Resolves lazytts commands.
+     * @param query - TTS query.
+     * @returns Source result payload.
+     */
     async resolve(query) {
         return this.search(query);
     }
+    /**
+     * Builds encoded track payload for TTS request.
+     * @param param0 - Resolved TTS request payload.
+     * @returns Encoded track payload.
+     */
     buildTrack({ text, serviceName, voiceId, voiceLabel }) {
         const query = new URLSearchParams({
             service: String(serviceName),
@@ -318,12 +459,18 @@ export default class LazyPyTtsSource {
             isrc: null,
             sourceName: 'lazypytts'
         };
+        const encodedInput = { ...track, details: [] };
         return {
-            encoded: encodeTrack(track),
+            encoded: encodeTrack(encodedInput),
             info: track,
             pluginInfo: {}
         };
     }
+    /**
+     * Returns stream URL descriptor for generated TTS track.
+     * @param track - Decoded track info.
+     * @returns Track URL result payload.
+     */
     async getTrackUrl(track) {
         return {
             url: track.uri,
@@ -331,6 +478,12 @@ export default class LazyPyTtsSource {
             format: 'mp3'
         };
     }
+    /**
+     * Loads synthesized TTS stream.
+     * @param decodedTrack - Decoded track metadata.
+     * @param url - lazypytts URI.
+     * @returns Stream result payload or exception payload.
+     */
     async loadStream(decodedTrack, url, _protocol, _additionalData) {
         logger('debug', 'Sources', `Loading LazyPy TTS stream for "${decodedTrack.title}"`);
         try {
@@ -374,15 +527,16 @@ export default class LazyPyTtsSource {
                 }
             });
             if (error || statusCode !== 200 || !responseBody) {
-                throw new Error(error?.message || `LazyPy TTS returned status ${statusCode}`);
+                throw new Error(error || `LazyPy TTS returned status ${statusCode}`);
             }
             const payload = typeof responseBody === 'string'
-                ? JSON.parse(responseBody)
-                : responseBody;
-            if (!payload?.success || !payload.audio_url) {
-                throw new Error(payload?.error_msg || 'LazyPy TTS request failed.');
+                ? this.asRecord(JSON.parse(responseBody))
+                : this.asRecord(responseBody);
+            if (!payload?.['success'] || !this.asString(payload['audio_url'])) {
+                throw new Error(this.asString(payload?.['error_msg']) || 'LazyPy TTS request failed.');
             }
-            const audioResponse = await makeRequest(payload.audio_url, {
+            const audioUrl = this.asString(payload['audio_url']);
+            const audioResponse = await makeRequest(audioUrl, {
                 method: 'GET',
                 streamOnly: true,
                 headers: {
@@ -391,7 +545,7 @@ export default class LazyPyTtsSource {
                 }
             });
             if (audioResponse.error || !audioResponse.stream) {
-                throw (audioResponse.error ||
+                throw (new Error(audioResponse.error || 'Failed to get audio stream.') ||
                     new Error('Failed to get stream, no stream object returned.'));
             }
             const stream = new PassThrough();
@@ -413,15 +567,58 @@ export default class LazyPyTtsSource {
             });
             return { stream };
         }
-        catch (err) {
-            logger('error', 'Sources', `Failed to load LazyPy TTS stream: ${err.message}`);
+        catch (error) {
+            const message = this.getErrorMessage(error);
+            logger('error', 'Sources', `Failed to load LazyPy TTS stream: ${message}`);
             return {
                 exception: {
-                    message: err.message,
+                    message,
                     severity: 'common',
                     cause: 'Upstream'
                 }
             };
         }
+    }
+    /**
+     * Casts unknown value to object record.
+     * @param value - Unknown value.
+     * @returns Object record or null.
+     */
+    asRecord(value) {
+        return value && typeof value === 'object' && !Array.isArray(value)
+            ? value
+            : null;
+    }
+    /**
+     * Casts unknown value to string.
+     * @param value - Unknown value.
+     * @returns String or null.
+     */
+    asString(value) {
+        return typeof value === 'string' ? value : null;
+    }
+    /**
+     * Casts unknown value to number.
+     * @param value - Unknown value.
+     * @returns Number or null.
+     */
+    asNumber(value) {
+        return typeof value === 'number' && Number.isFinite(value) ? value : null;
+    }
+    /**
+     * Casts unknown value to boolean.
+     * @param value - Unknown value.
+     * @returns Boolean or null.
+     */
+    asBoolean(value) {
+        return typeof value === 'boolean' ? value : null;
+    }
+    /**
+     * Normalizes unknown errors to strings.
+     * @param error - Unknown error value.
+     * @returns Error message string.
+     */
+    getErrorMessage(error) {
+        return error instanceof Error ? error.message : String(error);
     }
 }
