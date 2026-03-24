@@ -1,6 +1,11 @@
-import { Transform } from 'node:stream'
 import type { Readable } from 'node:stream'
-import { encodeTrack, getVersion, http1makeRequest, logger } from '../utils.ts'
+import { PassThrough, Transform } from 'node:stream'
+import type {
+  HttpResolvedTrackData,
+  IcyMetadataEventPayload,
+  IcyMetadataHeaders,
+  IcyMetadataPayload
+} from '../typings/sources/http.types.ts'
 import type {
   SourceResult,
   TrackInfo,
@@ -9,12 +14,10 @@ import type {
   WorkerNodeLink
 } from '../typings/sources/source.types.ts'
 import type {
-  HttpResolvedTrackData,
-  IcyMetadataEventPayload,
-  IcyMetadataHeaders,
-  IcyMetadataPayload
-} from '../typings/sources/http.types.ts'
-import type { HttpResponseHeaders, TrackEncodeInput } from '../typings/utils.types.ts'
+  HttpResponseHeaders,
+  TrackEncodeInput
+} from '../typings/utils.types.ts'
+import { encodeTrack, getVersion, http1makeRequest, logger } from '../utils.ts'
 
 /**
  * Default user agent for HTTP source requests.
@@ -29,7 +32,10 @@ const DEFAULT_HTTP_USER_AGENT = `NodeLink/${getVersion()} (https://github.com/Pe
  * @internal
  */
 const extractUrlExtension = (rawUrl: string): string => {
-  const sanitized = String(rawUrl || '').split('?')[0]?.split('#')[0] || ''
+  const sanitized =
+    String(rawUrl || '')
+      .split('?')[0]
+      ?.split('#')[0] || ''
   const lastSlash = sanitized.lastIndexOf('/')
   const lastDot = sanitized.lastIndexOf('.')
   if (lastDot === -1 || lastDot < lastSlash) return ''
@@ -155,7 +161,10 @@ class IcyMetadataTransform extends Transform {
           }
 
           if (this.metaBytes >= this.pendingMetaLength) {
-            const raw = Buffer.concat(this.metaChunks, this.pendingMetaLength).toString('utf8')
+            const raw = Buffer.concat(
+              this.metaChunks,
+              this.pendingMetaLength
+            ).toString('utf8')
             this._emitMetadata(raw)
             this.audioBytesRemaining = this.metaInt
             this.pendingMetaLength = null
@@ -250,8 +259,13 @@ export default class HttpSource {
         headers: requestHeaders
       })
 
-      const headContentType = headerToString((data.headers as Record<string, unknown>)?.['content-type'])
-      const headOk = !data.error && (data.statusCode || 0) < 400 && isValidMediaType(headContentType)
+      const headContentType = headerToString(
+        (data.headers as Record<string, unknown>)?.['content-type']
+      )
+      const headOk =
+        !data.error &&
+        (data.statusCode || 0) < 400 &&
+        isValidMediaType(headContentType)
 
       if (!headOk) {
         const getData = await http1makeRequest(url, {
@@ -282,7 +296,9 @@ export default class HttpSource {
       }
 
       const headers = data.headers as HttpResponseHeaders | undefined
-      const contentType = headerToString((headers as Record<string, unknown>)?.['content-type'])
+      const contentType = headerToString(
+        (headers as Record<string, unknown>)?.['content-type']
+      )
       if (!isValidMediaType(contentType)) {
         return {
           exception: {
@@ -293,8 +309,10 @@ export default class HttpSource {
       }
 
       const hasContentLength =
-        'content-length' in (headers as Record<string, unknown> || {})
-      const isStream = Boolean((headers as Record<string, unknown>)?.['icy-metaint']) || !hasContentLength
+        'content-length' in ((headers as Record<string, unknown>) || {})
+      const isStream =
+        Boolean((headers as Record<string, unknown>)?.['icy-metaint']) ||
+        !hasContentLength
 
       return {
         loadType: 'track',
@@ -325,7 +343,9 @@ export default class HttpSource {
     isStream: boolean
   ): HttpResolvedTrackData {
     const headerRecord = (headers || {}) as Record<string, unknown>
-    const contentDisposition = headerToString(headerRecord['content-disposition'])
+    const contentDisposition = headerToString(
+      headerRecord['content-disposition']
+    )
     const fileNameMatch = contentDisposition.match(/filename="([^"]+)"/i)
 
     const title =
@@ -434,7 +454,10 @@ export default class HttpSource {
       }
 
       let outputStream: Readable = httpStream as Readable
-      const metaInt = Number.parseInt(headerToString(headers['icy-metaint']), 10)
+      const metaInt = Number.parseInt(
+        headerToString(headers['icy-metaint']),
+        10
+      )
       if (Number.isFinite(metaInt) && metaInt > 0) {
         const icyHeaders: IcyMetadataHeaders = {
           name: headerToString(headers['icy-name']) || null,
@@ -454,20 +477,22 @@ export default class HttpSource {
         outputStream = metadataStream
       }
 
-      outputStream.on('end', () => {
+      const finalStream = outputStream.pipe(new PassThrough())
+
+      finalStream.on('end', () => {
         logger(
           'debug',
           'HTTP Source',
           `Stream ended for ${url}, emitting finishBuffering.`
         )
-        outputStream.emit('finishBuffering')
+        finalStream.emit('finishBuffering')
       })
 
-      outputStream.on('error', (err: Error) => {
+      finalStream.on('error', (err: Error) => {
         logger('error', 'HTTP Source', `Stream error: ${err.message}`)
       })
 
-      return { stream: outputStream, type: resolvedType }
+      return { stream: finalStream, type: resolvedType }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       logger('error', 'Sources', `Failed to load http stream: ${message}`)

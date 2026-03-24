@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream'
+import { PassThrough } from 'node:stream'
 import { SeekError } from '@ecliptia/seekable-stream'
 import discordVoice, {
   type VoiceAudioStream,
@@ -36,7 +37,6 @@ import type {
 } from '../typings/playback/player.types.ts'
 import type { TrackUrlResult } from '../typings/sources/source.types.ts'
 import { logger } from '../utils.ts'
-
 
 export type GatewayEventName =
   (typeof GatewayEvents)[keyof typeof GatewayEvents]
@@ -941,9 +941,12 @@ export class Player {
           : null,
       lastChunkAt: null
     }
+    let streamForResource: Readable = fetchedStream as Readable
+
     if (typeof (fetchedStream as { on?: unknown }).on === 'function') {
       const eventStream = fetchedStream as unknown as VoiceAudioStream
-      eventStream.on?.('data', (chunk: Buffer | Uint8Array | string) => {
+      const profilerTap = new PassThrough()
+      profilerTap.on('data', (chunk: Buffer | Uint8Array | string) => {
         const size =
           typeof chunk === 'string'
             ? Buffer.byteLength(chunk)
@@ -951,6 +954,8 @@ export class Player {
         if (size > 0) this.profilerStreamStats.downloadedBytes += size
         this.profilerStreamStats.lastChunkAt = Date.now()
       })
+      streamForResource = (fetchedStream as Readable).pipe(profilerTap)
+
       eventStream.on?.('eternalboxJump', (data: unknown) => {
         this.emitEvent(GatewayEvents.ETERNALBOX_JUMP, {
           track: this.holoTrack || this.track,
@@ -966,7 +971,7 @@ export class Player {
     }
     const resource = audioResourceFactory(
       this.guildId,
-      fetchedStream,
+      streamForResource,
       fetched.type || urlData.format,
       this.nodelink,
       this.filters,
@@ -1871,15 +1876,19 @@ export class Player {
       !!this.nextTrack?.info?.identifier &&
       this.nextTrack.info.identifier === payload.info.identifier
     const isDuplicatePreload =
-      (sameEncoded || sameIdentifier) &&
-      !!this.nextResource
+      (sameEncoded || sameIdentifier) && !!this.nextResource
 
     if (isDuplicatePreload) {
-      logger('debug', 'Player', `Skipping duplicate preload for ${this.guildId}`, {
-        identifier: payload.info?.identifier,
-        encodedMatch: sameEncoded,
-        identifierMatch: sameIdentifier
-      })
+      logger(
+        'debug',
+        'Player',
+        `Skipping duplicate preload for ${this.guildId}`,
+        {
+          identifier: payload.info?.identifier,
+          encodedMatch: sameEncoded,
+          identifierMatch: sameIdentifier
+        }
+      )
       return true
     }
 

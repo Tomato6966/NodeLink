@@ -1,3 +1,4 @@
+import { PassThrough } from 'node:stream';
 import { SeekError } from '@ecliptia/seekable-stream';
 import discordVoice from '@performanc/voice';
 import { EndReasons, GatewayEvents } from "../constants.js";
@@ -645,9 +646,11 @@ export class Player {
                 : null,
             lastChunkAt: null
         };
+        let streamForResource = fetchedStream;
         if (typeof fetchedStream.on === 'function') {
             const eventStream = fetchedStream;
-            eventStream.on?.('data', (chunk) => {
+            const profilerTap = new PassThrough();
+            profilerTap.on('data', (chunk) => {
                 const size = typeof chunk === 'string'
                     ? Buffer.byteLength(chunk)
                     : Number(chunk?.length || 0);
@@ -655,6 +658,7 @@ export class Player {
                     this.profilerStreamStats.downloadedBytes += size;
                 this.profilerStreamStats.lastChunkAt = Date.now();
             });
+            streamForResource = fetchedStream.pipe(profilerTap);
             eventStream.on?.('eternalboxJump', (data) => {
                 this.emitEvent(GatewayEvents.ETERNALBOX_JUMP, {
                     track: this.holoTrack || this.track,
@@ -668,7 +672,7 @@ export class Player {
                 });
             });
         }
-        const resource = audioResourceFactory(this.guildId, fetchedStream, fetched.type || urlData.format, this.nodelink, this.filters, this.volumePercent / 100, this.audioMixer, false, this.loudnessNormalizer);
+        const resource = audioResourceFactory(this.guildId, streamForResource, fetched.type || urlData.format, this.nodelink, this.filters, this.volumePercent / 100, this.audioMixer, false, this.loudnessNormalizer);
         return { stream: resource };
     }
     /**
@@ -1253,8 +1257,7 @@ export class Player {
         const sameIdentifier = !!payload.info?.identifier &&
             !!this.nextTrack?.info?.identifier &&
             this.nextTrack.info.identifier === payload.info.identifier;
-        const isDuplicatePreload = (sameEncoded || sameIdentifier) &&
-            !!this.nextResource;
+        const isDuplicatePreload = (sameEncoded || sameIdentifier) && !!this.nextResource;
         if (isDuplicatePreload) {
             logger('debug', 'Player', `Skipping duplicate preload for ${this.guildId}`, {
                 identifier: payload.info?.identifier,

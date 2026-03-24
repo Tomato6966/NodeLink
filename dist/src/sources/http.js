@@ -1,4 +1,4 @@
-import { Transform } from 'node:stream';
+import { PassThrough, Transform } from 'node:stream';
 import { encodeTrack, getVersion, http1makeRequest, logger } from "../utils.js";
 /**
  * Default user agent for HTTP source requests.
@@ -12,7 +12,9 @@ const DEFAULT_HTTP_USER_AGENT = `NodeLink/${getVersion()} (https://github.com/Pe
  * @internal
  */
 const extractUrlExtension = (rawUrl) => {
-    const sanitized = String(rawUrl || '').split('?')[0]?.split('#')[0] || '';
+    const sanitized = String(rawUrl || '')
+        .split('?')[0]
+        ?.split('#')[0] || '';
     const lastSlash = sanitized.lastIndexOf('/');
     const lastDot = sanitized.lastIndexOf('.');
     if (lastDot === -1 || lastDot < lastSlash)
@@ -211,7 +213,9 @@ export default class HttpSource {
                 headers: requestHeaders
             });
             const headContentType = headerToString(data.headers?.['content-type']);
-            const headOk = !data.error && (data.statusCode || 0) < 400 && isValidMediaType(headContentType);
+            const headOk = !data.error &&
+                (data.statusCode || 0) < 400 &&
+                isValidMediaType(headContentType);
             if (!headOk) {
                 const getData = await http1makeRequest(url, {
                     method: 'GET',
@@ -248,7 +252,8 @@ export default class HttpSource {
                 };
             }
             const hasContentLength = 'content-length' in (headers || {});
-            const isStream = Boolean(headers?.['icy-metaint']) || !hasContentLength;
+            const isStream = Boolean(headers?.['icy-metaint']) ||
+                !hasContentLength;
             return {
                 loadType: 'track',
                 data: this.buildTrack(url, headers, isStream)
@@ -379,14 +384,15 @@ export default class HttpSource {
                 httpStream.pipe(metadataStream);
                 outputStream = metadataStream;
             }
-            outputStream.on('end', () => {
+            const finalStream = outputStream.pipe(new PassThrough());
+            finalStream.on('end', () => {
                 logger('debug', 'HTTP Source', `Stream ended for ${url}, emitting finishBuffering.`);
-                outputStream.emit('finishBuffering');
+                finalStream.emit('finishBuffering');
             });
-            outputStream.on('error', (err) => {
+            finalStream.on('error', (err) => {
                 logger('error', 'HTTP Source', `Stream error: ${err.message}`);
             });
-            return { stream: outputStream, type: resolvedType };
+            return { stream: finalStream, type: resolvedType };
         }
         catch (err) {
             const message = err instanceof Error ? err.message : String(err);
