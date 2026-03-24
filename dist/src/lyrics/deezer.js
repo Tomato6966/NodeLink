@@ -72,7 +72,9 @@ export default class DeezerLyrics {
             const query = `${trackInfo.title} ${trackInfo.author}`;
             const searchRes = await this.nodelink.sources.search('deezer', query);
             const searchData = searchRes.data;
-            if (searchRes.loadType !== 'search' || !Array.isArray(searchData) || searchData.length === 0) {
+            if (searchRes.loadType !== 'search' ||
+                !Array.isArray(searchData) ||
+                searchData.length === 0) {
                 return { loadType: 'empty', data: {} };
             }
             const candidates = searchData;

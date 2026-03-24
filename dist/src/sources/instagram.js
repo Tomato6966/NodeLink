@@ -266,8 +266,7 @@ export default class InstagramSource {
                 logger('debug', 'Sources', `Rejected low-confidence mirror candidates for "${query}".`);
                 continue;
             }
-            const bestMatch = getBestMatch(acceptableMatches, decodedTrack) ||
-                acceptableMatches[0];
+            const bestMatch = getBestMatch(acceptableMatches, decodedTrack) || acceptableMatches[0];
             if (!bestMatch?.info)
                 continue;
             const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info);

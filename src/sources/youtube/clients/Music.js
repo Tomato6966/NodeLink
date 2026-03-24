@@ -57,7 +57,7 @@ export default class Music extends BaseClient {
       },
       body: requestBody,
       disableBodyCompression: true,
-        proxy: this.getProxy()
+      proxy: this.getProxy()
     })
 
     if (error || statusCode !== 200) {
@@ -210,7 +210,7 @@ export default class Music extends BaseClient {
               'X-Goog-Api-Format-Version': '2'
             },
             disableBodyCompression: true,
-        proxy: this.getProxy()
+            proxy: this.getProxy()
           }
         )
 

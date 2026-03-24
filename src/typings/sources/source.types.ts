@@ -555,6 +555,8 @@ export interface SourceManager {
   search: (source: string, query: string) => Promise<SourceResult>
   /** Unified search across sources */
   unifiedSearch: (query: string) => Promise<SourceResult>
+  /** Search using default search source */
+  searchWithDefault: (query: string) => Promise<SourceResult>
   /** Get track URL */
   getTrackUrl: (
     track: TrackInfo | TrackInfoExtended,

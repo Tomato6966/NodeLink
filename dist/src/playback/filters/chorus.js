@@ -71,16 +71,15 @@ export default class Chorus extends AnimatableFilter {
         const targetAlpha = isDisabled ? 0.0 : isActive ? 1.0 : 0.0;
         super.applyAnimatedUpdate({
             chorus: {
-                alpha: targetAlpha,
-                transition: c.transition
+                alpha: targetAlpha
             }
         }, 'chorus', { alpha: 0.0 });
     }
     onConfigChanged(config) {
-        this.alpha = config['alpha'] ?? 0;
+        this.alpha = config.alpha ?? 0;
     }
     isConfigActive(config) {
-        const a = config ? config['alpha'] : this.alpha;
+        const a = config ? config.alpha : this.alpha;
         return (a ?? 0) > 0.001;
     }
     /**

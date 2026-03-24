@@ -1,7 +1,5 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, http1makeRequest, logger } from '../utils.ts'
 import type { TrackInfo } from '../typings/sources/source.types.ts'
-import type { TrackEncodeInput } from '../typings/utils.types.ts'
 import type {
   TumblrDecodedTrack,
   TumblrInitialState,
@@ -13,6 +11,8 @@ import type {
   TumblrTrackUrlResult,
   TumblrUrlInfo
 } from '../typings/sources/tumblr.types.ts'
+import type { TrackEncodeInput } from '../typings/utils.types.ts'
+import { encodeTrack, http1makeRequest, logger } from '../utils.ts'
 
 const TUMBLR_USER_AGENT = 'WhatsApp/2.0'
 const TUMBLR_STREAM_USER_AGENT =
@@ -140,8 +140,12 @@ export default class TumblrSource {
           )
 
           if (post) {
-            const videoContent = post.content?.find((entry) => entry.type === 'video')
-            const audioContent = post.content?.find((entry) => entry.type === 'audio')
+            const videoContent = post.content?.find(
+              (entry) => entry.type === 'video'
+            )
+            const audioContent = post.content?.find(
+              (entry) => entry.type === 'audio'
+            )
             const media = videoContent || audioContent
             const directUrl = media?.url || media?.media?.url
 
@@ -171,21 +175,29 @@ export default class TumblrSource {
         )
       }
 
-      const vimeoMatch = html.match(/https?:\/\/player\.vimeo\.com\/video\/(\d+)/)
+      const vimeoMatch = html.match(
+        /https?:\/\/player\.vimeo\.com\/video\/(\d+)/
+      )
       if (vimeoMatch?.[1]) {
-        return await this.nodelink.sources.resolve(`https://vimeo.com/${vimeoMatch[1]}`)
+        return await this.nodelink.sources.resolve(
+          `https://vimeo.com/${vimeoMatch[1]}`
+        )
       }
 
       const titleMatch =
         html.match(/<title data-rh="true">(.*?)<\/title>/i) ||
         html.match(/<title>(.*?)<\/title>/i)
       const title = titleMatch?.[1]
-        ? titleMatch[1].replace(' – @', ' by @').replace(' on Tumblr', '').trim()
+        ? titleMatch[1]
+            .replace(' – @', ' by @')
+            .replace(' on Tumblr', '')
+            .trim()
         : 'Tumblr Content'
 
       const videoUrl =
-        html.match(/<meta data-rh="" content="(.*?)" property="og:video"/i)?.[1] ||
-        html.match(/<meta property="og:video" content="(.*?)"/i)?.[1]
+        html.match(
+          /<meta data-rh="" content="(.*?)" property="og:video"/i
+        )?.[1] || html.match(/<meta property="og:video" content="(.*?)"/i)?.[1]
 
       if (videoUrl) {
         const trackInfo: TrackInfo = {
@@ -198,7 +210,8 @@ export default class TumblrSource {
           title,
           uri: url,
           artworkUrl:
-            html.match(/<meta property="og:image" content="(.*?)"/i)?.[1] || null,
+            html.match(/<meta property="og:image" content="(.*?)"/i)?.[1] ||
+            null,
           isrc: null,
           sourceName: 'tumblr'
         }
@@ -209,7 +222,11 @@ export default class TumblrSource {
         }
       }
 
-      logger('debug', 'Tumblr', `No native media or supported embed found in ${url}`)
+      logger(
+        'debug',
+        'Tumblr',
+        `No native media or supported embed found in ${url}`
+      )
       return { loadType: 'empty', data: {} }
     } catch (error) {
       const message = this._getMessage(error)
@@ -285,9 +302,15 @@ export default class TumblrSource {
       })
 
       response.stream.on('error', (error) => {
-        logger('error', 'Tumblr', `External stream error: ${this._getMessage(error)}`)
+        logger(
+          'error',
+          'Tumblr',
+          `External stream error: ${this._getMessage(error)}`
+        )
         if (!stream.destroyed) {
-          stream.destroy(error instanceof Error ? error : new Error(String(error)))
+          stream.destroy(
+            error instanceof Error ? error : new Error(String(error))
+          )
         }
       })
 

@@ -89,9 +89,9 @@ export default class Timescale extends AnimatableFilter {
         });
     }
     onConfigChanged(config) {
-        const speed = config['speed'] ?? 1.0;
-        const pitch = config['pitch'] ?? 1.0;
-        const rate = config['rate'] ?? 1.0;
+        const speed = config.speed ?? 1.0;
+        const pitch = config.pitch ?? 1.0;
+        const rate = config.rate ?? 1.0;
         const bypass = speed === 1.0 && pitch === 1.0 && rate === 1.0;
         const silence = speed <= 0 || pitch <= 0 || rate <= 0;
         const wasBypassed = this._bypass || this._silence;

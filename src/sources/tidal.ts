@@ -5,13 +5,6 @@
 
 import path from 'node:path'
 import { PassThrough } from 'node:stream'
-import {
-  encodeTrack,
-  getBestMatch,
-  http1makeRequest,
-  logger,
-  makeRequest
-} from '../utils.ts'
 import type {
   SourceResult,
   TrackInfo,
@@ -19,7 +12,17 @@ import type {
   TrackUrlResult,
   WorkerNodeLink
 } from '../typings/sources/source.types.ts'
-import type { BestMatchCandidate, TrackEncodeInput } from '../typings/utils.types.ts'
+import type {
+  BestMatchCandidate,
+  TrackEncodeInput
+} from '../typings/utils.types.ts'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger,
+  makeRequest
+} from '../utils.ts'
 
 const API_BASE = 'https://api.tidal.com/v1/'
 const CACHE_VALIDITY_DAYS = 7
@@ -102,7 +105,7 @@ export default class TidalSource {
    */
   public constructor(nodelink: WorkerNodeLink) {
     this.nodelink = nodelink
-    const sourceConfig = this.asRecord(this.nodelink.options.sources?.['tidal'])
+    const sourceConfig = this.asRecord(this.nodelink.options.sources?.tidal)
     this.config = sourceConfig || {}
     this.searchTerms = ['tdsearch']
     this.recommendationTerm = ['tdrec']
@@ -110,18 +113,20 @@ export default class TidalSource {
       /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix|artist)\/(?<id>[a-zA-Z0-9-]+)(?:\/[a-zA-Z0-9/_-]*)?(?:\?.*)?$/
     ]
     this.priority = 90
-    this.token = this.asString(this.config['token'])
-    this.countryCode = this.asString(this.config['countryCode']) || 'US'
-    this.playlistLoadLimit = this.asNumber(this.config['playlistLoadLimit']) ?? 2
+    this.token = this.asString(this.config.token)
+    this.countryCode = this.asString(this.config.countryCode) || 'US'
+    this.playlistLoadLimit = this.asNumber(this.config.playlistLoadLimit) ?? 2
     this.playlistPageLoadConcurrency =
-      this.asNumber(this.config['playlistPageLoadConcurrency']) ?? 5
+      this.asNumber(this.config.playlistPageLoadConcurrency) ?? 5
     this.tokenCachePath = path.join(process.cwd(), '.cache', 'tidal_token.json')
-    this.hifiApis = this.toStringArray(this.config['hifiApis']).map((url) =>
+    this.hifiApis = this.toStringArray(this.config.hifiApis).map((url) =>
       url.replace(/\/$/, '')
     )
-    const configuredQualities = this.toStringArray(this.config['hifiQualities'])
+    const configuredQualities = this.toStringArray(this.config.hifiQualities)
     this.hifiQualities =
-      configuredQualities.length > 0 ? configuredQualities : DEFAULT_HIFI_QUALITIES
+      configuredQualities.length > 0
+        ? configuredQualities
+        : DEFAULT_HIFI_QUALITIES
   }
 
   /**
@@ -131,7 +136,8 @@ export default class TidalSource {
   public async setup(): Promise<boolean> {
     if (this.token && this.token !== 'token_here') return true
 
-    const cachedToken = this.nodelink.credentialManager?.get<string>('tidal_token')
+    const cachedToken =
+      this.nodelink.credentialManager?.get<string>('tidal_token')
     if (cachedToken) {
       this.token = cachedToken
       logger('info', 'Tidal', 'Loaded valid token from CredentialManager.')
@@ -171,21 +177,24 @@ export default class TidalSource {
    * @param sourceTerm - Source alias.
    * @returns Search result payload.
    */
-  public async search(query: string, sourceTerm?: string): Promise<SourceResult> {
+  public async search(
+    query: string,
+    sourceTerm?: string
+  ): Promise<SourceResult> {
     if (sourceTerm && this.recommendationTerm.includes(sourceTerm)) {
       return this.getRecommendations(query)
     }
 
     try {
-      const limit = this.asNumber(this.nodelink.options['maxSearchResults']) ?? 10
+      const limit = this.asNumber(this.nodelink.options.maxSearchResults) ?? 10
       const data = await this.getJson('search', {
         query,
         limit,
         types: 'TRACKS'
       })
 
-      const tracksBlock = this.asRecord(data?.['tracks'])
-      const items = this.asArrayRecords(tracksBlock?.['items'])
+      const tracksBlock = this.asRecord(data?.tracks)
+      const items = this.asArrayRecords(tracksBlock?.items)
       if (items.length === 0) return { loadType: 'empty', data: {} }
 
       const tracks = items
@@ -219,15 +228,15 @@ export default class TidalSource {
     const match = url.match(pattern)
     if (!match?.groups) return { loadType: 'empty', data: {} }
 
-    let type = match.groups['type']
-    let id = match.groups['id']
+    let type = match.groups.type
+    let id = match.groups.id
 
     const nestedTrack = url.match(
       /\/album\/[a-zA-Z0-9-]+\/track\/(?<trackId>[a-zA-Z0-9-]+)/
     )
-    if (nestedTrack?.groups?.['trackId']) {
+    if (nestedTrack?.groups?.trackId) {
       type = 'track'
-      id = nestedTrack.groups['trackId']
+      id = nestedTrack.groups.trackId
     }
 
     if (!type || !id) return { loadType: 'empty', data: {} }
@@ -273,8 +282,8 @@ export default class TidalSource {
 
     try {
       const data = await this.getJson(`tracks/${trackId}`)
-      const mixes = this.asRecord(data?.['mixes'])
-      const mixId = this.asString(mixes?.['TRACK_MIX'])
+      const mixes = this.asRecord(data?.mixes)
+      const mixId = this.asString(mixes?.TRACK_MIX)
       if (!mixId) return { loadType: 'empty', data: {} }
 
       return this.getMix(mixId)
@@ -293,11 +302,11 @@ export default class TidalSource {
   public async getMix(mixId: string): Promise<SourceResult> {
     try {
       const data = await this.getJson(`mixes/${mixId}/items`, { limit: 100 })
-      const items = this.asArrayRecords(data?.['items'])
+      const items = this.asArrayRecords(data?.items)
       if (items.length === 0) return { loadType: 'empty', data: {} }
 
       const tracks = items
-        .map((item) => this.asRecord(item['item']) || item)
+        .map((item) => this.asRecord(item.item) || item)
         .map((item) => this.buildTrack(item))
         .filter(
           (
@@ -335,7 +344,9 @@ export default class TidalSource {
     decodedTrack: TrackInfo,
     itag?: number,
     forceRefresh = false
-  ): Promise<TrackUrlResult | { exception: { message: string; severity: string } }> {
+  ): Promise<
+    TrackUrlResult | { exception: { message: string; severity: string } }
+  > {
     try {
       logger(
         'debug',
@@ -353,8 +364,8 @@ export default class TidalSource {
         `Falling back to default search mirror for: ${decodedTrack.title}`
       )
       const query = `${decodedTrack.title} ${decodedTrack.author}`
-      const searchWithDefault = this.getSearchWithDefaultFn()
-      if (!searchWithDefault) {
+
+      if (!this.nodelink.sources) {
         return {
           exception: {
             message: 'Default source search is not available.',
@@ -363,13 +374,13 @@ export default class TidalSource {
         }
       }
 
-      let searchResult = await searchWithDefault(
+      let searchResult = await this.nodelink.sources.searchWithDefault(
         decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query
       )
       let tracks = this.toTrackInfoArray(searchResult.data)
 
       if (searchResult.loadType !== 'search' || tracks.length === 0) {
-        searchResult = await searchWithDefault(query)
+        searchResult = await this.nodelink.sources.searchWithDefault(query)
         tracks = this.toTrackInfoArray(searchResult.data)
       }
 
@@ -428,7 +439,11 @@ export default class TidalSource {
       return { newTrack: { info: fallbackTrack }, ...streamInfo }
     } catch (error) {
       const message = this.getErrorMessage(error)
-      logger('error', 'Tidal', `getTrackUrl failed for "${decodedTrack.title}": ${message}`)
+      logger(
+        'error',
+        'Tidal',
+        `getTrackUrl failed for "${decodedTrack.title}": ${message}`
+      )
       return { exception: { message, severity: 'fault' } }
     }
   }
@@ -442,7 +457,9 @@ export default class TidalSource {
   public async loadStream(
     decodedTrack: TrackInfo,
     url: string
-  ): Promise<TrackStreamResult | { exception: { message: string; severity: string } }> {
+  ): Promise<
+    TrackStreamResult | { exception: { message: string; severity: string } }
+  > {
     try {
       const { stream, error, statusCode } = await makeRequest(url, {
         method: 'GET',
@@ -481,7 +498,11 @@ export default class TidalSource {
       return { stream: passthrough }
     } catch (error) {
       const message = this.getErrorMessage(error)
-      logger('error', 'Tidal', `loadStream error for ${decodedTrack.title}: ${message}`)
+      logger(
+        'error',
+        'Tidal',
+        `loadStream error for ${decodedTrack.title}: ${message}`
+      )
       return { exception: { message, severity: 'fault' } }
     }
   }
@@ -508,7 +529,7 @@ export default class TidalSource {
   private async resolveAlbum(id: string): Promise<SourceResult> {
     const albumData = await this.getJson(`albums/${id}`)
     const tracksData = await this.getJson(`albums/${id}/tracks`, { limit: 100 })
-    const items = this.asArrayRecords(tracksData?.['items'])
+    const items = this.asArrayRecords(tracksData?.items)
     if (!albumData || items.length === 0) return { loadType: 'empty', data: {} }
 
     const tracks = items
@@ -527,7 +548,7 @@ export default class TidalSource {
       loadType: 'playlist',
       data: {
         info: {
-          name: this.asString(albumData['title']) || 'Unknown Album',
+          name: this.asString(albumData.title) || 'Unknown Album',
           selectedTrack: 0
         },
         tracks
@@ -542,14 +563,15 @@ export default class TidalSource {
    */
   private async resolvePlaylist(id: string): Promise<SourceResult> {
     const playlistData = await this.getJson(`playlists/${id}`)
-    const totalTracks = this.asNumber(playlistData?.['numberOfTracks']) ?? 0
-    if (!playlistData || totalTracks === 0) return { loadType: 'empty', data: {} }
+    const totalTracks = this.asNumber(playlistData?.numberOfTracks) ?? 0
+    if (!playlistData || totalTracks === 0)
+      return { loadType: 'empty', data: {} }
 
     const firstPageData = await this.getJson(`playlists/${id}/tracks`, {
       limit: 50,
       offset: 0
     })
-    const firstItems = this.asArrayRecords(firstPageData?.['items'])
+    const firstItems = this.asArrayRecords(firstPageData?.items)
     if (firstItems.length === 0) return { loadType: 'empty', data: {} }
 
     const allItems = [...firstItems]
@@ -563,7 +585,9 @@ export default class TidalSource {
     const pageRequests: Array<Promise<Record<string, unknown> | null>> = []
     for (let i = 1; i < pagesToFetch; i++) {
       const offset = i * limit
-      pageRequests.push(this.getJson(`playlists/${id}/tracks`, { limit, offset }))
+      pageRequests.push(
+        this.getJson(`playlists/${id}/tracks`, { limit, offset })
+      )
     }
 
     if (pageRequests.length > 0) {
@@ -573,7 +597,7 @@ export default class TidalSource {
         try {
           const results = await Promise.all(batch)
           for (const page of results) {
-            allItems.push(...this.asArrayRecords(page?.['items']))
+            allItems.push(...this.asArrayRecords(page?.items))
           }
         } catch (error) {
           logger(
@@ -586,7 +610,7 @@ export default class TidalSource {
     }
 
     const tracks = allItems
-      .map((item) => this.asRecord(item['item']) || item)
+      .map((item) => this.asRecord(item.item) || item)
       .map((item) => this.buildTrack(item))
       .filter(
         (
@@ -601,14 +625,14 @@ export default class TidalSource {
     logger(
       'info',
       'Tidal',
-      `Loaded ${tracks.length} of ${totalTracks} tracks from playlist "${this.asString(playlistData['title']) || 'Unknown Playlist'}".`
+      `Loaded ${tracks.length} of ${totalTracks} tracks from playlist "${this.asString(playlistData.title) || 'Unknown Playlist'}".`
     )
 
     return {
       loadType: 'playlist',
       data: {
         info: {
-          name: this.asString(playlistData['title']) || 'Unknown Playlist',
+          name: this.asString(playlistData.title) || 'Unknown Playlist',
           selectedTrack: 0
         },
         tracks
@@ -623,7 +647,11 @@ export default class TidalSource {
    */
   private async resolveArtist(id: string): Promise<SourceResult> {
     if (this.hifiApis.length === 0) {
-      logger('warn', 'Tidal', `No hifi APIs configured, cannot load artist ${id}`)
+      logger(
+        'warn',
+        'Tidal',
+        `No hifi APIs configured, cannot load artist ${id}`
+      )
       return { loadType: 'empty', data: {} }
     }
 
@@ -637,8 +665,12 @@ export default class TidalSource {
     ])
 
     const tracksBody = this.asRecord(tracksRes.body)
-    const tracksList = this.asArrayRecords(tracksBody?.['tracks'])
-    if (tracksRes.error || tracksRes.statusCode !== 200 || tracksList.length === 0) {
+    const tracksList = this.asArrayRecords(tracksBody?.tracks)
+    if (
+      tracksRes.error ||
+      tracksRes.statusCode !== 200 ||
+      tracksList.length === 0
+    ) {
       logger(
         'warn',
         'Tidal',
@@ -648,8 +680,8 @@ export default class TidalSource {
     }
 
     const infoBody = this.asRecord(infoRes.body)
-    const artist = this.asRecord(infoBody?.['artist'])
-    const name = this.asString(artist?.['name']) || `Artist ${id}`
+    const artist = this.asRecord(infoBody?.artist)
+    const name = this.asString(artist?.name) || `Artist ${id}`
     const tracks = tracksList
       .map((item) => this.buildTrack(item))
       .filter(
@@ -662,7 +694,11 @@ export default class TidalSource {
         } => item !== null
       )
 
-    logger('debug', 'Tidal', `Loaded ${tracks.length} tracks for artist "${name}"`)
+    logger(
+      'debug',
+      'Tidal',
+      `Loaded ${tracks.length} tracks for artist "${name}"`
+    )
     return {
       loadType: 'playlist',
       data: { info: { name, selectedTrack: 0 }, tracks }
@@ -694,7 +730,9 @@ export default class TidalSource {
     })
 
     if (error || statusCode !== 200) {
-      throw new Error(`Failed to fetch from Tidal API: ${error || `Status ${statusCode}`}`)
+      throw new Error(
+        `Failed to fetch from Tidal API: ${error || `Status ${statusCode}`}`
+      )
     }
 
     if (typeof body === 'string') {
@@ -718,30 +756,32 @@ export default class TidalSource {
     info: TrackInfo
     pluginInfo: Record<string, unknown>
   } | null {
-    const idRaw = item['id']
+    const idRaw = item.id
     if (idRaw === undefined || idRaw === null) return null
     const identifier = String(idRaw)
 
-    const artists = this.asArrayRecords(item['artists'])
-      .map((artist) => this.asString(artist['name']))
+    const artists = this.asArrayRecords(item.artists)
+      .map((artist) => this.asString(artist.name))
       .filter((name): name is string => Boolean(name))
 
-    const album = this.asRecord(item['album'])
-    const cover = this.asString(album?.['cover'])
+    const album = this.asRecord(item.album)
+    const cover = this.asString(album?.cover)
 
     const trackInfo: TrackInfo = {
       identifier,
       isSeekable: true,
       author: artists.join(', ') || 'Unknown Artist',
-      length: (this.asNumber(item['duration']) ?? 0) * 1000,
+      length: (this.asNumber(item.duration) ?? 0) * 1000,
       isStream: false,
       position: 0,
-      title: this.asString(item['title']) || 'Unknown Title',
-      uri: this.asString(item['url']) || `https://tidal.com/browse/track/${identifier}`,
+      title: this.asString(item.title) || 'Unknown Title',
+      uri:
+        this.asString(item.url) ||
+        `https://tidal.com/browse/track/${identifier}`,
       artworkUrl: cover
         ? `https://resources.tidal.com/images/${cover.replace(/-/g, '/')}/1280x1280.jpg`
         : null,
-      isrc: this.asString(item['isrc']) || null,
+      isrc: this.asString(item.isrc) || null,
       sourceName: 'tidal'
     }
 
@@ -774,31 +814,43 @@ export default class TidalSource {
         try {
           const { body, error, statusCode } = await http1makeRequest(url, {})
           if (error || statusCode !== 200 || !body) {
-            logger('debug', 'Tidal', `  ✗ ${quality} @ ${baseUrl} → ${error || statusCode}`)
+            logger(
+              'debug',
+              'Tidal',
+              `  ✗ ${quality} @ ${baseUrl} → ${error || statusCode}`
+            )
             continue
           }
 
           const bodyObject = this.asRecord(body)
-          const data = this.asRecord(bodyObject?.['data'])
-          const rawManifest = this.asString(data?.['manifest'])
+          const data = this.asRecord(bodyObject?.data)
+          const rawManifest = this.asString(data?.manifest)
           if (!rawManifest) {
-            logger('debug', 'Tidal', `  ✗ ${quality} @ ${baseUrl} → no manifest field`)
+            logger(
+              'debug',
+              'Tidal',
+              `  ✗ ${quality} @ ${baseUrl} → no manifest field`
+            )
             continue
           }
 
           const manifest = this.asRecord(
             JSON.parse(Buffer.from(rawManifest, 'base64').toString('utf8'))
           )
-          const urls = this.toStringArray(manifest?.['urls'])
+          const urls = this.toStringArray(manifest?.urls)
           const streamUrl = urls[0]
           if (!streamUrl) {
-            logger('debug', 'Tidal', `  ✗ ${quality} @ ${baseUrl} → no URL in manifest`)
+            logger(
+              'debug',
+              'Tidal',
+              `  ✗ ${quality} @ ${baseUrl} → no URL in manifest`
+            )
             continue
           }
 
-          const mimeType = this.asString(manifest?.['mimeType']) || ''
+          const mimeType = this.asString(manifest?.mimeType) || ''
           const format = mimeType.includes('flac') ? 'flac' : 'mp4'
-          const codecs = this.asString(manifest?.['codecs']) || 'unknown'
+          const codecs = this.asString(manifest?.codecs) || 'unknown'
           logger(
             'debug',
             'Tidal',
@@ -815,7 +867,11 @@ export default class TidalSource {
       }
     }
 
-    logger('warn', 'Tidal', `All hifi APIs exhausted for track ${trackId}, will mirror`)
+    logger(
+      'warn',
+      'Tidal',
+      `All hifi APIs exhausted for track ${trackId}, will mirror`
+    )
     return null
   }
 
@@ -827,9 +883,8 @@ export default class TidalSource {
   private extractSecondClientId(text: string): string | null {
     const regex = /clientId\s*[:=]\s*"([^"]+)"/g
     let count = 0
-    let match: RegExpExecArray | null
 
-    while ((match = regex.exec(text))) {
+    for (const match of text.matchAll(regex)) {
       count += 1
       if (count === 2) return match[1] || null
     }
@@ -848,18 +903,18 @@ export default class TidalSource {
     const tracks: TrackInfo[] = []
     for (const item of data) {
       const itemRecord = this.asRecord(item)
-      const info = this.asRecord(itemRecord?.['info'])
+      const info = this.asRecord(itemRecord?.info)
       if (!info) continue
 
-      const identifier = this.asString(info['identifier'])
-      const isSeekable = this.asBoolean(info['isSeekable'])
-      const author = this.asString(info['author'])
-      const length = this.asNumber(info['length'])
-      const isStream = this.asBoolean(info['isStream'])
-      const position = this.asNumber(info['position'])
-      const title = this.asString(info['title'])
-      const uri = this.asString(info['uri'])
-      const sourceName = this.asString(info['sourceName'])
+      const identifier = this.asString(info.identifier)
+      const isSeekable = this.asBoolean(info.isSeekable)
+      const author = this.asString(info.author)
+      const length = this.asNumber(info.length)
+      const isStream = this.asBoolean(info.isStream)
+      const position = this.asNumber(info.position)
+      const title = this.asString(info.title)
+      const uri = this.asString(info.uri)
+      const sourceName = this.asString(info.sourceName)
 
       if (
         identifier === null ||
@@ -884,27 +939,13 @@ export default class TidalSource {
         position,
         title,
         uri,
-        artworkUrl: this.asString(info['artworkUrl']) || null,
-        isrc: this.asString(info['isrc']) || null,
+        artworkUrl: this.asString(info.artworkUrl) || null,
+        isrc: this.asString(info.isrc) || null,
         sourceName
       })
     }
 
     return tracks
-  }
-
-  /**
-   * Gets searchWithDefault function from source manager.
-   * @returns Search function or null.
-   */
-  private getSearchWithDefaultFn():
-    | ((query: string) => Promise<SourceResult>)
-    | null {
-    const sourcesObject = this.asRecord(this.nodelink.sources)
-    const fn = sourcesObject?.['searchWithDefault']
-    return typeof fn === 'function'
-      ? (fn as (query: string) => Promise<SourceResult>)
-      : null
   }
 
   /**

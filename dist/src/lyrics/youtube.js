@@ -5,7 +5,10 @@ import { logger, makeRequest } from "../utils.js";
  * @returns Decoded text.
  * @internal
  */
-const decodeCaptionText = (text) => text.replace(/&amp;#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+const decodeCaptionText = (text) => text
+    .replace(/&amp;#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
 /**
  * YouTube captions lyrics provider.
  * @public
@@ -40,7 +43,8 @@ export default class YouTubeLyrics {
         let trackLang = null;
         if (language) {
             trackLang =
-                captionTracks.find((caption) => caption.languageCode === language) ?? null;
+                captionTracks.find((caption) => caption.languageCode === language) ??
+                    null;
             if (!trackLang) {
                 const defaultTrack = captionTracks.find((caption) => caption.languageCode.startsWith('en')) ||
                     captionTracks.find((caption) => caption.kind !== 'asr') ||
@@ -95,7 +99,9 @@ export default class YouTubeLyrics {
         else {
             url += '&fmt=json3';
         }
-        const { body, error, statusCode } = await makeRequest(url, { method: 'GET' });
+        const { body, error, statusCode } = await makeRequest(url, {
+            method: 'GET'
+        });
         if (error || statusCode !== 200) {
             logger('error', 'Lyrics', `Failed to fetch lyrics content from ${url}: ${error || statusCode}`);
             return { loadType: 'empty', data: {} };

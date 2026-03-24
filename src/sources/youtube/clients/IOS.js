@@ -120,7 +120,7 @@ export default class IOS extends BaseClient {
             body: requestBody,
             method: 'POST',
             disableBodyCompression: true,
-        proxy: this.getProxy()
+            proxy: this.getProxy()
           }
         )
 

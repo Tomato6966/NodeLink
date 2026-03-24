@@ -71,7 +71,7 @@ export default class QobuzSource {
      */
     async setup() {
         const qobuzConfig = this.getQobuzConfig();
-        this.userToken = this.asString(qobuzConfig['userToken']);
+        this.userToken = this.asString(qobuzConfig.userToken);
         const credentialManager = this.nodelink.credentialManager;
         const cachedAppId = credentialManager?.get('qobuz_app_id') || null;
         const cachedAppSecret = credentialManager?.get('qobuz_app_secret') || null;
@@ -122,8 +122,8 @@ export default class QobuzSource {
             limit: this.getMaxSearchResults(),
             type: 'tracks'
         });
-        const tracksBlock = this.asRecord(data?.['tracks']);
-        const items = this.asArrayRecords(tracksBlock?.['items']);
+        const tracksBlock = this.asRecord(data?.tracks);
+        const items = this.asArrayRecords(tracksBlock?.items);
         if (items.length === 0)
             return { loadType: 'empty', data: {} };
         const tracks = items.map((item) => this.buildTrack(item));
@@ -139,8 +139,8 @@ export default class QobuzSource {
             const trackData = await this.apiRequest('/track/get', { track_id: id });
             if (!trackData)
                 return { loadType: 'empty', data: {} };
-            const performer = this.asRecord(trackData['performer']);
-            const artistId = this.asNumber(performer?.['id']);
+            const performer = this.asRecord(trackData.performer);
+            const artistId = this.asNumber(performer?.id);
             if (!artistId)
                 return { loadType: 'empty', data: {} };
             const payload = {
@@ -158,8 +158,8 @@ export default class QobuzSource {
                 body: payload,
                 disableBodyCompression: true
             });
-            const tracksBlock = this.asRecord(data?.['tracks']);
-            const items = this.asArrayRecords(tracksBlock?.['items']);
+            const tracksBlock = this.asRecord(data?.tracks);
+            const items = this.asArrayRecords(tracksBlock?.items);
             if (items.length === 0) {
                 return { loadType: 'empty', data: {} };
             }
@@ -224,9 +224,9 @@ export default class QobuzSource {
                 type: 'tracks',
                 limit: 1
             });
-            const tracksBlock = this.asRecord(search?.['tracks']);
-            const items = this.asArrayRecords(tracksBlock?.['items']);
-            data = items.find((item) => String(item['id']) === String(id)) || null;
+            const tracksBlock = this.asRecord(search?.tracks);
+            const items = this.asArrayRecords(tracksBlock?.items);
+            data = items.find((item) => String(item.id) === String(id)) || null;
         }
         if (!data)
             return { loadType: 'empty', data: {} };
@@ -249,35 +249,38 @@ export default class QobuzSource {
                 type: 'albums',
                 limit: 1
             });
-            const albumsBlock = this.asRecord(search?.['albums']);
-            const albums = this.asArrayRecords(albumsBlock?.['items']);
+            const albumsBlock = this.asRecord(search?.albums);
+            const albums = this.asArrayRecords(albumsBlock?.items);
             const album = albums.find((item) => {
-                const qobuzId = this.asNumber(item['qobuz_id']);
-                return String(item['id']) === String(id) || qobuzId === Number(id);
+                const qobuzId = this.asNumber(item.qobuz_id);
+                return String(item.id) === String(id) || qobuzId === Number(id);
             });
             if (album) {
                 data = await this.apiRequest('/album/get', {
-                    album_id: String(album['id']),
+                    album_id: String(album.id),
                     limit: Math.min(max, 50)
                 });
             }
         }
-        const tracksBlock = this.asRecord(data?.['tracks']);
+        const tracksBlock = this.asRecord(data?.tracks);
         if (!data || !tracksBlock)
             return { loadType: 'empty', data: {} };
-        const allItems = await this.fetchRemainingTracks('/album/get', { album_id: String(data['id']) }, tracksBlock, max);
+        const allItems = await this.fetchRemainingTracks('/album/get', { album_id: String(data.id) }, tracksBlock, max);
         const tracks = allItems.map((item) => {
-            item['album'] = {
-                title: data['title'],
-                image: data['image'],
-                id: data['id']
+            item.album = {
+                title: data.title,
+                image: data.image,
+                id: data.id
             };
             return this.buildTrack(item);
         });
         return {
             loadType: 'playlist',
             data: {
-                info: { name: this.asString(data['title']) || 'Unknown Album', selectedTrack: 0 },
+                info: {
+                    name: this.asString(data.title) || 'Unknown Album',
+                    selectedTrack: 0
+                },
                 tracks
             }
         };
@@ -294,7 +297,7 @@ export default class QobuzSource {
             extra: 'tracks',
             limit: Math.min(max, 50)
         });
-        const tracksBlock = this.asRecord(data?.['tracks']);
+        const tracksBlock = this.asRecord(data?.tracks);
         if (!data || !tracksBlock)
             return { loadType: 'empty', data: {} };
         const allItems = await this.fetchRemainingTracks('/playlist/get', { playlist_id: id, extra: 'tracks' }, tracksBlock, max);
@@ -302,7 +305,10 @@ export default class QobuzSource {
         return {
             loadType: 'playlist',
             data: {
-                info: { name: this.asString(data['name']) || 'Unknown Playlist', selectedTrack: 0 },
+                info: {
+                    name: this.asString(data.name) || 'Unknown Playlist',
+                    selectedTrack: 0
+                },
                 tracks
             }
         };
@@ -319,12 +325,12 @@ export default class QobuzSource {
             extra: 'tracks',
             limit: Math.min(max, 50)
         });
-        const tracksBlock = this.asRecord(data?.['tracks']);
+        const tracksBlock = this.asRecord(data?.tracks);
         if (!data || !tracksBlock)
             return { loadType: 'empty', data: {} };
         const allItems = await this.fetchRemainingTracks('/artist/get', { artist_id: id, extra: 'tracks' }, tracksBlock, max);
         const tracks = allItems.map((item) => this.buildTrack(item));
-        const artistName = this.asString(data['name']) || 'Unknown Artist';
+        const artistName = this.asString(data.name) || 'Unknown Artist';
         return {
             loadType: 'playlist',
             data: {
@@ -340,7 +346,7 @@ export default class QobuzSource {
      */
     async getTrackUrl(decodedTrack) {
         const qobuzConfig = this.getQobuzConfig();
-        const formatId = this.asString(qobuzConfig['formatId']) || '5';
+        const formatId = this.asString(qobuzConfig.formatId) || '5';
         if (this.userToken && this.appSecret) {
             try {
                 const unixTs = Math.floor(Date.now() / 1000);
@@ -356,8 +362,8 @@ export default class QobuzSource {
                     format_id: formatId,
                     intent: 'stream'
                 });
-                const directUrl = this.asString(data?.['url']);
-                const sampleFlag = data?.['sample'];
+                const directUrl = this.asString(data?.url);
+                const sampleFlag = data?.sample;
                 const isSample = sampleFlag === true || sampleFlag === 'true';
                 if (directUrl && !isSample) {
                     return { url: directUrl, protocol: 'https' };
@@ -392,15 +398,15 @@ export default class QobuzSource {
      * @returns Track object list.
      */
     async fetchRemainingTracks(path, params, initialTracks, max) {
-        const items = this.asArrayRecords(initialTracks['items']);
-        const initialTotal = this.asNumber(initialTracks['total']) ?? items.length;
+        const items = this.asArrayRecords(initialTracks.items);
+        const initialTotal = this.asNumber(initialTracks.total) ?? items.length;
         const total = Math.min(initialTotal, max);
         let offset = items.length;
         while (items.length < total) {
             const limit = Math.min(50, total - items.length);
             const data = await this.apiRequest(path, { ...params, limit, offset });
-            const tracksBlock = this.asRecord(data?.['tracks']);
-            const batchItems = this.asArrayRecords(tracksBlock?.['items']);
+            const tracksBlock = this.asRecord(data?.tracks);
+            const batchItems = this.asArrayRecords(tracksBlock?.items);
             if (batchItems.length === 0)
                 break;
             items.push(...batchItems);
@@ -424,14 +430,14 @@ export default class QobuzSource {
         }
         try {
             const { body, statusCode } = await http1makeRequest(url.toString(), {
-                method: this.asString(options['method']) || 'GET',
+                method: this.asString(options.method) || 'GET',
                 headers: {
                     'x-app-id': this.appId || '',
                     'x-user-auth-token': this.userToken || '',
-                    ...(this.asRecord(options['headers']) || {})
+                    ...(this.asRecord(options.headers) || {})
                 },
-                body: this.asRequestBody(options['body']),
-                disableBodyCompression: this.asBoolean(options['disableBodyCompression']) ?? false
+                body: this.asRequestBody(options.body),
+                disableBodyCompression: this.asBoolean(options.disableBodyCompression) ?? false
             });
             if (statusCode !== 200) {
                 logger('debug', 'Qobuz', `API Error (${statusCode}) on ${path}: ${JSON.stringify(body)}`);
@@ -499,8 +505,8 @@ export default class QobuzSource {
         if (!groups) {
             return null;
         }
-        const info = groups['info'];
-        const extras = groups['extras'];
+        const info = groups.info;
+        const extras = groups.extras;
         if (typeof info !== 'string' || typeof extras !== 'string') {
             return null;
         }
@@ -513,25 +519,25 @@ export default class QobuzSource {
      * @returns Encoded track payload.
      */
     buildTrack(item) {
-        const artist = this.asRecord(item['artist']);
-        const performer = this.asRecord(item['performer']);
-        const album = this.asRecord(item['album']);
-        const albumImage = this.asRecord(album?.['image']);
+        const artist = this.asRecord(item.artist);
+        const performer = this.asRecord(item.performer);
+        const album = this.asRecord(item.album);
+        const albumImage = this.asRecord(album?.image);
         const trackInfo = {
-            identifier: String(item['id']),
+            identifier: String(item.id),
             isSeekable: true,
-            author: this.asString(artist?.['name']) ||
-                this.asString(performer?.['name']) ||
+            author: this.asString(artist?.name) ||
+                this.asString(performer?.name) ||
                 'Unknown Artist',
-            length: (this.asNumber(item['duration']) ?? 0) * 1000,
+            length: (this.asNumber(item.duration) ?? 0) * 1000,
             isStream: false,
             position: 0,
-            title: this.asString(item['title']) || 'Unknown Title',
-            uri: `https://open.qobuz.com/track/${item['id']}`,
-            artworkUrl: this.asString(albumImage?.['large']) ||
-                this.asString(albumImage?.['small']) ||
+            title: this.asString(item.title) || 'Unknown Title',
+            uri: `https://open.qobuz.com/track/${item.id}`,
+            artworkUrl: this.asString(albumImage?.large) ||
+                this.asString(albumImage?.small) ||
                 null,
-            isrc: this.asString(item['isrc']) || null,
+            isrc: this.asString(item.isrc) || null,
             sourceName: 'qobuz'
         };
         const encodedInput = { ...trackInfo, details: [] };
@@ -549,20 +555,11 @@ export default class QobuzSource {
     async getMirrorUrl(decodedTrack) {
         const query = `${decodedTrack.title} ${decodedTrack.author}`;
         try {
-            const searchWithDefault = this.getSearchWithDefaultFn();
-            if (!searchWithDefault) {
-                return {
-                    exception: {
-                        message: 'Default source search is not available.',
-                        severity: 'fault'
-                    }
-                };
-            }
-            let result = await searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
+            let result = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
             if (result.loadType !== 'search' ||
                 !Array.isArray(result.data) ||
                 result.data.length === 0) {
-                result = await searchWithDefault(query);
+                result = await this.nodelink.sources.searchWithDefault(query);
             }
             if (result.loadType !== 'search' ||
                 !Array.isArray(result.data) ||
@@ -616,7 +613,7 @@ export default class QobuzSource {
      * @returns Qobuz config object.
      */
     getQobuzConfig() {
-        const sourceConfig = this.config.sources?.['qobuz'];
+        const sourceConfig = this.config.sources?.qobuz;
         return this.asRecord(sourceConfig) || {};
     }
     /**
@@ -624,32 +621,21 @@ export default class QobuzSource {
      * @returns True when explicit content is allowed.
      */
     getAllowExplicit() {
-        return this.asBoolean(this.getQobuzConfig()['allowExplicit']) ?? true;
+        return this.asBoolean(this.getQobuzConfig().allowExplicit) ?? true;
     }
     /**
      * Reads max search results from runtime config.
      * @returns Max search size.
      */
     getMaxSearchResults() {
-        return this.asNumber(this.config['maxSearchResults']) ?? 10;
+        return this.asNumber(this.config.maxSearchResults) ?? 10;
     }
     /**
      * Reads max playlist/album load size from runtime config.
      * @returns Max playlist size.
      */
     getMaxAlbumPlaylistLength() {
-        return this.asNumber(this.config['maxAlbumPlaylistLength']) ?? 100;
-    }
-    /**
-     * Gets searchWithDefault function from source manager.
-     * @returns Search function or null.
-     */
-    getSearchWithDefaultFn() {
-        const sourcesObject = this.asRecord(this.nodelink.sources);
-        const fn = sourcesObject?.['searchWithDefault'];
-        return typeof fn === 'function'
-            ? fn
-            : null;
+        return this.asNumber(this.config.maxAlbumPlaylistLength) ?? 100;
     }
     /**
      * Converts unknown search results into TrackInfo list.
@@ -662,18 +648,18 @@ export default class QobuzSource {
         const tracks = [];
         for (const item of data) {
             const itemRecord = this.asRecord(item);
-            const info = this.asRecord(itemRecord?.['info']);
+            const info = this.asRecord(itemRecord?.info);
             if (!info)
                 continue;
-            const identifier = this.asString(info['identifier']);
-            const isSeekable = this.asBoolean(info['isSeekable']);
-            const author = this.asString(info['author']);
-            const length = this.asNumber(info['length']);
-            const isStream = this.asBoolean(info['isStream']);
-            const position = this.asNumber(info['position']);
-            const title = this.asString(info['title']);
-            const uri = this.asString(info['uri']);
-            const sourceName = this.asString(info['sourceName']);
+            const identifier = this.asString(info.identifier);
+            const isSeekable = this.asBoolean(info.isSeekable);
+            const author = this.asString(info.author);
+            const length = this.asNumber(info.length);
+            const isStream = this.asBoolean(info.isStream);
+            const position = this.asNumber(info.position);
+            const title = this.asString(info.title);
+            const uri = this.asString(info.uri);
+            const sourceName = this.asString(info.sourceName);
             if (identifier === null ||
                 isSeekable === null ||
                 author === null ||
@@ -694,8 +680,8 @@ export default class QobuzSource {
                 position,
                 title,
                 uri,
-                artworkUrl: this.asString(info['artworkUrl']) || null,
-                isrc: this.asString(info['isrc']) || null,
+                artworkUrl: this.asString(info.artworkUrl) || null,
+                isrc: this.asString(info.isrc) || null,
                 sourceName
             });
         }

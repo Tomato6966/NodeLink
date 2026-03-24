@@ -210,19 +210,28 @@ export async function fetchCanvas(
 ): Promise<SpotifyCanvasFetchResult | null> {
   try {
     const trackUriBuf = Buffer.from(trackUri)
-    const trackBuf = Buffer.concat([Buffer.from([0x0a, trackUriBuf.length]), trackUriBuf])
-    const requestBuf = Buffer.concat([Buffer.from([0x0a, trackBuf.length]), trackBuf])
+    const trackBuf = Buffer.concat([
+      Buffer.from([0x0a, trackUriBuf.length]),
+      trackUriBuf
+    ])
+    const requestBuf = Buffer.concat([
+      Buffer.from([0x0a, trackBuf.length]),
+      trackBuf
+    ])
 
-    const res = await fetch('https://spclient.wg.spotify.com/canvaz-cache/v0/canvases', {
-      method: 'POST',
-      body: requestBuf,
-      headers: {
-        Accept: 'application/protobuf',
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Spotify/9.0.34.593 iOS/18.4 (iPhone15,3)',
-        Authorization: `Bearer ${token}`
+    const res = await fetch(
+      'https://spclient.wg.spotify.com/canvaz-cache/v0/canvases',
+      {
+        method: 'POST',
+        body: requestBuf,
+        headers: {
+          Accept: 'application/protobuf',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'User-Agent': 'Spotify/9.0.34.593 iOS/18.4 (iPhone15,3)',
+          Authorization: `Bearer ${token}`
+        }
       }
-    })
+    )
 
     if (!res.ok) return null
 

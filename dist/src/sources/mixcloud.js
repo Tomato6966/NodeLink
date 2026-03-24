@@ -233,7 +233,7 @@ export default class MixcloudSource {
         const key = Buffer.from(DECRYPTION_KEY);
         const decrypted = Buffer.alloc(ciphertext.length);
         for (let i = 0; i < ciphertext.length; i++) {
-            decrypted[i] = ciphertext[i] ^ key[i % key.length];
+            decrypted[i] = (ciphertext[i] ?? 0) ^ (key[i % key.length] ?? 0);
         }
         return decrypted.toString('utf-8');
     }
@@ -257,7 +257,10 @@ export default class MixcloudSource {
      * @returns Track or error result.
      */
     async _resolveTrack(url) {
-        const match = url.match(this.patterns[0]);
+        const pattern = this.patterns[0];
+        if (!pattern)
+            return this.emptyResult();
+        const match = url.match(pattern);
         const groups = (match?.groups || {});
         const username = groups.user;
         const slug = groups.slug;
@@ -300,7 +303,10 @@ export default class MixcloudSource {
      * @returns Playlist or error result.
      */
     async _resolvePlaylist(url) {
-        const match = url.match(this.patterns[1]);
+        const pattern = this.patterns[1];
+        if (!pattern)
+            return this.emptyResult();
+        const match = url.match(pattern);
         const groups = (match?.groups || {});
         const user = groups.user;
         const slug = groups.playlist;
@@ -372,7 +378,10 @@ export default class MixcloudSource {
      * @returns Playlist or error result.
      */
     async _resolveUser(url) {
-        const match = url.match(this.patterns[2]);
+        const pattern = this.patterns[2];
+        if (!pattern)
+            return this.emptyResult();
+        const match = url.match(pattern);
         const groups = (match?.groups || {});
         const username = groups.id;
         const type = groups.type || 'uploads';

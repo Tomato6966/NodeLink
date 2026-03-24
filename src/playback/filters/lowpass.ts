@@ -5,7 +5,7 @@ import { clamp16Bit } from './dsp/clamp16Bit.ts'
 
 const CHANNELS = 2
 
-const BUTTERWORTH_Q = 0.7071067811865476
+const BUTTERWORTH_Q = Math.SQRT1_2
 const SUB_BLOCK_FRAMES = 64
 const TWO_PI = 2 * Math.PI
 
@@ -35,7 +35,6 @@ export default class Lowpass extends AnimatableFilter {
       {
         lowpass: {
           logSmoothing: targetLogSmoothing,
-          transition: (rawConfig as any).transition
         }
       },
       'lowpass',
@@ -44,13 +43,13 @@ export default class Lowpass extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    const logSmoothing = config['logSmoothing'] ?? 0
+    const logSmoothing = config.logSmoothing ?? 0
     this._currentLogSmoothing = logSmoothing
     this._computeCoefficients(logSmoothing)
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const logSmoothing = config ? config['logSmoothing'] : null
+    const logSmoothing = config ? config.logSmoothing : null
     if (logSmoothing !== null && logSmoothing !== undefined) {
       return logSmoothing > 0.001
     }

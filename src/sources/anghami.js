@@ -14,7 +14,7 @@ export default class AnghamiSource {
 
     this.cookieHeader = ''
 
-    if (this.config.sources.anghami && this.config.sources.anghami.cookies) {
+    if (this.config.sources.anghami?.cookies) {
       this.cookieHeader = this.config.sources.anghami.cookies
       this.parseFingerprintFromCookies()
     }
@@ -73,7 +73,7 @@ export default class AnghamiSource {
     }
 
     if (this.cookieHeader) {
-      headers['Cookie'] = this.cookieHeader
+      headers.Cookie = this.cookieHeader
     }
 
     const { body, error } = await makeRequest(searchUrl, {
@@ -136,7 +136,7 @@ export default class AnghamiSource {
     }
 
     if (this.cookieHeader) {
-      headers['Cookie'] = this.cookieHeader
+      headers.Cookie = this.cookieHeader
     }
 
     if (type === 'song') {
@@ -153,7 +153,7 @@ export default class AnghamiSource {
           headers
         })
 
-        if (searchBody && searchBody.sections) {
+        if (searchBody?.sections) {
           for (const sec of searchBody.sections) {
             if (sec.data) {
               const match = sec.data.find((s) => s.id === id)
@@ -223,7 +223,9 @@ export default class AnghamiSource {
                 })
               }
             } else {
-              songMap.forEach((song) => tracks.push(this.buildTrack(song)))
+              for (const song of songMap.values()) {
+                tracks.push(this.buildTrack(song))
+              }
             }
           } catch (e) {
             logger(
@@ -241,22 +243,20 @@ export default class AnghamiSource {
               s.group === 'songs' ||
               s.group === 'album_songs'
           )
-          if (songsSec && songsSec.data) {
+          if (songsSec?.data) {
             tracks = songsSec.data.map((item) => this.buildTrack(item))
           }
         }
 
         const songsMapData =
-          (body.playlist && body.playlist.songs) ||
-          body.songs ||
-          (body.album && body.album.songs)
+          body.playlist?.songs || body.songs || body.album?.songs
         if (tracks.length === 0 && songsMapData) {
           const songsMap = new Map()
           Object.keys(songsMapData).forEach((key) => {
             const s = songsMapData[key]
             if (typeof s !== 'object') return
             const songObj = s._attributes || s
-            if (songObj && songObj.id) {
+            if (songObj?.id) {
               songsMap.set(songObj.id.toString(), songObj)
             }
           })
@@ -271,7 +271,9 @@ export default class AnghamiSource {
             })
           }
           if (tracks.length === 0) {
-            songsMap.forEach((song) => tracks.push(this.buildTrack(song)))
+            for (const song of songsMap.values()) {
+              tracks.push(this.buildTrack(song))
+            }
           }
         }
 
@@ -336,9 +338,8 @@ export default class AnghamiSource {
     const searchQuery = `${decodedTrack.title} - ${decodedTrack.author}`
 
     try {
-      let searchResult
-
-      searchResult = await this.nodelink.sources.searchWithDefault(searchQuery)
+      const searchResult =
+        await this.nodelink.sources.searchWithDefault(searchQuery)
 
       if (
         !searchResult ||
@@ -624,7 +625,7 @@ class Reader {
         this.pos += 4
         break
       default:
-        throw new Error('Unknown wire type: ' + wireType)
+        throw new Error(`Unknown wire type: ${wireType}`)
     }
   }
 }

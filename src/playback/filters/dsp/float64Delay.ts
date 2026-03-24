@@ -46,7 +46,7 @@ export class Float64DelayLine {
     if (delayInSamples <= 0) {
       // Reading current write position (most recent sample)
       const idx = (this.writeIndex - 1 + this.size) % this.size
-      return this.buffer[idx]!
+      return this.buffer[idx] ?? 0
     }
 
     const clamped = Math.min(delayInSamples, this.size - 1)
@@ -56,8 +56,8 @@ export class Float64DelayLine {
     const idx0 = (this.writeIndex - intDelay - 1 + this.size * 2) % this.size
     const idx1 = (idx0 - 1 + this.size) % this.size
 
-    const s0 = this.buffer[idx0]!
-    const s1 = this.buffer[idx1]!
+    const s0 = this.buffer[idx0] ?? 0
+    const s1 = this.buffer[idx1] ?? 0
 
     // Linear interpolation: (1-frac)×s0 + frac×s1
     return s0 + frac * (s1 - s0)

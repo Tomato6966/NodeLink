@@ -431,10 +431,10 @@ export class PoTokenManager {
         visitorData: this.visitorData,
         poToken: contentPoToken,
         legacyPoToken,
-        integrityToken: this.integrityToken?.slice(0, 20) + '...'
+        integrityToken: `${this.integrityToken?.slice(0, 20)}...`
       }
 
-      await appendFile(TOKENS_LOG_PATH, JSON.stringify(entry) + '\n').catch(
+      await appendFile(TOKENS_LOG_PATH, `${JSON.stringify(entry)}\n`).catch(
         () => {}
       )
 
@@ -458,7 +458,7 @@ export class PoTokenManager {
         'PoToken',
         `Failed to generate token for ${videoId}: ${error.message}`
       )
-      await appendFile(TOKENS_LOG_PATH, JSON.stringify(errEntry) + '\n').catch(
+      await appendFile(TOKENS_LOG_PATH, `${JSON.stringify(errEntry)}\n`).catch(
         () => {}
       )
 

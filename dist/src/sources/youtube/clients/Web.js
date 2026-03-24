@@ -173,7 +173,7 @@ export default class Web extends BaseClient {
         }
     }
     async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
-        if (this.oauth && this.oauth.accessToken) {
+        if (this.oauth?.accessToken) {
             await this.oauth.getAccessToken();
         }
         const { poToken, visitorData } = await this.poTokenManager.generate(decodedTrack.identifier);
@@ -276,7 +276,7 @@ export default class Web extends BaseClient {
                     };
                 }
             }
-            catch (e) { }
+            catch (_e) { }
         }
         return super.getTrackUrl(decodedTrack, context, cipherManager, itag);
     }

@@ -1,4 +1,4 @@
-import { PassThrough, Readable } from 'node:stream'
+import { PassThrough } from 'node:stream'
 import * as MP4Box from 'mp4box'
 import { encodeTrack, http1makeRequest, logger } from '../utils.ts'
 
@@ -46,10 +46,22 @@ export default class EternalboxSource {
     ].join('|')
 
     this.patterns = [
-      new RegExp(`https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/jukebox_go\\.html\\?id=([A-Za-z0-9]+)`, 'i'),
-      new RegExp(`https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/analysis\\/analyse\\/([A-Za-z0-9]+)`, 'i'),
-      new RegExp(`https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/audio\\/jukebox\\/([A-Za-z0-9]+)`, 'i'),
-      new RegExp(`https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/audio\\/jukebox\\/([A-Za-z0-9]+)\\/location`, 'i')
+      new RegExp(
+        `https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/jukebox_go\\.html\\?id=([A-Za-z0-9]+)`,
+        'i'
+      ),
+      new RegExp(
+        `https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/analysis\\/analyse\\/([A-Za-z0-9]+)`,
+        'i'
+      ),
+      new RegExp(
+        `https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/audio\\/jukebox\\/([A-Za-z0-9]+)`,
+        'i'
+      ),
+      new RegExp(
+        `https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/audio\\/jukebox\\/([A-Za-z0-9]+)\\/location`,
+        'i'
+      )
     ]
     this.priority = 60
     this.cache = new Map()

@@ -36,13 +36,7 @@ export default class Android extends BaseClient {
     return false
   }
 
-  async search(
-    query,
-    type,
-    context,
-    proxy,
-    reportProxyStatus = () => {}
-  ) {
+  async search(query, type, context, proxy, reportProxyStatus = () => {}) {
     const sourceName = 'youtube'
 
     let params = 'EgIQAQ%3D%3D' // Default to track (video)

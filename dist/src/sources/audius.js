@@ -115,7 +115,7 @@ export default class AudiusSource {
     _createExceptionResponse(message, severity = 'fault') {
         return { exception: { message, severity } };
     }
-    async search(query, sourceTerm, searchType = 'track') {
+    async search(query, _sourceTerm, _searchType = 'track') {
         try {
             const limit = this.config.maxSearchResults || 10;
             const endpoint = `/v1/tracks/search?query=${encodeURIComponent(query)}&limit=${limit}`;
@@ -345,7 +345,7 @@ export default class AudiusSource {
             .map((item) => this._buildTrack(item))
             .filter(Boolean);
     }
-    async getTrackUrl(decodedTrack, itag) {
+    async getTrackUrl(decodedTrack, _itag) {
         try {
             logger('debug', 'Audius', `Getting track URL for track ID: ${decodedTrack.identifier}`);
             if (!decodedTrack.identifier) {
@@ -404,7 +404,7 @@ export default class AudiusSource {
             return null;
         }
     }
-    async loadStream(track, url, protocol, additionalData) {
+    async loadStream(_track, url, _protocol, _additionalData) {
         try {
             logger('debug', 'Audius', `Loading stream from URL: ${url}`);
             const response = await http1makeRequest(url, {

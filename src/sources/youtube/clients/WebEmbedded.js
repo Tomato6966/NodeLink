@@ -58,7 +58,7 @@ export default class WebEmbedded extends BaseClient {
       },
       body: requestBody,
       disableBodyCompression: true,
-        proxy: this.getProxy()
+      proxy: this.getProxy()
     })
 
     if (error || statusCode !== 200) {
@@ -220,7 +220,7 @@ export default class WebEmbedded extends BaseClient {
             body: requestBody,
             method: 'POST',
             disableBodyCompression: true,
-        proxy: this.getProxy()
+            proxy: this.getProxy()
           }
         )
 
@@ -303,7 +303,7 @@ export default class WebEmbedded extends BaseClient {
       },
       body: requestBody,
       disableBodyCompression: true,
-        proxy: this.getProxy()
+      proxy: this.getProxy()
     })
 
     if (error || statusCode !== 200) {

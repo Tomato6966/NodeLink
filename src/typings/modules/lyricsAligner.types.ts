@@ -113,4 +113,5 @@ export interface PendingDeviation {
    */
   index: number
 }
+
 import type { LyricsLine } from '../lyrics/musixmatch.types.ts'

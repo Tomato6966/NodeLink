@@ -393,7 +393,7 @@ export default class YandexMusicSource {
         }
         return parsed;
     }
-    _parsePlaylist(data, domain, playlistUrl) {
+    _parsePlaylist(data, domain, _playlistUrl) {
         const result = data?.result;
         if (!result?.tracks?.length)
             return { loadType: 'empty', data: {} };

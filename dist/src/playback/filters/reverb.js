@@ -40,7 +40,7 @@ class CombFilter {
      * No clamping inside the loop — full Float64 precision.
      */
     process(input) {
-        const output = this.buffer[this.writeIndex];
+        const output = this.buffer[this.writeIndex] ?? 0;
         this.filterStore = output * this.damp2 + this.filterStore * this.damp1;
         this.buffer[this.writeIndex] = input + this.filterStore * this.feedback;
         this.writeIndex = (this.writeIndex + 1) % this.size;
@@ -147,16 +147,15 @@ export default class Reverb extends AnimatableFilter {
         const targetAlpha = isDisabled ? 0.0 : isActive ? 1.0 : 0.0;
         super.applyAnimatedUpdate({
             reverb: {
-                alpha: targetAlpha,
-                transition: r.transition
+                alpha: targetAlpha
             }
         }, 'reverb', { alpha: 0.0 });
     }
     onConfigChanged(config) {
-        this.alpha = config['alpha'] ?? 0;
+        this.alpha = config.alpha ?? 0;
     }
     isConfigActive(config) {
-        const a = config ? config['alpha'] : this.alpha;
+        const a = config ? config.alpha : this.alpha;
         return (a ?? 0) > 0.001;
     }
     /**
@@ -164,9 +163,9 @@ export default class Reverb extends AnimatableFilter {
      * No Int16 clamping inside — full precision preserved.
      */
     processAllpass(input, buffer, writeIdx, idx, stateY, stateIdx) {
-        const pos = writeIdx[idx];
-        const delayed = buffer[pos];
-        const output = -input + delayed + this.allpassCoeff * (input - stateY[stateIdx]);
+        const pos = writeIdx[idx] ?? 0;
+        const delayed = buffer[pos] ?? 0;
+        const output = -input + delayed + this.allpassCoeff * (input - (stateY[stateIdx] ?? 0));
         buffer[pos] = input;
         writeIdx[idx] = (pos + 1) % buffer.length;
         stateY[stateIdx] = output;
@@ -211,8 +210,12 @@ export default class Reverb extends AnimatableFilter {
                     }
                 }
                 for (let j = 0; j < this.allpassBuffersL.length; j++) {
-                    leftOut = this.processAllpass(leftOut, this.allpassBuffersL[j], this.allpassWriteL, j, this.allpassStateL, j);
-                    rightOut = this.processAllpass(rightOut, this.allpassBuffersR[j], this.allpassWriteR, j, this.allpassStateR, j);
+                    const bufL = this.allpassBuffersL[j];
+                    const bufR = this.allpassBuffersR[j];
+                    if (bufL && bufR) {
+                        leftOut = this.processAllpass(leftOut, bufL, this.allpassWriteL, j, this.allpassStateL, j);
+                        rightOut = this.processAllpass(rightOut, bufR, this.allpassWriteR, j, this.allpassStateR, j);
+                    }
                 }
                 leftOut *= this.combNorm;
                 rightOut *= this.combNorm;

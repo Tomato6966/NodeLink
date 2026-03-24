@@ -125,7 +125,7 @@ export default class LastFMSource {
                 // For track pages, we attempt to resolve the track by searching YouTube with various query formulations based on the track title and artist.
                 const rawTitle = path[2] ?? '';
                 const fullTitle = sanitizeQuery(rawTitle);
-                // We strip any "(feat. ...)" suffix from the title to create a "core title" for more effective searching, since YouTube often omits featured artists from the title.
+                // We strip unknown "(feat. ...)" suffix from the title to create a "core title" for more effective searching, since YouTube often omits featured artists from the title.
                 const coreTitle = fullTitle.replace(/\s*\(feat\..*?\)/i, '').trim();
                 logger('info', 'LastFM', `Resolving track: "${fullTitle}" by "${artist}"`);
                 // 1st attempt: core title + "official audio"
@@ -133,7 +133,7 @@ export default class LastFMSource {
                     const r1 = await this.searchPreferredTracks(`${artist} ${coreTitle} official audio`);
                     if (r1[0]) {
                         const t = this.rewrapDelegatedTrack(r1[0], url);
-                        logger('info', 'LastFM', `Resolved via core+official: ${t.info.title}`);
+                        logger('info', 'LastFM', `Resolved via core+official: ${t.info?.title}`);
                         return { loadType: 'track', data: t };
                     }
                 }
@@ -141,7 +141,7 @@ export default class LastFMSource {
                 const r2 = await this.searchPreferredTracks(`${artist} ${fullTitle} official audio`);
                 if (r2[0]) {
                     const t = this.rewrapDelegatedTrack(r2[0], url);
-                    logger('info', 'LastFM', `Resolved via full+official: ${t.info.title}`);
+                    logger('info', 'LastFM', `Resolved via full+official: ${t.info?.title}`);
                     return { loadType: 'track', data: t };
                 }
                 // 3rd attempt: core title only
@@ -149,7 +149,7 @@ export default class LastFMSource {
                     const r3 = await this.searchPreferredTracks(`${artist} ${coreTitle}`);
                     if (r3[0]) {
                         const t = this.rewrapDelegatedTrack(r3[0], url);
-                        logger('info', 'LastFM', `Resolved via core title: ${t.info.title}`);
+                        logger('info', 'LastFM', `Resolved via core title: ${t.info?.title}`);
                         return { loadType: 'track', data: t };
                     }
                 }
@@ -157,7 +157,7 @@ export default class LastFMSource {
                 const r4 = await this.searchPreferredTracks(`${artist} ${fullTitle}`);
                 if (r4[0]) {
                     const t = this.rewrapDelegatedTrack(r4[0], url);
-                    logger('info', 'LastFM', `Resolved via full title fallback: ${t.info.title}`);
+                    logger('info', 'LastFM', `Resolved via full title fallback: ${t.info?.title}`);
                     return { loadType: 'track', data: t };
                 }
                 logger('error', 'LastFM', `No tracks found for: "${fullTitle}" by "${artist}"`);
@@ -168,7 +168,7 @@ export default class LastFMSource {
                     }
                 };
             }
-            // For album/artist pages, we attempt to extract any linked YouTube URLs from the page HTML and resolve them as tracks. We treat the entire page as a "playlist" of these tracks.
+            // For album/artist pages, we attempt to extract unknown linked YouTube URLs from the page HTML and resolve them as tracks. We treat the entire page as a "playlist" of these tracks.
             const { body, error, statusCode } = await http1makeRequest(url, {
                 method: 'GET'
             });
@@ -182,10 +182,10 @@ export default class LastFMSource {
                     }
                 };
             }
-            // We use the artist name as the collection title for artist pages, and for album pages we use "Album Title - Artist". We also decode any URL-encoded characters and replace '+' with spaces for readability.
+            // We use the artist name as the collection title for artist pages, and for album pages we use "Album Title - Artist". We also decode unknown URL-encoded characters and replace '+' with spaces for readability.
             let collectionTitle = artist;
             if (path.length >= 3) {
-                // Strip any leading '+' from the third segment (which indicates an album page) and decode it to get the album title, then combine it with the artist name for the collection title.
+                // Strip unknown leading '+' from the third segment (which indicates an album page) and decode it to get the album title, then combine it with the artist name for the collection title.
                 collectionTitle = sanitizeQuery((path[2] ?? '').replace(/^\+/, ''));
             }
             const youtubeUrls = this.extractYouTubeUrls(html);
@@ -194,7 +194,7 @@ export default class LastFMSource {
                 const youtubeResult = await this.getSourceManager()?.resolve(youtubeUrl);
                 if (!youtubeResult)
                     continue;
-                const delegatedTrack = this.extractTrackDataLike(youtubeResult);
+                const delegatedTrack = this.extractTrackData(youtubeResult);
                 if (!delegatedTrack)
                     continue;
                 tracks.push(this.rewrapDelegatedTrack(delegatedTrack, url, youtubeUrl));
@@ -210,7 +210,7 @@ export default class LastFMSource {
                     }
                 };
             }
-            logger('error', 'LastFM', 'Failed to resolve any tracks from Last.fm album/artist');
+            logger('error', 'LastFM', 'Failed to resolve unknown tracks from Last.fm album/artist');
             return {
                 exception: {
                     message: 'Failed to resolve tracks from Last.fm',
@@ -224,7 +224,7 @@ export default class LastFMSource {
             return { exception: { message, severity: 'fault' } };
         }
     }
-    async getTrackUrl(decodedTrack) {
+    async getTrackUrl(decodedTrack, trackData) {
         const sourceManager = this.getSourceManager();
         if (!sourceManager) {
             return {
@@ -235,13 +235,13 @@ export default class LastFMSource {
             };
         }
         try {
-            const youtubeUrl = decodedTrack.pluginInfo?.youtubeUrl;
+            const youtubeUrl = trackData?.pluginInfo?.youtubeUrl;
             if (youtubeUrl) {
                 const youtubeResult = await sourceManager.resolve(youtubeUrl);
-                const delegatedTrack = this.extractTrackDataLike(youtubeResult);
-                if (delegatedTrack) {
+                const delegatedTrack = this.extractTrackData(youtubeResult);
+                if (delegatedTrack?.info) {
                     const streamInfo = await sourceManager.getTrackUrl(delegatedTrack.info);
-                    return { newTrack: delegatedTrack, ...streamInfo };
+                    return { ...streamInfo, newTrack: delegatedTrack };
                 }
             }
             const query = `${decodedTrack.title} ${decodedTrack.author}`.trim();
@@ -255,11 +255,18 @@ export default class LastFMSource {
                     }
                 };
             }
-            const bestMatchCandidate = getBestMatch(searchTracks, decodedTrack);
+            const bestMatchCandidate = getBestMatch(searchTracks.map((t) => ({
+                info: {
+                    title: t.info?.title || '',
+                    author: t.info?.author || '',
+                    length: t.info?.length || 0,
+                    uri: t.info?.uri
+                }
+            })), decodedTrack);
             const bestMatch = bestMatchCandidate
-                ? this.findTrackDataByCandidate(searchTracks, bestMatchCandidate)
+                ? searchTracks[searchTracks.findIndex((t) => t.info?.title === bestMatchCandidate.info.title && t.info?.author === bestMatchCandidate.info.author)]
                 : null;
-            if (!bestMatch) {
+            if (!bestMatch || !bestMatch.info) {
                 return {
                     exception: {
                         message: 'No suitable alternative found after filtering.',
@@ -268,7 +275,7 @@ export default class LastFMSource {
                 };
             }
             const streamInfo = await sourceManager.getTrackUrl(bestMatch.info);
-            return { newTrack: bestMatch, ...streamInfo };
+            return { ...streamInfo, newTrack: bestMatch };
         }
         catch (error) {
             return {
@@ -288,7 +295,7 @@ export default class LastFMSource {
     }
     /**
      * Parses a Last.fm URL into path segments with the 'music' prefix retained
-     * and any locale prefix stripped, so callers always receive segments starting
+     * and unknown locale prefix stripped, so callers always receive segments starting
      * at ['music', artist, ...].
      *
      * Examples:
@@ -443,7 +450,7 @@ export default class LastFMSource {
                 ? trackUrl
                 : `https://www.last.fm${trackUrl}`;
             results.push(this.buildTrackResult(title, artist, fullUrl, {
-                youtubeUrl: youtubeUrl || undefined
+                ...(youtubeUrl ? { youtubeUrl } : {})
             }));
             match = regex.exec(html);
         }
@@ -461,10 +468,9 @@ export default class LastFMSource {
             uri: url,
             artworkUrl: null,
             isrc: null,
-            sourceName: 'lastfm',
-            details: []
+            sourceName: 'lastfm'
         };
-        return { encoded: encodeTrack(info), info, pluginInfo };
+        return { encoded: encodeTrack({ ...info, details: [] }), info, pluginInfo };
     }
     buildCollectionResult(title, author, url, type) {
         const info = {
@@ -478,19 +484,21 @@ export default class LastFMSource {
             uri: url,
             artworkUrl: null,
             isrc: null,
-            sourceName: 'lastfm',
-            details: []
+            sourceName: 'lastfm'
         };
-        return { encoded: encodeTrack(info), info, pluginInfo: { type } };
+        return { encoded: encodeTrack({ ...info, details: [] }), info, pluginInfo: { type: String(type) } };
     }
     rewrapDelegatedTrack(track, url, youtubeUrl) {
+        if (!track.info) {
+            throw new Error('Cannot rewrap track without info');
+        }
         const pluginInfo = this.getPluginInfoRecord(track.pluginInfo);
-        const storedYoutubeUrl = pluginInfo['youtubeUrl'];
+        const storedYoutubeUrl = pluginInfo.youtubeUrl;
         const lastFmPluginInfo = {
             youtubeUrl: youtubeUrl ||
                 (typeof storedYoutubeUrl === 'string'
                     ? storedYoutubeUrl
-                    : track.info.uri)
+                    : track.info.uri) || ''
         };
         const info = {
             identifier: track.info.identifier,
@@ -503,14 +511,13 @@ export default class LastFMSource {
             uri: url,
             artworkUrl: track.info.artworkUrl ?? null,
             isrc: track.info.isrc ?? null,
-            sourceName: 'lastfm',
-            details: []
+            sourceName: 'lastfm'
         };
-        return { encoded: encodeTrack(info), info, pluginInfo: lastFmPluginInfo };
+        return { encoded: encodeTrack({ ...info, details: [] }), info, pluginInfo: lastFmPluginInfo };
     }
-    extractTrackDataLike(result) {
+    extractTrackData(result) {
         const trackData = result.data;
-        if (result.loadType === 'track' && this.isTrackDataLike(trackData)) {
+        if (result.loadType === 'track' && this.isTrackData(trackData)) {
             return trackData;
         }
         const playlistData = result.data;
@@ -525,13 +532,14 @@ export default class LastFMSource {
         const resultData = result.data;
         if (result.loadType === 'search' &&
             Array.isArray(resultData) &&
-            resultData.every((item) => this.isTrackDataLike(item))) {
+            resultData.every((item) => this.isTrackData(item))) {
             return resultData;
         }
         return [];
     }
     findTrackDataByCandidate(tracks, candidate) {
-        return (tracks.find((track) => track.info.title === candidate.info.title &&
+        return (tracks.find((track) => track.info &&
+            track.info.title === candidate.info.title &&
             track.info.author === candidate.info.author &&
             track.info.uri === candidate.info.uri) ?? null);
     }
@@ -600,7 +608,7 @@ export default class LastFMSource {
         }
         return result;
     }
-    isTrackDataLike(value) {
+    isTrackData(value) {
         const record = this.getRecordFromValue(value);
         if (!record)
             return false;
@@ -622,7 +630,6 @@ export default class LastFMSource {
         if (!record)
             return false;
         const tracks = this.getValue(record, 'tracks');
-        return (Array.isArray(tracks) &&
-            tracks.every((track) => this.isTrackDataLike(track)));
+        return (Array.isArray(tracks) && tracks.every((track) => this.isTrackData(track)));
     }
 }

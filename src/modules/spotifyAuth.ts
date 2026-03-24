@@ -1,10 +1,10 @@
 import crypto from 'node:crypto'
-import { http1makeRequest, logger } from '../utils.ts'
 import type {
   EncodedSpotifySecretEntry,
   SpotifyLocalTokenResponse,
   SpotifyServerTimeResponse
 } from '../typings/modules/spotifyAuth.types.ts'
+import { http1makeRequest, logger } from '../utils.ts'
 
 /**
  * Built-in encoded TOTP secrets used as primary/fallback bootstrap.
@@ -141,11 +141,14 @@ async function ensureTotpSecrets(): Promise<void> {
 async function getServerTime(spDc?: string | null): Promise<number> {
   try {
     const headers: Record<string, string> = { 'User-Agent': USER_AGENT_MOBILE }
-    if (spDc) headers['Cookie'] = `sp_dc=${spDc}`
+    if (spDc) headers.Cookie = `sp_dc=${spDc}`
 
-    const res = await http1makeRequest('https://open.spotify.com/api/server-time', {
-      headers
-    })
+    const res = await http1makeRequest(
+      'https://open.spotify.com/api/server-time',
+      {
+        headers
+      }
+    )
     if (res.statusCode !== 200 || !res.body) {
       throw new Error('Failed to get time')
     }
@@ -178,12 +181,12 @@ function generateTOTP(secretHex: string, timeSec: number, step = 30): string {
   hmac.update(buf)
   const digest = hmac.digest()
 
-  const offset = digest[digest.length - 1]! & 0xf
+  const offset = (digest[digest.length - 1] ?? 0) & 0xf
   const code =
-    (((digest[offset]! & 0x7f) << 24) |
-      ((digest[offset + 1]! & 0xff) << 16) |
-      ((digest[offset + 2]! & 0xff) << 8) |
-      (digest[offset + 3]! & 0xff)) %
+    (((digest[offset] ?? 0 & 0x7f) << 24) |
+      ((digest[offset + 1] ?? 0 & 0xff) << 16) |
+      ((digest[offset + 2] ?? 0 & 0xff) << 8) |
+      (digest[offset + 3] ?? 0 & 0xff)) %
     1000000
 
   return code.toString().padStart(6, '0')
@@ -224,7 +227,7 @@ async function performTokenRequest(
     Referer: 'https://open.spotify.com/'
   }
 
-  if (spDc) headers['Cookie'] = `sp_dc=${spDc}`
+  if (spDc) headers.Cookie = `sp_dc=${spDc}`
 
   const res = await http1makeRequest(url.toString(), {
     method: 'GET',

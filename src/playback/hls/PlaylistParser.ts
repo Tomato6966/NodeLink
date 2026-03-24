@@ -122,7 +122,10 @@ export function parse(content: string, baseUrl: string): HLSPlaylist {
 export function parseMaster(
   lines: string[],
   baseUrl: string
-): { variants: HLSVariant[]; audioGroups: Record<string, HLSAudioRendition[]> } {
+): {
+  variants: HLSVariant[]
+  audioGroups: Record<string, HLSAudioRendition[]>
+} {
   const variants: HLSVariant[] = []
   const audioGroups: Record<string, HLSAudioRendition[]> = {}
 

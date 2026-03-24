@@ -1,7 +1,4 @@
-import type {
-  BestMatchCandidate,
-  BestMatchTrackInfo
-} from '../utils.types.ts'
+import type { BestMatchCandidate, BestMatchTrackInfo } from '../utils.types.ts'
 
 /**
  * Typed track payload used by Letras provider matching.

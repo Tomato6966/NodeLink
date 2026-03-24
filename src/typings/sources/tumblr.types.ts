@@ -1,6 +1,6 @@
 import type {
-  SourceResult,
   SourceManager,
+  SourceResult,
   TrackInfo,
   TrackStreamResult,
   TrackUrlResult,

@@ -121,10 +121,7 @@ export interface NodelinkInstanceForYandexLyrics {
  * Track info accepted by Yandex lyrics provider.
  * @public
  */
-export type YandexLyricsTrackInfo = Pick<
-  TrackInfo,
-  'identifier' | 'title'
->
+export type YandexLyricsTrackInfo = Pick<TrackInfo, 'identifier' | 'title'>
 
 /**
  * Minimal HTTP result used by yandex helper methods.

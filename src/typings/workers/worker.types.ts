@@ -7,9 +7,7 @@ import type {
   NodeLink,
   PlayerVoiceState,
   PlayPayload,
-  SourceManagerLike,
-  StatsManagerLike,
-  TrackInfoExtended
+  StatsManagerLike
 } from '../playback/player.types.ts'
 import type {
   CredentialManager as CredentialManagerLike,
@@ -19,8 +17,7 @@ import type {
   SourceManager as SourceManagerBase,
   TrackCacheManager as TrackCacheManagerLike,
   TrackInfo,
-  TrackStreamResult,
-  TrackUrlResult
+  TrackStreamResult
 } from '../sources/source.types.ts'
 
 /**
@@ -70,7 +67,7 @@ export interface WorkerExtensions extends Record<string, unknown> {
 /**
  * Runtime context shared across worker components.
  */
-export interface WorkerNodeLink extends NodeLink {
+export interface WorkerNodeLink extends Omit<NodeLink, 'extensions'> {
   options: NodeLinkConfig & NodeLink['options']
   logger: LoggerFn
   voiceRelay?: NodeLink['voiceRelay']

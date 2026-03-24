@@ -32,7 +32,7 @@ export default class Compressor extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const comp = settings?.compressor || {}
-    const isDisabled = (comp as any)._disabled === true
+    const isDisabled = (comp as Record<string, unknown>)._disabled === true
 
     this.threshold = comp.threshold ?? -24
     this.ratio = Math.max(1, comp.ratio ?? 4)
@@ -46,7 +46,6 @@ export default class Compressor extends AnimatableFilter {
       {
         compressor: {
           alpha: targetAlpha,
-          transition: (comp as any).transition
         }
       },
       'compressor',
@@ -55,11 +54,11 @@ export default class Compressor extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 

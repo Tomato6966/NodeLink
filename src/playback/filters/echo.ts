@@ -46,7 +46,7 @@ export default class Echo extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const e = settings?.echo || {}
-    const isDisabled = (e as any)._disabled === true
+    const isDisabled = (e as Record<string, unknown>)._disabled === true
 
     this.delay = Math.max(0, Math.min(e.delay || 0, MAX_DELAY_MS))
     this.feedback = Math.max(0, Math.min(e.feedback || 0, 1.0))
@@ -59,7 +59,6 @@ export default class Echo extends AnimatableFilter {
       {
         echo: {
           alpha: targetAlpha,
-          transition: (e as any).transition
         }
       },
       'echo',
@@ -68,11 +67,11 @@ export default class Echo extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 

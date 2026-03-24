@@ -47,7 +47,7 @@ class CombFilter {
    * No clamping inside the loop — full Float64 precision.
    */
   public process(input: number): number {
-    const output = this.buffer[this.writeIndex]!
+    const output = this.buffer[this.writeIndex] ?? 0
     this.filterStore = output * this.damp2 + this.filterStore * this.damp1
     this.buffer[this.writeIndex] = input + this.filterStore * this.feedback
     this.writeIndex = (this.writeIndex + 1) % this.size
@@ -135,10 +135,12 @@ export default class Reverb extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const r = settings?.reverb || {}
-    const isDisabled = (r as any)._disabled === true
+    const isDisabled = (r as Record<string, unknown>)._disabled === true
 
-    const customDelays: number[] = (r as any).delays || []
-    const customGains: number[] = (r as any).gains || []
+    const customDelays: number[] =
+      ((r as Record<string, unknown>).delays as number[]) || []
+    const customGains: number[] =
+      ((r as Record<string, unknown>).gains as number[]) || []
 
     if (customDelays.length > 0 && customGains.length > 0) {
       this.isCustom = true
@@ -193,8 +195,7 @@ export default class Reverb extends AnimatableFilter {
     super.applyAnimatedUpdate(
       {
         reverb: {
-          alpha: targetAlpha,
-          transition: (r as any).transition
+          alpha: targetAlpha
         }
       },
       'reverb',
@@ -203,11 +204,11 @@ export default class Reverb extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 
@@ -223,10 +224,10 @@ export default class Reverb extends AnimatableFilter {
     stateY: number[],
     stateIdx: number
   ): number {
-    const pos = writeIdx[idx]!
-    const delayed = buffer[pos]!
+    const pos = writeIdx[idx] ?? 0
+    const delayed = buffer[pos] ?? 0
     const output =
-      -input + delayed + this.allpassCoeff * (input - stateY[stateIdx]!)
+      -input + delayed + this.allpassCoeff * (input - (stateY[stateIdx] ?? 0))
 
     buffer[pos] = input
     writeIdx[idx] = (pos + 1) % buffer.length
@@ -280,22 +281,26 @@ export default class Reverb extends AnimatableFilter {
         }
 
         for (let j = 0; j < this.allpassBuffersL.length; j++) {
-          leftOut = this.processAllpass(
-            leftOut,
-            this.allpassBuffersL[j]!,
-            this.allpassWriteL,
-            j,
-            this.allpassStateL,
-            j
-          )
-          rightOut = this.processAllpass(
-            rightOut,
-            this.allpassBuffersR[j]!,
-            this.allpassWriteR,
-            j,
-            this.allpassStateR,
-            j
-          )
+          const bufL = this.allpassBuffersL[j]
+          const bufR = this.allpassBuffersR[j]
+          if (bufL && bufR) {
+            leftOut = this.processAllpass(
+              leftOut,
+              bufL,
+              this.allpassWriteL,
+              j,
+              this.allpassStateL,
+              j
+            )
+            rightOut = this.processAllpass(
+              rightOut,
+              bufR,
+              this.allpassWriteR,
+              j,
+              this.allpassStateR,
+              j
+            )
+          }
         }
 
         leftOut *= this.combNorm

@@ -414,10 +414,9 @@ export default class AmazonMusicSource {
             identifier: tId,
             isSeekable: true,
             author: tArtist,
-            length:
-              tDuration && tDuration.includes(':')
-                ? parseColonDurationToMs(tDuration)
-                : 0,
+            length: tDuration?.includes(':')
+              ? parseColonDurationToMs(tDuration)
+              : 0,
             isStream: false,
             position: 0,
             title: tTitle,
@@ -690,7 +689,9 @@ export default class AmazonMusicSource {
     const query = `${decodedTrack.title} ${decodedTrack.author}`
 
     try {
-      let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query)
+      let searchResult = await this.nodelink.sources.searchWithDefault(
+        decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query
+      )
 
       if (
         !searchResult ||

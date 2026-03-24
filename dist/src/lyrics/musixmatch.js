@@ -503,9 +503,9 @@ export default class MusixmatchLyrics {
     async _search(artist, title) {
         const params = {};
         if (artist)
-            params['q_artist'] = artist;
+            params.q_artist = artist;
         if (title)
-            params['q_track'] = title;
+            params.q_track = title;
         const body = (await this._request(ENDPOINTS.SEARCH, {
             ...params,
             page_size: '3',

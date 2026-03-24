@@ -1,5 +1,4 @@
 import { PassThrough } from 'node:stream'
-import { encodeTrack, logger, makeRequest } from '../utils.ts'
 import type {
   SourceResult,
   TrackInfo,
@@ -8,6 +7,7 @@ import type {
   WorkerNodeLink
 } from '../typings/sources/source.types.ts'
 import type { TrackEncodeInput } from '../typings/utils.types.ts'
+import { encodeTrack, logger, makeRequest } from '../utils.ts'
 
 const VOICES_URL = 'https://lazypy.ro/tts/assets/js/voices.json'
 const REQUEST_URL = 'https://lazypy.ro/tts/request_tts.php'
@@ -68,10 +68,12 @@ export default class LazyPyTtsSource {
    * @param nodelink - Runtime NodeLink context.
    */
   public constructor(
-    nodelink: WorkerNodeLink & { sources: NonNullable<WorkerNodeLink['sources']> }
+    nodelink: WorkerNodeLink & {
+      sources: NonNullable<WorkerNodeLink['sources']>
+    }
   ) {
     this.nodelink = nodelink
-    const sourceConfig = this.nodelink.options.sources?.['lazypytts']
+    const sourceConfig = this.nodelink.options.sources?.lazypytts
     this.config =
       sourceConfig && typeof sourceConfig === 'object'
         ? (sourceConfig as Record<string, unknown>)
@@ -87,7 +89,7 @@ export default class LazyPyTtsSource {
    * @returns False when source is disabled.
    */
   public async setup(): Promise<boolean> {
-    if (this.config['enabled'] === false) {
+    if (this.config.enabled === false) {
       logger('debug', 'LazyPy', 'LazyPy TTS source is disabled.')
       return false
     }
@@ -108,12 +110,12 @@ export default class LazyPyTtsSource {
           'lazypytts_voices'
         ) || null
       const cachedRecord = this.asRecord(cached)
-      if (cachedRecord && this.asRecord(cachedRecord['services'])) {
+      if (cachedRecord && this.asRecord(cachedRecord.services)) {
         this._applyVoiceCache(cachedRecord)
         logger(
           'debug',
           'LazyPy',
-          `Loaded ${this.asNumber(cachedRecord['totalVoices']) || 0} LazyPy voices from CredentialManager.`
+          `Loaded ${this.asNumber(cachedRecord.totalVoices) || 0} LazyPy voices from CredentialManager.`
         )
         return
       }
@@ -158,33 +160,32 @@ export default class LazyPyTtsSource {
    */
   private _applyVoiceCache(cache: Record<string, unknown>): void {
     this.services.clear()
-    const services = this.asRecord(cache['services']) || {}
+    const services = this.asRecord(cache.services) || {}
     for (const [key, serviceValue] of Object.entries(services)) {
       const service = this.asRecord(serviceValue)
       if (!service) continue
-      const voicesRecord = this.asRecord(service['voices']) || {}
+      const voicesRecord = this.asRecord(service.voices) || {}
       const voices = new Map(
         Object.entries(voicesRecord)
           .map(([voiceKey, voicePayload]) => {
             const voice = this.asRecord(voicePayload)
-            const id = this.asString(voice?.['id'])
-            const name = this.asString(voice?.['name'])
+            const id = this.asString(voice?.id)
+            const name = this.asString(voice?.name)
             return id && name ? [voiceKey, { id, name }] : null
           })
           .filter(
-            (
-              entry
-            ): entry is [string, { id: string; name: string }] => entry !== null
+            (entry): entry is [string, { id: string; name: string }] =>
+              entry !== null
           )
       )
-      const defaultVoiceRecord = this.asRecord(service['defaultVoice'])
-      const defaultVoiceId = this.asString(defaultVoiceRecord?.['id'])
-      const defaultVoiceName = this.asString(defaultVoiceRecord?.['name'])
+      const defaultVoiceRecord = this.asRecord(service.defaultVoice)
+      const defaultVoiceId = this.asString(defaultVoiceRecord?.id)
+      const defaultVoiceName = this.asString(defaultVoiceRecord?.name)
       this.services.set(key, {
         key,
-        name: this.asString(service['name']) || key,
-        charLimit: this.asNumber(service['charLimit']),
-        countBytes: this.asBoolean(service['countBytes']) ?? false,
+        name: this.asString(service.name) || key,
+        charLimit: this.asNumber(service.charLimit),
+        countBytes: this.asBoolean(service.countBytes) ?? false,
         voices,
         defaultVoice:
           defaultVoiceId && defaultVoiceName
@@ -209,7 +210,7 @@ export default class LazyPyTtsSource {
 
     for (const [serviceName, serviceDataRaw] of Object.entries(data)) {
       const serviceData = this.asRecord(serviceDataRaw)
-      const voicesRaw = serviceData ? serviceData['voices'] : null
+      const voicesRaw = serviceData ? serviceData.voices : null
       if (!serviceData || !Array.isArray(voicesRaw)) continue
 
       const serviceKey = this._normalizeKey(serviceName)
@@ -222,10 +223,8 @@ export default class LazyPyTtsSource {
         const voice = this.asRecord(voiceRaw)
         if (!voice) continue
 
-        const voiceId = String(
-          voice['vid'] ?? voice['id'] ?? voice['name'] ?? ''
-        ).trim()
-        const voiceName = String(voice['name'] ?? voice['vid'] ?? voiceId).trim()
+        const voiceId = String(voice.vid ?? voice.id ?? voice.name ?? '').trim()
+        const voiceName = String(voice.name ?? voice.vid ?? voiceId).trim()
         if (!voiceId && !voiceName) continue
 
         const payload = { id: voiceId || voiceName, name: voiceName || voiceId }
@@ -242,8 +241,8 @@ export default class LazyPyTtsSource {
       this.services.set(serviceKey, {
         key: serviceKey,
         name: serviceName,
-        charLimit: this.asNumber(serviceData['charLimit']),
-        countBytes: this.asBoolean(serviceData['countBytes']) ?? false,
+        charLimit: this.asNumber(serviceData.charLimit),
+        countBytes: this.asBoolean(serviceData.countBytes) ?? false,
         voices,
         defaultVoice
       })
@@ -298,16 +297,14 @@ export default class LazyPyTtsSource {
    * @param name - Service name.
    * @returns Service payload or null.
    */
-  private _getService(name: unknown):
-    | {
-        key: string
-        name: string
-        charLimit: number | null
-        countBytes: boolean
-        voices: Map<string, { id: string; name: string }>
-        defaultVoice: { id: string; name: string } | null
-      }
-    | null {
+  private _getService(name: unknown): {
+    key: string
+    name: string
+    charLimit: number | null
+    countBytes: boolean
+    voices: Map<string, { id: string; name: string }>
+    defaultVoice: { id: string; name: string } | null
+  } | null {
     const key = this._normalizeKey(name)
     if (!key) return null
     return this.services.get(key) || null
@@ -317,16 +314,14 @@ export default class LazyPyTtsSource {
    * Returns first available service.
    * @returns Service payload or null.
    */
-  private _getFirstService():
-    | {
-        key: string
-        name: string
-        charLimit: number | null
-        countBytes: boolean
-        voices: Map<string, { id: string; name: string }>
-        defaultVoice: { id: string; name: string } | null
-      }
-    | null {
+  private _getFirstService(): {
+    key: string
+    name: string
+    charLimit: number | null
+    countBytes: boolean
+    voices: Map<string, { id: string; name: string }>
+    defaultVoice: { id: string; name: string } | null
+  } | null {
     return this.services.values().next().value || null
   }
 
@@ -335,23 +330,21 @@ export default class LazyPyTtsSource {
    * @param voiceName - Voice name.
    * @returns Matching service/voice pair or null.
    */
-  private _findServiceForVoice(voiceName: unknown):
-    | {
-        service: {
-          key: string
-          name: string
-          charLimit: number | null
-          countBytes: boolean
-          voices: Map<string, { id: string; name: string }>
-          defaultVoice: { id: string; name: string } | null
-        }
-        voice: { id: string; name: string }
-      }
-    | null {
+  private _findServiceForVoice(voiceName: unknown): {
+    service: {
+      key: string
+      name: string
+      charLimit: number | null
+      countBytes: boolean
+      voices: Map<string, { id: string; name: string }>
+      defaultVoice: { id: string; name: string } | null
+    }
+    voice: { id: string; name: string }
+  } | null {
     const voiceKey = this._normalizeKey(voiceName)
     if (!voiceKey) return null
 
-    const preferred = this._getService(this.config['service'])
+    const preferred = this._getService(this.config.service)
     if (preferred) {
       const voice = preferred.voices.get(voiceKey)
       if (voice) return { service: preferred, voice }
@@ -370,9 +363,9 @@ export default class LazyPyTtsSource {
    * @param raw - Raw command text.
    * @returns Parsed input object or null.
    */
-  private _parseQueryString(raw: string):
-    | { service: string; voice: string; text: string }
-    | null {
+  private _parseQueryString(
+    raw: string
+  ): { service: string; voice: string; text: string } | null {
     if (!raw.includes('=')) return null
     const params = new URLSearchParams(raw)
     if (!params.has('text')) return null
@@ -454,20 +447,18 @@ export default class LazyPyTtsSource {
     serviceName: string
     voiceId: string
     voiceLabel: string
-    service:
-      | {
-          key: string
-          name: string
-          charLimit: number | null
-          countBytes: boolean
-          voices: Map<string, { id: string; name: string }>
-          defaultVoice: { id: string; name: string } | null
-        }
-      | null
+    service: {
+      key: string
+      name: string
+      charLimit: number | null
+      countBytes: boolean
+      voices: Map<string, { id: string; name: string }>
+      defaultVoice: { id: string; name: string } | null
+    } | null
   } {
-    const configService = this.asString(this.config['service']) || DEFAULT_SERVICE
-    const configVoice = this.asString(this.config['voice']) || DEFAULT_VOICE
-    const enforceConfig = this.config['enforceConfig'] === true
+    const configService = this.asString(this.config.service) || DEFAULT_SERVICE
+    const configVoice = this.asString(this.config.voice) || DEFAULT_VOICE
+    const enforceConfig = this.config.enforceConfig === true
     const text = (parsed.text || '').trim()
 
     let serviceName = enforceConfig ? configService : parsed.service
@@ -520,13 +511,15 @@ export default class LazyPyTtsSource {
    * @param service - Selected service payload.
    * @returns Max text length.
    */
-  private _getMaxTextLength(service: {
-    charLimit: number | null
-  } | null): number {
+  private _getMaxTextLength(
+    service: {
+      charLimit: number | null
+    } | null
+  ): number {
     const configLimit =
-      Number.isFinite(this.config['maxTextLength']) &&
-      Number(this.config['maxTextLength']) > 0
-        ? Number(this.config['maxTextLength'])
+      Number.isFinite(this.config.maxTextLength) &&
+      Number(this.config.maxTextLength) > 0
+        ? Number(this.config.maxTextLength)
         : DEFAULT_MAX_TEXT_LENGTH
     const serviceLimit =
       service?.charLimit && service.charLimit > 0 ? service.charLimit : null
@@ -738,9 +731,7 @@ export default class LazyPyTtsSource {
       })
 
       if (error || statusCode !== 200 || !responseBody) {
-        throw new Error(
-          error || `LazyPy TTS returned status ${statusCode}`
-        )
+        throw new Error(error || `LazyPy TTS returned status ${statusCode}`)
       }
 
       const payload =
@@ -748,13 +739,14 @@ export default class LazyPyTtsSource {
           ? this.asRecord(JSON.parse(responseBody))
           : this.asRecord(responseBody)
 
-      if (!payload?.['success'] || !this.asString(payload['audio_url'])) {
+      if (!payload?.success || !this.asString(payload.audio_url)) {
         throw new Error(
-          this.asString(payload?.['error_msg']) || 'LazyPy TTS request failed.'
+          this.asString(payload?.error_msg) || 'LazyPy TTS request failed.'
         )
       }
 
-      const audioUrl = this.asString(payload['audio_url'])!
+      const audioUrl = this.asString(payload.audio_url)
+      if (!audioUrl) throw new Error('Audio URL is missing in the payload.')
       const audioResponse = await makeRequest(audioUrl, {
         method: 'GET',
         streamOnly: true,
@@ -794,11 +786,7 @@ export default class LazyPyTtsSource {
       return { stream }
     } catch (error) {
       const message = this.getErrorMessage(error)
-      logger(
-        'error',
-        'Sources',
-        `Failed to load LazyPy TTS stream: ${message}`
-      )
+      logger('error', 'Sources', `Failed to load LazyPy TTS stream: ${message}`)
       return {
         exception: {
           message,

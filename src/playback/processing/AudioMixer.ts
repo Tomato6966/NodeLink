@@ -44,7 +44,7 @@ export class AudioMixer extends Readable {
     this.enabled = config.enabled !== false
   }
 
-  override _read(size: number): void {
+  override _read(_size: number): void {
     const targetSize = FRAME_SIZE
 
     if (this.mixLayers.size === 0 || !this.enabled) {

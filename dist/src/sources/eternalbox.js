@@ -1,4 +1,4 @@
-import { PassThrough, Readable } from 'node:stream';
+import { PassThrough } from 'node:stream';
 import * as MP4Box from 'mp4box';
 import { encodeTrack, http1makeRequest, logger } from "../utils.js";
 const SAMPLE_RATES = Object.freeze([

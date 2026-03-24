@@ -214,8 +214,8 @@ export default class TrackCacheManager {
     const nestedTrackCache = isRecord(nestedCache) ? nestedCache : null
     const selected = rootCache ?? nestedTrackCache
 
-    const maxEntriesRaw = selected?.['maxEntries']
-    const cleanupIntervalRaw = selected?.['cleanupIntervalMs']
+    const maxEntriesRaw = selected?.maxEntries
+    const cleanupIntervalRaw = selected?.cleanupIntervalMs
 
     const maxEntries =
       typeof maxEntriesRaw === 'number' && Number.isFinite(maxEntriesRaw)

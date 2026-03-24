@@ -1,11 +1,3 @@
-import {
-  encodeTrack,
-  getBestMatch,
-  http1makeRequest,
-  logger
-} from '../utils.ts'
-import type { TrackInfo } from '../typings/sources/source.types.ts'
-import type { BestMatchCandidate, TrackEncodeInput } from '../typings/utils.types.ts'
 import type {
   NeteaseAlbumResponse,
   NeteaseArtist,
@@ -13,7 +5,6 @@ import type {
   NeteaseDecodedTrack,
   NeteaseLoadStreamResult,
   NeteaseNodeLinkContext,
-  NeteasePlaylistData,
   NeteasePlaylistResponse,
   NeteaseSearchResponse,
   NeteaseSearchType,
@@ -24,6 +15,17 @@ import type {
   NeteaseTrackData,
   NeteaseTrackUrlResult
 } from '../typings/sources/netease.types.ts'
+import type { TrackInfo } from '../typings/sources/source.types.ts'
+import type {
+  BestMatchCandidate,
+  TrackEncodeInput
+} from '../typings/utils.types.ts'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger
+} from '../utils.ts'
 
 const NETEASE_TRACK_PATTERN =
   /^https?:\/\/(?:www\.)?music\.163\.com\/?#?\/song\?id=(\d+)/
@@ -165,7 +167,9 @@ export default class NeteaseSource {
 
       const parsedBody = this.parseBody<NeteaseSearchResponse>(body)
       if (error || statusCode !== 200 || !parsedBody) {
-        return this.exceptionResult(`Netease search failed: ${statusCode || 'unknown'}`)
+        return this.exceptionResult(
+          `Netease search failed: ${statusCode || 'unknown'}`
+        )
       }
 
       let results = this._mapSearchResults(parsedBody, searchType)
@@ -220,7 +224,10 @@ export default class NeteaseSource {
       return Object.fromEntries(
         parsed.songs
           .map((song) => this.toSong(song))
-          .filter((song): song is NeteaseSong => song !== null && song.id !== undefined)
+          .filter(
+            (song): song is NeteaseSong =>
+              song !== null && song.id !== undefined
+          )
           .map((song) => [String(song.id), song])
       )
     } catch {
@@ -242,10 +249,12 @@ export default class NeteaseSource {
       if (albumMatch?.[1]) return await this._resolveAlbum(albumMatch[1], url)
 
       const playlistMatch = url.match(NETEASE_PLAYLIST_PATTERN)
-      if (playlistMatch?.[1]) return await this._resolvePlaylist(playlistMatch[1], url)
+      if (playlistMatch?.[1])
+        return await this._resolvePlaylist(playlistMatch[1], url)
 
       const artistMatch = url.match(NETEASE_ARTIST_PATTERN)
-      if (artistMatch?.[1]) return await this._resolveArtist(artistMatch[1], url)
+      if (artistMatch?.[1])
+        return await this._resolveArtist(artistMatch[1], url)
 
       return this.emptyResult()
     } catch (error) {
@@ -282,7 +291,11 @@ export default class NeteaseSource {
     if (!song) return this.emptyResult()
 
     const track = this._buildTrackResult(song, originalUrl)
-    logger('info', 'Netease', `Resolved track: ${song.name} by ${this._getArtists(song)}`)
+    logger(
+      'info',
+      'Netease',
+      `Resolved track: ${song.name} by ${this._getArtists(song)}`
+    )
     return { loadType: 'track', data: track }
   }
 
@@ -319,7 +332,11 @@ export default class NeteaseSource {
     const name = parsed.album?.name || 'Unknown Album'
     const artist = parsed.album?.artist?.name || 'Unknown Artist'
 
-    logger('info', 'Netease', `Resolved album: ${name} with ${tracks.length} tracks`)
+    logger(
+      'info',
+      'Netease',
+      `Resolved album: ${name} with ${tracks.length} tracks`
+    )
     return {
       loadType: 'playlist',
       data: {
@@ -362,7 +379,11 @@ export default class NeteaseSource {
     if (tracks.length === 0) return this.emptyResult()
 
     const name = playlist?.name || 'Unknown Playlist'
-    logger('info', 'Netease', `Resolved playlist: ${name} with ${tracks.length} tracks`)
+    logger(
+      'info',
+      'Netease',
+      `Resolved playlist: ${name} with ${tracks.length} tracks`
+    )
     return {
       loadType: 'playlist',
       data: {
@@ -404,7 +425,11 @@ export default class NeteaseSource {
     if (tracks.length === 0) return this.emptyResult()
 
     const name = parsed.artist?.name || 'Unknown Artist'
-    logger('info', 'Netease', `Resolved artist top tracks: ${name} with ${tracks.length} tracks`)
+    logger(
+      'info',
+      'Netease',
+      `Resolved artist top tracks: ${name} with ${tracks.length} tracks`
+    )
     return {
       loadType: 'playlist',
       data: {
@@ -579,8 +604,14 @@ export default class NeteaseSource {
       const query = `${decodedTrack.title} ${decodedTrack.author}`.trim()
       const searchResult = await this.nodelink.sources.searchWithDefault(query)
 
-      if (!Array.isArray(searchResult.data) || searchResult.loadType !== 'search') {
-        return this.exceptionTrackResult('No matching track found on fallback source.', 'common')
+      if (
+        !Array.isArray(searchResult.data) ||
+        searchResult.loadType !== 'search'
+      ) {
+        return this.exceptionTrackResult(
+          'No matching track found on fallback source.',
+          'common'
+        )
       }
 
       const candidates = this.toBestMatchCandidates(searchResult.data)
@@ -599,7 +630,10 @@ export default class NeteaseSource {
           candidate.info.length === bestMatch.info.length
       )
       if (!fallback) {
-        return this.exceptionTrackResult('No suitable alternative found.', 'common')
+        return this.exceptionTrackResult(
+          'No suitable alternative found.',
+          'common'
+        )
       }
 
       const streamInfo = await this.nodelink.sources.getTrackUrl(
@@ -625,7 +659,12 @@ export default class NeteaseSource {
     protocol?: string,
     additionalData?: Record<string, unknown>
   ): Promise<NeteaseLoadStreamResult> {
-    return this.nodelink.sources.getTrackStream(track, url, protocol, additionalData)
+    return this.nodelink.sources.getTrackStream(
+      track,
+      url,
+      protocol,
+      additionalData
+    )
   }
 
   /**
@@ -676,8 +715,8 @@ export default class NeteaseSource {
           : null
       )
       .map((item) =>
-        item?.['info'] && this.isTrackInfo(item['info'])
-          ? ({ info: item['info'] } as BestMatchCandidate)
+        item?.info && this.isTrackInfo(item.info)
+          ? ({ info: item.info } as BestMatchCandidate)
           : null
       )
       .filter((item): item is BestMatchCandidate => item !== null)
@@ -696,12 +735,12 @@ export default class NeteaseSource {
 
     return (
       info !== null &&
-      typeof info['identifier'] === 'string' &&
-      typeof info['title'] === 'string' &&
-      typeof info['author'] === 'string' &&
-      typeof info['length'] === 'number' &&
-      typeof info['uri'] === 'string' &&
-      typeof info['sourceName'] === 'string'
+      typeof info.identifier === 'string' &&
+      typeof info.title === 'string' &&
+      typeof info.author === 'string' &&
+      typeof info.length === 'number' &&
+      typeof info.uri === 'string' &&
+      typeof info.sourceName === 'string'
     )
   }
 
@@ -748,4 +787,3 @@ export default class NeteaseSource {
     return error instanceof Error ? error.message : String(error)
   }
 }
-

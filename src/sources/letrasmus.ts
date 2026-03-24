@@ -579,8 +579,8 @@ export default class LetrasMusSource {
       }
 
       const query = `${decodedTrack.title} ${decodedTrack.author}`.trim()
-      let searchResult = await sourceManager.searchWithDefault(query)
-      let searchTracks = searchResult.data as
+      const searchResult = await sourceManager.searchWithDefault(query)
+      const searchTracks = searchResult.data as
         | JsonValue
         | LetrasTrackData[]
         | undefined

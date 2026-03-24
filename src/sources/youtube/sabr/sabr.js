@@ -126,18 +126,22 @@ class CompositeBuffer {
     this.currentChunkIndex = 0
     this.totalLength = 0
     this.currentDataView = undefined
-    chunks.forEach((chunk) => this.append(chunk))
+    for (const chunk of chunks) {
+      this.append(chunk)
+    }
   }
   append(chunk) {
     if (chunk instanceof Uint8Array) {
-      if (chunk.length === 0) return
       this.chunks.push(chunk)
       this.totalLength += chunk.length
     } else if (chunk instanceof CompositeBuffer) {
-      chunk.chunks.forEach((c) => this.append(c))
+      for (const c of chunk.chunks) {
+        this.append(c)
+      }
     }
     this.currentDataView = undefined
   }
+
   split(position) {
     const extractedBuffer = new CompositeBuffer()
     const remainingBuffer = new CompositeBuffer()
@@ -418,7 +422,7 @@ export class SabrStream extends PassThrough {
 
   logTraffic(entry) {
     if (!this.enableTrafficLog) return
-    void appendFile(this.trafficLogPath, JSON.stringify(entry) + '\n').catch(
+    void appendFile(this.trafficLogPath, `${JSON.stringify(entry)}\n`).catch(
       () => {}
     )
   }
@@ -836,7 +840,7 @@ export class SabrStream extends PassThrough {
 
   handleSabrRedirect(part) {
     const red = this.decodePart(part, SabrRedirect)
-    if (red && red.url) {
+    if (red?.url) {
       this.serverAbrStreamingUrl = red.url
     }
   }
@@ -1151,7 +1155,7 @@ export class SabrStream extends PassThrough {
     }
   }
 
-  handleSnackbarMessage(part) {}
+  handleSnackbarMessage(_part) {}
   handleReloadPlayerResponse(part) {
     const reloadContext = this.decodePart(part, ReloadPlaybackContext)
     if (reloadContext) {
@@ -1170,7 +1174,7 @@ export class SabrStream extends PassThrough {
     videoFormat,
     selectedFormatIds,
     preferredAudioFormatIds,
-    preferredVideoFormatIds,
+    _preferredVideoFormatIds,
     bufferedRanges,
     contexts,
     unsent
@@ -1185,7 +1189,7 @@ export class SabrStream extends PassThrough {
     const segMap = this.downloadedSegmentsByItag.get(audioFormat?.itag)
     const segs = segMap ? Array.from(segMap.values()) : []
     const downloadedMs = segs.reduce(
-      (sum, s) => sum + parseInt(s.durationMs || '0'),
+      (sum, s) => sum + parseInt(s.durationMs || '0', 10),
       0
     )
     const aheadMs =
@@ -1229,7 +1233,7 @@ export class SabrStream extends PassThrough {
       if (!headers || headers.length === 0) continue
 
       const durationMs = headers.reduce(
-        (sum, h) => sum + parseInt(h.durationMs || '0'),
+        (sum, h) => sum + parseInt(h.durationMs || '0', 10),
         0
       )
       const startH = headers[0]
@@ -1402,7 +1406,7 @@ export class SabrStream extends PassThrough {
     logger(
       'debug',
       'SABR',
-      `Traffic -> rn=${trafficReq.rn} bodyB64[1024B]=${reqPreviewB64.length > 260 ? reqPreviewB64.slice(0, 260) + '...' : reqPreviewB64} (full in sabr_traffic.jsonl)`
+      `Traffic -> rn=${trafficReq.rn} bodyB64[1024B]=${reqPreviewB64.length > 260 ? `${reqPreviewB64.slice(0, 260)}...` : reqPreviewB64} (full in sabr_traffic.jsonl)`
     )
 
     const rn = this.requestNumber
@@ -1422,7 +1426,7 @@ export class SabrStream extends PassThrough {
     }
 
     if (this.config.accessToken) {
-      headers['Authorization'] = `Bearer ${this.config.accessToken}`
+      headers.Authorization = `Bearer ${this.config.accessToken}`
     }
 
     const t0 = Date.now()
@@ -1437,7 +1441,7 @@ export class SabrStream extends PassThrough {
       let errorText = ''
       try {
         errorText = await res.text()
-      } catch (e) {
+      } catch (_e) {
         errorText = '(Failed to read response body)'
       }
 
@@ -1621,7 +1625,7 @@ export class SabrStream extends PassThrough {
           }
           // The incomplete flag was true, so we check what's left
           const res = incomplete
-          if (res && res.incomplete) {
+          if (res?.incomplete) {
             if (!activePartial) {
               activePartial = {
                 type: res.type,

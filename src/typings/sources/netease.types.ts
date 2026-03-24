@@ -398,7 +398,9 @@ export interface NeteaseDecodedTrack extends TrackInfo {
  * Track URL result payload for Netease source.
  * @public
  */
-export type NeteaseTrackUrlResult = TrackUrlResult | { exception: NeteaseException }
+export type NeteaseTrackUrlResult =
+  | TrackUrlResult
+  | { exception: NeteaseException }
 
 /**
  * Stream loading result payload for Netease source.
@@ -445,4 +447,3 @@ export interface NeteaseNodeLinkContext extends WorkerNodeLink {
    */
   sources: NeteaseSourceManager
 }
-

@@ -9,7 +9,7 @@ export default class AnghamiSource {
         ];
         this.udid = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
         this.cookieHeader = '';
-        if (this.config.sources.anghami && this.config.sources.anghami.cookies) {
+        if (this.config.sources.anghami?.cookies) {
             this.cookieHeader = this.config.sources.anghami.cookies;
             this.parseFingerprintFromCookies();
         }
@@ -54,7 +54,7 @@ export default class AnghamiSource {
             Origin: 'https://play.anghami.com'
         };
         if (this.cookieHeader) {
-            headers['Cookie'] = this.cookieHeader;
+            headers.Cookie = this.cookieHeader;
         }
         const { body, error } = await makeRequest(searchUrl, {
             method: 'GET',
@@ -100,7 +100,7 @@ export default class AnghamiSource {
             Origin: 'https://play.anghami.com'
         };
         if (this.cookieHeader) {
-            headers['Cookie'] = this.cookieHeader;
+            headers.Cookie = this.cookieHeader;
         }
         if (type === 'song') {
             const songDataUrl = `https://api.anghami.com/gateway.php?type=GETsongdata&songId=${id}&output=jsonhp`;
@@ -114,7 +114,7 @@ export default class AnghamiSource {
                     method: 'GET',
                     headers
                 });
-                if (searchBody && searchBody.sections) {
+                if (searchBody?.sections) {
                     for (const sec of searchBody.sections) {
                         if (sec.data) {
                             const match = sec.data.find((s) => s.id === id);
@@ -182,7 +182,9 @@ export default class AnghamiSource {
                             }
                         }
                         else {
-                            songMap.forEach((song) => tracks.push(this.buildTrack(song)));
+                            for (const song of songMap.values()) {
+                                tracks.push(this.buildTrack(song));
+                            }
                         }
                     }
                     catch (e) {
@@ -193,13 +195,11 @@ export default class AnghamiSource {
                     const songsSec = body.sections.find((s) => s.type === 'song' ||
                         s.group === 'songs' ||
                         s.group === 'album_songs');
-                    if (songsSec && songsSec.data) {
+                    if (songsSec?.data) {
                         tracks = songsSec.data.map((item) => this.buildTrack(item));
                     }
                 }
-                const songsMapData = (body.playlist && body.playlist.songs) ||
-                    body.songs ||
-                    (body.album && body.album.songs);
+                const songsMapData = body.playlist?.songs || body.songs || body.album?.songs;
                 if (tracks.length === 0 && songsMapData) {
                     const songsMap = new Map();
                     Object.keys(songsMapData).forEach((key) => {
@@ -207,7 +207,7 @@ export default class AnghamiSource {
                         if (typeof s !== 'object')
                             return;
                         const songObj = s._attributes || s;
-                        if (songObj && songObj.id) {
+                        if (songObj?.id) {
                             songsMap.set(songObj.id.toString(), songObj);
                         }
                     });
@@ -221,7 +221,9 @@ export default class AnghamiSource {
                         });
                     }
                     if (tracks.length === 0) {
-                        songsMap.forEach((song) => tracks.push(this.buildTrack(song)));
+                        for (const song of songsMap.values()) {
+                            tracks.push(this.buildTrack(song));
+                        }
                     }
                 }
                 if (tracks.length === 0 && Array.isArray(body.data)) {
@@ -280,8 +282,7 @@ export default class AnghamiSource {
     async getTrackUrl(decodedTrack) {
         const searchQuery = `${decodedTrack.title} - ${decodedTrack.author}`;
         try {
-            let searchResult;
-            searchResult = await this.nodelink.sources.searchWithDefault(searchQuery);
+            const searchResult = await this.nodelink.sources.searchWithDefault(searchQuery);
             if (!searchResult ||
                 searchResult.loadType !== 'search' ||
                 searchResult.data.length === 0) {
@@ -543,7 +544,7 @@ class Reader {
                 this.pos += 4;
                 break;
             default:
-                throw new Error('Unknown wire type: ' + wireType);
+                throw new Error(`Unknown wire type: ${wireType}`);
         }
     }
 }

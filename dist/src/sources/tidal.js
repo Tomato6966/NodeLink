@@ -72,7 +72,7 @@ export default class TidalSource {
      */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        const sourceConfig = this.asRecord(this.nodelink.options.sources?.['tidal']);
+        const sourceConfig = this.asRecord(this.nodelink.options.sources?.tidal);
         this.config = sourceConfig || {};
         this.searchTerms = ['tdsearch'];
         this.recommendationTerm = ['tdrec'];
@@ -80,16 +80,18 @@ export default class TidalSource {
             /^https?:\/\/(?:(?:listen|www)\.)?tidal\.com\/(?:browse\/)?(?<type>album|track|playlist|mix|artist)\/(?<id>[a-zA-Z0-9-]+)(?:\/[a-zA-Z0-9/_-]*)?(?:\?.*)?$/
         ];
         this.priority = 90;
-        this.token = this.asString(this.config['token']);
-        this.countryCode = this.asString(this.config['countryCode']) || 'US';
-        this.playlistLoadLimit = this.asNumber(this.config['playlistLoadLimit']) ?? 2;
+        this.token = this.asString(this.config.token);
+        this.countryCode = this.asString(this.config.countryCode) || 'US';
+        this.playlistLoadLimit = this.asNumber(this.config.playlistLoadLimit) ?? 2;
         this.playlistPageLoadConcurrency =
-            this.asNumber(this.config['playlistPageLoadConcurrency']) ?? 5;
+            this.asNumber(this.config.playlistPageLoadConcurrency) ?? 5;
         this.tokenCachePath = path.join(process.cwd(), '.cache', 'tidal_token.json');
-        this.hifiApis = this.toStringArray(this.config['hifiApis']).map((url) => url.replace(/\/$/, ''));
-        const configuredQualities = this.toStringArray(this.config['hifiQualities']);
+        this.hifiApis = this.toStringArray(this.config.hifiApis).map((url) => url.replace(/\/$/, ''));
+        const configuredQualities = this.toStringArray(this.config.hifiQualities);
         this.hifiQualities =
-            configuredQualities.length > 0 ? configuredQualities : DEFAULT_HIFI_QUALITIES;
+            configuredQualities.length > 0
+                ? configuredQualities
+                : DEFAULT_HIFI_QUALITIES;
     }
     /**
      * Initializes source token state.
@@ -134,14 +136,14 @@ export default class TidalSource {
             return this.getRecommendations(query);
         }
         try {
-            const limit = this.asNumber(this.nodelink.options['maxSearchResults']) ?? 10;
+            const limit = this.asNumber(this.nodelink.options.maxSearchResults) ?? 10;
             const data = await this.getJson('search', {
                 query,
                 limit,
                 types: 'TRACKS'
             });
-            const tracksBlock = this.asRecord(data?.['tracks']);
-            const items = this.asArrayRecords(tracksBlock?.['items']);
+            const tracksBlock = this.asRecord(data?.tracks);
+            const items = this.asArrayRecords(tracksBlock?.items);
             if (items.length === 0)
                 return { loadType: 'empty', data: {} };
             const tracks = items
@@ -167,12 +169,12 @@ export default class TidalSource {
         const match = url.match(pattern);
         if (!match?.groups)
             return { loadType: 'empty', data: {} };
-        let type = match.groups['type'];
-        let id = match.groups['id'];
+        let type = match.groups.type;
+        let id = match.groups.id;
         const nestedTrack = url.match(/\/album\/[a-zA-Z0-9-]+\/track\/(?<trackId>[a-zA-Z0-9-]+)/);
-        if (nestedTrack?.groups?.['trackId']) {
+        if (nestedTrack?.groups?.trackId) {
             type = 'track';
-            id = nestedTrack.groups['trackId'];
+            id = nestedTrack.groups.trackId;
         }
         if (!type || !id)
             return { loadType: 'empty', data: {} };
@@ -217,8 +219,8 @@ export default class TidalSource {
         }
         try {
             const data = await this.getJson(`tracks/${trackId}`);
-            const mixes = this.asRecord(data?.['mixes']);
-            const mixId = this.asString(mixes?.['TRACK_MIX']);
+            const mixes = this.asRecord(data?.mixes);
+            const mixId = this.asString(mixes?.TRACK_MIX);
             if (!mixId)
                 return { loadType: 'empty', data: {} };
             return this.getMix(mixId);
@@ -237,11 +239,11 @@ export default class TidalSource {
     async getMix(mixId) {
         try {
             const data = await this.getJson(`mixes/${mixId}/items`, { limit: 100 });
-            const items = this.asArrayRecords(data?.['items']);
+            const items = this.asArrayRecords(data?.items);
             if (items.length === 0)
                 return { loadType: 'empty', data: {} };
             const tracks = items
-                .map((item) => this.asRecord(item['item']) || item)
+                .map((item) => this.asRecord(item.item) || item)
                 .map((item) => this.buildTrack(item))
                 .filter((item) => item !== null);
             return {
@@ -275,8 +277,7 @@ export default class TidalSource {
             }
             logger('debug', 'Tidal', `Falling back to default search mirror for: ${decodedTrack.title}`);
             const query = `${decodedTrack.title} ${decodedTrack.author}`;
-            const searchWithDefault = this.getSearchWithDefaultFn();
-            if (!searchWithDefault) {
+            if (!this.nodelink.sources) {
                 return {
                     exception: {
                         message: 'Default source search is not available.',
@@ -284,10 +285,10 @@ export default class TidalSource {
                     }
                 };
             }
-            let searchResult = await searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
+            let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
             let tracks = this.toTrackInfoArray(searchResult.data);
             if (searchResult.loadType !== 'search' || tracks.length === 0) {
-                searchResult = await searchWithDefault(query);
+                searchResult = await this.nodelink.sources.searchWithDefault(query);
                 tracks = this.toTrackInfoArray(searchResult.data);
             }
             if (searchResult.loadType !== 'search' || tracks.length === 0) {
@@ -406,7 +407,7 @@ export default class TidalSource {
     async resolveAlbum(id) {
         const albumData = await this.getJson(`albums/${id}`);
         const tracksData = await this.getJson(`albums/${id}/tracks`, { limit: 100 });
-        const items = this.asArrayRecords(tracksData?.['items']);
+        const items = this.asArrayRecords(tracksData?.items);
         if (!albumData || items.length === 0)
             return { loadType: 'empty', data: {} };
         const tracks = items
@@ -416,7 +417,7 @@ export default class TidalSource {
             loadType: 'playlist',
             data: {
                 info: {
-                    name: this.asString(albumData['title']) || 'Unknown Album',
+                    name: this.asString(albumData.title) || 'Unknown Album',
                     selectedTrack: 0
                 },
                 tracks
@@ -430,14 +431,14 @@ export default class TidalSource {
      */
     async resolvePlaylist(id) {
         const playlistData = await this.getJson(`playlists/${id}`);
-        const totalTracks = this.asNumber(playlistData?.['numberOfTracks']) ?? 0;
+        const totalTracks = this.asNumber(playlistData?.numberOfTracks) ?? 0;
         if (!playlistData || totalTracks === 0)
             return { loadType: 'empty', data: {} };
         const firstPageData = await this.getJson(`playlists/${id}/tracks`, {
             limit: 50,
             offset: 0
         });
-        const firstItems = this.asArrayRecords(firstPageData?.['items']);
+        const firstItems = this.asArrayRecords(firstPageData?.items);
         if (firstItems.length === 0)
             return { loadType: 'empty', data: {} };
         const allItems = [...firstItems];
@@ -458,7 +459,7 @@ export default class TidalSource {
                 try {
                     const results = await Promise.all(batch);
                     for (const page of results) {
-                        allItems.push(...this.asArrayRecords(page?.['items']));
+                        allItems.push(...this.asArrayRecords(page?.items));
                     }
                 }
                 catch (error) {
@@ -467,15 +468,15 @@ export default class TidalSource {
             }
         }
         const tracks = allItems
-            .map((item) => this.asRecord(item['item']) || item)
+            .map((item) => this.asRecord(item.item) || item)
             .map((item) => this.buildTrack(item))
             .filter((item) => item !== null);
-        logger('info', 'Tidal', `Loaded ${tracks.length} of ${totalTracks} tracks from playlist "${this.asString(playlistData['title']) || 'Unknown Playlist'}".`);
+        logger('info', 'Tidal', `Loaded ${tracks.length} of ${totalTracks} tracks from playlist "${this.asString(playlistData.title) || 'Unknown Playlist'}".`);
         return {
             loadType: 'playlist',
             data: {
                 info: {
-                    name: this.asString(playlistData['title']) || 'Unknown Playlist',
+                    name: this.asString(playlistData.title) || 'Unknown Playlist',
                     selectedTrack: 0
                 },
                 tracks
@@ -501,14 +502,16 @@ export default class TidalSource {
             http1makeRequest(`${baseUrl}/artist/?f=${id}&skip_tracks=true`, {})
         ]);
         const tracksBody = this.asRecord(tracksRes.body);
-        const tracksList = this.asArrayRecords(tracksBody?.['tracks']);
-        if (tracksRes.error || tracksRes.statusCode !== 200 || tracksList.length === 0) {
+        const tracksList = this.asArrayRecords(tracksBody?.tracks);
+        if (tracksRes.error ||
+            tracksRes.statusCode !== 200 ||
+            tracksList.length === 0) {
             logger('warn', 'Tidal', `hifi artist tracks fetch failed for ${id}: ${tracksRes.error || tracksRes.statusCode}`);
             return { loadType: 'empty', data: {} };
         }
         const infoBody = this.asRecord(infoRes.body);
-        const artist = this.asRecord(infoBody?.['artist']);
-        const name = this.asString(artist?.['name']) || `Artist ${id}`;
+        const artist = this.asRecord(infoBody?.artist);
+        const name = this.asString(artist?.name) || `Artist ${id}`;
         const tracks = tracksList
             .map((item) => this.buildTrack(item))
             .filter((item) => item !== null);
@@ -555,28 +558,29 @@ export default class TidalSource {
      * @returns Encoded track payload.
      */
     buildTrack(item) {
-        const idRaw = item['id'];
+        const idRaw = item.id;
         if (idRaw === undefined || idRaw === null)
             return null;
         const identifier = String(idRaw);
-        const artists = this.asArrayRecords(item['artists'])
-            .map((artist) => this.asString(artist['name']))
+        const artists = this.asArrayRecords(item.artists)
+            .map((artist) => this.asString(artist.name))
             .filter((name) => Boolean(name));
-        const album = this.asRecord(item['album']);
-        const cover = this.asString(album?.['cover']);
+        const album = this.asRecord(item.album);
+        const cover = this.asString(album?.cover);
         const trackInfo = {
             identifier,
             isSeekable: true,
             author: artists.join(', ') || 'Unknown Artist',
-            length: (this.asNumber(item['duration']) ?? 0) * 1000,
+            length: (this.asNumber(item.duration) ?? 0) * 1000,
             isStream: false,
             position: 0,
-            title: this.asString(item['title']) || 'Unknown Title',
-            uri: this.asString(item['url']) || `https://tidal.com/browse/track/${identifier}`,
+            title: this.asString(item.title) || 'Unknown Title',
+            uri: this.asString(item.url) ||
+                `https://tidal.com/browse/track/${identifier}`,
             artworkUrl: cover
                 ? `https://resources.tidal.com/images/${cover.replace(/-/g, '/')}/1280x1280.jpg`
                 : null,
-            isrc: this.asString(item['isrc']) || null,
+            isrc: this.asString(item.isrc) || null,
             sourceName: 'tidal'
         };
         const encodedInput = { ...trackInfo, details: [] };
@@ -607,22 +611,22 @@ export default class TidalSource {
                         continue;
                     }
                     const bodyObject = this.asRecord(body);
-                    const data = this.asRecord(bodyObject?.['data']);
-                    const rawManifest = this.asString(data?.['manifest']);
+                    const data = this.asRecord(bodyObject?.data);
+                    const rawManifest = this.asString(data?.manifest);
                     if (!rawManifest) {
                         logger('debug', 'Tidal', `  ✗ ${quality} @ ${baseUrl} → no manifest field`);
                         continue;
                     }
                     const manifest = this.asRecord(JSON.parse(Buffer.from(rawManifest, 'base64').toString('utf8')));
-                    const urls = this.toStringArray(manifest?.['urls']);
+                    const urls = this.toStringArray(manifest?.urls);
                     const streamUrl = urls[0];
                     if (!streamUrl) {
                         logger('debug', 'Tidal', `  ✗ ${quality} @ ${baseUrl} → no URL in manifest`);
                         continue;
                     }
-                    const mimeType = this.asString(manifest?.['mimeType']) || '';
+                    const mimeType = this.asString(manifest?.mimeType) || '';
                     const format = mimeType.includes('flac') ? 'flac' : 'mp4';
-                    const codecs = this.asString(manifest?.['codecs']) || 'unknown';
+                    const codecs = this.asString(manifest?.codecs) || 'unknown';
                     logger('debug', 'Tidal', `  ✓ Direct stream: quality=${quality} format=${format} codec=${codecs} api=${baseUrl}`);
                     return { url: streamUrl, quality, format };
                 }
@@ -642,8 +646,7 @@ export default class TidalSource {
     extractSecondClientId(text) {
         const regex = /clientId\s*[:=]\s*"([^"]+)"/g;
         let count = 0;
-        let match;
-        while ((match = regex.exec(text))) {
+        for (const match of text.matchAll(regex)) {
             count += 1;
             if (count === 2)
                 return match[1] || null;
@@ -661,18 +664,18 @@ export default class TidalSource {
         const tracks = [];
         for (const item of data) {
             const itemRecord = this.asRecord(item);
-            const info = this.asRecord(itemRecord?.['info']);
+            const info = this.asRecord(itemRecord?.info);
             if (!info)
                 continue;
-            const identifier = this.asString(info['identifier']);
-            const isSeekable = this.asBoolean(info['isSeekable']);
-            const author = this.asString(info['author']);
-            const length = this.asNumber(info['length']);
-            const isStream = this.asBoolean(info['isStream']);
-            const position = this.asNumber(info['position']);
-            const title = this.asString(info['title']);
-            const uri = this.asString(info['uri']);
-            const sourceName = this.asString(info['sourceName']);
+            const identifier = this.asString(info.identifier);
+            const isSeekable = this.asBoolean(info.isSeekable);
+            const author = this.asString(info.author);
+            const length = this.asNumber(info.length);
+            const isStream = this.asBoolean(info.isStream);
+            const position = this.asNumber(info.position);
+            const title = this.asString(info.title);
+            const uri = this.asString(info.uri);
+            const sourceName = this.asString(info.sourceName);
             if (identifier === null ||
                 isSeekable === null ||
                 author === null ||
@@ -693,23 +696,12 @@ export default class TidalSource {
                 position,
                 title,
                 uri,
-                artworkUrl: this.asString(info['artworkUrl']) || null,
-                isrc: this.asString(info['isrc']) || null,
+                artworkUrl: this.asString(info.artworkUrl) || null,
+                isrc: this.asString(info.isrc) || null,
                 sourceName
             });
         }
         return tracks;
-    }
-    /**
-     * Gets searchWithDefault function from source manager.
-     * @returns Search function or null.
-     */
-    getSearchWithDefaultFn() {
-        const sourcesObject = this.asRecord(this.nodelink.sources);
-        const fn = sourcesObject?.['searchWithDefault'];
-        return typeof fn === 'function'
-            ? fn
-            : null;
     }
     /**
      * Casts unknown value to record.

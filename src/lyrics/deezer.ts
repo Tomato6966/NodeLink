@@ -1,12 +1,15 @@
-import { getBestMatch, logger, makeRequest } from '../utils.ts'
-import type { TrackInfo } from '../typings/sources/source.types.ts'
-import type { LyricsLine, LyricsResult } from '../typings/lyrics/musixmatch.types.ts'
 import type {
   DeezerGraphqlResponse,
   DeezerJwtResponse,
   DeezerSearchCandidate,
   NodelinkInstanceForDeezerLyrics
 } from '../typings/lyrics/deezer.types.ts'
+import type {
+  LyricsLine,
+  LyricsResult
+} from '../typings/lyrics/musixmatch.types.ts'
+import type { TrackInfo } from '../typings/sources/source.types.ts'
+import { getBestMatch, logger, makeRequest } from '../utils.ts'
 
 /**
  * Deezer lyrics provider backed by Deezer GraphQL endpoint.
@@ -99,7 +102,11 @@ export default class DeezerLyrics {
       const searchRes = await this.nodelink.sources.search('deezer', query)
 
       const searchData = searchRes.data
-      if (searchRes.loadType !== 'search' || !Array.isArray(searchData) || searchData.length === 0) {
+      if (
+        searchRes.loadType !== 'search' ||
+        !Array.isArray(searchData) ||
+        searchData.length === 0
+      ) {
         return { loadType: 'empty', data: {} }
       }
 

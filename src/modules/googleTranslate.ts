@@ -1,8 +1,8 @@
-import { http1makeRequest } from '../utils.ts'
 import type {
   GoogleTranslateResponseBody,
   GoogleTranslationResult
 } from '../typings/modules/googleTranslate.types.ts'
+import { http1makeRequest } from '../utils.ts'
 
 /**
  * Fallback key used when no custom Google Translate key is configured.
@@ -202,8 +202,7 @@ export async function translateText(
 ): Promise<GoogleTranslationResult> {
   if (!text) return { translation: '', sourceLanguage: sourceLang }
 
-  const key =
-    apiKey || process.env['GOOGLE_TRANSLATE_KEY'] || DEFAULT_API_KEY
+  const key = apiKey || process.env.GOOGLE_TRANSLATE_KEY || DEFAULT_API_KEY
   const url = buildTranslateUrl(text, sourceLang, targetLang, key)
   const { body, statusCode, error } = await http1makeRequest(url, {
     method: 'GET'

@@ -31,13 +31,13 @@ import type {
   LoadStreamPayload,
   PCMStream
 } from '../typings/workers/worker.types.ts'
+import * as utils from '../utils.ts'
 import {
   createHeadQueue,
   dequeueHeadQueue,
   enqueueHeadQueue,
   getHeadQueueLength
 } from './headQueue.ts'
-import * as utils from '../utils.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 
@@ -632,9 +632,9 @@ if (isMainThread) {
     return meaningManagerPromise
   }
 
-  nodelink['getLyricsManager'] =
+  nodelink.getLyricsManager =
     getLyricsManager as unknown as WorkerNodeLink['getLyricsManager']
-  nodelink['getMeaningManager'] =
+  nodelink.getMeaningManager =
     getMeaningManager as unknown as WorkerNodeLink['getMeaningManager']
 
   /**
@@ -642,7 +642,7 @@ if (isMainThread) {
    * @internal
    */
   const activeChats = new Map<string, boolean>()
-  const profilerBaseDir = process.env['NODELINK_PROFILER_DIR'] || '.profiles'
+  const profilerBaseDir = process.env.NODELINK_PROFILER_DIR || '.profiles'
   let activeCpuSession: {
     session: inspector.Session
     startedAt: number
@@ -703,7 +703,7 @@ if (isMainThread) {
     bytes: number
     hits: number
   }> => {
-    const head = profile['head'] as
+    const head = profile.head as
       | {
           callFrame?: {
             functionName?: string
@@ -784,7 +784,7 @@ if (isMainThread) {
   const handleProfilerCommand = async (
     payload: Record<string, unknown>
   ): Promise<Record<string, unknown>> => {
-    const action = payload?.['action']
+    const action = payload?.action
     if (typeof action !== 'string' || action.length === 0) {
       return { success: false, error: 'Missing profiler action' }
     }
@@ -890,13 +890,12 @@ if (isMainThread) {
     }
 
     if (action === 'openInspector') {
-      const host =
-        typeof payload['host'] === 'string' ? payload['host'] : '127.0.0.1'
+      const host = typeof payload.host === 'string' ? payload.host : '127.0.0.1'
       const port =
-        typeof payload['port'] === 'number' && Number.isInteger(payload['port'])
-          ? payload['port']
+        typeof payload.port === 'number' && Number.isInteger(payload.port)
+          ? payload.port
           : 0
-      inspector.open(port, host, payload['exposeWait'] === true)
+      inspector.open(port, host, payload.exposeWait === true)
       return {
         success: true,
         pid: process.pid,
@@ -942,7 +941,7 @@ if (isMainThread) {
         startedAt: Date.now(),
         name:
           sanitizeProfileName(
-            typeof payload['name'] === 'string' ? payload['name'] : undefined
+            typeof payload.name === 'string' ? payload.name : undefined
           ) || null
       }
       return {
@@ -961,13 +960,13 @@ if (isMainThread) {
       const outputPath = await buildProfilerFilePath(
         'cpu',
         'cpuprofile',
-        (typeof payload['name'] === 'string'
-          ? sanitizeProfileName(payload['name'])
+        (typeof payload.name === 'string'
+          ? sanitizeProfileName(payload.name)
           : '') ||
           name ||
           undefined
       )
-      await fsPromises.writeFile(outputPath, JSON.stringify(result['profile']))
+      await fsPromises.writeFile(outputPath, JSON.stringify(result.profile))
       try {
         session.disconnect()
       } catch {}
@@ -985,7 +984,7 @@ if (isMainThread) {
       const outputPath = await buildProfilerFilePath(
         'heap',
         'heapsnapshot',
-        typeof payload['name'] === 'string' ? payload['name'] : undefined
+        typeof payload.name === 'string' ? payload.name : undefined
       )
       const session = new inspector.Session()
       let fd: number | null = null
@@ -1025,10 +1024,10 @@ if (isMainThread) {
       }
 
       const samplingInterval =
-        typeof payload['samplingInterval'] === 'number' &&
-        Number.isFinite(payload['samplingInterval']) &&
-        payload['samplingInterval'] > 0
-          ? Math.floor(payload['samplingInterval'])
+        typeof payload.samplingInterval === 'number' &&
+        Number.isFinite(payload.samplingInterval) &&
+        payload.samplingInterval > 0
+          ? Math.floor(payload.samplingInterval)
           : 32768
 
       const session = new inspector.Session()
@@ -1042,7 +1041,7 @@ if (isMainThread) {
         startedAt: Date.now(),
         name:
           sanitizeProfileName(
-            typeof payload['name'] === 'string' ? payload['name'] : undefined
+            typeof payload.name === 'string' ? payload.name : undefined
           ) || null,
         samplingInterval
       }
@@ -1064,8 +1063,8 @@ if (isMainThread) {
       const outputPath = await buildProfilerFilePath(
         'heap-sampling',
         'heapsampling.json',
-        (typeof payload['name'] === 'string'
-          ? sanitizeProfileName(payload['name'])
+        (typeof payload.name === 'string'
+          ? sanitizeProfileName(payload.name)
           : '') ||
           name ||
           undefined
@@ -1076,7 +1075,7 @@ if (isMainThread) {
       } catch {}
       activeHeapSampling = null
 
-      const profile = (result['profile'] as Record<string, unknown>) || {}
+      const profile = (result.profile as Record<string, unknown>) || {}
       const topSites = summarizeHeapSamplingProfile(profile)
 
       return {

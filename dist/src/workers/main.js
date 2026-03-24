@@ -25,9 +25,9 @@ import StatsManager from "../managers/statsManager.js";
 import TrackCacheManager from "../managers/trackCacheManager.js";
 import { getWebmOpusProfilerStats } from "../playback/demuxers/WebmOpus.js";
 import { bufferPool } from "../playback/structs/BufferPool.js";
-import { createHeadQueue, dequeueHeadQueue, enqueueHeadQueue, getHeadQueueLength } from "./headQueue.js";
 import { cleanupHttpAgents, initLogger, logger } from "../utils.js";
 import { createVoiceRelay } from "../voice/voiceRelay.js";
+import { createHeadQueue, dequeueHeadQueue, enqueueHeadQueue, getHeadQueueLength } from "./headQueue.js";
 let playerClassPromise = null;
 let createPCMStreamPromise = null;
 const getPlayerClass = async () => {
@@ -67,7 +67,8 @@ catch {
 }
 const HIBERNATION_ENABLED = config.cluster?.hibernation?.enabled !== false;
 const HIBERNATION_TIMEOUT = config.cluster?.hibernation?.timeoutMs || 20 * 60 * 1000;
-initLogger(config);
+const logging = config.logging;
+initLogger({ logging });
 const players = new Map();
 const guildQueues = new Map();
 const activeStreams = new Map();
@@ -169,20 +170,20 @@ const getCodecAndContainer = (format) => {
         return { codec: null, container: null, formatLabel: null };
     }
     const info = format;
-    const mimeType = typeof info['mimeType'] === 'string'
-        ? info['mimeType']
-        : typeof info['type'] === 'string'
-            ? info['type']
+    const mimeType = typeof info.mimeType === 'string'
+        ? info.mimeType
+        : typeof info.type === 'string'
+            ? info.type
             : null;
-    let codec = typeof info['codecs'] === 'string'
-        ? info['codecs']
-        : typeof info['codec'] === 'string'
-            ? info['codec']
+    let codec = typeof info.codecs === 'string'
+        ? info.codecs
+        : typeof info.codec === 'string'
+            ? info.codec
             : null;
-    let container = typeof info['container'] === 'string'
-        ? info['container']
-        : typeof info['ext'] === 'string'
-            ? info['ext']
+    let container = typeof info.container === 'string'
+        ? info.container
+        : typeof info.ext === 'string'
+            ? info.ext
             : null;
     if (mimeType) {
         const [kind, rest] = mimeType.split(';', 2);
@@ -196,8 +197,8 @@ const getCodecAndContainer = (format) => {
         }
     }
     const formatLabel = mimeType ||
-        (typeof info['format'] === 'string' ? info['format'] : null) ||
-        (typeof info['label'] === 'string' ? info['label'] : null) ||
+        (typeof info.format === 'string' ? info.format : null) ||
+        (typeof info.label === 'string' ? info.label : null) ||
         container;
     return {
         codec: codec || null,
@@ -205,7 +206,7 @@ const getCodecAndContainer = (format) => {
         formatLabel: formatLabel || null
     };
 };
-const profilerBaseDir = process.env['NODELINK_PROFILER_DIR'] || '.profiles';
+const profilerBaseDir = process.env.NODELINK_PROFILER_DIR || '.profiles';
 let activeCpuProfiler = null;
 let activeHeapSampling = null;
 const sanitizeProfileName = (value) => {
@@ -237,7 +238,7 @@ const inspectorPost = (session, method, params) => new Promise((resolve, reject)
     });
 });
 const summarizeHeapSamplingProfile = (profile, limit = null) => {
-    const head = profile['head'];
+    const head = profile.head;
     if (!head)
         return [];
     const aggregates = new Map();
@@ -565,7 +566,7 @@ const handleProfilerCommand = async (payload) => {
         const { session, startedAt, name } = activeCpuProfiler;
         const result = await inspectorPost(session, 'Profiler.stop');
         const outputPath = await buildProfilerFilePath('cpu', 'cpuprofile', sanitizeProfileName(payload.name) || name || undefined);
-        const profile = result['profile'];
+        const profile = result.profile;
         await fsPromises.writeFile(outputPath, JSON.stringify(profile));
         try {
             session.disconnect();
@@ -626,7 +627,7 @@ const handleProfilerCommand = async (payload) => {
         }
         catch { }
         activeHeapSampling = null;
-        const profile = result['profile'] || {};
+        const profile = result.profile || {};
         const topSites = summarizeHeapSamplingProfile(profile);
         return {
             success: true,
@@ -1463,7 +1464,7 @@ async function processQueue(queueKey) {
                 };
                 const PlayerClass = await getPlayerClass();
                 const player = new PlayerClass({
-                    nodelink,
+                    nodelink: nodelink,
                     session: mockSession,
                     guildId
                 });
@@ -1531,7 +1532,7 @@ async function processQueue(queueKey) {
                 };
                 const PlayerClass = await getPlayerClass();
                 const player = new PlayerClass({
-                    nodelink,
+                    nodelink: nodelink,
                     session: mockSession,
                     guildId
                 });

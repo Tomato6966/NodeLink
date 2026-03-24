@@ -45,15 +45,14 @@ export default class Distortion extends AnimatableFilter {
         super.applyAnimatedUpdate({
             distortion: {
                 alpha: targetAlpha,
-                transition: dist.transition
             }
         }, 'distortion', { alpha: 0.0 });
     }
     onConfigChanged(config) {
-        this.alpha = config['alpha'] ?? 0;
+        this.alpha = config.alpha ?? 0;
     }
     isConfigActive(config) {
-        const a = config ? config['alpha'] : this.alpha;
+        const a = config ? config.alpha : this.alpha;
         return (a ?? 0) > 0.001;
     }
     /**

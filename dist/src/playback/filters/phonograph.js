@@ -205,12 +205,11 @@ export default class Phonograph extends AnimatableFilter {
         super.applyAnimatedUpdate({
             phonograph: {
                 alpha: targetAlpha,
-                transition: phono.transition
             }
         }, 'phonograph', { alpha: 0.0 });
     }
     onConfigChanged(config) {
-        this.alpha = config['alpha'] ?? 1.0;
+        this.alpha = config.alpha ?? 1.0;
         this.depth = this.targetDepth * this.alpha;
         this.crackle = this.targetCrackle * this.alpha;
         this.flutter = this.targetFlutter * this.alpha;
@@ -219,7 +218,7 @@ export default class Phonograph extends AnimatableFilter {
         this.drive = this.targetDrive * this.alpha;
     }
     isConfigActive(config) {
-        const a = config ? config['alpha'] : this.alpha;
+        const a = config ? config.alpha : this.alpha;
         return (a ?? 1.0) > 0.001;
     }
     process(chunk) {

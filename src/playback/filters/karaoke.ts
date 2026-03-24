@@ -145,7 +145,7 @@ export default class Karaoke extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const k = settings?.karaoke || {}
-    const isDisabled = (k as any)._disabled === true
+    const isDisabled = (k as Record<string, unknown>)._disabled === true
 
     this.targetLevel = k.level ?? 1.0
     this.targetMonoLevel = k.monoLevel ?? 1.0
@@ -160,7 +160,6 @@ export default class Karaoke extends AnimatableFilter {
       {
         karaoke: {
           alpha: targetAlpha,
-          transition: (k as any).transition
         }
       },
       'karaoke',
@@ -169,7 +168,7 @@ export default class Karaoke extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 1.0
+    this.alpha = config.alpha ?? 1.0
 
     const level = this.targetLevel
     const monoLevel = this.targetMonoLevel
@@ -179,7 +178,7 @@ export default class Karaoke extends AnimatableFilter {
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 1.0) > 0.001
   }
 

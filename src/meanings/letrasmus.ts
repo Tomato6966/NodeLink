@@ -1,13 +1,5 @@
 import { translateMany, translateText } from '../modules/googleTranslate.js'
 import type {
-  BestMatchTrackInfo
-} from '../typings/utils.types.ts'
-import type {
-  MeaningLoadResult,
-  MeaningTrackInfo,
-  MeaningTranslation
-} from '../typings/meanings/meaning.types.ts'
-import type {
   LetrasCandidate,
   LetrasTrackInfo,
   MeaningBlock,
@@ -16,6 +8,12 @@ import type {
   SolrDoc,
   SolrResponse
 } from '../typings/meanings/letrasmus.types.ts'
+import type {
+  MeaningLoadResult,
+  MeaningTrackInfo,
+  MeaningTranslation
+} from '../typings/meanings/meaning.types.ts'
+import type { BestMatchTrackInfo } from '../typings/utils.types.ts'
 import { getBestMatch, http1makeRequest, logger } from '../utils.ts'
 
 /**
@@ -257,8 +255,7 @@ const extractMeaning = (html: string): MeaningBlock => {
 
   const paragraphs: string[] = []
   const pRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi
-  let pMatch: RegExpExecArray | null
-  while ((pMatch = pRegex.exec(block))) {
+  for (const pMatch of block.matchAll(pRegex)) {
     const paragraphBlock = pMatch[1]
     if (!paragraphBlock) continue
     let text = paragraphBlock.replace(/<br\s*\/?>/gi, '\n')
@@ -337,9 +334,7 @@ const searchLetras = async (
 const getTranslationText = (result: unknown): string | null => {
   if (!result || typeof result !== 'object') return null
   const record = result as Record<string, unknown>
-  return typeof record['translation'] === 'string'
-    ? record['translation']
-    : null
+  return typeof record.translation === 'string' ? record.translation : null
 }
 
 export default class LetrasMusMeaning {
@@ -429,7 +424,8 @@ export default class LetrasMusMeaning {
 
       for (const candidate of candidates) {
         const letrasTrack = candidate.info
-        if (!letrasTrack?.uri || letrasTrack.sourceName !== 'letrasmus') continue
+        if (!letrasTrack?.uri || letrasTrack.sourceName !== 'letrasmus')
+          continue
 
         const baseUrl = letrasTrack.uri.endsWith('/')
           ? letrasTrack.uri
@@ -441,7 +437,8 @@ export default class LetrasMusMeaning {
           error
         } = await http1makeRequest(url, { method: 'GET' })
 
-        if (error || statusCode !== 200 || typeof fetchedBody !== 'string') continue
+        if (error || statusCode !== 200 || typeof fetchedBody !== 'string')
+          continue
 
         const meaningCheck = extractMeaning(fetchedBody)
         if (!meaningCheck.body.length) continue

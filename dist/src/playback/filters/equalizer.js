@@ -6,6 +6,11 @@ const BANDS = [
     25, 40, 63, 100, 160, 250, 400, 630, 1000, 1600, 2500, 4000, 6300, 10000,
     16000
 ];
+/**
+ * Multi-band biquad equalizer filter.
+ * Supports smooth per-band animation.
+ * @public
+ */
 export default class Equalizer extends AnimatableFilter {
     priority = 5;
     bandGains;

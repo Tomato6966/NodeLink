@@ -18,18 +18,18 @@ declare module 'fastest-validator' {
     default?: unknown
     messages?: Record<string, string>
 
-    [key: string]: any
+    [key: string]: unknown
   }
 
   export interface ValidationSchema {
-    [key: string]: ValidationRule | any
+    [key: string]: ValidationRule | unknown
   }
 
   export interface ValidatorOptions {
     haltOnFirstError?: boolean
     useNewCustomCheckerFunction?: boolean
 
-    [key: string]: any
+    [key: string]: unknown
   }
 
   export type CompiledValidator = (data: unknown) => ValidationResult

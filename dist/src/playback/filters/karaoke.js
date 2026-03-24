@@ -136,19 +136,18 @@ export default class Karaoke extends AnimatableFilter {
         super.applyAnimatedUpdate({
             karaoke: {
                 alpha: targetAlpha,
-                transition: k.transition
             }
         }, 'karaoke', { alpha: 0.0 });
     }
     onConfigChanged(config) {
-        this.alpha = config['alpha'] ?? 1.0;
+        this.alpha = config.alpha ?? 1.0;
         const level = this.targetLevel;
         const monoLevel = this.targetMonoLevel;
         this.level = level <= 0 ? 0 : level >= 1 ? 1 : level;
         this.monoLevel = monoLevel <= 0 ? 0 : monoLevel >= 1 ? 1 : monoLevel;
     }
     isConfigActive(config) {
-        const a = config ? config['alpha'] : this.alpha;
+        const a = config ? config.alpha : this.alpha;
         return (a ?? 1.0) > 0.001;
     }
     /**

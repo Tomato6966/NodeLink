@@ -164,11 +164,7 @@ export default class CipherManager {
         this._reportProxyStatus(proxy, false, 500, Date.now() - startTime)
         throw err
       }
-      const {
-        body: scriptContent,
-        error,
-        statusCode
-      } = response
+      const { body: scriptContent, error, statusCode } = response
       this._reportProxyStatus(
         proxy,
         !error && statusCode === 200,
@@ -289,12 +285,15 @@ export default class CipherManager {
 
       const proxy = this._pickProxy(true)
       const startTime = Date.now()
-      const { statusCode, error } = await http1makeRequest(`${this.config.url}/`, {
-        method: 'GET',
-        timeout: 5000,
-        headers,
-        proxy
-      })
+      const { statusCode, error } = await http1makeRequest(
+        `${this.config.url}/`,
+        {
+          method: 'GET',
+          timeout: 5000,
+          headers,
+          proxy
+        }
+      )
       this._reportProxyStatus(
         proxy,
         !error && statusCode === 200,
@@ -435,11 +434,7 @@ export default class CipherManager {
       this._reportProxyStatus(proxy, false, 500, Date.now() - startTime)
       throw err
     }
-    const {
-      body: watchPage,
-      error,
-      statusCode
-    } = response
+    const { body: watchPage, error, statusCode } = response
     this._reportProxyStatus(
       proxy,
       !error && statusCode === 200,

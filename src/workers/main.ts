@@ -20,7 +20,8 @@ import StatsManager from '../managers/statsManager.ts'
 import TrackCacheManager from '../managers/trackCacheManager.ts'
 import { getWebmOpusProfilerStats } from '../playback/demuxers/WebmOpus.ts'
 import { bufferPool } from '../playback/structs/BufferPool.ts'
-import type { TrackInfoExtended } from '../typings/playback/player.types.ts'
+import type { NodelinkConfig as NodeLinkConfig } from '../typings/config/config.types.ts'
+import type { TrackInfoExtended, NodeLink } from '../typings/playback/player.types.ts'
 import type {
   RoutePlannerManager as RoutePlannerManagerLike,
   SourceInstance,
@@ -28,6 +29,7 @@ import type {
   TrackStreamResult,
   TrackUrlResult
 } from '../typings/sources/source.types.ts'
+import type { LoggingConfig } from '../typings/utils.types.ts'
 import type {
   ActiveStreamEntry,
   AudioInterceptor,
@@ -42,15 +44,14 @@ import type {
   WorkerNodeLink,
   WorkerPlayer
 } from '../typings/workers/worker.types.ts'
-import type { NodelinkConfig as NodeLinkConfig } from '../typings/config/config.types.ts'
+import { cleanupHttpAgents, initLogger, logger } from '../utils.ts'
+import { createVoiceRelay } from '../voice/voiceRelay.ts'
 import {
   createHeadQueue,
   dequeueHeadQueue,
   enqueueHeadQueue,
   getHeadQueueLength
 } from './headQueue.ts'
-import { cleanupHttpAgents, initLogger, logger } from '../utils.ts'
-import { createVoiceRelay } from '../voice/voiceRelay.ts'
 
 type WorkerPlayerClass = typeof import('../playback/player.ts').Player
 type CreatePCMStreamFn =
@@ -110,7 +111,8 @@ const HIBERNATION_ENABLED = config.cluster?.hibernation?.enabled !== false
 const HIBERNATION_TIMEOUT =
   config.cluster?.hibernation?.timeoutMs || 20 * 60 * 1000
 
-initLogger(config as any)
+const logging = config.logging as LoggingConfig
+initLogger({ logging })
 
 const players = new Map<string, WorkerPlayer>()
 const guildQueues = new Map<string, GuildQueueEntry>()
@@ -232,23 +234,23 @@ const getCodecAndContainer = (
 
   const info = format as Record<string, unknown>
   const mimeType =
-    typeof info['mimeType'] === 'string'
-      ? info['mimeType']
-      : typeof info['type'] === 'string'
-        ? info['type']
+    typeof info.mimeType === 'string'
+      ? info.mimeType
+      : typeof info.type === 'string'
+        ? info.type
         : null
 
   let codec =
-    typeof info['codecs'] === 'string'
-      ? info['codecs']
-      : typeof info['codec'] === 'string'
-        ? info['codec']
+    typeof info.codecs === 'string'
+      ? info.codecs
+      : typeof info.codec === 'string'
+        ? info.codec
         : null
   let container =
-    typeof info['container'] === 'string'
-      ? info['container']
-      : typeof info['ext'] === 'string'
-        ? info['ext']
+    typeof info.container === 'string'
+      ? info.container
+      : typeof info.ext === 'string'
+        ? info.ext
         : null
 
   if (mimeType) {
@@ -264,8 +266,8 @@ const getCodecAndContainer = (
 
   const formatLabel =
     mimeType ||
-    (typeof info['format'] === 'string' ? info['format'] : null) ||
-    (typeof info['label'] === 'string' ? info['label'] : null) ||
+    (typeof info.format === 'string' ? info.format : null) ||
+    (typeof info.label === 'string' ? info.label : null) ||
     container
 
   return {
@@ -308,7 +310,7 @@ type WorkerProfilerPayload = {
   samplingInterval?: number
 }
 
-const profilerBaseDir = process.env['NODELINK_PROFILER_DIR'] || '.profiles'
+const profilerBaseDir = process.env.NODELINK_PROFILER_DIR || '.profiles'
 let activeCpuProfiler: CpuProfilerState | null = null
 let activeHeapSampling: HeapSamplingState | null = null
 
@@ -360,7 +362,7 @@ const summarizeHeapSamplingProfile = (
   bytes: number
   hits: number
 }> => {
-  const head = profile['head'] as
+  const head = profile.head as
     | {
         callFrame?: {
           functionName?: string
@@ -861,7 +863,7 @@ const handleProfilerCommand = async (
       'cpuprofile',
       sanitizeProfileName(payload.name) || name || undefined
     )
-    const profile = result['profile']
+    const profile = result.profile
     await fsPromises.writeFile(outputPath, JSON.stringify(profile))
 
     try {
@@ -936,7 +938,7 @@ const handleProfilerCommand = async (
     } catch {}
     activeHeapSampling = null
 
-    const profile = (result['profile'] as Record<string, unknown>) || {}
+    const profile = (result.profile as Record<string, unknown>) || {}
     const topSites = summarizeHeapSamplingProfile(profile)
 
     return {
@@ -1534,7 +1536,7 @@ nodelink.sources = new SourceManager(nodelink)
 nodelink.routePlanner = new RoutePlannerManager(
   nodelink
 ) as RoutePlannerManagerLike
-nodelink.connectionManager = new ConnectionManager(nodelink as any)
+nodelink.connectionManager = new ConnectionManager(nodelink)
 nodelink.pluginManager = new PluginManager(nodelink)
 
 function setEfficiencyMode(enabled: boolean): void {
@@ -1842,7 +1844,7 @@ async function startLoadStream(
     payload?.guildId ?? 'worker-stream',
     fetched.stream,
     fetched.type || (urlResult.format as string) || 'unknown',
-    nodelink,
+    nodelink as unknown as NodeLink,
     (payload?.volume ?? 100) / 100,
     payload?.filters || {}
   ) as unknown as PCMStream
@@ -1981,7 +1983,7 @@ async function processQueue(queueKey: string): Promise<void> {
 
         const PlayerClass = await getPlayerClass()
         const player = new PlayerClass({
-          nodelink,
+          nodelink: nodelink as unknown as NodeLink,
           session: mockSession,
           guildId
         }) as unknown as WorkerPlayer
@@ -2087,7 +2089,7 @@ async function processQueue(queueKey: string): Promise<void> {
 
         const PlayerClass = await getPlayerClass()
         const player = new PlayerClass({
-          nodelink,
+          nodelink: nodelink as unknown as NodeLink,
           session: mockSession,
           guildId
         }) as unknown as WorkerPlayer

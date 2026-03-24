@@ -10,11 +10,28 @@ const BANDS = [
   16000
 ]
 
+interface BiquadFilter {
+  b0: number
+  b1: number
+  b2: number
+  a1: number
+  a2: number
+  x1: number
+  x2: number
+  y1: number
+  y2: number
+}
+
+/**
+ * Multi-band biquad equalizer filter.
+ * Supports smooth per-band animation.
+ * @public
+ */
 export default class Equalizer extends AnimatableFilter {
   public priority = 5
   private bandGains: number[]
-  private filtersL: Array<any>
-  private filtersR: Array<any>
+  private filtersL: BiquadFilter[]
+  private filtersR: BiquadFilter[]
 
   constructor() {
     super()
@@ -23,7 +40,7 @@ export default class Equalizer extends AnimatableFilter {
     this.filtersR = BANDS.map((freq) => this._createFilter(freq))
   }
 
-  private _createFilter(freq: number) {
+  private _createFilter(freq: number): BiquadFilter {
     const omega = (2 * Math.PI * freq) / SAMPLE_RATE
     const sin = Math.sin(omega)
     const cos = Math.cos(omega)
@@ -52,7 +69,7 @@ export default class Equalizer extends AnimatableFilter {
       defaults[`band_${i}`] = 1.0
     }
 
-    const mappedConfig: Record<string, any> = { transition: eq.transition }
+    const mappedConfig: Record<string, unknown> = { transition: eq.transition }
     for (const band of bands) {
       if (band.band >= 0 && band.band < BANDS.length) {
         mappedConfig[`band_${band.band}`] = Math.max(

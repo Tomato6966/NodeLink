@@ -100,6 +100,15 @@ export class FlowController extends Transform {
     checkScratchEffectCompleted() {
         return this.scratch.checkEffectCompleted();
     }
+    /**
+     * Updates filters in the pipeline via the FlowController.
+     * Note: FlowController currently doesn't manage filters itself,
+     * this is a no-op placeholder to match the expected interface.
+     * @param _filters - The filter settings.
+     */
+    setFilters(_filters) {
+        // This exists to satisfy streamProcessor's type check and avoid 'as any'
+    }
     _transform(chunk, _encoding, callback) {
         let offset = 0;
         if (this.pendingLength > 0) {

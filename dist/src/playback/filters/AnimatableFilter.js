@@ -36,10 +36,10 @@ export class AnimatableFilter extends BaseFilter {
                 newTarget[key] = defaults[key];
             }
         }
-        const transition = rawConfig['transition'];
+        const transition = rawConfig.transition;
         // If disabled via auto-injection hook, make sure transition executes properly but to default states
         // and if there's no transition, snap instantly to defaults
-        if (rawConfig['_disabled'] === true) {
+        if (rawConfig._disabled === true) {
             for (const key of Object.keys(defaults)) {
                 newTarget[key] = defaults[key];
             }

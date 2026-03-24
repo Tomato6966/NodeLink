@@ -36,7 +36,7 @@ export default class Spatial extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const s = settings?.spatial || {}
-    const isDisabled = (s as any)._disabled === true
+    const isDisabled = (s as Record<string, unknown>)._disabled === true
 
     this.depth = Math.max(0, Math.min(s.depth || 0, 1.0))
     this.rate = s.rate || 0
@@ -50,7 +50,6 @@ export default class Spatial extends AnimatableFilter {
       {
         spatial: {
           alpha: targetAlpha,
-          transition: (s as any).transition
         }
       },
       'spatial',
@@ -59,11 +58,11 @@ export default class Spatial extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 

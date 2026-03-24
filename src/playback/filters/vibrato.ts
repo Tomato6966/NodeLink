@@ -36,7 +36,7 @@ export default class Vibrato extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const v = settings?.vibrato || {}
-    const isDisabled = (v as any)._disabled === true
+    const isDisabled = (v as Record<string, unknown>)._disabled === true
 
     this.targetFrequency = v.frequency || 0
     this.targetDepth = Math.max(0, Math.min(v.depth ?? 0, 2.0))
@@ -55,7 +55,6 @@ export default class Vibrato extends AnimatableFilter {
       {
         vibrato: {
           alpha: targetAlpha,
-          transition: (v as any).transition
         }
       },
       'vibrato',
@@ -64,11 +63,11 @@ export default class Vibrato extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 

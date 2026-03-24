@@ -35,7 +35,7 @@ export default class Flanger extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const f = settings?.flanger || {}
-    const isDisabled = (f as any)._disabled === true
+    const isDisabled = (f as Record<string, unknown>)._disabled === true
 
     this.rate = f.rate || 0
     this.depth = Math.max(0, Math.min(f.depth || 0, 1.0))
@@ -50,7 +50,6 @@ export default class Flanger extends AnimatableFilter {
       {
         flanger: {
           alpha: targetAlpha,
-          transition: (f as any).transition
         }
       },
       'flanger',
@@ -59,11 +58,11 @@ export default class Flanger extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 

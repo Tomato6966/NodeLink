@@ -412,7 +412,8 @@ export default class NeteaseSource {
             }
             const query = `${decodedTrack.title} ${decodedTrack.author}`.trim();
             const searchResult = await this.nodelink.sources.searchWithDefault(query);
-            if (!Array.isArray(searchResult.data) || searchResult.loadType !== 'search') {
+            if (!Array.isArray(searchResult.data) ||
+                searchResult.loadType !== 'search') {
                 return this.exceptionTrackResult('No matching track found on fallback source.', 'common');
             }
             const candidates = this.toBestMatchCandidates(searchResult.data);
@@ -486,8 +487,8 @@ export default class NeteaseSource {
             .map((item) => item && typeof item === 'object' && !Array.isArray(item)
             ? item
             : null)
-            .map((item) => item?.['info'] && this.isTrackInfo(item['info'])
-            ? { info: item['info'] }
+            .map((item) => item?.info && this.isTrackInfo(item.info)
+            ? { info: item.info }
             : null)
             .filter((item) => item !== null);
     }
@@ -501,12 +502,12 @@ export default class NeteaseSource {
             ? value
             : null;
         return (info !== null &&
-            typeof info['identifier'] === 'string' &&
-            typeof info['title'] === 'string' &&
-            typeof info['author'] === 'string' &&
-            typeof info['length'] === 'number' &&
-            typeof info['uri'] === 'string' &&
-            typeof info['sourceName'] === 'string');
+            typeof info.identifier === 'string' &&
+            typeof info.title === 'string' &&
+            typeof info.author === 'string' &&
+            typeof info.length === 'number' &&
+            typeof info.uri === 'string' &&
+            typeof info.sourceName === 'string');
     }
     /**
      * Returns a typed empty result payload.

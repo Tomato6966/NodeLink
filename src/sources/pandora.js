@@ -719,7 +719,9 @@ export default class PandoraSource {
     const query = `${decodedTrack.title} ${decodedTrack.author}`
 
     try {
-      let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query)
+      let searchResult = await this.nodelink.sources.searchWithDefault(
+        decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query
+      )
 
       if (
         !searchResult ||

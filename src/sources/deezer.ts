@@ -1141,7 +1141,9 @@ export default class DeezerSource {
     }
 
     const query = `${decodedTrack.title} ${decodedTrack.author}`
-    let searchResult = await sourceManager.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query)
+    let searchResult = await sourceManager.searchWithDefault(
+      decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query
+    )
 
     if (this.extractTrackData(searchResult).length === 0) {
       searchResult = await sourceManager.searchWithDefault(query)

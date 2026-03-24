@@ -1224,7 +1224,8 @@ async function http1makeRequest(urlString, options = {}) {
     while (true) {
         try {
             let finalUrl = urlString;
-            if (proxy?.type === 'reverse' || (proxy?.url && !proxy.username && !proxy.url.includes(':', 7))) {
+            if (proxy?.type === 'reverse' ||
+                (proxy?.url && !proxy.username && !proxy.url.includes(':', 7))) {
                 finalUrl = `${proxy.url.replace(/\/+$/, '')}/${urlString}`;
                 logger('debug', 'Network', `Using reverse proxy: ${proxy.url} for ${urlString}`);
             }

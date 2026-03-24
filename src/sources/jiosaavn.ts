@@ -1,16 +1,5 @@
 import { PassThrough } from 'node:stream'
 import { desEcbDecryptBase64ToUtf8 } from '../decrypters/des-ecb.ts'
-import {
-  encodeTrack,
-  getBestMatch,
-  http1makeRequest,
-  logger
-} from '../utils.ts'
-import type { TrackInfo } from '../typings/sources/source.types.ts'
-import type {
-  BestMatchCandidate,
-  TrackEncodeInput
-} from '../typings/utils.types.ts'
 import type {
   JioSaavnApiParams,
   JioSaavnDecodedTrack,
@@ -21,8 +10,8 @@ import type {
   JioSaavnSearchResponse,
   JioSaavnSongDetailsResponse,
   JioSaavnSongPayload,
-  JioSaavnSourceResult,
   JioSaavnSourceOptions,
+  JioSaavnSourceResult,
   JioSaavnStationCreateResponse,
   JioSaavnStationSongResponse,
   JioSaavnTrackData,
@@ -30,6 +19,17 @@ import type {
   JioSaavnUrlType,
   JioSaavnWebApiGetResponse
 } from '../typings/sources/jiosaavn.types.ts'
+import type { TrackInfo } from '../typings/sources/source.types.ts'
+import type {
+  BestMatchCandidate,
+  TrackEncodeInput
+} from '../typings/utils.types.ts'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger
+} from '../utils.ts'
 
 const API_BASE = 'https://www.jiosaavn.com/api.php'
 const J_BUFFER = Buffer.from('38346591')
@@ -102,7 +102,8 @@ export default class JioSaavnSource {
       /https?:\/\/(?:www\.)?jiosaavn\.com\/(?:(?<type>album|featured|song|s\/playlist|artist)\/)(?:[^/]+\/)(?<id>[A-Za-z0-9_,-]+)/
     ]
     this.priority = 60
-    this.playlistLoadLimit = this.config.playlistLoadLimit || DEFAULT_PLAYLIST_LIMIT
+    this.playlistLoadLimit =
+      this.config.playlistLoadLimit || DEFAULT_PLAYLIST_LIMIT
     this.artistLoadLimit = this.config.artistLoadLimit || DEFAULT_ARTIST_LIMIT
   }
 
@@ -149,7 +150,9 @@ export default class JioSaavnSource {
         .map((item) => this._parseTrack(item))
         .filter((item): item is JioSaavnTrackData => item !== null)
 
-      return tracks.length > 0 ? { loadType: 'search', data: tracks } : this.emptyResult()
+      return tracks.length > 0
+        ? { loadType: 'search', data: tracks }
+        : this.emptyResult()
     } catch (error) {
       const message = this.getErrorMessage(error)
       logger('error', 'JioSaavn', `Search error: ${message}`)
@@ -162,11 +165,16 @@ export default class JioSaavnSource {
    * @param query - Track identifier or textual query.
    * @returns Playlist-style recommendation payload.
    */
-  public async getRecommendations(query: string): Promise<JioSaavnSourceResult> {
+  public async getRecommendations(
+    query: string
+  ): Promise<JioSaavnSourceResult> {
     let id = query
     if (!IDENTIFIER_REGEX.test(query)) {
       const searchRes = await this.search(query, 'jssearch')
-      if (this.isSearchResult(searchRes) && searchRes.data[0]?.info.identifier) {
+      if (
+        this.isSearchResult(searchRes) &&
+        searchRes.data[0]?.info.identifier
+      ) {
         id = searchRes.data[0].info.identifier
       } else {
         return this.emptyResult()
@@ -183,7 +191,9 @@ export default class JioSaavnSource {
         entity_type: 'queue'
       })
 
-      const station = this.toObject(json) as JioSaavnStationCreateResponse | null
+      const station = this.toObject(
+        json
+      ) as JioSaavnStationCreateResponse | null
       if (station?.stationid) {
         json = await this._getJson({
           __call: 'webradio.getSong',
@@ -240,7 +250,9 @@ export default class JioSaavnSource {
    * @returns Resolve result payload.
    */
   public async resolve(url: string): Promise<JioSaavnSourceResult> {
-    const match = url.match(this.patterns[0]!)
+    const pattern = this.patterns[0]
+    if (!pattern) return this.emptyResult()
+    const match = url.match(pattern)
     if (!match) return this.emptyResult()
 
     const groups = (match.groups || {}) as JioSaavnResolveGroups
@@ -254,7 +266,11 @@ export default class JioSaavnSource {
       if (type === 'song') {
         const trackData = await this._fetchSongMetadata(id)
         if (!trackData) {
-          logger('error', 'JioSaavn', `All resolution methods failed for song ${id}`)
+          logger(
+            'error',
+            'JioSaavn',
+            `All resolution methods failed for song ${id}`
+          )
           return this.emptyResult()
         }
 
@@ -281,11 +297,18 @@ export default class JioSaavnSource {
     decodedTrack: JioSaavnDecodedTrack
   ): Promise<JioSaavnTrackUrlResult> {
     try {
-      logger('debug', 'JioSaavn', `Fetching stream for: ${decodedTrack.identifier}`)
+      logger(
+        'debug',
+        'JioSaavn',
+        `Fetching stream for: ${decodedTrack.identifier}`
+      )
 
       const trackData = await this._fetchSongMetadata(decodedTrack.identifier)
       if (!trackData) {
-        return this.exceptionTrackUrlResult('Track metadata not found', 'common')
+        return this.exceptionTrackUrlResult(
+          'Track metadata not found',
+          'common'
+        )
       }
 
       if (!trackData.encrypted_media_url) {
@@ -323,7 +346,7 @@ export default class JioSaavnSource {
     const fallbackTracks: TrackInfo[] = []
     for (const item of searchResult.data) {
       const obj = this.toObject(item)
-      const info = obj?.['info']
+      const info = obj?.info
       if (this.isTrackInfo(info)) {
         candidates.push({ info })
         fallbackTracks.push(info)
@@ -442,7 +465,9 @@ export default class JioSaavnSource {
    * @param id - Song identifier.
    * @returns Song payload or null when unavailable.
    */
-  private async _fetchSongMetadata(id: string): Promise<JioSaavnSongPayload | null> {
+  private async _fetchSongMetadata(
+    id: string
+  ): Promise<JioSaavnSongPayload | null> {
     let data = await this._getJson({ __call: 'song.getDetails', pids: id })
     const details = this.toObject(data) as JioSaavnSongDetailsResponse | null
 
@@ -469,7 +494,9 @@ export default class JioSaavnSource {
       type: 'song'
     })
 
-    const webApiPayload = this.toObject(data) as JioSaavnWebApiGetResponse | null
+    const webApiPayload = this.toObject(
+      data
+    ) as JioSaavnWebApiGetResponse | null
     return Array.isArray(webApiPayload?.songs)
       ? this._parseSongPayload(webApiPayload.songs[0])
       : null
@@ -492,8 +519,8 @@ export default class JioSaavnSource {
       type: type === 'featured' || type === 's/playlist' ? 'playlist' : type
     }
 
-    if (type === 'artist') params['n_song'] = this.artistLoadLimit
-    else params['n'] = this.playlistLoadLimit
+    if (type === 'artist') params.n_song = this.artistLoadLimit
+    else params.n = this.playlistLoadLimit
 
     const data = await this._getJson(params)
     const payload = this.toObject(data) as JioSaavnWebApiGetResponse | null
@@ -511,7 +538,8 @@ export default class JioSaavnSource {
 
     if (tracks.length === 0) return this.emptyResult()
 
-    let name = typeof payload?.title === 'string' ? payload.title : payload?.name || ''
+    let name =
+      typeof payload?.title === 'string' ? payload.title : payload?.name || ''
     if (type === 'artist') name = `${name}'s Top Tracks`
 
     const playlistData: JioSaavnPlaylistData = {
@@ -563,8 +591,10 @@ export default class JioSaavnSource {
     const uri = typeof json.perma_url === 'string' ? json.perma_url : ''
 
     const durationMs =
-      Number.parseInt(String(json.more_info?.duration || json.duration || '0'), 10) *
-      1000
+      Number.parseInt(
+        String(json.more_info?.duration || json.duration || '0'),
+        10
+      ) * 1000
 
     const primaryArtists = json.more_info?.artistMap?.primary_artists
     const artistList = json.more_info?.artistMap?.artists
@@ -578,7 +608,9 @@ export default class JioSaavnSource {
     const author = metaArtist
       ? this._cleanString(
           metaArtist
-            .map((artist) => (typeof artist?.name === 'string' ? artist.name : null))
+            .map((artist) =>
+              typeof artist?.name === 'string' ? artist.name : null
+            )
             .filter((name): name is string => Boolean(name))
             .join(', ')
         )
@@ -624,11 +656,11 @@ export default class JioSaavnSource {
    */
   private getStationPlaylist(value: unknown): JioSaavnSourceResult | null {
     const json = this.toObject(value) as JioSaavnStationSongResponse | null
-    if (!json || json['error']) return null
+    if (!json || json.error) return null
 
     const tracks = Object.values(json)
       .map((item) => this.toObject(item))
-      .map((item) => this.toObject(item?.['song']))
+      .map((item) => this.toObject(item?.song))
       .map((song) => this._parseTrack(song))
       .filter((item): item is JioSaavnTrackData => item !== null)
 
@@ -653,7 +685,7 @@ export default class JioSaavnSource {
     const json = this.toObject(value)
     if (!json) return null
 
-    const id = json['id']
+    const id = json.id
     if (typeof id !== 'string' && typeof id !== 'number') return null
 
     return json as JioSaavnSongPayload
@@ -668,12 +700,12 @@ export default class JioSaavnSource {
     const info = this.toObject(value)
     return (
       info !== null &&
-      typeof info['identifier'] === 'string' &&
-      typeof info['title'] === 'string' &&
-      typeof info['author'] === 'string' &&
-      typeof info['length'] === 'number' &&
-      typeof info['uri'] === 'string' &&
-      typeof info['sourceName'] === 'string'
+      typeof info.identifier === 'string' &&
+      typeof info.title === 'string' &&
+      typeof info.author === 'string' &&
+      typeof info.length === 'number' &&
+      typeof info.uri === 'string' &&
+      typeof info.sourceName === 'string'
     )
   }
 

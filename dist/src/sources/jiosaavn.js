@@ -62,7 +62,8 @@ export default class JioSaavnSource {
             /https?:\/\/(?:www\.)?jiosaavn\.com\/(?:(?<type>album|featured|song|s\/playlist|artist)\/)(?:[^/]+\/)(?<id>[A-Za-z0-9_,-]+)/
         ];
         this.priority = 60;
-        this.playlistLoadLimit = this.config.playlistLoadLimit || DEFAULT_PLAYLIST_LIMIT;
+        this.playlistLoadLimit =
+            this.config.playlistLoadLimit || DEFAULT_PLAYLIST_LIMIT;
         this.artistLoadLimit = this.config.artistLoadLimit || DEFAULT_ARTIST_LIMIT;
     }
     /**
@@ -100,7 +101,9 @@ export default class JioSaavnSource {
             const tracks = payload.results
                 .map((item) => this._parseTrack(item))
                 .filter((item) => item !== null);
-            return tracks.length > 0 ? { loadType: 'search', data: tracks } : this.emptyResult();
+            return tracks.length > 0
+                ? { loadType: 'search', data: tracks }
+                : this.emptyResult();
         }
         catch (error) {
             const message = this.getErrorMessage(error);
@@ -117,7 +120,8 @@ export default class JioSaavnSource {
         let id = query;
         if (!IDENTIFIER_REGEX.test(query)) {
             const searchRes = await this.search(query, 'jssearch');
-            if (this.isSearchResult(searchRes) && searchRes.data[0]?.info.identifier) {
+            if (this.isSearchResult(searchRes) &&
+                searchRes.data[0]?.info.identifier) {
                 id = searchRes.data[0].info.identifier;
             }
             else {
@@ -186,7 +190,10 @@ export default class JioSaavnSource {
      * @returns Resolve result payload.
      */
     async resolve(url) {
-        const match = url.match(this.patterns[0]);
+        const pattern = this.patterns[0];
+        if (!pattern)
+            return this.emptyResult();
+        const match = url.match(pattern);
         if (!match)
             return this.emptyResult();
         const groups = (match.groups || {});
@@ -252,7 +259,7 @@ export default class JioSaavnSource {
         const fallbackTracks = [];
         for (const item of searchResult.data) {
             const obj = this.toObject(item);
-            const info = obj?.['info'];
+            const info = obj?.info;
             if (this.isTrackInfo(info)) {
                 candidates.push({ info });
                 fallbackTracks.push(info);
@@ -384,9 +391,9 @@ export default class JioSaavnSource {
             type: type === 'featured' || type === 's/playlist' ? 'playlist' : type
         };
         if (type === 'artist')
-            params['n_song'] = this.artistLoadLimit;
+            params.n_song = this.artistLoadLimit;
         else
-            params['n'] = this.playlistLoadLimit;
+            params.n = this.playlistLoadLimit;
         const data = await this._getJson(params);
         const payload = this.toObject(data);
         const list = Array.isArray(payload?.list)
@@ -445,8 +452,7 @@ export default class JioSaavnSource {
             return null;
         const title = this._cleanString(json.title || json.song || 'Unknown');
         const uri = typeof json.perma_url === 'string' ? json.perma_url : '';
-        const durationMs = Number.parseInt(String(json.more_info?.duration || json.duration || '0'), 10) *
-            1000;
+        const durationMs = Number.parseInt(String(json.more_info?.duration || json.duration || '0'), 10) * 1000;
         const primaryArtists = json.more_info?.artistMap?.primary_artists;
         const artistList = json.more_info?.artistMap?.artists;
         const metaArtist = Array.isArray(primaryArtists) && primaryArtists.length > 0
@@ -456,7 +462,7 @@ export default class JioSaavnSource {
                 : null;
         const author = metaArtist
             ? this._cleanString(metaArtist
-                .map((artist) => (typeof artist?.name === 'string' ? artist.name : null))
+                .map((artist) => typeof artist?.name === 'string' ? artist.name : null)
                 .filter((name) => Boolean(name))
                 .join(', '))
             : this._cleanString(json.more_info?.music ||
@@ -493,11 +499,11 @@ export default class JioSaavnSource {
      */
     getStationPlaylist(value) {
         const json = this.toObject(value);
-        if (!json || json['error'])
+        if (!json || json.error)
             return null;
         const tracks = Object.values(json)
             .map((item) => this.toObject(item))
-            .map((item) => this.toObject(item?.['song']))
+            .map((item) => this.toObject(item?.song))
             .map((song) => this._parseTrack(song))
             .filter((item) => item !== null);
         if (tracks.length === 0)
@@ -520,7 +526,7 @@ export default class JioSaavnSource {
         const json = this.toObject(value);
         if (!json)
             return null;
-        const id = json['id'];
+        const id = json.id;
         if (typeof id !== 'string' && typeof id !== 'number')
             return null;
         return json;
@@ -533,12 +539,12 @@ export default class JioSaavnSource {
     isTrackInfo(value) {
         const info = this.toObject(value);
         return (info !== null &&
-            typeof info['identifier'] === 'string' &&
-            typeof info['title'] === 'string' &&
-            typeof info['author'] === 'string' &&
-            typeof info['length'] === 'number' &&
-            typeof info['uri'] === 'string' &&
-            typeof info['sourceName'] === 'string');
+            typeof info.identifier === 'string' &&
+            typeof info.title === 'string' &&
+            typeof info.author === 'string' &&
+            typeof info.length === 'number' &&
+            typeof info.uri === 'string' &&
+            typeof info.sourceName === 'string');
     }
     /**
      * Converts unknown values to object records.

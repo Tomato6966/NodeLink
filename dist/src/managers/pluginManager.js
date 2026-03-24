@@ -94,32 +94,31 @@ export default class PluginManager {
             if (!parsed || typeof parsed !== 'object')
                 return null;
             const pkg = parsed;
-            const repository = pkg['repository'];
-            const author = pkg['author'];
+            const repository = pkg.repository;
+            const author = pkg.author;
             return {
-                version: typeof pkg['version'] === 'string' ? pkg['version'] : undefined,
+                version: typeof pkg.version === 'string' ? pkg.version : undefined,
                 author: typeof author === 'string'
                     ? author
                     : author && typeof author === 'object'
                         ? {
-                            name: typeof author['name'] ===
-                                'string'
-                                ? author['name']
+                            name: typeof author.name === 'string'
+                                ? author.name
                                 : undefined
                         }
                         : undefined,
-                homepage: typeof pkg['homepage'] === 'string' ? pkg['homepage'] : undefined,
+                homepage: typeof pkg.homepage === 'string' ? pkg.homepage : undefined,
                 repository: typeof repository === 'string'
                     ? repository
                     : repository && typeof repository === 'object'
                         ? {
-                            url: typeof repository['url'] ===
+                            url: typeof repository.url ===
                                 'string'
-                                ? repository['url']
+                                ? repository.url
                                 : undefined
                         }
                         : undefined,
-                main: typeof pkg['main'] === 'string' ? pkg['main'] : undefined
+                main: typeof pkg.main === 'string' ? pkg.main : undefined
             };
         }
         catch {
@@ -172,10 +171,10 @@ export default class PluginManager {
         if (!moduleValue || typeof moduleValue !== 'object')
             return null;
         const record = moduleValue;
-        if (typeof record['default'] !== 'function')
+        if (typeof record.default !== 'function')
             return null;
         return {
-            default: record['default']
+            default: record.default
         };
     }
     /**

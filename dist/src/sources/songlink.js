@@ -104,7 +104,7 @@ export default class SongLinkSource {
      */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        const sourceConfig = this.nodelink.options.sources?.['songlink'];
+        const sourceConfig = this.nodelink.options.sources?.songlink;
         this.config =
             sourceConfig && typeof sourceConfig === 'object'
                 ? sourceConfig
@@ -126,16 +126,16 @@ export default class SongLinkSource {
      * @returns Always true.
      */
     async setup() {
-        this.apiKey = this.asString(this.config['apiKey']);
-        this.userCountry = this.asString(this.config['userCountry']) ?? 'US';
-        this.songIfSingle = this.asBoolean(this.config['songIfSingle']) ?? true;
-        this.preferredPlatforms = Array.isArray(this.config['preferredPlatforms'])
-            ? this.config['preferredPlatforms'].filter((item) => typeof item === 'string')
+        this.apiKey = this.asString(this.config.apiKey);
+        this.userCountry = this.asString(this.config.userCountry) ?? 'US';
+        this.songIfSingle = this.asBoolean(this.config.songIfSingle) ?? true;
+        this.preferredPlatforms = Array.isArray(this.config.preferredPlatforms)
+            ? this.config.preferredPlatforms.filter((item) => typeof item === 'string')
             : [...DEFAULT_PLATFORM_ORDER];
-        this.fallbackToAny = this.asBoolean(this.config['fallbackToAny']) ?? true;
+        this.fallbackToAny = this.asBoolean(this.config.fallbackToAny) ?? true;
         this.useScrapeFallback =
-            this.asBoolean(this.config['useScrapeFallback']) ?? true;
-        this.useApi = this.asBoolean(this.config['useApi']) ?? true;
+            this.asBoolean(this.config.useScrapeFallback) ?? true;
+        this.useApi = this.asBoolean(this.config.useApi) ?? true;
         return true;
     }
     /**
@@ -149,20 +149,20 @@ export default class SongLinkSource {
             if (cached)
                 return cached;
             const data = await this._fetchSongLinkData(url);
-            const linksByPlatform = this.asRecord(data?.['linksByPlatform']) || {};
+            const linksByPlatform = this.asRecord(data?.linksByPlatform) || {};
             if (Object.keys(linksByPlatform).length === 0) {
                 return { loadType: 'empty', data: {} };
             }
             const platforms = this._buildPlatformOrder(linksByPlatform);
             const songlinkInfo = {
-                pageUrl: this.asString(data?.['pageUrl']) || undefined,
-                entityUniqueId: this.asString(data?.['entityUniqueId']) || undefined,
-                userCountry: this.asString(data?.['userCountry']) || undefined,
+                pageUrl: this.asString(data?.pageUrl) || undefined,
+                entityUniqueId: this.asString(data?.entityUniqueId) || undefined,
+                userCountry: this.asString(data?.userCountry) || undefined,
                 linksByPlatform
             };
             for (const platform of platforms) {
                 const platformData = this.asRecord(linksByPlatform[platform]);
-                const link = this.asString(platformData?.['url']);
+                const link = this.asString(platformData?.url);
                 if (!link)
                     continue;
                 const sourceName = PLATFORM_SOURCE_MAP[platform];
@@ -208,7 +208,7 @@ export default class SongLinkSource {
      */
     async search(query, _sourceTerm, _searchType = 'track') {
         try {
-            const maxSearchRaw = this.nodelink.options['maxSearchResults'];
+            const maxSearchRaw = this.nodelink.options.maxSearchResults;
             const limit = typeof maxSearchRaw === 'number' && Number.isFinite(maxSearchRaw)
                 ? maxSearchRaw
                 : 10;
@@ -222,7 +222,7 @@ export default class SongLinkSource {
             if (statusCode !== 200)
                 return { loadType: 'empty', data: {} };
             const payload = typeof body === 'string' ? this._parseJsonp(body) : this.asRecord(body);
-            const results = payload?.['results'];
+            const results = payload?.results;
             if (!Array.isArray(results) || results.length === 0) {
                 return { loadType: 'empty', data: {} };
             }
@@ -231,21 +231,21 @@ export default class SongLinkSource {
                 const item = this.asRecord(rawItem);
                 if (!item)
                     continue;
-                const trackId = item['trackId'];
+                const trackId = item.trackId;
                 if (trackId === undefined || trackId === null)
                     continue;
-                const kind = this.asString(item['kind']) ?? this.asString(item['wrapperType']);
-                const wrapper = this.asString(item['wrapperType']) ?? '';
+                const kind = this.asString(item.kind) ?? this.asString(item.wrapperType);
+                const wrapper = this.asString(item.wrapperType) ?? '';
                 const isSong = kind === 'song';
                 const isPodcastEpisode = kind === 'podcast-episode' || wrapper === 'podcastEpisode';
                 const isPodcast = kind === 'podcast' || wrapper === 'track';
                 if (!isSong && !isPodcastEpisode && !isPodcast)
                     continue;
-                const episodeUrl = this.asString(item['episodeUrl']);
-                const previewUrl = this.asString(item['previewUrl']);
-                const feedUrl = this.asString(item['feedUrl']);
-                const fallbackUrl = this.asString(item['trackViewUrl']) ||
-                    this.asString(item['collectionViewUrl']);
+                const episodeUrl = this.asString(item.episodeUrl);
+                const previewUrl = this.asString(item.previewUrl);
+                const feedUrl = this.asString(item.feedUrl);
+                const fallbackUrl = this.asString(item.trackViewUrl) ||
+                    this.asString(item.collectionViewUrl);
                 const uri = (isPodcastEpisode ? episodeUrl || previewUrl : null) ||
                     (isPodcast ? feedUrl : null) ||
                     fallbackUrl;
@@ -254,22 +254,22 @@ export default class SongLinkSource {
                 const trackInfo = {
                     identifier: String(trackId),
                     isSeekable: true,
-                    author: this.asString(item['artistName']) ||
-                        this.asString(item['collectionArtistName']) ||
-                        this.asString(item['artistViewUrl']) ||
+                    author: this.asString(item.artistName) ||
+                        this.asString(item.collectionArtistName) ||
+                        this.asString(item.artistViewUrl) ||
                         'Unknown Artist',
-                    length: this.asNumber(item['trackTimeMillis']) ?? 0,
+                    length: this.asNumber(item.trackTimeMillis) ?? 0,
                     isStream: false,
                     position: 0,
-                    title: this.asString(item['trackName']) ||
-                        this.asString(item['collectionName']) ||
+                    title: this.asString(item.trackName) ||
+                        this.asString(item.collectionName) ||
                         'Unknown Title',
                     uri,
-                    artworkUrl: this.asString(item['artworkUrl600']) ||
-                        this.asString(item['artworkUrl100']) ||
-                        this.asString(item['artworkUrl60']) ||
+                    artworkUrl: this.asString(item.artworkUrl600) ||
+                        this.asString(item.artworkUrl100) ||
+                        this.asString(item.artworkUrl60) ||
                         null,
-                    isrc: this.asString(item['isrc']) || null,
+                    isrc: this.asString(item.isrc) || null,
                     sourceName: 'songlink'
                 };
                 const encodedInput = { ...trackInfo, details: [] };
@@ -330,7 +330,8 @@ export default class SongLinkSource {
                 };
             }
             const resolved = await this.nodelink.sources.resolve(uri);
-            if (resolved.loadType === 'track' && this.isTrackResultData(resolved.data)) {
+            if (resolved.loadType === 'track' &&
+                this.isTrackResultData(resolved.data)) {
                 const streamInfo = await this.nodelink.sources.getTrackUrl(resolved.data.info);
                 return { newTrack: resolved.data, ...streamInfo };
             }
@@ -371,7 +372,7 @@ export default class SongLinkSource {
                 }
                 const { body, statusCode } = await http1makeRequest(apiUrl.toString());
                 const parsed = this.asRecord(body);
-                const linksByPlatform = this.asRecord(parsed?.['linksByPlatform']);
+                const linksByPlatform = this.asRecord(parsed?.linksByPlatform);
                 if (statusCode === 200 && linksByPlatform) {
                     return parsed;
                 }
@@ -419,7 +420,7 @@ export default class SongLinkSource {
                 return null;
             const parsed = JSON.parse(nextDataMatch[1]);
             const payload = this._findSonglinkPayload(parsed);
-            return this.asRecord(payload?.['linksByPlatform']) ? payload : null;
+            return this.asRecord(payload?.linksByPlatform) ? payload : null;
         }
         catch (error) {
             logger('debug', 'SongLink', `HTML scrape failed: ${this.getErrorMessage(error)}`);
@@ -444,8 +445,8 @@ export default class SongLinkSource {
             const currentObject = this.asRecord(current);
             if (!currentObject)
                 continue;
-            if (this.asRecord(currentObject['linksByPlatform']) &&
-                this.asRecord(currentObject['entitiesByUniqueId'])) {
+            if (this.asRecord(currentObject.linksByPlatform) &&
+                this.asRecord(currentObject.entitiesByUniqueId)) {
                 return currentObject;
             }
             for (const value of Object.values(currentObject)) {
@@ -467,36 +468,36 @@ export default class SongLinkSource {
      */
     _extractFromNextData(root) {
         const rootObject = this.asRecord(root);
-        const props = this.asRecord(rootObject?.['props']);
-        const pageProps = this.asRecord(props?.['pageProps']);
-        const pageData = this.asRecord(pageProps?.['pageData']);
+        const props = this.asRecord(rootObject?.props);
+        const pageProps = this.asRecord(props?.pageProps);
+        const pageData = this.asRecord(pageProps?.pageData);
         if (!pageData)
             return null;
-        const sections = pageData?.['sections'];
+        const sections = pageData?.sections;
         if (!Array.isArray(sections))
             return null;
         const linksByPlatform = {};
         let userCountry = this.userCountry || 'US';
         for (const sectionItem of sections) {
             const section = this.asRecord(sectionItem);
-            const links = section?.['links'];
+            const links = section?.links;
             if (!Array.isArray(links))
                 continue;
             for (const linkItem of links) {
                 const link = this.asRecord(linkItem);
                 if (!link)
                     continue;
-                const platform = this.asString(link['platform']);
-                const url = this.asString(link['url']);
-                if (!platform || !url || link['show'] === false)
+                const platform = this.asString(link.platform);
+                const url = this.asString(link.url);
+                if (!platform || !url || link.show === false)
                     continue;
                 linksByPlatform[platform] = {
                     url,
-                    nativeAppUriMobile: this.asString(link['nativeAppUriMobile']) || undefined,
-                    nativeAppUriDesktop: this.asString(link['nativeAppUriDesktop']) || undefined,
-                    entityUniqueId: this.asString(link['uniqueId']) || undefined
+                    nativeAppUriMobile: this.asString(link.nativeAppUriMobile) || undefined,
+                    nativeAppUriDesktop: this.asString(link.nativeAppUriDesktop) || undefined,
+                    entityUniqueId: this.asString(link.uniqueId) || undefined
                 };
-                const country = this.asString(link['country']);
+                const country = this.asString(link.country);
                 if (country)
                     userCountry = country;
             }
@@ -504,25 +505,25 @@ export default class SongLinkSource {
         if (Object.keys(linksByPlatform).length === 0)
             return null;
         const entitiesByUniqueId = {};
-        const entityId = this.asString(pageData['entityUniqueId']);
-        const entityData = this.asRecord(pageData['entityData']);
+        const entityId = this.asString(pageData.entityUniqueId);
+        const entityData = this.asRecord(pageData.entityData);
         if (entityId && entityData) {
-            const durationRaw = this.asNumber(entityData['duration']);
+            const durationRaw = this.asNumber(entityData.duration);
             entitiesByUniqueId[entityId] = {
-                id: entityData['id'],
-                type: this.asString(entityData['type']) || undefined,
-                title: this.asString(entityData['title']) || undefined,
-                artistName: this.asString(entityData['artistName']) || undefined,
-                thumbnailUrl: this.asString(entityData['thumbnailUrl']) || undefined,
+                id: entityData.id,
+                type: this.asString(entityData.type) || undefined,
+                title: this.asString(entityData.title) || undefined,
+                artistName: this.asString(entityData.artistName) || undefined,
+                thumbnailUrl: this.asString(entityData.thumbnailUrl) || undefined,
                 duration: durationRaw !== null ? durationRaw / 1000 : undefined,
-                isrc: this.asString(entityData['isrc']) || null
+                isrc: this.asString(entityData.isrc) || null
             };
         }
         return {
             entityUniqueId: entityId || undefined,
             userCountry,
-            pageUrl: this.asString(pageData['pageUrl']) ||
-                this.asString(pageProps?.['pageUrl']) ||
+            pageUrl: this.asString(pageData.pageUrl) ||
+                this.asString(pageProps?.pageUrl) ||
                 undefined,
             linksByPlatform,
             entitiesByUniqueId
@@ -592,10 +593,12 @@ export default class SongLinkSource {
         else if (result.loadType === 'playlist' &&
             this.asRecord(result.data) !== null) {
             const playlist = this.asRecord(result.data);
-            playlist['pluginInfo'] = {
-                ...(this.asRecord(playlist['pluginInfo']) || {}),
-                songlink: extraInfo
-            };
+            if (playlist) {
+                playlist.pluginInfo = {
+                    ...(this.asRecord(playlist.pluginInfo) || {}),
+                    songlinkUrl: url
+                };
+            }
         }
         return result;
     }
@@ -606,15 +609,15 @@ export default class SongLinkSource {
      */
     isTrackResultData(data) {
         const record = this.asRecord(data);
-        const info = this.asRecord(record?.['info']);
+        const info = this.asRecord(record?.info);
         return (record !== null &&
             info !== null &&
-            typeof info['identifier'] === 'string' &&
-            typeof info['title'] === 'string' &&
-            typeof info['author'] === 'string' &&
-            typeof info['length'] === 'number' &&
-            typeof info['uri'] === 'string' &&
-            typeof info['sourceName'] === 'string');
+            typeof info.identifier === 'string' &&
+            typeof info.title === 'string' &&
+            typeof info.author === 'string' &&
+            typeof info.length === 'number' &&
+            typeof info.uri === 'string' &&
+            typeof info.sourceName === 'string');
     }
     /**
      * Converts unknown value into a record object.

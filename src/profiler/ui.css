@@ -13,6 +13,25 @@
   --blue: #d8d8d8;
   --yellow: #ffffff;
 }
+.muted {
+  color: var(--muted);
+}
+.tag {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #2e2e2e;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+b {
+  font-weight: 600;
+}
+span {
+  display: inline;
+}
 * {
   box-sizing: border-box;
 }
@@ -1623,7 +1642,7 @@ th {
   display: block;
 }
 .tab-panel.hidden {
-  display: none !important;
+  display: none;
 }
 
 .list-scroll::-webkit-scrollbar,

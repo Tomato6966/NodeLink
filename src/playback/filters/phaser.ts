@@ -48,7 +48,7 @@ export default class Phaser extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const p = settings?.phaser || {}
-    const isDisabled = (p as any)._disabled === true
+    const isDisabled = (p as Record<string, unknown>)._disabled === true
 
     this.stages = Math.max(2, Math.min(p.stages || 4, MAX_STAGES))
     this.rate = p.rate || 0
@@ -69,7 +69,6 @@ export default class Phaser extends AnimatableFilter {
       {
         phaser: {
           alpha: targetAlpha,
-          transition: (p as any).transition
         }
       },
       'phaser',
@@ -78,11 +77,11 @@ export default class Phaser extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 

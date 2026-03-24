@@ -323,7 +323,7 @@ export default class AppleMusicSource {
       .replace('{h}', artworkData.height)
   }
 
-  async search(query, sourceName, searchType = 'track') {
+  async search(query, _sourceName, searchType = 'track') {
     try {
       const limit = this.config.maxSearchResults || 10
       const encodedQuery = encodeURIComponent(query)
@@ -677,7 +677,9 @@ export default class AppleMusicSource {
     const query = this._buildSearchQuery(decodedTrack, isExplicit)
 
     try {
-      let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query)
+      let searchResult = await this.nodelink.sources.searchWithDefault(
+        decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query
+      )
 
       if (
         !searchResult ||

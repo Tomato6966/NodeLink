@@ -5,7 +5,7 @@ import { clamp16Bit } from './dsp/clamp16Bit.ts'
 
 const CHANNELS = 2
 
-const BUTTERWORTH_Q = 0.7071067811865476
+const BUTTERWORTH_Q = Math.SQRT1_2
 const SUB_BLOCK_FRAMES = 64
 const TWO_PI = 2 * Math.PI
 
@@ -38,7 +38,6 @@ export default class Highpass extends AnimatableFilter {
       {
         highpass: {
           targetAlpha: targetAlpha,
-          transition: (rawConfig as any).transition
         }
       },
       'highpass',
@@ -47,13 +46,13 @@ export default class Highpass extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    const alpha = config['targetAlpha'] ?? 0.0
+    const alpha = config.targetAlpha ?? 0.0
     this._currentAlpha = alpha
     this._computeCoefficients(alpha)
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const alpha = config ? config['targetAlpha'] : this._currentAlpha
+    const alpha = config ? config.targetAlpha : this._currentAlpha
     return (alpha ?? 0) > 0.001
   }
 

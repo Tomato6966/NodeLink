@@ -203,41 +203,36 @@ export default class PluginManager {
       if (!parsed || typeof parsed !== 'object') return null
 
       const pkg = parsed as Record<string, unknown>
-      const repository = pkg['repository']
-      const author = pkg['author']
+      const repository = pkg.repository
+      const author = pkg.author
 
       return {
-        version:
-          typeof pkg['version'] === 'string' ? pkg['version'] : undefined,
+        version: typeof pkg.version === 'string' ? pkg.version : undefined,
         author:
           typeof author === 'string'
             ? author
             : author && typeof author === 'object'
               ? {
                   name:
-                    typeof (author as Record<string, unknown>)['name'] ===
-                    'string'
-                      ? ((author as Record<string, unknown>)['name'] as string)
+                    typeof (author as Record<string, unknown>).name === 'string'
+                      ? ((author as Record<string, unknown>).name as string)
                       : undefined
                 }
               : undefined,
-        homepage:
-          typeof pkg['homepage'] === 'string' ? pkg['homepage'] : undefined,
+        homepage: typeof pkg.homepage === 'string' ? pkg.homepage : undefined,
         repository:
           typeof repository === 'string'
             ? repository
             : repository && typeof repository === 'object'
               ? {
                   url:
-                    typeof (repository as Record<string, unknown>)['url'] ===
+                    typeof (repository as Record<string, unknown>).url ===
                     'string'
-                      ? ((repository as Record<string, unknown>)[
-                          'url'
-                        ] as string)
+                      ? ((repository as Record<string, unknown>).url as string)
                       : undefined
                 }
               : undefined,
-        main: typeof pkg['main'] === 'string' ? pkg['main'] : undefined
+        main: typeof pkg.main === 'string' ? pkg.main : undefined
       }
     } catch {
       return null
@@ -301,10 +296,10 @@ export default class PluginManager {
     if (!moduleValue || typeof moduleValue !== 'object') return null
 
     const record = moduleValue as Record<string, unknown>
-    if (typeof record['default'] !== 'function') return null
+    if (typeof record.default !== 'function') return null
 
     return {
-      default: record['default'] as PluginExecutor
+      default: record.default as PluginExecutor
     }
   }
 

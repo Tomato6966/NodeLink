@@ -1,11 +1,11 @@
+import { getLocalToken } from '../modules/spotifyAuth.ts'
+import { fetchCanvas } from '../modules/spotifyCanvas.ts'
 import {
   encodeTrack,
   getBestMatch,
   http1makeRequest,
   logger
 } from '../utils.ts'
-import { fetchCanvas } from '../modules/spotifyCanvas.ts'
-import { getLocalToken } from '../modules/spotifyAuth.ts'
 
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1'
 const SPOTIFY_CLIENT_API_URL = 'https://spclient.wg.spotify.com'
@@ -117,7 +117,11 @@ export default class SpotifySource {
     }
 
     try {
-      if (!this.externalAuthUrl && !this.spDc && (!this.clientId || !this.clientSecret)) {
+      if (
+        !this.externalAuthUrl &&
+        !this.spDc &&
+        (!this.clientId || !this.clientSecret)
+      ) {
         logger(
           'warn',
           'Spotify',
@@ -150,7 +154,8 @@ export default class SpotifySource {
   }
 
   _base62ToHex(id) {
-    const alphabet = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    const alphabet =
+      '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
     let bn = 0n
     for (const char of id) {
       bn = bn * 62n + BigInt(alphabet.indexOf(char))
@@ -169,7 +174,7 @@ export default class SpotifySource {
         responseType: 'buffer',
         headers: {
           Authorization: `Bearer ${token}`,
-          'Accept': 'application/json',
+          Accept: 'application/json',
           'App-Platform': 'WebPlayer',
           'Spotify-App-Version': '1.2.83.284.g147edeea'
         }
@@ -185,13 +190,18 @@ export default class SpotifySource {
         if (isrcIndex !== -1) {
           const bodyRange = body.subarray(isrcIndex, isrcIndex + 50).toString()
           const isrcMatch = bodyRange.match(/[A-Z0-9]{12}/)
-          if (isrcMatch) return { external_id: [{ type: 'isrc', id: isrcMatch[0] }] }
+          if (isrcMatch)
+            return { external_id: [{ type: 'isrc', id: isrcMatch[0] }] }
         }
       }
 
       return null
     } catch (e) {
-      logger('debug', 'Spotify', `Exception in _fetchTrackMetadata for ${id}: ${e.message}`)
+      logger(
+        'debug',
+        'Spotify',
+        `Exception in _fetchTrackMetadata for ${id}: ${e.message}`
+      )
       return null
     }
   }
@@ -211,8 +221,10 @@ export default class SpotifySource {
       position: 0,
       title: data.name,
       uri: `https://open.spotify.com/track/${id}?explicit=${isExplicit}`,
-      artworkUrl: data.album?.cover_group?.image?.find(img => img.size === 'LARGE' || img.size === 'DEFAULT')?.file_id
-        ? `https://i.scdn.co/image/${data.album.cover_group.image.find(img => img.size === 'LARGE' || img.size === 'DEFAULT').file_id}`
+      artworkUrl: data.album?.cover_group?.image?.find(
+        (img) => img.size === 'LARGE' || img.size === 'DEFAULT'
+      )?.file_id
+        ? `https://i.scdn.co/image/${data.album.cover_group.image.find((img) => img.size === 'LARGE' || img.size === 'DEFAULT').file_id}`
         : null,
       isrc: data.external_id?.find((e) => e.type === 'isrc')?.id || null,
       sourceName: 'spotify'
@@ -248,7 +260,11 @@ export default class SpotifySource {
           this.mobileToken,
           Math.max(expiresMs, 60000)
         )
-        logger('debug', 'Spotify', 'Canvas token (mobile) refreshed successfully')
+        logger(
+          'debug',
+          'Spotify',
+          'Canvas token (mobile) refreshed successfully'
+        )
       }
     } catch (e) {
       logger('warn', 'Spotify', `Mobile token refresh failed: ${e.message}`)
@@ -418,7 +434,11 @@ export default class SpotifySource {
 
       if (statusCode === 429) {
         if (retryCount >= 3) {
-          logger('error', 'Spotify', `Rate limit retry cap reached for ${path}. Skipping.`)
+          logger(
+            'error',
+            'Spotify',
+            `Rate limit retry cap reached for ${path}. Skipping.`
+          )
           return null
         }
 
@@ -436,12 +456,16 @@ export default class SpotifySource {
           this.anonymousToken = null
           this.accessToken = null
           this.tokenInitialized = false
-          await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)))
+          await new Promise((resolve) =>
+            setTimeout(resolve, 1000 * (retryCount + 1))
+          )
           const refreshed = await this._refreshToken()
           if (refreshed) return this._apiRequest(path, retryCount + 1)
         }
 
-        await new Promise((resolve) => setTimeout(resolve, Math.min(retryAfter, 10) * 1000))
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(retryAfter, 10) * 1000)
+        )
         return this._apiRequest(path, retryCount + 1)
       }
 
@@ -500,7 +524,11 @@ export default class SpotifySource {
 
       if (statusCode === 429) {
         if (retryCount >= 3) {
-          logger('error', 'Spotify', `Internal API Rate limit retry cap reached. Skipping.`)
+          logger(
+            'error',
+            'Spotify',
+            `Internal API Rate limit retry cap reached. Skipping.`
+          )
           return null
         }
 
@@ -518,12 +546,21 @@ export default class SpotifySource {
           this.anonymousToken = null
           this.accessToken = null
           this.tokenInitialized = false
-          await new Promise((resolve) => setTimeout(resolve, 1000 * (retryCount + 1)))
+          await new Promise((resolve) =>
+            setTimeout(resolve, 1000 * (retryCount + 1))
+          )
           const refreshed = await this._refreshToken()
-          if (refreshed) return this._internalApiRequest(operation, variables, retryCount + 1)
+          if (refreshed)
+            return this._internalApiRequest(
+              operation,
+              variables,
+              retryCount + 1
+            )
         }
 
-        await new Promise((resolve) => setTimeout(resolve, Math.min(retryAfter, 10) * 1000))
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(retryAfter, 10) * 1000)
+        )
         return this._internalApiRequest(operation, variables, retryCount + 1)
       }
 
@@ -671,7 +708,9 @@ export default class SpotifySource {
       const localIndex = pathParts.indexOf('local')
       if (localIndex === -1) return null
 
-      const [author, album, title, durationSeconds] = pathParts.slice(localIndex + 1)
+      const [author, album, title, durationSeconds] = pathParts.slice(
+        localIndex + 1
+      )
       const length = Number.parseInt(durationSeconds || '', 10)
 
       return {
@@ -694,7 +733,9 @@ export default class SpotifySource {
       const localPath = item.uri
         .slice('spotify:local:'.length)
         .split(':')
-        .map((part) => encodeURIComponent(decodeURIComponent(part.replace(/\+/g, ' '))))
+        .map((part) =>
+          encodeURIComponent(decodeURIComponent(part.replace(/\+/g, ' ')))
+        )
         .join('/')
 
       return `https://open.spotify.com/local/${localPath}`
@@ -706,17 +747,16 @@ export default class SpotifySource {
       item?.artists?.map((artist) => artist.name).join(', ') ||
       this._getInternalTrackAuthor(item, null)
 
-    return [
-      decodedLocal?.title || item?.name,
-      author,
-      decodedLocal?.album
-    ]
+    return [decodedLocal?.title || item?.name, author, decodedLocal?.album]
       .filter(Boolean)
       .join(' ')
   }
 
   async _searchLocalTrack(item) {
-    if (!this.allowLocalFiles || (!this.externalAuthUrl && !this.anonymousToken)) {
+    if (
+      !this.allowLocalFiles ||
+      (!this.externalAuthUrl && !this.anonymousToken)
+    ) {
       return null
     }
 
@@ -948,7 +988,13 @@ export default class SpotifySource {
   }
 
   async _fetchFullTracks(ids) {
-    if (!this.clientId || !this.clientSecret || !this.accessToken || ids.length === 0) return []
+    if (
+      !this.clientId ||
+      !this.clientSecret ||
+      !this.accessToken ||
+      ids.length === 0
+    )
+      return []
 
     const batches = []
     for (let i = 0; i < ids.length; i += 50) {
@@ -968,7 +1014,11 @@ export default class SpotifySource {
         }
       }
     } catch (e) {
-      logger('warn', 'Spotify', `Failed to fetch full track details: ${e.message}`)
+      logger(
+        'warn',
+        'Spotify',
+        `Failed to fetch full track details: ${e.message}`
+      )
     }
 
     return aggregatedTracks
@@ -1001,9 +1051,13 @@ export default class SpotifySource {
           if (results.length > 0 && searchType === 'track') {
             const topTrack = results[0]
             if (!topTrack.info.isrc) {
-              const metadata = await this._fetchTrackMetadata(topTrack.info.identifier)
+              const metadata = await this._fetchTrackMetadata(
+                topTrack.info.identifier
+              )
               if (metadata) {
-                const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+                const isrc = metadata.external_id?.find(
+                  (e) => e.type === 'isrc'
+                )?.id
                 if (isrc) {
                   topTrack.info.isrc = isrc
                   topTrack.encoded = encodeTrack(topTrack.info)
@@ -1037,9 +1091,13 @@ export default class SpotifySource {
           if (results.length > 0 && spotifyType === 'track') {
             const topTrack = results[0]
             if (!topTrack.info.isrc) {
-              const metadata = await this._fetchTrackMetadata(topTrack.info.identifier)
+              const metadata = await this._fetchTrackMetadata(
+                topTrack.info.identifier
+              )
               if (metadata) {
-                const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+                const isrc = metadata.external_id?.find(
+                  (e) => e.type === 'isrc'
+                )?.id
                 if (isrc) {
                   topTrack.info.isrc = isrc
                   topTrack.encoded = encodeTrack(topTrack.info)
@@ -1074,7 +1132,10 @@ export default class SpotifySource {
 
       if (!/^[a-zA-Z0-9]{22}$/.test(trackId) && !query.includes('=')) {
         const searchResult = await this.search(query, 'spsearch', 'track')
-        if (searchResult.loadType === 'search' && searchResult.data.length > 0) {
+        if (
+          searchResult.loadType === 'search' &&
+          searchResult.data.length > 0
+        ) {
           trackId = searchResult.data[0].info.identifier
         }
       }
@@ -1097,15 +1158,22 @@ export default class SpotifySource {
           logger('debug', 'Spotify', `inspiredby-mix failed: ${e.message}`)
         }
 
-        const data = await this._internalApiRequest(QUERIES.getRecommendations, {
-          uri: `spotify:track:${trackId}`,
-          limit: 20
-        })
+        const data = await this._internalApiRequest(
+          QUERIES.getRecommendations,
+          {
+            uri: `spotify:track:${trackId}`,
+            limit: 20
+          }
+        )
 
-        const items = data?.internalLinkRecommenderTrack?.items || data?.seoRecommendedTrack?.items
+        const items =
+          data?.internalLinkRecommenderTrack?.items ||
+          data?.seoRecommendedTrack?.items
         if (items?.length > 0) {
           const tracks = items
-            .map((it) => this._buildTrackFromInternal(it.content?.data || it.data))
+            .map((it) =>
+              this._buildTrackFromInternal(it.content?.data || it.data)
+            )
             .filter(Boolean)
 
           return {
@@ -1119,7 +1187,10 @@ export default class SpotifySource {
         }
       }
 
-      if (query.startsWith('mix:') || (!query.includes('=') && !query.includes(':'))) {
+      if (
+        query.startsWith('mix:') ||
+        (!query.includes('=') && !query.includes(':'))
+      ) {
         let seedType = 'track'
         let seed = query
 
@@ -1406,7 +1477,10 @@ export default class SpotifySource {
         const track = this._buildTrackFromInternal(data.trackUnion)
 
         if (this.mobileToken && track) {
-          const cachedCanvas = this.nodelink.trackCacheManager.get('spotify-canvas', id)
+          const cachedCanvas = this.nodelink.trackCacheManager.get(
+            'spotify-canvas',
+            id
+          )
           if (cachedCanvas) {
             track.pluginInfo.canvas = cachedCanvas
           } else {
@@ -1415,9 +1489,16 @@ export default class SpotifySource {
               this.mobileToken
             )
             if (canvasRes?.data?.canvasesList?.[0]) {
-              const compactCanvas = { canvasesList: [canvasRes.data.canvasesList[0]] }
+              const compactCanvas = {
+                canvasesList: [canvasRes.data.canvasesList[0]]
+              }
               track.pluginInfo.canvas = compactCanvas
-              this.nodelink.trackCacheManager.set('spotify-canvas', id, compactCanvas, 1000 * 60 * 60 * 12)
+              this.nodelink.trackCacheManager.set(
+                'spotify-canvas',
+                id,
+                compactCanvas,
+                1000 * 60 * 60 * 12
+              )
             }
           }
         }
@@ -1425,7 +1506,9 @@ export default class SpotifySource {
         if (!track.info.isrc) {
           const metadata = await this._fetchTrackMetadata(id)
           if (metadata) {
-            const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+            const isrc = metadata.external_id?.find(
+              (e) => e.type === 'isrc'
+            )?.id
             if (isrc) {
               track.info.isrc = isrc
               track.encoded = encodeTrack(track.info)
@@ -1456,7 +1539,10 @@ export default class SpotifySource {
         const track = this._buildTrack(data)
 
         if (this.mobileToken && track) {
-          const cachedCanvas = this.nodelink.trackCacheManager.get('spotify-canvas', id)
+          const cachedCanvas = this.nodelink.trackCacheManager.get(
+            'spotify-canvas',
+            id
+          )
           if (cachedCanvas) {
             track.pluginInfo.canvas = cachedCanvas
           } else {
@@ -1465,9 +1551,16 @@ export default class SpotifySource {
               this.mobileToken
             )
             if (canvasRes?.data?.canvasesList?.[0]) {
-              const compactCanvas = { canvasesList: [canvasRes.data.canvasesList[0]] }
+              const compactCanvas = {
+                canvasesList: [canvasRes.data.canvasesList[0]]
+              }
               track.pluginInfo.canvas = compactCanvas
-              this.nodelink.trackCacheManager.set('spotify-canvas', id, compactCanvas, 1000 * 60 * 60 * 12)
+              this.nodelink.trackCacheManager.set(
+                'spotify-canvas',
+                id,
+                compactCanvas,
+                1000 * 60 * 60 * 12
+              )
             }
           }
         }
@@ -1475,7 +1568,9 @@ export default class SpotifySource {
         if (!track.info.isrc) {
           const metadata = await this._fetchTrackMetadata(id)
           if (metadata) {
-            const isrc = metadata.external_id?.find((e) => e.type === 'isrc')?.id
+            const isrc = metadata.external_id?.find(
+              (e) => e.type === 'isrc'
+            )?.id
             if (isrc) {
               track.info.isrc = isrc
               track.encoded = encodeTrack(track.info)
@@ -1492,7 +1587,7 @@ export default class SpotifySource {
 
   async _resolveAlbum(id) {
     // locally generated tokens can also work ig.
-    if (this._isTokenValid() && this.accessToken || this.externalAuthUrl) {
+    if ((this._isTokenValid() && this.accessToken) || this.externalAuthUrl) {
       const data = await this._internalApiRequest(QUERIES.getAlbum, {
         uri: `spotify:album:${id}`,
         locale: 'en',
@@ -1590,7 +1685,8 @@ export default class SpotifySource {
   }
 
   async _resolvePlaylist(id) {
-    const isAutogenerated = id.startsWith('37i9dQZF') || id.startsWith('37i9dQZE')
+    const isAutogenerated =
+      id.startsWith('37i9dQZF') || id.startsWith('37i9dQZE')
 
     if (this.externalAuthUrl || isAutogenerated) {
       const data = await this._internalApiRequest(QUERIES.getPlaylist, {
@@ -1602,7 +1698,8 @@ export default class SpotifySource {
 
       if (data?.playlistV2 && data.playlistV2.__typename !== 'NotFound') {
         const allItems = [...(data.playlistV2.content?.items || [])]
-        const totalTracks = data.playlistV2.content?.totalCount || allItems.length
+        const totalTracks =
+          data.playlistV2.content?.totalCount || allItems.length
 
         if (totalTracks > 100) {
           const additionalItems = await this._fetchInternalPaginatedData(
@@ -1666,7 +1763,8 @@ export default class SpotifySource {
       if (isAutogenerated && !this.externalAuthUrl) {
         return {
           exception: {
-            message: 'Autogenerated playlists require externalAuthUrl to be configured.',
+            message:
+              'Autogenerated playlists require externalAuthUrl to be configured.',
             severity: 'common'
           }
         }
@@ -1808,7 +1906,9 @@ export default class SpotifySource {
     const searchQuery = this._buildSearchQuery(decodedTrack, isExplicit)
 
     try {
-      let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : searchQuery)
+      let searchResult = await this.nodelink.sources.searchWithDefault(
+        decodedTrack.isrc ? `"${decodedTrack.isrc}"` : searchQuery
+      )
 
       if (
         searchResult.loadType !== 'search' ||

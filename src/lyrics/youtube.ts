@@ -1,4 +1,3 @@
-import { logger, makeRequest } from '../utils.ts'
 import type {
   NodelinkInstanceForYouTubeLyrics,
   YouTubeCaptionResponse,
@@ -7,6 +6,7 @@ import type {
   YouTubeLyricsResult,
   YouTubeLyricsTrackInfo
 } from '../typings/lyrics/youtube.types.ts'
+import { logger, makeRequest } from '../utils.ts'
 
 /**
  * Decodes common HTML entities found in YouTube caption segments.
@@ -15,7 +15,10 @@ import type {
  * @internal
  */
 const decodeCaptionText = (text: string): string =>
-  text.replace(/&amp;#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+  text
+    .replace(/&amp;#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
 
 /**
  * YouTube captions lyrics provider.
@@ -58,11 +61,14 @@ export default class YouTubeLyrics {
 
     if (language) {
       trackLang =
-        captionTracks.find((caption) => caption.languageCode === language) ?? null
+        captionTracks.find((caption) => caption.languageCode === language) ??
+        null
 
       if (!trackLang) {
         const defaultTrack =
-          captionTracks.find((caption) => caption.languageCode.startsWith('en')) ||
+          captionTracks.find((caption) =>
+            caption.languageCode.startsWith('en')
+          ) ||
           captionTracks.find((caption) => caption.kind !== 'asr') ||
           captionTracks[0]
 
@@ -79,7 +85,9 @@ export default class YouTubeLyrics {
 
     if (!trackLang) {
       trackLang =
-        captionTracks.find((caption) => caption.languageCode.startsWith('en')) ||
+        captionTracks.find((caption) =>
+          caption.languageCode.startsWith('en')
+        ) ||
         captionTracks.find((caption) => caption.kind !== 'asr') ||
         captionTracks[0] ||
         null
@@ -117,11 +125,13 @@ export default class YouTubeLyrics {
       return { loadType: 'empty', data: {} }
     }
 
-    const langs: YouTubeLyricsLanguageDescriptor[] = captionTracks.map((caption) => ({
-      code: caption.languageCode,
-      name: caption.name,
-      isTranslatable: caption.isTranslatable
-    }))
+    const langs: YouTubeLyricsLanguageDescriptor[] = captionTracks.map(
+      (caption) => ({
+        code: caption.languageCode,
+        name: caption.name,
+        isTranslatable: caption.isTranslatable
+      })
+    )
 
     const trackLang = this._pickCaptionTrack(captionTracks, language)
     if (!trackLang) return { loadType: 'empty', data: {} }
@@ -133,7 +143,9 @@ export default class YouTubeLyrics {
       url += '&fmt=json3'
     }
 
-    const { body, error, statusCode } = await makeRequest(url, { method: 'GET' })
+    const { body, error, statusCode } = await makeRequest(url, {
+      method: 'GET'
+    })
     if (error || statusCode !== 200) {
       logger(
         'error',

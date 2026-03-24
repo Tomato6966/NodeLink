@@ -203,7 +203,7 @@ export default class YouTubeSource {
   }
 
   async _fetchVisitorData() {
-    const cachedVisitorData =
+    const _cachedVisitorData =
       this.nodelink.credentialManager.get('yt_visitor_data')
     const cachedPlayerScript = this.nodelink.credentialManager.get(
       'yt_player_script_url'
@@ -804,25 +804,27 @@ export default class YouTubeSource {
       const cached = this.nodelink.trackCacheManager.get(
         'youtube',
         decodedTrack.identifier
-      );
+      )
       if (cached) {
-        const cachedProxyUrl = cached.additionalData?.proxy?.url;
-        const currentProxies = this.config.proxies || [];
-        const isProxyStillValid = !cachedProxyUrl || currentProxies.some(p => p.url === cachedProxyUrl);
+        const cachedProxyUrl = cached.additionalData?.proxy?.url
+        const currentProxies = this.config.proxies || []
+        const isProxyStillValid =
+          !cachedProxyUrl ||
+          currentProxies.some((p) => p.url === cachedProxyUrl)
 
         if (isProxyStillValid) {
           logger(
             'debug',
             'YouTube',
             `Using cached URL for ${decodedTrack.identifier}`
-          );
-          return cached;
+          )
+          return cached
         } else {
           logger(
             'debug',
             'YouTube',
             `Cached proxy for ${decodedTrack.identifier} is no longer in config. Forcing refresh...`
-          );
+          )
         }
       }
     }
@@ -899,7 +901,8 @@ export default class YouTubeSource {
 
           this.reportProxyStatus(
             proxyToUse,
-            !check.error && (check.statusCode === 200 || check.statusCode === 206),
+            !check.error &&
+              (check.statusCode === 200 || check.statusCode === 206),
             check.statusCode,
             Date.now() - proxyStartTime
           )
@@ -925,7 +928,10 @@ export default class YouTubeSource {
               'YouTube',
               `URL pre-flight check successful for client ${clientName}.`
             )
-            const result = { ...urlData, additionalData: { contentLength, proxy: proxyToUse } }
+            const result = {
+              ...urlData,
+              additionalData: { contentLength, proxy: proxyToUse }
+            }
             this.nodelink.trackCacheManager.set(
               'youtube',
               decodedTrack.identifier,
@@ -959,7 +965,8 @@ export default class YouTubeSource {
 
             this.reportProxyStatus(
               proxyToUse,
-              !hlsCheck.error && (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206),
+              !hlsCheck.error &&
+                (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206),
               hlsCheck.statusCode,
               Date.now() - proxyStartTime
             )
@@ -1003,7 +1010,8 @@ export default class YouTubeSource {
 
           this.reportProxyStatus(
             proxyToUse,
-            !hlsCheck.error && (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206),
+            !hlsCheck.error &&
+              (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206),
             hlsCheck.statusCode,
             Date.now() - proxyStartTime
           )
@@ -1426,7 +1434,10 @@ export default class YouTubeSource {
       let contentLength = additionalData?.contentLength || null
 
       if (!contentLength) {
-        const testResponse = await http1makeRequest(url, { method: 'HEAD', timeout: 5000 })
+        const testResponse = await http1makeRequest(url, {
+          method: 'HEAD',
+          timeout: 5000
+        })
 
         if (testResponse.headers?.['content-length']) {
           contentLength = Number.parseInt(
@@ -1444,7 +1455,7 @@ export default class YouTubeSource {
             method: 'GET',
             headers: { Range: 'bytes=0-0' },
             streamOnly: true,
-        proxy: this.getProxy()
+            proxy: this.getProxy()
           })
 
           if (rangeResponse.stream) rangeResponse.stream.destroy()
@@ -1483,7 +1494,8 @@ export default class YouTubeSource {
 
       this.reportProxyStatus(
         additionalData?.proxy || this.getProxy(false),
-        !response.error && (response.statusCode === 200 || response.statusCode === 206),
+        !response.error &&
+          (response.statusCode === 200 || response.statusCode === 206),
         response.statusCode,
         Date.now() - fetchStartTime
       )

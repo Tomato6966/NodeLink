@@ -1,4 +1,5 @@
 import type { JioSaavnSourceConfig } from '../config/config.types.ts'
+import type { HttpProxyConfig } from '../utils.types.ts'
 import type {
   SourceManager,
   SourceResult,
@@ -7,7 +8,6 @@ import type {
   TrackUrlResult,
   WorkerNodeLink
 } from './source.types.ts'
-import type { HttpProxyConfig } from '../utils.types.ts'
 
 /**
  * Scalar values accepted by JioSaavn API query parameters.
@@ -235,7 +235,12 @@ export interface JioSaavnWebApiGetResponse {
  * URL type segment accepted in JioSaavn links.
  * @public
  */
-export type JioSaavnUrlType = 'album' | 'featured' | 'song' | 's/playlist' | 'artist'
+export type JioSaavnUrlType =
+  | 'album'
+  | 'featured'
+  | 'song'
+  | 's/playlist'
+  | 'artist'
 
 /**
  * Regex group payload extracted from JioSaavn URLs.
@@ -389,7 +394,9 @@ export interface JioSaavnDecodedTrack extends TrackInfo {}
  * Stream URL result payload returned by JioSaavn `getTrackUrl`.
  * @public
  */
-export type JioSaavnTrackUrlResult = TrackUrlResult | { exception: JioSaavnException }
+export type JioSaavnTrackUrlResult =
+  | TrackUrlResult
+  | { exception: JioSaavnException }
 
 /**
  * Stream loading result payload returned by JioSaavn `loadStream`.

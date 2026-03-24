@@ -28,7 +28,7 @@ export default class Distortion extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const dist = settings?.distortion || {}
-    const isDisabled = (dist as any)._disabled === true
+    const isDisabled = (dist as Record<string, unknown>)._disabled === true
 
     this.sinOffset = dist.sinOffset ?? 0
     this.sinScale = dist.sinScale ?? 1
@@ -56,7 +56,6 @@ export default class Distortion extends AnimatableFilter {
       {
         distortion: {
           alpha: targetAlpha,
-          transition: (dist as any).transition
         }
       },
       'distortion',
@@ -65,11 +64,11 @@ export default class Distortion extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 

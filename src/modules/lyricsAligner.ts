@@ -29,8 +29,8 @@ function similarity(s1: string, s2: string): number {
  * @internal
  */
 function editDistance(s1: string, s2: string): number {
-  let left = s1.toLowerCase()
-  let right = s2.toLowerCase()
+  const left = s1.toLowerCase()
+  const right = s2.toLowerCase()
   const costs: number[] = []
 
   for (let i = 0; i <= left.length; i++) {
@@ -165,7 +165,10 @@ function findBestSequenceMatch(
           matchCount++
         } else {
           const offsetCandidate = ytWords[i + k + ytOffset + 1]
-          if (offsetCandidate && similarity(keys[k] || '', offsetCandidate.text) > 0.75) {
+          if (
+            offsetCandidate &&
+            similarity(keys[k] || '', offsetCandidate.text) > 0.75
+          ) {
             matchCount++
             ytOffset++
           }

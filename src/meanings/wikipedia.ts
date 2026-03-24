@@ -1,12 +1,10 @@
-import { logger, makeRequest } from '../utils.ts'
-import type {
-  MeaningTrackInfo
-} from '../typings/meanings/meaning.types.ts'
+import type { MeaningTrackInfo } from '../typings/meanings/meaning.types.ts'
 import type {
   WikipediaApiResponse,
   WikipediaEmptyResult,
   WikipediaMeaningResult
 } from '../typings/meanings/wikipedia.types.ts'
+import { logger, makeRequest } from '../utils.ts'
 
 /**
  * Meaning provider backed by Wikipedia.

@@ -139,10 +139,9 @@ function parsePublishedAt(publishedText) {
     seconds: 0
   }
 
-  let match
   const regex = new RegExp(TIME_UNIT_REGEX.source, TIME_UNIT_REGEX.flags)
 
-  while ((match = regex.exec(text)) !== null) {
+  for (const match of text.matchAll(regex)) {
     const value = parseInt(match[1], 10)
     const unit = match[2].toLowerCase()
 
@@ -2410,7 +2409,7 @@ export class BaseClient {
             },
             method: 'POST',
             disableBodyCompression: true,
-        proxy: this.getProxy()
+            proxy: this.getProxy()
           }
         )
 
@@ -2443,7 +2442,7 @@ export class BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
+  async getTrackUrl(decodedTrack, context, cipherManager, _itag, proxy) {
     const _sourceName = decodedTrack.sourceName || 'youtube'
 
     const headers = this.oauth ? await this.getAuthHeaders() : {}

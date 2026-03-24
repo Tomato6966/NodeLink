@@ -242,7 +242,7 @@ export default class AppleMusicSource {
             .replace('{w}', artworkData.width)
             .replace('{h}', artworkData.height);
     }
-    async search(query, sourceName, searchType = 'track') {
+    async search(query, _sourceName, searchType = 'track') {
         try {
             const limit = this.config.maxSearchResults || 10;
             const encodedQuery = encodeURIComponent(query);

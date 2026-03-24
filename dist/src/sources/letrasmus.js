@@ -294,8 +294,8 @@ export default class LetrasMusSource {
                 }
             }
             const query = `${decodedTrack.title} ${decodedTrack.author}`.trim();
-            let searchResult = await sourceManager.searchWithDefault(query);
-            let searchTracks = searchResult.data;
+            const searchResult = await sourceManager.searchWithDefault(query);
+            const searchTracks = searchResult.data;
             if (searchResult.loadType !== 'search' ||
                 !this.isTrackDataArray(searchTracks) ||
                 searchTracks.length === 0) {

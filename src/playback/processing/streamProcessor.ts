@@ -300,21 +300,15 @@ const _isHttpProxyConfig = (value: unknown): value is HttpProxyConfig => {
   if (!value || typeof value !== 'object') return false
 
   const proxy = value as Record<string, unknown>
-  if (typeof proxy['url'] !== 'string' || proxy['url'].length === 0) return false
-  if (
-    proxy['username'] !== undefined &&
-    typeof proxy['username'] !== 'string'
-  )
+  if (typeof proxy.url !== 'string' || proxy.url.length === 0) return false
+  if (proxy.username !== undefined && typeof proxy.username !== 'string')
+    return false
+  if (proxy.password !== undefined && typeof proxy.password !== 'string')
     return false
   if (
-    proxy['password'] !== undefined &&
-    typeof proxy['password'] !== 'string'
-  )
-    return false
-  if (
-    proxy['type'] !== undefined &&
-    proxy['type'] !== 'forward' &&
-    proxy['type'] !== 'reverse'
+    proxy.type !== undefined &&
+    proxy.type !== 'forward' &&
+    proxy.type !== 'reverse'
   )
     return false
 
@@ -328,8 +322,8 @@ const _extractSeekProxy = (
     | Record<string, unknown>
     | undefined
 
-  return _isHttpProxyConfig(additionalData?.['proxy'])
-    ? (additionalData['proxy'] as HttpProxyConfig)
+  return _isHttpProxyConfig(additionalData?.proxy)
+    ? (additionalData.proxy as HttpProxyConfig)
     : undefined
 }
 
@@ -393,7 +387,9 @@ async function _openRangeStream(
       (response.statusCode !== 200 && response.statusCode !== 206) ||
       !response.stream
     ) {
-      throw new Error(`HTTP ${response.statusCode ?? 0} while opening range stream`)
+      throw new Error(
+        `HTTP ${response.statusCode ?? 0} while opening range stream`
+      )
     }
 
     return response.stream as Readable
@@ -441,7 +437,12 @@ async function _buildMp4SeekOptions(
 
     try {
       for (let i = 0; i < MAX_FETCHES && !readyInfo; i++) {
-        const buf = await _fetchRange(url, nextStart, nextStart + CHUNK - 1, proxy)
+        const buf = await _fetchRange(
+          url,
+          nextStart,
+          nextStart + CHUNK - 1,
+          proxy
+        )
         const ab = _toArrayBufferWithFileStart(buf, nextStart)
 
         prefetch.push({ fileStart: nextStart, data: ab })
@@ -507,13 +508,13 @@ type SeekableResponseLike = Readable & {
 const _createSeekableProxyRequest = (
   proxy?: HttpProxyConfig
 ):
-  | (((
+  | ((
       requestUrl: string | URL,
       options: {
         method?: string
         headers?: Record<string, string>
       }
-    ) => Promise<SeekableResponseLike>))
+    ) => Promise<SeekableResponseLike>)
   | undefined => {
   if (!proxy) return undefined
 
@@ -728,9 +729,7 @@ class BaseAudioResource {
     ) as FlowController | undefined
 
     if (flowController) {
-      if (typeof (flowController as any).setFilters === 'function') {
-        ;(flowController as any).setFilters(filters)
-      }
+      flowController.setFilters(filters)
       return
     }
   }
@@ -2583,8 +2582,7 @@ class StreamAudioResource extends BaseAudioResource {
     const silenceDetector = new SilenceDetector({
       sampleRate: AUDIO_CONFIG.sampleRate,
       channels: AUDIO_CONFIG.channels,
-      thresholdDb:
-        (nodelink.options.audio as any)?.automix?.silenceThresholdDb ?? -40
+      thresholdDb: nodelink.options.audio?.automix?.silenceThresholdDb ?? -40
     })
 
     const flowController = new FlowController(
@@ -2593,7 +2591,7 @@ class StreamAudioResource extends BaseAudioResource {
       tapeTransformer,
       scratchTransformer,
       audioMixer
-    ) as any
+    )
 
     const opusEncoder = new OpusEncoder({
       rate: AUDIO_CONFIG.sampleRate,
@@ -2609,27 +2607,22 @@ class StreamAudioResource extends BaseAudioResource {
       filters,
       flowController
     ]
-    this.pipes?.push(
-      frameCounter,
-      silenceDetector,
-      filters,
-      flowController
-    )
+    this.pipes?.push(frameCounter, silenceDetector, filters, flowController)
 
     if (nodelink.extensions?.audioInterceptors) {
-      for (const interceptorFactory of nodelink.extensions // biome-ignore lint/suspicious/noExplicitAny: dynamic extension types
-        .audioInterceptors as any[]) {
+      for (const interceptorFactory of nodelink.extensions.audioInterceptors) {
         try {
           const interceptorStream = interceptorFactory()
-          if (
-            interceptorStream &&
-            typeof interceptorStream.pipe === 'function'
-          ) {
+          if (interceptorStream) {
             streams.push(interceptorStream)
             this.pipes?.push(interceptorStream)
           }
         } catch (e) {
-          console.error(`Audio interceptor error: ${(e as Error).message}`)
+          logger(
+            'error',
+            'StreamProcessor',
+            `Audio interceptor error: ${e instanceof Error ? e.message : String(e)}`
+          )
         }
       }
     }
@@ -2914,7 +2907,7 @@ export const createSeekeableAudioResource = async (
 }
 
 export const createPCMStream = (
-  guildId: string,
+  _guildId: string,
   stream: Readable,
   type: string,
   nodelink: NodeLink,

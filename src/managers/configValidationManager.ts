@@ -1,8 +1,10 @@
-type ValidationRule<T = any> = {
+import type { NodelinkConfig } from '../typings/config/config.types.ts'
+
+type ValidationRule = {
   path: string
   expected: string
-  value: T
-  validate: (v: T) => boolean
+  value: unknown
+  validate: (v: unknown) => boolean
 }
 
 type ValidationWarning = {
@@ -54,7 +56,7 @@ const VALID_METRICS_AUTH_TYPES = new Set(['Bearer', 'Basic'])
 export default class ConfigValidationManager {
   private warnings: ValidationWarning[] = []
 
-  constructor(private options: any) {}
+  constructor(private options: NodelinkConfig) {}
 
   validate(): void {
     this.warnings = []
@@ -133,10 +135,11 @@ export default class ConfigValidationManager {
         path: 'cluster.minWorkers',
         expected:
           workers === 0
-            ? 'integer (auto-scaled workers, any value allowed)'
+            ? 'integer (auto-scaled workers, unknown value allowed)'
             : `integer <= cluster.workers (${workers})`,
         value: cluster.minWorkers,
-        validate: (v: number) =>
+        validate: (v: unknown) =>
+          typeof v === 'number' &&
           Number.isInteger(v) &&
           Number.isInteger(workers) &&
           (workers === 0 || v <= workers)
@@ -245,13 +248,13 @@ export default class ConfigValidationManager {
           path: 'cluster.scaling.scaleUpThreshold',
           expected: 'number between 0 and 1 (exclusive)',
           value: scaling.scaleUpThreshold,
-          validate: (v: number) => typeof v === 'number' && v > 0 && v < 1
+          validate: (v: unknown) => typeof v === 'number' && v > 0 && v < 1
         },
         {
           path: 'cluster.scaling.cpuPenaltyLimit',
           expected: 'number between 0 and 1 (exclusive)',
           value: scaling.cpuPenaltyLimit,
-          validate: (v: number) => typeof v === 'number' && v > 0 && v < 1
+          validate: (v: unknown) => typeof v === 'number' && v > 0 && v < 1
         },
         this.floatMustBeBelow(
           'cluster.scaling.scaleDownThreshold',
@@ -263,7 +266,7 @@ export default class ConfigValidationManager {
           path: 'cluster.scaling.targetUtilization',
           expected: `number between scaleDownThreshold (${scaling.scaleDownThreshold}) and scaleUpThreshold (${scaling.scaleUpThreshold})`,
           value: scaling.targetUtilization,
-          validate: (v: number) =>
+          validate: (v: unknown) =>
             typeof scaling.scaleDownThreshold === 'number' &&
             typeof scaling.scaleUpThreshold === 'number' &&
             typeof v === 'number' &&
@@ -301,7 +304,7 @@ export default class ConfigValidationManager {
         path: 'audio.gateThresholdLUFS',
         expected: 'number <= 0',
         value: audio?.gateThresholdLUFS,
-        validate: (v: number) => typeof v === 'number' && v <= 0
+        validate: (v: unknown) => typeof v === 'number' && v <= 0
       },
       this.enumRule('audio.quality', audio?.quality, VALID_AUDIO_QUALITIES),
       this.enumRule(
@@ -361,7 +364,7 @@ export default class ConfigValidationManager {
             path: 'audio.fading.ducking.targetVolume',
             expected: 'number between 0 and 1 (inclusive)',
             value: ducking.targetVolume,
-            validate: (v: number) => typeof v === 'number' && v >= 0 && v <= 1
+            validate: (v: unknown) => typeof v === 'number' && v >= 0 && v <= 1
           }
         )
       }
@@ -403,7 +406,7 @@ export default class ConfigValidationManager {
         path: 'trackStuckThresholdMs',
         expected: 'integer >= 1000 (milliseconds)',
         value: trackStuck,
-        validate: (v: number) => Number.isInteger(v) && v >= 1000
+        validate: (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 1000
       },
       this.intMustExceed(
         'zombieThresholdMs',
@@ -468,9 +471,10 @@ export default class ConfigValidationManager {
     ]
 
     for (const name of allSources) {
-      if (sources[name] !== undefined) {
+      const sourceConfig = (sources as Record<string, unknown>)[name] as Record<string, unknown> | undefined
+      if (sourceConfig !== undefined) {
         rules.push(
-          this.booleanRule(`sources.${name}.enabled`, sources[name].enabled)
+          this.booleanRule(`sources.${name}.enabled`, sourceConfig.enabled)
         )
       }
     }
@@ -497,113 +501,119 @@ export default class ConfigValidationManager {
     return rules
   }
 
-  private validateSourceSpotify(spotify: any): ValidationRule[] {
-    if (!spotify?.enabled) return []
+  private validateSourceSpotify(spotify: unknown): ValidationRule[] {
+    if (typeof spotify !== 'object' || spotify === null || !(spotify as Record<string, unknown>).enabled) return []
+
+    const s = spotify as Record<string, unknown>
 
     const rules: ValidationRule[] = [
       this.nonNegativeIntRule(
         'sources.spotify.playlistLoadLimit',
-        spotify.playlistLoadLimit
+        s.playlistLoadLimit
       ),
       this.nonNegativeIntRule(
         'sources.spotify.albumLoadLimit',
-        spotify.albumLoadLimit
+        s.albumLoadLimit
       ),
       this.positiveIntRule(
         'sources.spotify.playlistPageLoadConcurrency',
-        spotify.playlistPageLoadConcurrency
+        s.playlistPageLoadConcurrency
       ),
       this.positiveIntRule(
         'sources.spotify.albumPageLoadConcurrency',
-        spotify.albumPageLoadConcurrency
+        s.albumPageLoadConcurrency
       ),
       this.booleanRule(
         'sources.spotify.allowLocalFiles',
-        spotify.allowLocalFiles
+        s.allowLocalFiles
       ),
       {
         path: 'sources.spotify.clientId',
         expected: 'non-empty string when sources.spotify.clientSecret is set',
-        value: spotify.clientId,
-        validate: (v: string) =>
-          !spotify.clientSecret ||
+        value: s.clientId,
+        validate: (v: unknown) =>
+          !s.clientSecret ||
           (typeof v === 'string' && v.trim().length > 0)
       },
       {
         path: 'sources.spotify.clientSecret',
         expected: 'non-empty string when sources.spotify.clientId is set',
-        value: spotify.clientSecret,
-        validate: (v: string) =>
-          !spotify.clientId || (typeof v === 'string' && v.trim().length > 0)
+        value: s.clientSecret,
+        validate: (v: unknown) =>
+          !s.clientId || (typeof v === 'string' && v.trim().length > 0)
       },
-      this.placeholderWarningRule('sources.spotify.clientId', spotify.clientId),
+      this.placeholderWarningRule('sources.spotify.clientId', s.clientId),
       this.placeholderWarningRule(
         'sources.spotify.clientSecret',
-        spotify.clientSecret
+        s.clientSecret
       )
     ]
 
-    if (spotify.externalAuthUrl) {
+    if (s.externalAuthUrl) {
       rules.push(
-        this.urlRule('sources.spotify.externalAuthUrl', spotify.externalAuthUrl)
+        this.urlRule('sources.spotify.externalAuthUrl', s.externalAuthUrl)
       )
     }
 
     return rules
   }
 
-  private validateSourceAppleMusic(applemusic: any): ValidationRule[] {
-    if (!applemusic?.enabled) return []
+  private validateSourceAppleMusic(applemusic: unknown): ValidationRule[] {
+    if (typeof applemusic !== 'object' || applemusic === null || !(applemusic as Record<string, unknown>).enabled) return []
+
+    const a = applemusic as Record<string, unknown>
 
     return [
       this.nonNegativeIntRule(
         'sources.applemusic.playlistLoadLimit',
-        applemusic.playlistLoadLimit
+        a.playlistLoadLimit
       ),
       this.nonNegativeIntRule(
         'sources.applemusic.albumLoadLimit',
-        applemusic.albumLoadLimit
+        a.albumLoadLimit
       ),
       this.positiveIntRule(
         'sources.applemusic.playlistPageLoadConcurrency',
-        applemusic.playlistPageLoadConcurrency
+        a.playlistPageLoadConcurrency
       ),
       this.positiveIntRule(
         'sources.applemusic.albumPageLoadConcurrency',
-        applemusic.albumPageLoadConcurrency
+        a.albumPageLoadConcurrency
       ),
       this.placeholderWarningRule(
         'sources.applemusic.mediaApiToken',
-        applemusic.mediaApiToken,
+        a.mediaApiToken,
         ['token_here']
       )
     ]
   }
 
-  private validateSourceTidal(tidal: any): ValidationRule[] {
-    if (!tidal?.enabled) return []
+  private validateSourceTidal(tidal: unknown): ValidationRule[] {
+    if (typeof tidal !== 'object' || tidal === null || !(tidal as Record<string, unknown>).enabled) return []
+
+    const t = tidal as Record<string, unknown>
 
     const rules: ValidationRule[] = [
       this.nonNegativeIntRule(
         'sources.tidal.playlistLoadLimit',
-        tidal.playlistLoadLimit
+        t.playlistLoadLimit
       ),
       this.positiveIntRule(
         'sources.tidal.playlistPageLoadConcurrency',
-        tidal.playlistPageLoadConcurrency
+        t.playlistPageLoadConcurrency
       )
     ]
 
-    if (tidal.token !== undefined) {
+    if (t.token !== undefined) {
       rules.push(
         {
           path: 'sources.tidal.token',
           expected: 'string (non-whitespace if provided)',
-          value: tidal.token,
-          validate: (v: string) =>
+          value: t.token,
+          validate: (v: unknown) =>
             typeof v === 'string' && (v === '' || v.trim().length > 0)
         },
-        this.placeholderWarningRule('sources.tidal.token', tidal.token, [
+        this.placeholderWarningRule('sources.tidal.token', t.token, [
           'token_here'
         ])
       )
@@ -612,227 +622,255 @@ export default class ConfigValidationManager {
     return rules
   }
 
-  private validateSourceAudius(audius: any): ValidationRule[] {
-    if (!audius?.enabled) return []
+  private validateSourceAudius(audius: unknown): ValidationRule[] {
+    if (typeof audius !== 'object' || audius === null || !(audius as Record<string, unknown>).enabled) return []
+
+    const au = audius as Record<string, unknown>
 
     return [
       {
         path: 'sources.audius.appName',
         expected: 'string',
-        value: audius.appName,
-        validate: (v: string) => v === undefined || typeof v === 'string'
+        value: au.appName,
+        validate: (v: unknown) => v === undefined || typeof v === 'string'
       },
       {
         path: 'sources.audius.apiKey',
         expected: 'string',
-        value: audius.apiKey,
-        validate: (v: string) => v === undefined || typeof v === 'string'
+        value: au.apiKey,
+        validate: (v: unknown) => v === undefined || typeof v === 'string'
       },
       {
         path: 'sources.audius.apiSecret',
         expected: 'string',
-        value: audius.apiSecret,
-        validate: (v: string) => v === undefined || typeof v === 'string'
+        value: au.apiSecret,
+        validate: (v: unknown) => v === undefined || typeof v === 'string'
       },
       this.nonNegativeIntRule(
         'sources.audius.playlistLoadLimit',
-        audius.playlistLoadLimit
+        au.playlistLoadLimit
       ),
       this.nonNegativeIntRule(
         'sources.audius.albumLoadLimit',
-        audius.albumLoadLimit
+        au.albumLoadLimit
       ),
-      this.placeholderWarningRule('sources.audius.apiKey', audius.apiKey),
-      this.placeholderWarningRule('sources.audius.apiSecret', audius.apiSecret)
+      this.placeholderWarningRule('sources.audius.apiKey', au.apiKey),
+      this.placeholderWarningRule('sources.audius.apiSecret', au.apiSecret)
     ]
   }
 
-  private validateSourceJiosaavn(jiosaavn: any): ValidationRule[] {
-    if (!jiosaavn?.enabled) return []
+  private validateSourceJiosaavn(jiosaavn: unknown): ValidationRule[] {
+    if (typeof jiosaavn !== 'object' || jiosaavn === null || !(jiosaavn as Record<string, unknown>).enabled) return []
+
+    const j = jiosaavn as Record<string, unknown>
 
     return [
       this.nonNegativeIntRule(
         'sources.jiosaavn.playlistLoadLimit',
-        jiosaavn.playlistLoadLimit
+        j.playlistLoadLimit
       ),
       this.nonNegativeIntRule(
         'sources.jiosaavn.artistLoadLimit',
-        jiosaavn.artistLoadLimit
+        j.artistLoadLimit
       )
     ]
   }
 
-  private validateSourceEternalbox(eternalbox: any): ValidationRule[] {
-    if (!eternalbox?.enabled) return []
+  private validateSourceEternalbox(eternalbox: unknown): ValidationRule[] {
+    if (typeof eternalbox !== 'object' || eternalbox === null || !(eternalbox as Record<string, unknown>).enabled) return []
+
+    const e = eternalbox as Record<string, unknown>
 
     return [
-      this.urlRule('sources.eternalbox.baseUrl', eternalbox.baseUrl),
+      this.urlRule('sources.eternalbox.baseUrl', e.baseUrl),
       this.positiveIntRule(
         'sources.eternalbox.searchResults',
-        eternalbox.searchResults
+        e.searchResults
       ),
       this.positiveIntRule(
         'sources.eternalbox.maxBranches',
-        eternalbox.maxBranches
+        e.maxBranches
       ),
       this.nonNegativeIntRule(
         'sources.eternalbox.cacheMaxBytes',
-        eternalbox.cacheMaxBytes
+        e.cacheMaxBytes
       ),
       this.booleanRule(
         'sources.eternalbox.enrichSpotify',
-        eternalbox.enrichSpotify
+        e.enrichSpotify
       ),
       this.booleanRule(
         'sources.eternalbox.includeAnalysis',
-        eternalbox.includeAnalysis
+        e.includeAnalysis
       ),
       this.booleanRule(
         'sources.eternalbox.eternalStream',
-        eternalbox.eternalStream
+        e.eternalStream
       ),
       this.booleanRule(
         'sources.eternalbox.infiniteStream',
-        eternalbox.infiniteStream
+        e.infiniteStream
       ),
       this.nonNegativeIntRule(
         'sources.eternalbox.maxReconnects',
-        eternalbox.maxReconnects
+        e.maxReconnects
       ),
       this.positiveIntRule(
         'sources.eternalbox.reconnectDelayMs',
-        eternalbox.reconnectDelayMs
+        e.reconnectDelayMs
       ),
       {
         path: 'sources.eternalbox.minRandomBranchChance',
         expected: 'number between 0 and 1 (inclusive)',
-        value: eternalbox.minRandomBranchChance,
-        validate: (v: number) => typeof v === 'number' && v >= 0 && v <= 1
+        value: e.minRandomBranchChance,
+        validate: (v: unknown) => typeof v === 'number' && v >= 0 && v <= 1
       },
       {
         path: 'sources.eternalbox.maxRandomBranchChance',
         expected: 'number between 0 and 1 (inclusive)',
-        value: eternalbox.maxRandomBranchChance,
-        validate: (v: number) => typeof v === 'number' && v >= 0 && v <= 1
+        value: e.maxRandomBranchChance,
+        validate: (v: unknown) => typeof v === 'number' && v >= 0 && v <= 1
       },
       this.floatMustNotExceed(
         'sources.eternalbox.minRandomBranchChance',
-        eternalbox.minRandomBranchChance,
-        eternalbox.maxRandomBranchChance,
+        e.minRandomBranchChance,
+        e.maxRandomBranchChance,
         'sources.eternalbox.maxRandomBranchChance'
       )
     ]
   }
 
-  private validateSourceYoutube(youtube: any): ValidationRule[] {
-    if (!youtube?.enabled || youtube.cipher?.url === undefined) return []
+  private validateSourceYoutube(youtube: unknown): ValidationRule[] {
+    if (typeof youtube !== 'object' || youtube === null) return []
+    const y = youtube as Record<string, unknown>
+    if (!y.enabled || !y.cipher) return []
+    const cipher = y.cipher as Record<string, unknown>
+    if (cipher.url === undefined) return []
 
-    return [this.urlRule('sources.youtube.cipher.url', youtube.cipher.url)]
+    return [this.urlRule('sources.youtube.cipher.url', cipher.url)]
   }
 
-  private validateSourcePipertts(pipertts: any): ValidationRule[] {
-    if (!pipertts?.enabled) return []
+  private validateSourcePipertts(pipertts: unknown): ValidationRule[] {
+    if (typeof pipertts !== 'object' || pipertts === null || !(pipertts as Record<string, unknown>).enabled) return []
 
-    return [this.urlRule('sources.pipertts.url', pipertts.url)]
+    const p = pipertts as Record<string, unknown>
+
+    return [this.urlRule('sources.pipertts.url', p.url)]
   }
 
-  private validateSourcePandora(pandora: any): ValidationRule[] {
-    if (!pandora?.enabled || !pandora.remoteTokenUrl) return []
+  private validateSourcePandora(pandora: unknown): ValidationRule[] {
+    if (typeof pandora !== 'object' || pandora === null) return []
+    const pa = pandora as Record<string, unknown>
+    if (!pa.enabled || !pa.remoteTokenUrl) return []
 
     return [
-      this.urlRule('sources.pandora.remoteTokenUrl', pandora.remoteTokenUrl)
+      this.urlRule('sources.pandora.remoteTokenUrl', pa.remoteTokenUrl)
     ]
   }
 
-  private validateSourceQobuz(qobuz: any): ValidationRule[] {
-    if (!qobuz?.enabled) return []
+  private validateSourceQobuz(qobuz: unknown): ValidationRule[] {
+    if (typeof qobuz !== 'object' || qobuz === null || !(qobuz as Record<string, unknown>).enabled) return []
+
+    const q = qobuz as Record<string, unknown>
 
     return [
-      this.placeholderWarningRule('sources.qobuz.userToken', qobuz.userToken)
+      this.placeholderWarningRule('sources.qobuz.userToken', q.userToken)
     ]
   }
 
-  private validateSourceLastfm(lastfm: any): ValidationRule[] {
-    if (!lastfm?.enabled) return []
+  private validateSourceLastfm(lastfm: unknown): ValidationRule[] {
+    if (typeof lastfm !== 'object' || lastfm === null || !(lastfm as Record<string, unknown>).enabled) return []
 
-    return [this.placeholderWarningRule('sources.lastfm.apiKey', lastfm.apiKey)]
+    const l = lastfm as Record<string, unknown>
+
+    return [this.placeholderWarningRule('sources.lastfm.apiKey', l.apiKey)]
   }
 
-  private validateSourceBilibili(bilibili: any): ValidationRule[] {
-    if (!bilibili?.enabled) return []
+  private validateSourceBilibili(bilibili: unknown): ValidationRule[] {
+    if (typeof bilibili !== 'object' || bilibili === null || !(bilibili as Record<string, unknown>).enabled) return []
+
+    const b = bilibili as Record<string, unknown>
 
     return [
       this.placeholderWarningRule(
         'sources.bilibili.sessdata',
-        bilibili.sessdata
+        b.sessdata
       )
     ]
   }
 
-  private validateSourceYandexMusic(yandexmusic: any): ValidationRule[] {
-    if (!yandexmusic?.enabled) return []
+  private validateSourceYandexMusic(yandexmusic: unknown): ValidationRule[] {
+    if (typeof yandexmusic !== 'object' || yandexmusic === null || !(yandexmusic as Record<string, unknown>).enabled) return []
+
+    const ym = yandexmusic as Record<string, unknown>
 
     return [
       this.nonNegativeIntRule(
         'sources.yandexmusic.artistLoadLimit',
-        yandexmusic.artistLoadLimit
+        ym.artistLoadLimit
       ),
       this.nonNegativeIntRule(
         'sources.yandexmusic.albumLoadLimit',
-        yandexmusic.albumLoadLimit
+        ym.albumLoadLimit
       ),
       this.nonNegativeIntRule(
         'sources.yandexmusic.playlistLoadLimit',
-        yandexmusic.playlistLoadLimit
+        ym.playlistLoadLimit
       ),
       this.placeholderWarningRule(
         'sources.yandexmusic.accessToken',
-        yandexmusic.accessToken
+        ym.accessToken
       )
     ]
   }
 
-  private validateSourceGaana(gaana: any): ValidationRule[] {
-    if (!gaana?.enabled) return []
+  private validateSourceGaana(gaana: unknown): ValidationRule[] {
+    if (typeof gaana !== 'object' || gaana === null || !(gaana as Record<string, unknown>).enabled) return []
+
+    const g = gaana as Record<string, unknown>
 
     return [
       this.nonNegativeIntRule(
         'sources.gaana.playlistLoadLimit',
-        gaana.playlistLoadLimit
+        g.playlistLoadLimit
       ),
       this.nonNegativeIntRule(
         'sources.gaana.albumLoadLimit',
-        gaana.albumLoadLimit
+        g.albumLoadLimit
       ),
       this.nonNegativeIntRule(
         'sources.gaana.artistLoadLimit',
-        gaana.artistLoadLimit
+        g.artistLoadLimit
       )
     ]
   }
 
-  private validateSourceFlowery(flowery: any): ValidationRule[] {
-    if (!flowery?.enabled) return []
+  private validateSourceFlowery(flowery: unknown): ValidationRule[] {
+    if (typeof flowery !== 'object' || flowery === null || !(flowery as Record<string, unknown>).enabled) return []
+
+    const fl = flowery as Record<string, unknown>
 
     return [
-      this.positiveNumberRule('sources.flowery.speed', flowery.speed),
-      this.nonNegativeIntRule('sources.flowery.silence', flowery.silence),
-      this.booleanRule('sources.flowery.translate', flowery.translate),
-      this.booleanRule('sources.flowery.enforceConfig', flowery.enforceConfig)
+      this.positiveNumberRule('sources.flowery.speed', fl.speed),
+      this.nonNegativeIntRule('sources.flowery.silence', fl.silence),
+      this.booleanRule('sources.flowery.translate', fl.translate),
+      this.booleanRule('sources.flowery.enforceConfig', fl.enforceConfig)
     ]
   }
 
-  private validateSourceLazypytts(lazypytts: any): ValidationRule[] {
-    if (!lazypytts?.enabled) return []
+  private validateSourceLazypytts(lazypytts: unknown): ValidationRule[] {
+    if (typeof lazypytts !== 'object' || lazypytts === null || !(lazypytts as Record<string, unknown>).enabled) return []
+
+    const lp = lazypytts as Record<string, unknown>
 
     return [
       this.positiveIntRule(
         'sources.lazypytts.maxTextLength',
-        lazypytts.maxTextLength
+        lp.maxTextLength
       ),
       this.booleanRule(
         'sources.lazypytts.enforceConfig',
-        lazypytts.enforceConfig
+        lp.enforceConfig
       )
     ]
   }
@@ -856,15 +894,16 @@ export default class ConfigValidationManager {
         expected:
           'string or non-empty string[] of enabled source names in config.sources',
         value: this.options.defaultSearchSource,
-        validate: (v: any) => {
+        validate: (v: unknown) => {
           const sources = this.options.sources
           if (!sources) return false
-          if (typeof v === 'string') return sources[v]?.enabled === true
+          const sourcesRecord = sources as Record<string, unknown>
+          if (typeof v === 'string') return (sourcesRecord[v] as Record<string, unknown>)?.enabled === true
           if (Array.isArray(v)) {
             if (v.length === 0) return false
             return v.every(
-              (name: any) =>
-                typeof name === 'string' && sources[name]?.enabled === true
+              (name: unknown) =>
+                typeof name === 'string' && (sourcesRecord[name] as Record<string, unknown>)?.enabled === true
             )
           }
           return false
@@ -879,12 +918,13 @@ export default class ConfigValidationManager {
         expected:
           'non-empty string[] of enabled source names in config.sources',
         value: unified,
-        validate: (v: any) => {
+        validate: (v: unknown) => {
           const sources = this.options.sources
           if (!sources || !Array.isArray(v) || v.length === 0) return false
+          const sourcesRecord = sources as Record<string, unknown>
           return v.every(
-            (name: any) =>
-              typeof name === 'string' && sources[name]?.enabled === true
+            (name: unknown) =>
+              typeof name === 'string' && (sourcesRecord[name] as Record<string, unknown>)?.enabled === true
           )
         }
       })
@@ -1114,7 +1154,7 @@ export default class ConfigValidationManager {
         path: 'mix.defaultVolume',
         expected: 'number between 0 and 1 (inclusive)',
         value: mix.defaultVolume,
-        validate: (v: number) => typeof v === 'number' && v >= 0 && v <= 1
+        validate: (v: unknown) => typeof v === 'number' && v >= 0 && v <= 1
       }
     ]
   }
@@ -1205,12 +1245,12 @@ export default class ConfigValidationManager {
     path: string,
     value: unknown,
     except: string[] = []
-  ): ValidationRule<unknown> {
+  ): ValidationRule {
     return {
       path,
       expected: 'non-placeholder value',
       value,
-      validate: (v) => {
+      validate: (v: unknown) => {
         if (
           typeof v === 'string' &&
           KNOWN_PLACEHOLDERS.has(v) &&
@@ -1228,80 +1268,80 @@ export default class ConfigValidationManager {
 
   private nonNegativeIntRule(
     path: string,
-    value: number
-  ): ValidationRule<number> {
+    value: unknown
+  ): ValidationRule {
     return {
       path,
       expected: 'integer >= 0',
       value,
-      validate: (v) => Number.isInteger(v) && v >= 0
+      validate: (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0
     }
   }
 
-  private positiveIntRule(path: string, value: number): ValidationRule<number> {
+  private positiveIntRule(path: string, value: unknown): ValidationRule {
     return {
       path,
       expected: 'integer > 0',
       value,
-      validate: (v) => Number.isInteger(v) && v > 0
+      validate: (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v > 0
     }
   }
 
   private intRangeRule(
     path: string,
-    value: number,
+    value: unknown,
     min: number,
     max: number
-  ): ValidationRule<number> {
+  ): ValidationRule {
     return {
       path,
       expected: `integer between ${min} and ${max}`,
       value,
-      validate: (v) => Number.isInteger(v) && v >= min && v <= max
+      validate: (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max
     }
   }
 
-  private booleanRule(path: string, value: boolean): ValidationRule<boolean> {
+  private booleanRule(path: string, value: unknown): ValidationRule {
     return {
       path,
       expected: 'boolean',
       value,
-      validate: (v) => typeof v === 'boolean'
+      validate: (v: unknown) => typeof v === 'boolean'
     }
   }
 
   private nonEmptyStringRule(
     path: string,
-    value: string
-  ): ValidationRule<string> {
+    value: unknown
+  ): ValidationRule {
     return {
       path,
       expected: 'non-empty string',
       value,
-      validate: (v) => typeof v === 'string' && v.trim().length > 0
+      validate: (v: unknown) => typeof v === 'string' && v.trim().length > 0
     }
   }
 
   private enumRule(
     path: string,
-    value: any,
+    value: unknown,
     allowed: Set<string>
-  ): ValidationRule<any> {
+  ): ValidationRule {
     const label = [...allowed].join(', ')
     return {
       path,
       expected: `one of [${label}]`,
       value,
-      validate: (v) => allowed.has(v)
+      validate: (v: unknown) => allowed.has(v as string)
     }
   }
 
-  private urlRule(path: string, value: string): ValidationRule<string> {
+  private urlRule(path: string, value: unknown): ValidationRule {
     return {
       path,
       expected: 'valid http or https URL (e.g. https://example.com)',
       value,
-      validate: (v) => {
+      validate: (v: unknown) => {
         if (typeof v !== 'string' || v.trim().length === 0) return false
         if (v !== v.trim()) {
           this.warnings.push({
@@ -1321,45 +1361,45 @@ export default class ConfigValidationManager {
 
   private intMustExceed(
     path: string,
-    value: number,
-    dependency: number,
+    value: unknown,
+    dependency: unknown,
     dependencyPath: string
-  ): ValidationRule<number> {
+  ): ValidationRule {
     return {
       path,
       expected: `integer > ${dependencyPath} (${dependency})`,
       value,
-      validate: (v) =>
-        Number.isInteger(v) && Number.isInteger(dependency) && v > dependency
+      validate: (v: unknown) =>
+        typeof v === 'number' && Number.isInteger(v) && typeof dependency === 'number' && Number.isInteger(dependency) && v > dependency
     }
   }
 
   private intMustNotExceed(
     path: string,
-    value: number,
-    dependency: number,
+    value: unknown,
+    dependency: unknown,
     dependencyPath: string
-  ): ValidationRule<number> {
+  ): ValidationRule {
     return {
       path,
       expected: `integer <= ${dependencyPath} (${dependency})`,
       value,
-      validate: (v) =>
-        Number.isInteger(v) && Number.isInteger(dependency) && v <= dependency
+      validate: (v: unknown) =>
+        typeof v === 'number' && Number.isInteger(v) && typeof dependency === 'number' && Number.isInteger(dependency) && v <= dependency
     }
   }
 
   private floatMustNotExceed(
     path: string,
-    value: number,
-    dependency: number,
+    value: unknown,
+    dependency: unknown,
     dependencyPath: string
-  ): ValidationRule<number> {
+  ): ValidationRule {
     return {
       path,
       expected: `number <= ${dependencyPath} (${dependency})`,
       value,
-      validate: (v) =>
+      validate: (v: unknown) =>
         typeof v === 'number' &&
         typeof dependency === 'number' &&
         v <= dependency
@@ -1368,15 +1408,15 @@ export default class ConfigValidationManager {
 
   private floatMustBeBelow(
     path: string,
-    value: number,
-    dependency: number,
+    value: unknown,
+    dependency: unknown,
     dependencyPath: string
-  ): ValidationRule<number> {
+  ): ValidationRule {
     return {
       path,
       expected: `number < ${dependencyPath} (${dependency})`,
       value,
-      validate: (v) =>
+      validate: (v: unknown) =>
         typeof v === 'number' &&
         typeof dependency === 'number' &&
         v < dependency
@@ -1385,25 +1425,25 @@ export default class ConfigValidationManager {
 
   private positiveNumberRule(
     path: string,
-    value: number
-  ): ValidationRule<number> {
+    value: unknown
+  ): ValidationRule {
     return {
       path,
       expected: 'number > 0',
       value,
-      validate: (v) => typeof v === 'number' && v > 0
+      validate: (v: unknown) => typeof v === 'number' && v > 0
     }
   }
 
   private stringArrayRule(
     path: string,
     value: unknown
-  ): ValidationRule<unknown> {
+  ): ValidationRule {
     return {
       path,
       expected: 'array of strings',
       value,
-      validate: (v) =>
+      validate: (v: unknown) =>
         Array.isArray(v) && v.every((item) => typeof item === 'string')
     }
   }

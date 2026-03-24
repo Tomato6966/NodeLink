@@ -98,9 +98,9 @@ export default class Timescale extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    const speed = config['speed'] ?? 1.0
-    const pitch = config['pitch'] ?? 1.0
-    const rate = config['rate'] ?? 1.0
+    const speed = config.speed ?? 1.0
+    const pitch = config.pitch ?? 1.0
+    const rate = config.rate ?? 1.0
 
     const bypass = speed === 1.0 && pitch === 1.0 && rate === 1.0
     const silence = speed <= 0 || pitch <= 0 || rate <= 0

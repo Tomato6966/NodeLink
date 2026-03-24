@@ -382,7 +382,7 @@ export default class VKMusicSource {
     return { encoded: encodeTrack(trackInfo), info: trackInfo }
   }
 
-  async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
+  async getTrackUrl(decodedTrack, _itag, forceRefresh = false) {
     if (!forceRefresh) {
       const cached = this.nodelink.trackCacheManager.get(
         'vkmusic',
@@ -506,7 +506,9 @@ export default class VKMusicSource {
     const url = new URL(API_BASE + method)
     params.access_token = this.accessToken
     params.v = API_VERSION
-    Object.keys(params).forEach((k) => url.searchParams.append(k, params[k]))
+    for (const k of Object.keys(params)) {
+      url.searchParams.append(k, params[k])
+    }
     const { body, error, statusCode } = await makeRequest(url.toString(), {
       method: 'GET',
       headers: {
@@ -558,12 +560,13 @@ export default class VKMusicSource {
         indexes[n] = index
       }
       for (let n = 1; n < urlLen; n++) {
-        const c = maskUrlArr[n],
-          idx = indexes[urlLen - 1 - n]
-        ;(maskUrlArr[n] = maskUrlArr[idx]), (maskUrlArr[idx] = c)
+        const c = maskUrlArr[n]
+        const idx = indexes[urlLen - 1 - n]
+        maskUrlArr[n] = maskUrlArr[idx]
+        maskUrlArr[idx] = c
       }
       return maskUrlArr.join('')
-    } catch (e) {
+    } catch (_e) {
       return null
     }
   }

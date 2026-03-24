@@ -211,7 +211,8 @@ const findBestDoc = (docs, title, author) => {
     const wantedTitle = normalize(title);
     const wantedAuthor = normalize(author);
     const candidates = docs.filter((doc) => doc?.t === '2' && doc?.dns && doc?.url);
-    let best = candidates.find((doc) => normalize(doc.txt) === wantedTitle && normalize(doc.art) === wantedAuthor) || null;
+    let best = candidates.find((doc) => normalize(doc.txt) === wantedTitle &&
+        normalize(doc.art) === wantedAuthor) || null;
     if (!best) {
         best = candidates.find((doc) => normalize(doc.txt) === wantedTitle) || null;
     }

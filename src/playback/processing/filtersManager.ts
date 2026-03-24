@@ -70,6 +70,7 @@ export class FiltersManager extends Transform implements IFiltersManager {
   private readonly nodelink: FiltersManagerContext
   private activeFilters: FilterInstance[]
   private filterInstances: Record<string, FilterInstance>
+  private _lastRawFilters: FiltersState | FilterSettings = {}
 
   /**
    * When true, _transform passes chunks through without processing.
@@ -79,9 +80,6 @@ export class FiltersManager extends Transform implements IFiltersManager {
    * processes Track B — causing cross-contamination and 2x state advance.
    */
   public bypass = false
-
-  /** Stores the last raw update payload so resetState() can re-apply. */
-  private _lastRawFilters: FiltersState | FilterSettings = {}
 
   /**
    * Creates a new filter manager.
@@ -207,7 +205,7 @@ export class FiltersManager extends Transform implements IFiltersManager {
    */
   getRate(): number {
     if (this.bypass) return 1.0
-    const timescale = this.filterInstances['timescale'] as
+    const timescale = this.filterInstances.timescale as
       | { getRate?: () => number }
       | undefined
     return timescale?.getRate?.() ?? 1.0

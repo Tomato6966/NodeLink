@@ -50,15 +50,14 @@ export default class Echo extends AnimatableFilter {
         super.applyAnimatedUpdate({
             echo: {
                 alpha: targetAlpha,
-                transition: e.transition
             }
         }, 'echo', { alpha: 0.0 });
     }
     onConfigChanged(config) {
-        this.alpha = config['alpha'] ?? 0;
+        this.alpha = config.alpha ?? 0;
     }
     isConfigActive(config) {
-        const a = config ? config['alpha'] : this.alpha;
+        const a = config ? config.alpha : this.alpha;
         return (a ?? 0) > 0.001;
     }
     /**

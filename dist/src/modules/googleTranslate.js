@@ -182,7 +182,7 @@ const buildTranslateUrl = (text, sourceLang, targetLang, apiKey) => {
 export async function translateText(text, sourceLang, targetLang, apiKey) {
     if (!text)
         return { translation: '', sourceLanguage: sourceLang };
-    const key = apiKey || process.env['GOOGLE_TRANSLATE_KEY'] || DEFAULT_API_KEY;
+    const key = apiKey || process.env.GOOGLE_TRANSLATE_KEY || DEFAULT_API_KEY;
     const url = buildTranslateUrl(text, sourceLang, targetLang, key);
     const { body, statusCode, error } = await http1makeRequest(url, {
         method: 'GET'

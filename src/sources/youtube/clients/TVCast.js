@@ -118,7 +118,7 @@ export default class TV extends BaseClient {
             body: requestBody,
             method: 'POST',
             disableBodyCompression: true,
-        proxy: this.getProxy()
+            proxy: this.getProxy()
           }
         )
 

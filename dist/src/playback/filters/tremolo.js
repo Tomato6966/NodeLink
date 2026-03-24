@@ -38,15 +38,14 @@ export default class Tremolo extends AnimatableFilter {
         super.applyAnimatedUpdate({
             tremolo: {
                 alpha: targetAlpha,
-                transition: t.transition
             }
         }, 'tremolo', { alpha: 0.0 });
     }
     onConfigChanged(config) {
-        this.alpha = config['alpha'] ?? 0;
+        this.alpha = config.alpha ?? 0;
     }
     isConfigActive(config) {
-        const a = config ? config['alpha'] : this.alpha;
+        const a = config ? config.alpha : this.alpha;
         return (a ?? 0) > 0.001;
     }
     /**

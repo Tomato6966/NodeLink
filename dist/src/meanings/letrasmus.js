@@ -218,8 +218,7 @@ const extractMeaning = (html) => {
     block = block.replace(/<h3[^>]*>[\s\S]*?<\/h3>/i, '');
     const paragraphs = [];
     const pRegex = /<p[^>]*>([\s\S]*?)<\/p>/gi;
-    let pMatch;
-    while ((pMatch = pRegex.exec(block))) {
+    for (const pMatch of block.matchAll(pRegex)) {
         const paragraphBlock = pMatch[1];
         if (!paragraphBlock)
             continue;
@@ -293,9 +292,7 @@ const getTranslationText = (result) => {
     if (!result || typeof result !== 'object')
         return null;
     const record = result;
-    return typeof record['translation'] === 'string'
-        ? record['translation']
-        : null;
+    return typeof record.translation === 'string' ? record.translation : null;
 };
 export default class LetrasMusMeaning {
     nodelink;

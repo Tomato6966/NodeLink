@@ -66,14 +66,13 @@ class IcyMetadataTransform extends Transform {
             return;
         const fields = {};
         const regex = /([A-Za-z0-9]+)='([^']*)'/g;
-        let match;
-        while ((match = regex.exec(cleaned))) {
+        for (const match of cleaned.matchAll(regex)) {
             fields[(match[1] || '').toLowerCase()] = match[2] || '';
         }
         const payload = {
             raw: cleaned,
-            streamTitle: fields['streamtitle'] || null,
-            streamUrl: fields['streamurl'] || null,
+            streamTitle: fields.streamtitle || null,
+            streamUrl: fields.streamurl || null,
             fields
         };
         const signature = payload.raw;
@@ -168,7 +167,7 @@ export default class HttpSource {
      */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        const rawHttpConfig = nodelink.options.sources?.['http'];
+        const rawHttpConfig = nodelink.options.sources?.http;
         this.config =
             rawHttpConfig &&
                 typeof rawHttpConfig === 'object' &&

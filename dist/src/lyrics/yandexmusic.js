@@ -152,8 +152,7 @@ export default class YandexMusicLyrics {
     _parseLrc(lrc) {
         const lines = [];
         const regex = /\[(\d{2}):(\d{2})\.(\d{2})\]\s*(.*?)(?=\n|\[|$)/g;
-        let match;
-        while ((match = regex.exec(lrc)) !== null) {
+        for (const match of lrc.matchAll(regex)) {
             const minutes = Number(match[1] || 0);
             const seconds = Number(match[2] || 0);
             const centiseconds = Number(match[3] || 0);

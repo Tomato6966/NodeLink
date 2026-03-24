@@ -37,6 +37,7 @@ import type SourcesManager from './managers/sourceManager.ts'
 import type SourceWorkerManager from './managers/sourceWorkerManager.ts'
 import type TrackCacheManager from './managers/trackCacheManager.ts'
 import type WorkerManager from './managers/workerManager.ts'
+import type { ApiMiddlewareExtension } from './typings/api/api.types.ts'
 import type { NodelinkConfig } from './typings/config/config.types.ts'
 import type {
   AudioInterceptorExtension,
@@ -62,7 +63,6 @@ import type {
   VoiceRelay,
   WebSocketInterceptorExtension
 } from './typings/index.types.ts'
-import type { ApiMiddlewareExtension } from './typings/api/api.types.ts'
 import type { ClientInfo, IPCMessage, ReqShim } from './typings/shared.types.ts'
 import { parseVoiceFrameHeader } from './voice/voiceFrames.ts'
 import { createVoiceRelay } from './voice/voiceRelay.ts'
@@ -2506,11 +2506,7 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
     return
   }
 
-  logger(
-    'error',
-    'Server',
-    `Uncaught Exception: ${err.stack || err.message}`
-  )
+  logger('error', 'Server', `Uncaught Exception: ${err.stack || err.message}`)
   process.stderr.write('', () => process.exit(1))
 })
 

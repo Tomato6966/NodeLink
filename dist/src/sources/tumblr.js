@@ -118,10 +118,12 @@ export default class TumblrSource {
             const titleMatch = html.match(/<title data-rh="true">(.*?)<\/title>/i) ||
                 html.match(/<title>(.*?)<\/title>/i);
             const title = titleMatch?.[1]
-                ? titleMatch[1].replace(' – @', ' by @').replace(' on Tumblr', '').trim()
+                ? titleMatch[1]
+                    .replace(' – @', ' by @')
+                    .replace(' on Tumblr', '')
+                    .trim()
                 : 'Tumblr Content';
-            const videoUrl = html.match(/<meta data-rh="" content="(.*?)" property="og:video"/i)?.[1] ||
-                html.match(/<meta property="og:video" content="(.*?)"/i)?.[1];
+            const videoUrl = html.match(/<meta data-rh="" content="(.*?)" property="og:video"/i)?.[1] || html.match(/<meta property="og:video" content="(.*?)"/i)?.[1];
             if (videoUrl) {
                 const trackInfo = {
                     identifier: info.id,
@@ -132,7 +134,8 @@ export default class TumblrSource {
                     position: 0,
                     title,
                     uri: url,
-                    artworkUrl: html.match(/<meta property="og:image" content="(.*?)"/i)?.[1] || null,
+                    artworkUrl: html.match(/<meta property="og:image" content="(.*?)"/i)?.[1] ||
+                        null,
                     isrc: null,
                     sourceName: 'tumblr'
                 };

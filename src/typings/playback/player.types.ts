@@ -268,6 +268,10 @@ export interface NodeLinkOptions {
     lookaheadMs?: number
     gateThresholdLUFS?: number
     filterTransitions?: FilterTransitionsConfig
+    automix?: {
+      enabled?: boolean
+      silenceThresholdDb?: number
+    }
   }
   mix?: {
     enabled?: boolean
@@ -275,9 +279,12 @@ export interface NodeLinkOptions {
     maxLayersMix?: number
     autoCleanup?: boolean
   }
+  connection?: import('../voice/connection.types.ts').ConnectionConfig
 }
 
-export type AudioOptionsWithTransitions = NonNullable<NodeLinkOptions['audio']> & {
+export type AudioOptionsWithTransitions = NonNullable<
+  NodeLinkOptions['audio']
+> & {
   filterTransitions?: FilterTransitionsConfig
 }
 
@@ -360,7 +367,9 @@ export interface NodeLink {
   sources: SourceManagerLike
   lyrics: LyricsManagerLike | null
   statistics?: { players?: number }
-  extensions?: { audioInterceptors?: unknown[] } & Record<string, unknown>
+  extensions?: {
+    audioInterceptors?: Array<() => import('node:stream').Transform>
+  } & Record<string, unknown>
   getLyricsManager?: () => Promise<LyricsManagerLike>
   [key: string]: unknown
 }

@@ -105,10 +105,11 @@ export default class ConfigValidationManager {
         rules.push(this.nonNegativeIntRule('cluster.workers', workers), this.nonNegativeIntRule('cluster.minWorkers', cluster.minWorkers), {
             path: 'cluster.minWorkers',
             expected: workers === 0
-                ? 'integer (auto-scaled workers, any value allowed)'
+                ? 'integer (auto-scaled workers, unknown value allowed)'
                 : `integer <= cluster.workers (${workers})`,
             value: cluster.minWorkers,
-            validate: (v) => Number.isInteger(v) &&
+            validate: (v) => typeof v === 'number' &&
+                Number.isInteger(v) &&
                 Number.isInteger(workers) &&
                 (workers === 0 || v <= workers)
         }, this.positiveIntRule('cluster.commandTimeout', cluster.commandTimeout), this.positiveIntRule('cluster.fastCommandTimeout', cluster.fastCommandTimeout), this.nonNegativeIntRule('cluster.maxRetries', cluster.maxRetries));
@@ -210,7 +211,7 @@ export default class ConfigValidationManager {
                 path: 'trackStuckThresholdMs',
                 expected: 'integer >= 1000 (milliseconds)',
                 value: trackStuck,
-                validate: (v) => Number.isInteger(v) && v >= 1000
+                validate: (v) => typeof v === 'number' && Number.isInteger(v) && v >= 1000
             },
             this.intMustExceed('zombieThresholdMs', this.options.zombieThresholdMs, trackStuck, 'trackStuckThresholdMs')
         ];
@@ -267,209 +268,233 @@ export default class ConfigValidationManager {
             'letrasmus'
         ];
         for (const name of allSources) {
-            if (sources[name] !== undefined) {
-                rules.push(this.booleanRule(`sources.${name}.enabled`, sources[name].enabled));
+            const sourceConfig = sources[name];
+            if (sourceConfig !== undefined) {
+                rules.push(this.booleanRule(`sources.${name}.enabled`, sourceConfig.enabled));
             }
         }
         rules.push(...this.validateSourceSpotify(sources.spotify), ...this.validateSourceAppleMusic(sources.applemusic), ...this.validateSourceTidal(sources.tidal), ...this.validateSourceAudius(sources.audius), ...this.validateSourceJiosaavn(sources.jiosaavn), ...this.validateSourceEternalbox(sources.eternalbox), ...this.validateSourceYoutube(sources.youtube), ...this.validateSourcePipertts(sources.pipertts), ...this.validateSourcePandora(sources.pandora), ...this.validateSourceQobuz(sources.qobuz), ...this.validateSourceLastfm(sources.lastfm), ...this.validateSourceBilibili(sources.bilibili), ...this.validateSourceYandexMusic(sources.yandexmusic), ...this.validateSourceGaana(sources.gaana), ...this.validateSourceFlowery(sources.flowery), ...this.validateSourceLazypytts(sources.lazypytts));
         return rules;
     }
     validateSourceSpotify(spotify) {
-        if (!spotify?.enabled)
+        if (typeof spotify !== 'object' || spotify === null || !spotify.enabled)
             return [];
+        const s = spotify;
         const rules = [
-            this.nonNegativeIntRule('sources.spotify.playlistLoadLimit', spotify.playlistLoadLimit),
-            this.nonNegativeIntRule('sources.spotify.albumLoadLimit', spotify.albumLoadLimit),
-            this.positiveIntRule('sources.spotify.playlistPageLoadConcurrency', spotify.playlistPageLoadConcurrency),
-            this.positiveIntRule('sources.spotify.albumPageLoadConcurrency', spotify.albumPageLoadConcurrency),
-            this.booleanRule('sources.spotify.allowLocalFiles', spotify.allowLocalFiles),
+            this.nonNegativeIntRule('sources.spotify.playlistLoadLimit', s.playlistLoadLimit),
+            this.nonNegativeIntRule('sources.spotify.albumLoadLimit', s.albumLoadLimit),
+            this.positiveIntRule('sources.spotify.playlistPageLoadConcurrency', s.playlistPageLoadConcurrency),
+            this.positiveIntRule('sources.spotify.albumPageLoadConcurrency', s.albumPageLoadConcurrency),
+            this.booleanRule('sources.spotify.allowLocalFiles', s.allowLocalFiles),
             {
                 path: 'sources.spotify.clientId',
                 expected: 'non-empty string when sources.spotify.clientSecret is set',
-                value: spotify.clientId,
-                validate: (v) => !spotify.clientSecret ||
+                value: s.clientId,
+                validate: (v) => !s.clientSecret ||
                     (typeof v === 'string' && v.trim().length > 0)
             },
             {
                 path: 'sources.spotify.clientSecret',
                 expected: 'non-empty string when sources.spotify.clientId is set',
-                value: spotify.clientSecret,
-                validate: (v) => !spotify.clientId || (typeof v === 'string' && v.trim().length > 0)
+                value: s.clientSecret,
+                validate: (v) => !s.clientId || (typeof v === 'string' && v.trim().length > 0)
             },
-            this.placeholderWarningRule('sources.spotify.clientId', spotify.clientId),
-            this.placeholderWarningRule('sources.spotify.clientSecret', spotify.clientSecret)
+            this.placeholderWarningRule('sources.spotify.clientId', s.clientId),
+            this.placeholderWarningRule('sources.spotify.clientSecret', s.clientSecret)
         ];
-        if (spotify.externalAuthUrl) {
-            rules.push(this.urlRule('sources.spotify.externalAuthUrl', spotify.externalAuthUrl));
+        if (s.externalAuthUrl) {
+            rules.push(this.urlRule('sources.spotify.externalAuthUrl', s.externalAuthUrl));
         }
         return rules;
     }
     validateSourceAppleMusic(applemusic) {
-        if (!applemusic?.enabled)
+        if (typeof applemusic !== 'object' || applemusic === null || !applemusic.enabled)
             return [];
+        const a = applemusic;
         return [
-            this.nonNegativeIntRule('sources.applemusic.playlistLoadLimit', applemusic.playlistLoadLimit),
-            this.nonNegativeIntRule('sources.applemusic.albumLoadLimit', applemusic.albumLoadLimit),
-            this.positiveIntRule('sources.applemusic.playlistPageLoadConcurrency', applemusic.playlistPageLoadConcurrency),
-            this.positiveIntRule('sources.applemusic.albumPageLoadConcurrency', applemusic.albumPageLoadConcurrency),
-            this.placeholderWarningRule('sources.applemusic.mediaApiToken', applemusic.mediaApiToken, ['token_here'])
+            this.nonNegativeIntRule('sources.applemusic.playlistLoadLimit', a.playlistLoadLimit),
+            this.nonNegativeIntRule('sources.applemusic.albumLoadLimit', a.albumLoadLimit),
+            this.positiveIntRule('sources.applemusic.playlistPageLoadConcurrency', a.playlistPageLoadConcurrency),
+            this.positiveIntRule('sources.applemusic.albumPageLoadConcurrency', a.albumPageLoadConcurrency),
+            this.placeholderWarningRule('sources.applemusic.mediaApiToken', a.mediaApiToken, ['token_here'])
         ];
     }
     validateSourceTidal(tidal) {
-        if (!tidal?.enabled)
+        if (typeof tidal !== 'object' || tidal === null || !tidal.enabled)
             return [];
+        const t = tidal;
         const rules = [
-            this.nonNegativeIntRule('sources.tidal.playlistLoadLimit', tidal.playlistLoadLimit),
-            this.positiveIntRule('sources.tidal.playlistPageLoadConcurrency', tidal.playlistPageLoadConcurrency)
+            this.nonNegativeIntRule('sources.tidal.playlistLoadLimit', t.playlistLoadLimit),
+            this.positiveIntRule('sources.tidal.playlistPageLoadConcurrency', t.playlistPageLoadConcurrency)
         ];
-        if (tidal.token !== undefined) {
+        if (t.token !== undefined) {
             rules.push({
                 path: 'sources.tidal.token',
                 expected: 'string (non-whitespace if provided)',
-                value: tidal.token,
+                value: t.token,
                 validate: (v) => typeof v === 'string' && (v === '' || v.trim().length > 0)
-            }, this.placeholderWarningRule('sources.tidal.token', tidal.token, [
+            }, this.placeholderWarningRule('sources.tidal.token', t.token, [
                 'token_here'
             ]));
         }
         return rules;
     }
     validateSourceAudius(audius) {
-        if (!audius?.enabled)
+        if (typeof audius !== 'object' || audius === null || !audius.enabled)
             return [];
+        const au = audius;
         return [
             {
                 path: 'sources.audius.appName',
                 expected: 'string',
-                value: audius.appName,
+                value: au.appName,
                 validate: (v) => v === undefined || typeof v === 'string'
             },
             {
                 path: 'sources.audius.apiKey',
                 expected: 'string',
-                value: audius.apiKey,
+                value: au.apiKey,
                 validate: (v) => v === undefined || typeof v === 'string'
             },
             {
                 path: 'sources.audius.apiSecret',
                 expected: 'string',
-                value: audius.apiSecret,
+                value: au.apiSecret,
                 validate: (v) => v === undefined || typeof v === 'string'
             },
-            this.nonNegativeIntRule('sources.audius.playlistLoadLimit', audius.playlistLoadLimit),
-            this.nonNegativeIntRule('sources.audius.albumLoadLimit', audius.albumLoadLimit),
-            this.placeholderWarningRule('sources.audius.apiKey', audius.apiKey),
-            this.placeholderWarningRule('sources.audius.apiSecret', audius.apiSecret)
+            this.nonNegativeIntRule('sources.audius.playlistLoadLimit', au.playlistLoadLimit),
+            this.nonNegativeIntRule('sources.audius.albumLoadLimit', au.albumLoadLimit),
+            this.placeholderWarningRule('sources.audius.apiKey', au.apiKey),
+            this.placeholderWarningRule('sources.audius.apiSecret', au.apiSecret)
         ];
     }
     validateSourceJiosaavn(jiosaavn) {
-        if (!jiosaavn?.enabled)
+        if (typeof jiosaavn !== 'object' || jiosaavn === null || !jiosaavn.enabled)
             return [];
+        const j = jiosaavn;
         return [
-            this.nonNegativeIntRule('sources.jiosaavn.playlistLoadLimit', jiosaavn.playlistLoadLimit),
-            this.nonNegativeIntRule('sources.jiosaavn.artistLoadLimit', jiosaavn.artistLoadLimit)
+            this.nonNegativeIntRule('sources.jiosaavn.playlistLoadLimit', j.playlistLoadLimit),
+            this.nonNegativeIntRule('sources.jiosaavn.artistLoadLimit', j.artistLoadLimit)
         ];
     }
     validateSourceEternalbox(eternalbox) {
-        if (!eternalbox?.enabled)
+        if (typeof eternalbox !== 'object' || eternalbox === null || !eternalbox.enabled)
             return [];
+        const e = eternalbox;
         return [
-            this.urlRule('sources.eternalbox.baseUrl', eternalbox.baseUrl),
-            this.positiveIntRule('sources.eternalbox.searchResults', eternalbox.searchResults),
-            this.positiveIntRule('sources.eternalbox.maxBranches', eternalbox.maxBranches),
-            this.nonNegativeIntRule('sources.eternalbox.cacheMaxBytes', eternalbox.cacheMaxBytes),
-            this.booleanRule('sources.eternalbox.enrichSpotify', eternalbox.enrichSpotify),
-            this.booleanRule('sources.eternalbox.includeAnalysis', eternalbox.includeAnalysis),
-            this.booleanRule('sources.eternalbox.eternalStream', eternalbox.eternalStream),
-            this.booleanRule('sources.eternalbox.infiniteStream', eternalbox.infiniteStream),
-            this.nonNegativeIntRule('sources.eternalbox.maxReconnects', eternalbox.maxReconnects),
-            this.positiveIntRule('sources.eternalbox.reconnectDelayMs', eternalbox.reconnectDelayMs),
+            this.urlRule('sources.eternalbox.baseUrl', e.baseUrl),
+            this.positiveIntRule('sources.eternalbox.searchResults', e.searchResults),
+            this.positiveIntRule('sources.eternalbox.maxBranches', e.maxBranches),
+            this.nonNegativeIntRule('sources.eternalbox.cacheMaxBytes', e.cacheMaxBytes),
+            this.booleanRule('sources.eternalbox.enrichSpotify', e.enrichSpotify),
+            this.booleanRule('sources.eternalbox.includeAnalysis', e.includeAnalysis),
+            this.booleanRule('sources.eternalbox.eternalStream', e.eternalStream),
+            this.booleanRule('sources.eternalbox.infiniteStream', e.infiniteStream),
+            this.nonNegativeIntRule('sources.eternalbox.maxReconnects', e.maxReconnects),
+            this.positiveIntRule('sources.eternalbox.reconnectDelayMs', e.reconnectDelayMs),
             {
                 path: 'sources.eternalbox.minRandomBranchChance',
                 expected: 'number between 0 and 1 (inclusive)',
-                value: eternalbox.minRandomBranchChance,
+                value: e.minRandomBranchChance,
                 validate: (v) => typeof v === 'number' && v >= 0 && v <= 1
             },
             {
                 path: 'sources.eternalbox.maxRandomBranchChance',
                 expected: 'number between 0 and 1 (inclusive)',
-                value: eternalbox.maxRandomBranchChance,
+                value: e.maxRandomBranchChance,
                 validate: (v) => typeof v === 'number' && v >= 0 && v <= 1
             },
-            this.floatMustNotExceed('sources.eternalbox.minRandomBranchChance', eternalbox.minRandomBranchChance, eternalbox.maxRandomBranchChance, 'sources.eternalbox.maxRandomBranchChance')
+            this.floatMustNotExceed('sources.eternalbox.minRandomBranchChance', e.minRandomBranchChance, e.maxRandomBranchChance, 'sources.eternalbox.maxRandomBranchChance')
         ];
     }
     validateSourceYoutube(youtube) {
-        if (!youtube?.enabled || youtube.cipher?.url === undefined)
+        if (typeof youtube !== 'object' || youtube === null)
             return [];
-        return [this.urlRule('sources.youtube.cipher.url', youtube.cipher.url)];
+        const y = youtube;
+        if (!y.enabled || !y.cipher)
+            return [];
+        const cipher = y.cipher;
+        if (cipher.url === undefined)
+            return [];
+        return [this.urlRule('sources.youtube.cipher.url', cipher.url)];
     }
     validateSourcePipertts(pipertts) {
-        if (!pipertts?.enabled)
+        if (typeof pipertts !== 'object' || pipertts === null || !pipertts.enabled)
             return [];
-        return [this.urlRule('sources.pipertts.url', pipertts.url)];
+        const p = pipertts;
+        return [this.urlRule('sources.pipertts.url', p.url)];
     }
     validateSourcePandora(pandora) {
-        if (!pandora?.enabled || !pandora.remoteTokenUrl)
+        if (typeof pandora !== 'object' || pandora === null)
+            return [];
+        const pa = pandora;
+        if (!pa.enabled || !pa.remoteTokenUrl)
             return [];
         return [
-            this.urlRule('sources.pandora.remoteTokenUrl', pandora.remoteTokenUrl)
+            this.urlRule('sources.pandora.remoteTokenUrl', pa.remoteTokenUrl)
         ];
     }
     validateSourceQobuz(qobuz) {
-        if (!qobuz?.enabled)
+        if (typeof qobuz !== 'object' || qobuz === null || !qobuz.enabled)
             return [];
+        const q = qobuz;
         return [
-            this.placeholderWarningRule('sources.qobuz.userToken', qobuz.userToken)
+            this.placeholderWarningRule('sources.qobuz.userToken', q.userToken)
         ];
     }
     validateSourceLastfm(lastfm) {
-        if (!lastfm?.enabled)
+        if (typeof lastfm !== 'object' || lastfm === null || !lastfm.enabled)
             return [];
-        return [this.placeholderWarningRule('sources.lastfm.apiKey', lastfm.apiKey)];
+        const l = lastfm;
+        return [this.placeholderWarningRule('sources.lastfm.apiKey', l.apiKey)];
     }
     validateSourceBilibili(bilibili) {
-        if (!bilibili?.enabled)
+        if (typeof bilibili !== 'object' || bilibili === null || !bilibili.enabled)
             return [];
+        const b = bilibili;
         return [
-            this.placeholderWarningRule('sources.bilibili.sessdata', bilibili.sessdata)
+            this.placeholderWarningRule('sources.bilibili.sessdata', b.sessdata)
         ];
     }
     validateSourceYandexMusic(yandexmusic) {
-        if (!yandexmusic?.enabled)
+        if (typeof yandexmusic !== 'object' || yandexmusic === null || !yandexmusic.enabled)
             return [];
+        const ym = yandexmusic;
         return [
-            this.nonNegativeIntRule('sources.yandexmusic.artistLoadLimit', yandexmusic.artistLoadLimit),
-            this.nonNegativeIntRule('sources.yandexmusic.albumLoadLimit', yandexmusic.albumLoadLimit),
-            this.nonNegativeIntRule('sources.yandexmusic.playlistLoadLimit', yandexmusic.playlistLoadLimit),
-            this.placeholderWarningRule('sources.yandexmusic.accessToken', yandexmusic.accessToken)
+            this.nonNegativeIntRule('sources.yandexmusic.artistLoadLimit', ym.artistLoadLimit),
+            this.nonNegativeIntRule('sources.yandexmusic.albumLoadLimit', ym.albumLoadLimit),
+            this.nonNegativeIntRule('sources.yandexmusic.playlistLoadLimit', ym.playlistLoadLimit),
+            this.placeholderWarningRule('sources.yandexmusic.accessToken', ym.accessToken)
         ];
     }
     validateSourceGaana(gaana) {
-        if (!gaana?.enabled)
+        if (typeof gaana !== 'object' || gaana === null || !gaana.enabled)
             return [];
+        const g = gaana;
         return [
-            this.nonNegativeIntRule('sources.gaana.playlistLoadLimit', gaana.playlistLoadLimit),
-            this.nonNegativeIntRule('sources.gaana.albumLoadLimit', gaana.albumLoadLimit),
-            this.nonNegativeIntRule('sources.gaana.artistLoadLimit', gaana.artistLoadLimit)
+            this.nonNegativeIntRule('sources.gaana.playlistLoadLimit', g.playlistLoadLimit),
+            this.nonNegativeIntRule('sources.gaana.albumLoadLimit', g.albumLoadLimit),
+            this.nonNegativeIntRule('sources.gaana.artistLoadLimit', g.artistLoadLimit)
         ];
     }
     validateSourceFlowery(flowery) {
-        if (!flowery?.enabled)
+        if (typeof flowery !== 'object' || flowery === null || !flowery.enabled)
             return [];
+        const fl = flowery;
         return [
-            this.positiveNumberRule('sources.flowery.speed', flowery.speed),
-            this.nonNegativeIntRule('sources.flowery.silence', flowery.silence),
-            this.booleanRule('sources.flowery.translate', flowery.translate),
-            this.booleanRule('sources.flowery.enforceConfig', flowery.enforceConfig)
+            this.positiveNumberRule('sources.flowery.speed', fl.speed),
+            this.nonNegativeIntRule('sources.flowery.silence', fl.silence),
+            this.booleanRule('sources.flowery.translate', fl.translate),
+            this.booleanRule('sources.flowery.enforceConfig', fl.enforceConfig)
         ];
     }
     validateSourceLazypytts(lazypytts) {
-        if (!lazypytts?.enabled)
+        if (typeof lazypytts !== 'object' || lazypytts === null || !lazypytts.enabled)
             return [];
+        const lp = lazypytts;
         return [
-            this.positiveIntRule('sources.lazypytts.maxTextLength', lazypytts.maxTextLength),
-            this.booleanRule('sources.lazypytts.enforceConfig', lazypytts.enforceConfig)
+            this.positiveIntRule('sources.lazypytts.maxTextLength', lp.maxTextLength),
+            this.booleanRule('sources.lazypytts.enforceConfig', lp.enforceConfig)
         ];
     }
     validateSearch() {
@@ -484,12 +509,13 @@ export default class ConfigValidationManager {
                     const sources = this.options.sources;
                     if (!sources)
                         return false;
+                    const sourcesRecord = sources;
                     if (typeof v === 'string')
-                        return sources[v]?.enabled === true;
+                        return sourcesRecord[v]?.enabled === true;
                     if (Array.isArray(v)) {
                         if (v.length === 0)
                             return false;
-                        return v.every((name) => typeof name === 'string' && sources[name]?.enabled === true);
+                        return v.every((name) => typeof name === 'string' && sourcesRecord[name]?.enabled === true);
                     }
                     return false;
                 }
@@ -505,7 +531,8 @@ export default class ConfigValidationManager {
                     const sources = this.options.sources;
                     if (!sources || !Array.isArray(v) || v.length === 0)
                         return false;
-                    return v.every((name) => typeof name === 'string' && sources[name]?.enabled === true);
+                    const sourcesRecord = sources;
+                    return v.every((name) => typeof name === 'string' && sourcesRecord[name]?.enabled === true);
                 }
             });
         }
@@ -727,7 +754,7 @@ export default class ConfigValidationManager {
             path,
             expected: 'integer >= 0',
             value,
-            validate: (v) => Number.isInteger(v) && v >= 0
+            validate: (v) => typeof v === 'number' && Number.isInteger(v) && v >= 0
         };
     }
     positiveIntRule(path, value) {
@@ -735,7 +762,7 @@ export default class ConfigValidationManager {
             path,
             expected: 'integer > 0',
             value,
-            validate: (v) => Number.isInteger(v) && v > 0
+            validate: (v) => typeof v === 'number' && Number.isInteger(v) && v > 0
         };
     }
     intRangeRule(path, value, min, max) {
@@ -743,7 +770,7 @@ export default class ConfigValidationManager {
             path,
             expected: `integer between ${min} and ${max}`,
             value,
-            validate: (v) => Number.isInteger(v) && v >= min && v <= max
+            validate: (v) => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max
         };
     }
     booleanRule(path, value) {
@@ -800,7 +827,7 @@ export default class ConfigValidationManager {
             path,
             expected: `integer > ${dependencyPath} (${dependency})`,
             value,
-            validate: (v) => Number.isInteger(v) && Number.isInteger(dependency) && v > dependency
+            validate: (v) => typeof v === 'number' && Number.isInteger(v) && typeof dependency === 'number' && Number.isInteger(dependency) && v > dependency
         };
     }
     intMustNotExceed(path, value, dependency, dependencyPath) {
@@ -808,7 +835,7 @@ export default class ConfigValidationManager {
             path,
             expected: `integer <= ${dependencyPath} (${dependency})`,
             value,
-            validate: (v) => Number.isInteger(v) && Number.isInteger(dependency) && v <= dependency
+            validate: (v) => typeof v === 'number' && Number.isInteger(v) && typeof dependency === 'number' && Number.isInteger(dependency) && v <= dependency
         };
     }
     floatMustNotExceed(path, value, dependency, dependencyPath) {

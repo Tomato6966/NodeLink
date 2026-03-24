@@ -9,7 +9,7 @@ class LiveChat {
         this.activeChats = new Map();
     }
     async getLiveChat(videoId) {
-        const context = {
+        const _context = {
             client: { hl: 'en', gl: 'US' }
         };
         try {

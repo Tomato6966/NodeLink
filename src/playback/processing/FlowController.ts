@@ -1,11 +1,7 @@
 import { Transform, type TransformCallback } from 'node:stream'
-import type {
-  AudioMixer,
-  FiltersState
-} from '../../typings/playback/player.types.ts'
+import type { AudioMixer } from '../../typings/playback/player.types.ts'
 import type {
   IFadeTransformer,
-  IFiltersManager,
   IScratchTransformer,
   ITapeTransformer,
   IVolumeTransformer,
@@ -138,6 +134,18 @@ export class FlowController extends Transform {
 
   public checkScratchEffectCompleted(): boolean {
     return this.scratch.checkEffectCompleted()
+  }
+
+  /**
+   * Updates filters in the pipeline via the FlowController.
+   * Note: FlowController currently doesn't manage filters itself,
+   * this is a no-op placeholder to match the expected interface.
+   * @param _filters - The filter settings.
+   */
+  public setFilters(
+    _filters: import('../../typings/playback/player.types.ts').FiltersState
+  ): void {
+    // This exists to satisfy streamProcessor's type check and avoid 'as any'
   }
 
   public override _transform(

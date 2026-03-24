@@ -190,24 +190,22 @@ const _isHttpProxyConfig = (value) => {
     if (!value || typeof value !== 'object')
         return false;
     const proxy = value;
-    if (typeof proxy['url'] !== 'string' || proxy['url'].length === 0)
+    if (typeof proxy.url !== 'string' || proxy.url.length === 0)
         return false;
-    if (proxy['username'] !== undefined &&
-        typeof proxy['username'] !== 'string')
+    if (proxy.username !== undefined && typeof proxy.username !== 'string')
         return false;
-    if (proxy['password'] !== undefined &&
-        typeof proxy['password'] !== 'string')
+    if (proxy.password !== undefined && typeof proxy.password !== 'string')
         return false;
-    if (proxy['type'] !== undefined &&
-        proxy['type'] !== 'forward' &&
-        proxy['type'] !== 'reverse')
+    if (proxy.type !== undefined &&
+        proxy.type !== 'forward' &&
+        proxy.type !== 'reverse')
         return false;
     return true;
 };
 const _extractSeekProxy = (streamInfo) => {
     const additionalData = streamInfo?.additionalData;
-    return _isHttpProxyConfig(additionalData?.['proxy'])
-        ? additionalData['proxy']
+    return _isHttpProxyConfig(additionalData?.proxy)
+        ? additionalData.proxy
         : undefined;
 };
 async function _fetchRange(url, start, endInclusive, proxy) {
@@ -467,10 +465,7 @@ class BaseAudioResource {
         }
         const flowController = this.pipes.find((p) => p instanceof FlowController);
         if (flowController) {
-            if (typeof flowController.setFilters === 'function') {
-                ;
-                flowController.setFilters(filters);
-            }
+            flowController.setFilters(filters);
             return;
         }
     }
@@ -1989,18 +1984,16 @@ class StreamAudioResource extends BaseAudioResource {
         ];
         this.pipes?.push(frameCounter, silenceDetector, filters, flowController);
         if (nodelink.extensions?.audioInterceptors) {
-            for (const interceptorFactory of nodelink.extensions // biome-ignore lint/suspicious/noExplicitAny: dynamic extension types
-                .audioInterceptors) {
+            for (const interceptorFactory of nodelink.extensions.audioInterceptors) {
                 try {
                     const interceptorStream = interceptorFactory();
-                    if (interceptorStream &&
-                        typeof interceptorStream.pipe === 'function') {
+                    if (interceptorStream) {
                         streams.push(interceptorStream);
                         this.pipes?.push(interceptorStream);
                     }
                 }
                 catch (e) {
-                    console.error(`Audio interceptor error: ${e.message}`);
+                    logger('error', 'StreamProcessor', `Audio interceptor error: ${e instanceof Error ? e.message : String(e)}`);
                 }
             }
         }
@@ -2154,7 +2147,7 @@ export const createSeekeableAudioResource = async (guildId, url, seekTime, endTi
         return _createErrorResponse(err.message, cause);
     }
 };
-export const createPCMStream = (guildId, stream, type, nodelink, volume = 1.0, filters = {}) => {
+export const createPCMStream = (_guildId, stream, type, nodelink, volume = 1.0, filters = {}) => {
     const resamplingQuality = nodelink.options.audio?.resamplingQuality || 'fastest';
     const normalizedType = normalizeFormat(type);
     const streams = [stream];

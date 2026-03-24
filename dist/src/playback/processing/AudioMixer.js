@@ -27,7 +27,7 @@ export class AudioMixer extends Readable {
         this.autoCleanup = config.autoCleanup !== false;
         this.enabled = config.enabled !== false;
     }
-    _read(size) {
+    _read(_size) {
         const targetSize = FRAME_SIZE;
         if (this.mixLayers.size === 0 || !this.enabled) {
             this.push(SILENCE_FRAME);

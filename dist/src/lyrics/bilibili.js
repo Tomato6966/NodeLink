@@ -89,7 +89,10 @@ export default class BilibiliLyrics {
      */
     _signWbi(params, mixinKey) {
         const currTime = Math.round(Date.now() / 1000);
-        const newParams = { ...params, wts: currTime };
+        const newParams = {
+            ...params,
+            wts: currTime
+        };
         const query = Object.keys(newParams)
             .sort()
             .map((key) => {
@@ -97,7 +100,10 @@ export default class BilibiliLyrics {
             return `${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
         })
             .join('&');
-        const wRid = crypto.createHash('md5').update(query + mixinKey).digest('hex');
+        const wRid = crypto
+            .createHash('md5')
+            .update(query + mixinKey)
+            .digest('hex');
         return `${query}&w_rid=${wRid}`;
     }
     /**

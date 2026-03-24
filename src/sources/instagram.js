@@ -370,14 +370,11 @@ export default class InstagramSource {
       }
 
       const bestMatch =
-        getBestMatch(acceptableMatches, decodedTrack) ||
-        acceptableMatches[0]
+        getBestMatch(acceptableMatches, decodedTrack) || acceptableMatches[0]
 
       if (!bestMatch?.info) continue
 
-      const streamInfo = await this.nodelink.sources.getTrackUrl(
-        bestMatch.info
-      )
+      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info)
       if (!streamInfo?.exception) {
         return { newTrack: bestMatch, ...streamInfo }
       }

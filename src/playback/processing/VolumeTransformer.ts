@@ -176,7 +176,11 @@ export class VolumeTransformer extends Transform implements IVolumeTransformer {
     return { gainStart, gainEnd }
   }
 
-  private _viewResult: { buffer: Buffer; view: Int16Array | null; useBufferOps: boolean } = { buffer: null as any, view: null, useBufferOps: true }
+  private _viewResult: {
+    buffer: Buffer
+    view: Int16Array | null
+    useBufferOps: boolean
+  } = { buffer: null as unknown as Buffer, view: null, useBufferOps: true }
 
   private _prepareView(
     buffer: Buffer,
@@ -184,7 +188,11 @@ export class VolumeTransformer extends Transform implements IVolumeTransformer {
   ): { buffer: Buffer; view: Int16Array | null; useBufferOps: boolean } {
     this._viewResult.buffer = buffer
     if (buffer.byteOffset % 2 === 0) {
-      this._viewResult.view = new Int16Array(buffer.buffer, buffer.byteOffset, sampleCount)
+      this._viewResult.view = new Int16Array(
+        buffer.buffer,
+        buffer.byteOffset,
+        sampleCount
+      )
       this._viewResult.useBufferOps = false
     } else {
       this._viewResult.view = null

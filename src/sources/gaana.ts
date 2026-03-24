@@ -2,12 +2,7 @@ import { createDecipheriv } from 'node:crypto'
 import { PassThrough } from 'node:stream'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
 import { parse as parsePlaylist } from '../playback/hls/PlaylistParser.ts'
-import {
-  encodeTrack,
-  getBestMatch,
-  http1makeRequest,
-  logger
-} from '../utils.ts'
+import type { HLSSegment } from '../typings/playback/hls.types.ts'
 import type {
   SourceResult,
   TrackInfo,
@@ -15,8 +10,16 @@ import type {
   TrackUrlResult,
   WorkerNodeLink
 } from '../typings/sources/source.types.ts'
-import type { BestMatchCandidate, TrackEncodeInput } from '../typings/utils.types.ts'
-import type { HLSSegment } from '../typings/playback/hls.types.ts'
+import type {
+  BestMatchCandidate,
+  TrackEncodeInput
+} from '../typings/utils.types.ts'
+import {
+  encodeTrack,
+  getBestMatch,
+  http1makeRequest,
+  logger
+} from '../utils.ts'
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -88,7 +91,7 @@ export default class GaanaSource {
   public constructor(nodelink: WorkerNodeLink) {
     this.nodelink = nodelink
 
-    const sourceConfig = this.asRecord(this.nodelink.options.sources?.['gaana'])
+    const sourceConfig = this.asRecord(this.nodelink.options.sources?.gaana)
     this.config = sourceConfig || {}
     this.searchTerms = ['gnsearch', 'gaanasearch']
     this.patterns = [
@@ -96,16 +99,17 @@ export default class GaanaSource {
     ]
     this.priority = 70
 
-    this.maxSearchResults = this.asNumber(this.nodelink.options['maxSearchResults']) ?? 10
+    this.maxSearchResults =
+      this.asNumber(this.nodelink.options.maxSearchResults) ?? 10
     const maxAlbumPlaylistLength =
-      this.asNumber(this.nodelink.options['maxAlbumPlaylistLength']) ?? 100
+      this.asNumber(this.nodelink.options.maxAlbumPlaylistLength) ?? 100
     this.playlistLoadLimit =
-      this.asNumber(this.config['playlistLoadLimit']) ?? maxAlbumPlaylistLength
+      this.asNumber(this.config.playlistLoadLimit) ?? maxAlbumPlaylistLength
     this.albumLoadLimit =
-      this.asNumber(this.config['albumLoadLimit']) ?? maxAlbumPlaylistLength
+      this.asNumber(this.config.albumLoadLimit) ?? maxAlbumPlaylistLength
     this.artistLoadLimit =
-      this.asNumber(this.config['artistLoadLimit']) ?? maxAlbumPlaylistLength
-    this.streamQuality = this.asString(this.config['streamQuality']) || 'high'
+      this.asNumber(this.config.artistLoadLimit) ?? maxAlbumPlaylistLength
+    this.streamQuality = this.asString(this.config.streamQuality) || 'high'
   }
 
   /**
@@ -113,7 +117,7 @@ export default class GaanaSource {
    * @returns False when source is disabled.
    */
   public async setup(): Promise<boolean> {
-    if (this.config['enabled'] === false) return false
+    if (this.config.enabled === false) return false
     logger('info', 'Sources', 'Loaded Gaana source.')
     return true
   }
@@ -138,26 +142,34 @@ export default class GaanaSource {
         keyword: query
       }
 
-      if (searchType === 'track') params['secType'] = 'track'
-      else if (searchType === 'album') params['secType'] = 'album'
-      else if (searchType === 'artist') params['secType'] = 'artist'
-      else if (searchType === 'playlist') params['secType'] = 'playlist'
+      if (searchType === 'track') params.secType = 'track'
+      else if (searchType === 'album') params.secType = 'album'
+      else if (searchType === 'artist') params.secType = 'artist'
+      else if (searchType === 'playlist') params.secType = 'playlist'
 
-      const data = await this.getJson(params, `search/${encodeURIComponent(query)}`)
-      const groups = this.asArrayRecords(data?.['gr'])
+      const data = await this.getJson(
+        params,
+        `search/${encodeURIComponent(query)}`
+      )
+      const groups = this.asArrayRecords(data?.gr)
       if (groups.length === 0) return { loadType: 'empty', data: {} }
 
       const targetGroupName =
         searchType === 'track'
           ? 'Track'
           : searchType.charAt(0).toUpperCase() + searchType.slice(1)
-      const group = groups.find((item) => this.asString(item['ty']) === targetGroupName)
-      const items = this.asArrayRecords(group?.['gd']).slice(0, this.maxSearchResults)
+      const group = groups.find(
+        (item) => this.asString(item.ty) === targetGroupName
+      )
+      const items = this.asArrayRecords(group?.gd).slice(
+        0,
+        this.maxSearchResults
+      )
       if (items.length === 0) return { loadType: 'empty', data: {} }
 
       if (searchType === 'track') {
         const trackIdentifiers = items
-          .map((item) => this.asString(item['seo']) || this.asString(item['id']))
+          .map((item) => this.asString(item.seo) || this.asString(item.id))
           .filter((item): item is string => Boolean(item))
         const tracks = await this.getTracks(trackIdentifiers)
         return tracks.length > 0
@@ -198,8 +210,8 @@ export default class GaanaSource {
     const match = url.match(pattern)
     if (!match?.groups) return { loadType: 'empty', data: {} }
 
-    const type = match.groups['type']
-    const seokey = match.groups['seokey']
+    const type = match.groups.type
+    const seokey = match.groups.seokey
     if (!type || !seokey) return { loadType: 'empty', data: {} }
 
     try {
@@ -222,11 +234,16 @@ export default class GaanaSource {
    */
   public async getTrackUrl(
     decodedTrack: TrackInfo
-  ): Promise<TrackUrlResult | { exception: { message: string; severity: string } }> {
+  ): Promise<
+    TrackUrlResult | { exception: { message: string; severity: string } }
+  > {
     try {
-      const decodedTrackRecord = decodedTrack as unknown as Record<string, unknown>
-      const pluginInfo = this.asRecord(decodedTrackRecord['pluginInfo'])
-      const pluginTrackId = this.asString(pluginInfo?.['trackId'])
+      const decodedTrackRecord = decodedTrack as unknown as Record<
+        string,
+        unknown
+      >
+      const pluginInfo = this.asRecord(decodedTrackRecord.pluginInfo)
+      const pluginTrackId = this.asString(pluginInfo?.trackId)
       const trackId = pluginTrackId || decodedTrack.identifier
       if (trackId && /^\d+$/.test(String(trackId))) {
         const streamInfo = await this.fetchDirectStream(String(trackId))
@@ -246,8 +263,7 @@ export default class GaanaSource {
       `Direct playback for ${decodedTrack.title} failed. Falling back to default search matching.`
     )
 
-    const searchWithDefault = this.getSearchWithDefaultFn()
-    if (!searchWithDefault) {
+    if (!this.nodelink.sources) {
       return {
         exception: {
           message: 'Default source search is not available.',
@@ -256,7 +272,7 @@ export default class GaanaSource {
       }
     }
 
-    const searchResult = await searchWithDefault(
+    const searchResult = await this.nodelink.sources.searchWithDefault(
       `${decodedTrack.title} ${decodedTrack.author}`
     )
     const tracks = this.toTrackInfoArray(searchResult.data)
@@ -320,7 +336,9 @@ export default class GaanaSource {
     url: string,
     protocol?: string,
     additionalData?: TrackUrlResult['additionalData']
-  ): Promise<TrackStreamResult | { exception: { message: string; severity: string } }> {
+  ): Promise<
+    TrackStreamResult | { exception: { message: string; severity: string } }
+  > {
     const proxy = this.getProxyConfig()
 
     if (protocol === 'hls') {
@@ -328,7 +346,7 @@ export default class GaanaSource {
       const stream = new HLSHandler(url, {
         type: 'mpegts',
         localAddress: this.nodelink.routePlanner?.getIP?.(),
-        startTime: this.asNumber(additional['startTime']) || 0,
+        startTime: this.asNumber(additional.startTime) || 0,
         headers: this.getHeaders(),
         proxy
       })
@@ -336,11 +354,11 @@ export default class GaanaSource {
     }
 
     const additional = this.asRecord(additionalData) || {}
-    const additionalSegments = this.normalizeSegments(additional['segments'])
+    const additionalSegments = this.normalizeSegments(additional.segments)
     if (additionalSegments.length > 0) {
       const stream = new PassThrough()
       let segments = additionalSegments
-      const startTime = this.asNumber(additional['startTime']) || 0
+      const startTime = this.asNumber(additional.startTime) || 0
 
       if (startTime > 0) {
         let elapsed = 0
@@ -355,14 +373,16 @@ export default class GaanaSource {
         }
       }
 
-      const initUrl = this.asString(additional['initUrl']) || null
+      const initUrl = this.asString(additional.initUrl) || null
       void this.streamSegments(
         stream,
         initUrl,
-        segments.map((segment) => segment.url).filter((segmentUrl) => segmentUrl.length > 0)
+        segments
+          .map((segment) => segment.url)
+          .filter((segmentUrl) => segmentUrl.length > 0)
       )
 
-      const format = this.asString(additional['format']) || 'mp4'
+      const format = this.asString(additional.format) || 'mp4'
       let type = 'mp4'
       if (format === 'ts' || format === 'mpegts') type = 'mpegts'
       else if (format === 'aac') type = 'aac'
@@ -416,13 +436,18 @@ export default class GaanaSource {
    * @returns Track payload.
    */
   private async getSong(seokey: string): Promise<SourceResult> {
-    const data = await this.getJson({ type: 'songDetail', seokey }, `song/${seokey}`)
-    const tracks = this.asArrayRecords(data?.['tracks'])
+    const data = await this.getJson(
+      { type: 'songDetail', seokey },
+      `song/${seokey}`
+    )
+    const tracks = this.asArrayRecords(data?.tracks)
     const firstTrack = tracks[0]
     if (!firstTrack) return { loadType: 'empty', data: {} }
 
     const track = this.mapTrack(firstTrack)
-    return track ? { loadType: 'track', data: track } : { loadType: 'empty', data: {} }
+    return track
+      ? { loadType: 'track', data: track }
+      : { loadType: 'empty', data: {} }
   }
 
   /**
@@ -431,18 +456,23 @@ export default class GaanaSource {
    * @returns Playlist payload.
    */
   private async getAlbum(seokey: string): Promise<SourceResult> {
-    const data = await this.getJson({ type: 'albumDetail', seokey }, `album/${seokey}`)
-    const tracks = this.asArrayRecords(data?.['tracks'])
+    const data = await this.getJson(
+      { type: 'albumDetail', seokey },
+      `album/${seokey}`
+    )
+    const tracks = this.asArrayRecords(data?.tracks)
     if (tracks.length === 0) return { loadType: 'empty', data: {} }
 
-    const album = this.asRecord(data?.['album']) || {}
+    const album = this.asRecord(data?.album) || {}
     return this.buildPlaylist(
-      this.asString(album['title']) || 'Unknown Album',
+      this.asString(album.title) || 'Unknown Album',
       tracks,
       'album',
       `https://gaana.com/album/${seokey}`,
-      this.asString(album['atw']) || null,
-      this.asString(this.asRecord(this.asArrayRecords(album['artist'])[0])?.['name']) || null
+      this.asString(album.atw) || null,
+      this.asString(
+        this.asRecord(this.asArrayRecords(album.artist)[0])?.name
+      ) || null
     )
   }
 
@@ -456,16 +486,16 @@ export default class GaanaSource {
       { type: 'playlistDetail', seokey },
       `playlist/${seokey}`
     )
-    const tracks = this.asArrayRecords(data?.['tracks'])
+    const tracks = this.asArrayRecords(data?.tracks)
     if (tracks.length === 0) return { loadType: 'empty', data: {} }
 
-    const playlist = this.asRecord(data?.['playlist']) || {}
+    const playlist = this.asRecord(data?.playlist) || {}
     return this.buildPlaylist(
-      this.asString(playlist['title']) || 'Unknown Playlist',
+      this.asString(playlist.title) || 'Unknown Playlist',
       tracks,
       'playlist',
       `https://gaana.com/playlist/${seokey}`,
-      this.asString(playlist['atw']) || null
+      this.asString(playlist.atw) || null
     )
   }
 
@@ -475,12 +505,15 @@ export default class GaanaSource {
    * @returns Playlist payload.
    */
   private async getArtist(seokey: string): Promise<SourceResult> {
-    const detail = await this.getJson({ type: 'artistDetail', seokey }, `artist/${seokey}`)
-    const artists = this.asArrayRecords(detail?.['artist'])
+    const detail = await this.getJson(
+      { type: 'artistDetail', seokey },
+      `artist/${seokey}`
+    )
+    const artists = this.asArrayRecords(detail?.artist)
     const firstArtist = artists[0]
     if (!firstArtist) return { loadType: 'empty', data: {} }
 
-    const artistToken = this.asString(firstArtist['artist_id'])
+    const artistToken = this.asString(firstArtist.artist_id)
     if (!artistToken) return { loadType: 'empty', data: {} }
 
     const tracksData = await this.getJson(
@@ -495,17 +528,17 @@ export default class GaanaSource {
       `artist/${seokey}`
     )
 
-    const tracksArray = this.asArrayRecords(tracksData?.['tracks'])
-    const entitiesArray = this.asArrayRecords(tracksData?.['entities'])
+    const tracksArray = this.asArrayRecords(tracksData?.tracks)
+    const entitiesArray = this.asArrayRecords(tracksData?.entities)
     const merged = tracksArray.length > 0 ? tracksArray : entitiesArray
     if (merged.length === 0) return { loadType: 'empty', data: {} }
 
     return this.buildPlaylist(
-      this.asString(firstArtist['name']) || 'Unknown Artist',
+      this.asString(firstArtist.name) || 'Unknown Artist',
       merged,
       'artist',
       `https://gaana.com/artist/${seokey}`,
-      this.asString(firstArtist['artwork_bio']) || null
+      this.asString(firstArtist.artwork_bio) || null
     )
   }
 
@@ -529,7 +562,7 @@ export default class GaanaSource {
   ): SourceResult {
     const tracks = tracksArray
       .map((item) =>
-        item['track_id'] || item['track_title']
+        item.track_id || item.track_title
           ? this.mapTrack(item)
           : this.mapEntityTrack(item)
       )
@@ -565,23 +598,23 @@ export default class GaanaSource {
     info: TrackInfo
     pluginInfo: Record<string, unknown>
   } | null {
-    const title = this.asString(track['track_title']) || this.asString(track['name'])
+    const title = this.asString(track.track_title) || this.asString(track.name)
     if (!title) return null
 
-    const duration = (this.asNumber(track['duration']) ?? 0) * 1000
-    const artist = track['artist']
+    const duration = (this.asNumber(track.duration) ?? 0) * 1000
+    const artist = track.artist
     const author = Array.isArray(artist)
       ? artist
-          .map((item) => this.asString(this.asRecord(item)?.['name']))
+          .map((item) => this.asString(this.asRecord(item)?.name))
           .filter((item): item is string => Boolean(item))
           .join(', ')
-      : this.asString(this.asRecord(artist)?.['name']) || 'Unknown Artist'
+      : this.asString(this.asRecord(artist)?.name) || 'Unknown Artist'
 
     const identifier =
-      this.asString(track['track_id']) || this.asString(track['seokey']) || ''
+      this.asString(track.track_id) || this.asString(track.seokey) || ''
     if (!identifier) return null
 
-    const seokey = this.asString(track['seokey'])
+    const seokey = this.asString(track.seokey)
     const uri = seokey ? `https://gaana.com/song/${seokey}` : ''
 
     const info: TrackInfo = {
@@ -593,8 +626,9 @@ export default class GaanaSource {
       position: 0,
       title,
       uri,
-      artworkUrl: this.asString(track['artwork_large']) || this.asString(track['atw']) || null,
-      isrc: this.asString(track['isrc']) || null,
+      artworkUrl:
+        this.asString(track.artwork_large) || this.asString(track.atw) || null,
+      isrc: this.asString(track.isrc) || null,
       sourceName: 'gaana'
     }
 
@@ -603,10 +637,10 @@ export default class GaanaSource {
       encoded: encodeTrack(encodedInput),
       info,
       pluginInfo: {
-        trackId: this.asString(track['track_id']) || null,
-        albumName: this.asString(track['album_title']) || null,
-        albumUrl: this.asString(track['albumseokey'])
-          ? `https://gaana.com/album/${this.asString(track['albumseokey'])}`
+        trackId: this.asString(track.track_id) || null,
+        albumName: this.asString(track.album_title) || null,
+        albumUrl: this.asString(track.albumseokey)
+          ? `https://gaana.com/album/${this.asString(track.albumseokey)}`
           : null
       }
     }
@@ -623,23 +657,23 @@ export default class GaanaSource {
     pluginInfo: Record<string, unknown>
   } | null {
     const getEntityValue = (key: string): unknown => {
-      const entities = this.asArrayRecords(json['entity_info'])
-      return entities.find((item) => this.asString(item['key']) === key)?.['value']
+      const entities = this.asArrayRecords(json.entity_info)
+      return entities.find((item) => this.asString(item.key) === key)?.value
     }
 
-    const title = this.asString(json['name']) || ''
+    const title = this.asString(json.name) || ''
     if (!title) return null
 
     const duration = (this.asNumber(getEntityValue('duration')) ?? 0) * 1000
     const artistsRaw = getEntityValue('artist')
     const artists = Array.isArray(artistsRaw)
       ? artistsRaw
-          .map((item) => this.asString(this.asRecord(item)?.['name']))
+          .map((item) => this.asString(this.asRecord(item)?.name))
           .filter((item): item is string => Boolean(item))
           .join(', ')
       : ''
-    const identifier = this.asString(json['entity_id']) || ''
-    const seokey = this.asString(json['seokey']) || ''
+    const identifier = this.asString(json.entity_id) || ''
+    const seokey = this.asString(json.seokey) || ''
     if (!identifier || !seokey) return null
 
     const info: TrackInfo = {
@@ -651,7 +685,7 @@ export default class GaanaSource {
       position: 0,
       title,
       uri: `https://gaana.com/song/${seokey}`,
-      artworkUrl: this.asString(json['atw']) || null,
+      artworkUrl: this.asString(json.atw) || null,
       isrc: this.asString(getEntityValue('isrc')) || null,
       sourceName: 'gaana'
     }
@@ -674,20 +708,21 @@ export default class GaanaSource {
     info: TrackInfo
     pluginInfo: Record<string, unknown>
   } | null {
-    const title = this.asString(item['ti']) || this.asString(item['name']) || 'Unknown'
-    const seokey = this.asString(item['seo']) || ''
+    const title =
+      this.asString(item.ti) || this.asString(item.name) || 'Unknown'
+    const seokey = this.asString(item.seo) || ''
     const uri = `https://gaana.com/${type}/${seokey}`
 
     const info: TrackInfo = {
       identifier: seokey,
       isSeekable: true,
-      author: this.asString(item['sti']) || 'Gaana',
+      author: this.asString(item.sti) || 'Gaana',
       length: 0,
       isStream: false,
       position: 0,
       title,
       uri,
-      artworkUrl: this.asString(item['aw']) || this.asString(item['atw']) || null,
+      artworkUrl: this.asString(item.aw) || this.asString(item.atw) || null,
       isrc: null,
       sourceName: 'gaana'
     }
@@ -723,12 +758,12 @@ export default class GaanaSource {
     })
 
     const data = this.asRecord(body)
-    const dataNode = this.asRecord(data?.['data'])
-    const streamPath = this.asString(dataNode?.['stream_path'])
+    const dataNode = this.asRecord(data?.data)
+    const streamPath = this.asString(dataNode?.stream_path)
     if (
       error ||
       statusCode !== 200 ||
-      this.asString(data?.['api_status']) !== 'success' ||
+      this.asString(data?.api_status) !== 'success' ||
       !streamPath
     ) {
       return null
@@ -816,7 +851,9 @@ export default class GaanaSource {
    * @param url - HLS URL.
    * @returns Parsed media playlist.
    */
-  private async parseHlsManifest(url: string): Promise<{ segments: HLSSegment[] }> {
+  private async parseHlsManifest(
+    url: string
+  ): Promise<{ segments: HLSSegment[] }> {
     const proxy = this.getProxyConfig()
     const { body } = await http1makeRequest(url, {
       headers: this.getHeaders(),
@@ -840,7 +877,8 @@ export default class GaanaSource {
       }
 
       parsed = parsePlaylist(variantText, bestVariant.url)
-      if (parsed.isMaster) throw new Error('Nested master playlist not supported')
+      if (parsed.isMaster)
+        throw new Error('Nested master playlist not supported')
     }
 
     return {
@@ -914,7 +952,11 @@ export default class GaanaSource {
 
       return true
     } catch (error) {
-      logger('warn', 'Gaana', `Segment stream error: ${this.getErrorMessage(error)}`)
+      logger(
+        'warn',
+        'Gaana',
+        `Segment stream error: ${this.getErrorMessage(error)}`
+      )
       return false
     }
   }
@@ -924,9 +966,13 @@ export default class GaanaSource {
    * @param identifiers - Song identifiers.
    * @returns Track payload list.
    */
-  private async getTracks(
-    identifiers: string[]
-  ): Promise<Array<{ encoded: string; info: TrackInfo; pluginInfo: Record<string, unknown> }>> {
+  private async getTracks(identifiers: string[]): Promise<
+    Array<{
+      encoded: string
+      info: TrackInfo
+      pluginInfo: Record<string, unknown>
+    }>
+  > {
     if (identifiers.length === 0) return []
 
     const tracks = await Promise.all(
@@ -1019,27 +1065,13 @@ export default class GaanaSource {
         password?: string
       }
     | undefined {
-    const proxy = this.asRecord(this.config['proxy'])
-    const url = this.asString(proxy?.['url'])
+    const proxy = this.asRecord(this.config.proxy)
+    const url = this.asString(proxy?.url)
     if (!url) return undefined
 
-    const username = this.asString(proxy?.['username']) || undefined
-    const password = this.asString(proxy?.['password']) || undefined
+    const username = this.asString(proxy?.username) || undefined
+    const password = this.asString(proxy?.password) || undefined
     return { url, username, password }
-  }
-
-  /**
-   * Gets searchWithDefault function from source manager.
-   * @returns Search function or null.
-   */
-  private getSearchWithDefaultFn():
-    | ((query: string) => Promise<SourceResult>)
-    | null {
-    const sourcesObject = this.asRecord(this.nodelink.sources)
-    const fn = sourcesObject?.['searchWithDefault']
-    return typeof fn === 'function'
-      ? (fn as (query: string) => Promise<SourceResult>)
-      : null
   }
 
   /**
@@ -1052,18 +1084,18 @@ export default class GaanaSource {
 
     const tracks: TrackInfo[] = []
     for (const item of data) {
-      const info = this.asRecord(this.asRecord(item)?.['info'])
+      const info = this.asRecord(this.asRecord(item)?.info)
       if (!info) continue
 
-      const identifier = this.asString(info['identifier'])
-      const isSeekable = this.asBoolean(info['isSeekable'])
-      const author = this.asString(info['author'])
-      const length = this.asNumber(info['length'])
-      const isStream = this.asBoolean(info['isStream'])
-      const position = this.asNumber(info['position'])
-      const title = this.asString(info['title'])
-      const uri = this.asString(info['uri'])
-      const sourceName = this.asString(info['sourceName'])
+      const identifier = this.asString(info.identifier)
+      const isSeekable = this.asBoolean(info.isSeekable)
+      const author = this.asString(info.author)
+      const length = this.asNumber(info.length)
+      const isStream = this.asBoolean(info.isStream)
+      const position = this.asNumber(info.position)
+      const title = this.asString(info.title)
+      const uri = this.asString(info.uri)
+      const sourceName = this.asString(info.sourceName)
 
       if (
         identifier === null ||
@@ -1088,8 +1120,8 @@ export default class GaanaSource {
         position,
         title,
         uri,
-        artworkUrl: this.asString(info['artworkUrl']) || null,
-        isrc: this.asString(info['isrc']) || null,
+        artworkUrl: this.asString(info.artworkUrl) || null,
+        isrc: this.asString(info.isrc) || null,
         sourceName
       })
     }
@@ -1108,20 +1140,20 @@ export default class GaanaSource {
     pluginInfo: Record<string, unknown>
   } | null {
     const object = this.asRecord(data)
-    const info = this.asRecord(object?.['info'])
+    const info = this.asRecord(object?.info)
     if (!object || !info) return null
 
-    const identifier = this.asString(info['identifier'])
-    const isSeekable = this.asBoolean(info['isSeekable'])
-    const author = this.asString(info['author'])
-    const length = this.asNumber(info['length'])
-    const isStream = this.asBoolean(info['isStream'])
-    const position = this.asNumber(info['position'])
-    const title = this.asString(info['title'])
-    const uri = this.asString(info['uri'])
-    const sourceName = this.asString(info['sourceName'])
-    const encoded = this.asString(object['encoded'])
-    const pluginInfo = this.asRecord(object['pluginInfo'])
+    const identifier = this.asString(info.identifier)
+    const isSeekable = this.asBoolean(info.isSeekable)
+    const author = this.asString(info.author)
+    const length = this.asNumber(info.length)
+    const isStream = this.asBoolean(info.isStream)
+    const position = this.asNumber(info.position)
+    const title = this.asString(info.title)
+    const uri = this.asString(info.uri)
+    const sourceName = this.asString(info.sourceName)
+    const encoded = this.asString(object.encoded)
+    const pluginInfo = this.asRecord(object.pluginInfo)
     if (
       identifier === null ||
       isSeekable === null ||
@@ -1148,8 +1180,8 @@ export default class GaanaSource {
         position,
         title,
         uri,
-        artworkUrl: this.asString(info['artworkUrl']) || null,
-        isrc: this.asString(info['isrc']) || null,
+        artworkUrl: this.asString(info.artworkUrl) || null,
+        isrc: this.asString(info.isrc) || null,
         sourceName
       },
       pluginInfo: pluginInfo || {}
@@ -1169,12 +1201,12 @@ export default class GaanaSource {
     const result: Array<{ url: string; duration: number }> = []
     for (const item of value) {
       const segment = this.asRecord(item)
-      const segmentUrl = this.asString(segment?.['url'])
+      const segmentUrl = this.asString(segment?.url)
       if (!segmentUrl) continue
 
       result.push({
         url: segmentUrl,
-        duration: this.asNumber(segment?.['duration']) ?? 0
+        duration: this.asNumber(segment?.duration) ?? 0
       })
     }
 

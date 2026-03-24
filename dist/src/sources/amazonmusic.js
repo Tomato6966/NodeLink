@@ -373,7 +373,7 @@ export default class AmazonMusicSource {
                         identifier: tId,
                         isSeekable: true,
                         author: tArtist,
-                        length: tDuration && tDuration.includes(':')
+                        length: tDuration?.includes(':')
                             ? parseColonDurationToMs(tDuration)
                             : 0,
                         isStream: false,

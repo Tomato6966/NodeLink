@@ -233,7 +233,7 @@ export default class Phonograph extends AnimatableFilter {
 
   public override update(settings: FilterSettings): void {
     const phono = (settings.phonograph as PhonographSettings) || {}
-    const isDisabled = (phono as any)._disabled === true
+    const isDisabled = (phono as Record<string, unknown>)._disabled === true
 
     this.frequency = phono.frequency ?? 0.8
     this.targetDepth = Math.max(0, Math.min(phono.depth ?? 0.25, 1.0))
@@ -253,7 +253,6 @@ export default class Phonograph extends AnimatableFilter {
       {
         phonograph: {
           alpha: targetAlpha,
-          transition: (phono as any).transition
         }
       },
       'phonograph',
@@ -262,7 +261,7 @@ export default class Phonograph extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 1.0
+    this.alpha = config.alpha ?? 1.0
 
     this.depth = this.targetDepth * this.alpha
     this.crackle = this.targetCrackle * this.alpha
@@ -273,7 +272,7 @@ export default class Phonograph extends AnimatableFilter {
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 1.0) > 0.001
   }
 

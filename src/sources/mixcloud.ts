@@ -1,8 +1,5 @@
 import { PassThrough } from 'node:stream'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
-import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.ts'
-import type { TrackInfo, TrackStreamResult } from '../typings/sources/source.types.ts'
-import type { HttpRequestResult, TrackEncodeInput } from '../typings/utils.types.ts'
 import type {
   MixcloudCachedUrlResult,
   MixcloudDecodedTrack,
@@ -10,7 +7,7 @@ import type {
   MixcloudLoadStreamResult,
   MixcloudNodeLinkContext,
   MixcloudPlaylistLookupResponse,
-  MixcloudPluginInfo,
+  MixcloudPlaylistPatternGroups,
   MixcloudSearchItem,
   MixcloudSearchResponse,
   MixcloudSourceResult,
@@ -21,9 +18,17 @@ import type {
   MixcloudUserCollection,
   MixcloudUserCollectionType,
   MixcloudUserLookupResponse,
-  MixcloudUserPatternGroups,
-  MixcloudPlaylistPatternGroups
+  MixcloudUserPatternGroups
 } from '../typings/sources/mixcloud.types.ts'
+import type {
+  TrackInfo,
+  TrackStreamResult
+} from '../typings/sources/source.types.ts'
+import type {
+  HttpRequestResult,
+  TrackEncodeInput
+} from '../typings/utils.types.ts'
+import { encodeTrack, http1makeRequest, logger, makeRequest } from '../utils.ts'
 
 const DECRYPTION_KEY = 'IFYOUWANTTHEARTISTSTOGETPAIDDONOTDOWNLOADFROMMIXCLOUD'
 const MIXCLOUD_USER_AGENT =
@@ -240,7 +245,11 @@ export default class MixcloudSource {
 
       const body = this.parseObjectBody<MixcloudSearchResponse>(response.body)
       if (response.statusCode !== 200 || !body?.data) {
-        logger('warn', 'Mixcloud', `Search API returned status ${response.statusCode}`)
+        logger(
+          'warn',
+          'Mixcloud',
+          `Search API returned status ${response.statusCode}`
+        )
         return this.emptyResult()
       }
 
@@ -272,7 +281,11 @@ export default class MixcloudSource {
 
       return { loadType: 'search', data: tracks }
     } catch (error) {
-      logger('error', 'Mixcloud', `Search failed: ${this.getErrorMessage(error)}`)
+      logger(
+        'error',
+        'Mixcloud',
+        `Search failed: ${this.getErrorMessage(error)}`
+      )
       return this.emptyResult()
     }
   }
@@ -288,7 +301,7 @@ export default class MixcloudSource {
     const decrypted = Buffer.alloc(ciphertext.length)
 
     for (let i = 0; i < ciphertext.length; i++) {
-      decrypted[i] = ciphertext[i]! ^ key[i % key.length]!
+      decrypted[i] = (ciphertext[i] ?? 0) ^ (key[i % key.length] ?? 0)
     }
 
     return decrypted.toString('utf-8')
@@ -312,7 +325,9 @@ export default class MixcloudSource {
    * @returns Track or error result.
    */
   private async _resolveTrack(url: string): Promise<MixcloudSourceResult> {
-    const match = url.match(this.patterns[0]!)
+    const pattern = this.patterns[0]
+    if (!pattern) return this.emptyResult()
+    const match = url.match(pattern)
     const groups = (match?.groups || {}) as MixcloudTrackPatternGroups
     const username = groups.user
     const slug = groups.slug
@@ -333,7 +348,9 @@ export default class MixcloudSource {
       }`
 
       const response = await this._request(query)
-      const body = this.parseObjectBody<MixcloudTrackLookupResponse>(response.body)
+      const body = this.parseObjectBody<MixcloudTrackLookupResponse>(
+        response.body
+      )
 
       const cloudcast = body?.data?.cloudcastLookup
       if (response.statusCode !== 200 || !cloudcast) return this.emptyResult()
@@ -359,7 +376,9 @@ export default class MixcloudSource {
    * @returns Playlist or error result.
    */
   private async _resolvePlaylist(url: string): Promise<MixcloudSourceResult> {
-    const match = url.match(this.patterns[1]!)
+    const pattern = this.patterns[1]
+    if (!pattern) return this.emptyResult()
+    const match = url.match(pattern)
     const groups = (match?.groups || {}) as MixcloudPlaylistPatternGroups
     const user = groups.user
     const slug = groups.playlist
@@ -391,12 +410,14 @@ export default class MixcloudSource {
       let cursor: string | null = null
       let hasNextPage = true
       let playlistName = 'Mixcloud Playlist'
-      const maxTracks = this.config.maxAlbumPlaylistLength || DEFAULT_MAX_PLAYLIST_LENGTH
+      const maxTracks =
+        this.config.maxAlbumPlaylistLength || DEFAULT_MAX_PLAYLIST_LENGTH
 
       while (hasNextPage && tracks.length < maxTracks) {
         const response = await this._request(queryTemplate(cursor))
-        const body =
-          this.parseObjectBody<MixcloudPlaylistLookupResponse>(response.body)
+        const body = this.parseObjectBody<MixcloudPlaylistLookupResponse>(
+          response.body
+        )
         const playlist = body?.data?.playlistLookup
         if (response.statusCode !== 200 || !playlist?.items) break
 
@@ -435,14 +456,17 @@ export default class MixcloudSource {
    * @returns Playlist or error result.
    */
   private async _resolveUser(url: string): Promise<MixcloudSourceResult> {
-    const match = url.match(this.patterns[2]!)
+    const pattern = this.patterns[2]
+    if (!pattern) return this.emptyResult()
+    const match = url.match(pattern)
     const groups = (match?.groups || {}) as MixcloudUserPatternGroups
     const username = groups.id
     const type: MixcloudUserCollectionType = groups.type || 'uploads'
     if (!username) return this.emptyResult()
 
     try {
-      const queryType: MixcloudUserCollectionType = type === 'stream' ? 'stream' : type
+      const queryType: MixcloudUserCollectionType =
+        type === 'stream' ? 'stream' : type
       const streamFragment =
         '... on Cloudcast { audioLength name url owner { displayName username } picture(width: 1024, height: 1024) { url } streamInfo { hlsUrl url } }'
 
@@ -464,13 +488,18 @@ export default class MixcloudSource {
       let cursor: string | null = null
       let hasNextPage = true
       let userDisplayName = username
-      const maxTracks = this.config.maxAlbumPlaylistLength || DEFAULT_MAX_PLAYLIST_LENGTH
+      const maxTracks =
+        this.config.maxAlbumPlaylistLength || DEFAULT_MAX_PLAYLIST_LENGTH
 
       while (hasNextPage && tracks.length < maxTracks) {
         const response = await this._request(queryTemplate(cursor))
-        const body = this.parseObjectBody<MixcloudUserLookupResponse>(response.body)
+        const body = this.parseObjectBody<MixcloudUserLookupResponse>(
+          response.body
+        )
         const userLookup = body?.data?.userLookup
-        const list = userLookup?.[queryType] as MixcloudUserCollection | undefined
+        const list = userLookup?.[queryType] as
+          | MixcloudUserCollection
+          | undefined
         if (response.statusCode !== 200 || !list) break
 
         userDisplayName = userLookup?.displayName || userDisplayName
@@ -515,10 +544,11 @@ export default class MixcloudSource {
     forceRefresh = false
   ): Promise<MixcloudCachedUrlResult> {
     if (!forceRefresh) {
-      const cached = this.nodelink.trackCacheManager?.get<MixcloudCachedUrlResult>(
-        'mixcloud',
-        decodedTrack.identifier
-      )
+      const cached =
+        this.nodelink.trackCacheManager?.get<MixcloudCachedUrlResult>(
+          'mixcloud',
+          decodedTrack.identifier
+        )
       if (cached) return cached
     }
 
@@ -626,7 +656,9 @@ export default class MixcloudSource {
           `Upstream stream error: ${this.getErrorMessage(error)}`
         )
         if (!stream.destroyed) {
-          stream.destroy(error instanceof Error ? error : new Error(String(error)))
+          stream.destroy(
+            error instanceof Error ? error : new Error(String(error))
+          )
         }
       })
 

@@ -1,6 +1,8 @@
 import crypto from 'node:crypto'
-import { http1makeRequest, logger } from '../utils.ts'
-import type { LyricsLine, LyricsResult } from '../typings/lyrics/musixmatch.types.ts'
+import type {
+  LyricsLine,
+  LyricsResult
+} from '../typings/lyrics/musixmatch.types.ts'
 import type {
   NodelinkInstanceForYandexLyrics,
   YandexHttpResult,
@@ -8,6 +10,7 @@ import type {
   YandexLyricsSignPayload,
   YandexLyricsTrackInfo
 } from '../typings/lyrics/yandexmusic.types.ts'
+import { http1makeRequest, logger } from '../utils.ts'
 
 /**
  * Base URL for Yandex Music API.
@@ -181,9 +184,8 @@ export default class YandexMusicLyrics {
   private _parseLrc(lrc: string): LyricsLine[] {
     const lines: LyricsLine[] = []
     const regex = /\[(\d{2}):(\d{2})\.(\d{2})\]\s*(.*?)(?=\n|\[|$)/g
-    let match: RegExpExecArray | null
 
-    while ((match = regex.exec(lrc)) !== null) {
+    for (const match of lrc.matchAll(regex)) {
       const minutes = Number(match[1] || 0)
       const seconds = Number(match[2] || 0)
       const centiseconds = Number(match[3] || 0)

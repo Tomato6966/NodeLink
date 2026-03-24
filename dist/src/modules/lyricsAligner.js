@@ -21,8 +21,8 @@ function similarity(s1, s2) {
  * @internal
  */
 function editDistance(s1, s2) {
-    let left = s1.toLowerCase();
-    let right = s2.toLowerCase();
+    const left = s1.toLowerCase();
+    const right = s2.toLowerCase();
     const costs = [];
     for (let i = 0; i <= left.length; i++) {
         let lastValue = i;
@@ -148,7 +148,8 @@ function findBestSequenceMatch(targetWords, ytWords, startIndex, searchWindowEnd
                 }
                 else {
                     const offsetCandidate = ytWords[i + k + ytOffset + 1];
-                    if (offsetCandidate && similarity(keys[k] || '', offsetCandidate.text) > 0.75) {
+                    if (offsetCandidate &&
+                        similarity(keys[k] || '', offsetCandidate.text) > 0.75) {
                         matchCount++;
                         ytOffset++;
                     }

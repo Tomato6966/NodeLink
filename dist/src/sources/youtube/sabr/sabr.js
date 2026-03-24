@@ -98,17 +98,19 @@ class CompositeBuffer {
         this.currentChunkIndex = 0;
         this.totalLength = 0;
         this.currentDataView = undefined;
-        chunks.forEach((chunk) => this.append(chunk));
+        for (const chunk of chunks) {
+            this.append(chunk);
+        }
     }
     append(chunk) {
         if (chunk instanceof Uint8Array) {
-            if (chunk.length === 0)
-                return;
             this.chunks.push(chunk);
             this.totalLength += chunk.length;
         }
         else if (chunk instanceof CompositeBuffer) {
-            chunk.chunks.forEach((c) => this.append(c));
+            for (const c of chunk.chunks) {
+                this.append(c);
+            }
         }
         this.currentDataView = undefined;
     }
@@ -372,7 +374,7 @@ export class SabrStream extends PassThrough {
     logTraffic(entry) {
         if (!this.enableTrafficLog)
             return;
-        void appendFile(this.trafficLogPath, JSON.stringify(entry) + '\n').catch(() => { });
+        void appendFile(this.trafficLogPath, `${JSON.stringify(entry)}\n`).catch(() => { });
     }
     updateBandwidthEstimate(bytes, durationMs) {
         if (bytes <= 0 || durationMs <= 0)
@@ -681,7 +683,7 @@ export class SabrStream extends PassThrough {
     }
     handleSabrRedirect(part) {
         const red = this.decodePart(part, SabrRedirect);
-        if (red && red.url) {
+        if (red?.url) {
             this.serverAbrStreamingUrl = red.url;
         }
     }
@@ -917,7 +919,7 @@ export class SabrStream extends PassThrough {
                 this.sabrContexts.delete(type);
         }
     }
-    handleSnackbarMessage(part) { }
+    handleSnackbarMessage(_part) { }
     handleReloadPlayerResponse(part) {
         const reloadContext = this.decodePart(part, ReloadPlaybackContext);
         if (reloadContext) {
@@ -925,7 +927,7 @@ export class SabrStream extends PassThrough {
             this.emit('stall');
         }
     }
-    logDetailedState({ abrState, audioFormat, videoFormat, selectedFormatIds, preferredAudioFormatIds, preferredVideoFormatIds, bufferedRanges, contexts, unsent }) {
+    logDetailedState({ abrState, audioFormat, videoFormat, selectedFormatIds, preferredAudioFormatIds, _preferredVideoFormatIds, bufferedRanges, contexts, unsent }) {
         const now = Date.now();
         if (this.lastDetailedLogAt && now - this.lastDetailedLogAt < 2000)
             return;
@@ -934,7 +936,7 @@ export class SabrStream extends PassThrough {
         const initKeys = Array.from(this.initializedFormatsMap.keys()).slice(0, 5);
         const segMap = this.downloadedSegmentsByItag.get(audioFormat?.itag);
         const segs = segMap ? Array.from(segMap.values()) : [];
-        const downloadedMs = segs.reduce((sum, s) => sum + parseInt(s.durationMs || '0'), 0);
+        const downloadedMs = segs.reduce((sum, s) => sum + parseInt(s.durationMs || '0', 10), 0);
         const aheadMs = abrState?.playerTimeMs !== undefined
             ? downloadedMs - abrState.playerTimeMs
             : undefined;
@@ -955,7 +957,7 @@ export class SabrStream extends PassThrough {
             const headers = this.pendingRangesHeaders.get(formatIdKey);
             if (!headers || headers.length === 0)
                 continue;
-            const durationMs = headers.reduce((sum, h) => sum + parseInt(h.durationMs || '0'), 0);
+            const durationMs = headers.reduce((sum, h) => sum + parseInt(h.durationMs || '0', 10), 0);
             const startH = headers[0];
             const endH = headers[headers.length - 1];
             bufferedRanges.push({
@@ -1091,7 +1093,7 @@ export class SabrStream extends PassThrough {
         logger('debug', 'SABR', `Traffic -> rn=${trafficReq.rn} body=${trafficReq.requestBodyBytes}B br=${trafficReq.bufferedRanges.length} cookieLen=${trafficReq.cookieLen} sha256=${trafficReq.requestBodySha256}`);
         logger('debug', 'SABR', `Traffic -> rn=${trafficReq.rn} abrState(playerTimeMs=${trafficReq.playerTimeMs} enabled=${abrState?.enabledTrackTypesBitfield} visibility=${abrState?.visibility} rate=${abrState?.playbackRate}) ctx=${trafficReq.contexts.length} unsentCtx=${trafficReq.unsentContexts.length}`);
         const reqPreviewB64 = b64Trunc(requestBody, 1024);
-        logger('debug', 'SABR', `Traffic -> rn=${trafficReq.rn} bodyB64[1024B]=${reqPreviewB64.length > 260 ? reqPreviewB64.slice(0, 260) + '...' : reqPreviewB64} (full in sabr_traffic.jsonl)`);
+        logger('debug', 'SABR', `Traffic -> rn=${trafficReq.rn} bodyB64[1024B]=${reqPreviewB64.length > 260 ? `${reqPreviewB64.slice(0, 260)}...` : reqPreviewB64} (full in sabr_traffic.jsonl)`);
         const rn = this.requestNumber;
         const url = new URL(this.serverAbrStreamingUrl);
         url.searchParams.set('rn', rn.toString());
@@ -1107,7 +1109,7 @@ export class SabrStream extends PassThrough {
             'user-agent': this.userAgent
         };
         if (this.config.accessToken) {
-            headers['Authorization'] = `Bearer ${this.config.accessToken}`;
+            headers.Authorization = `Bearer ${this.config.accessToken}`;
         }
         const t0 = Date.now();
         const res = await fetch(url.toString(), {
@@ -1121,7 +1123,7 @@ export class SabrStream extends PassThrough {
             try {
                 errorText = await res.text();
             }
-            catch (e) {
+            catch (_e) {
                 errorText = '(Failed to read response body)';
             }
             this.logTraffic({
@@ -1275,7 +1277,7 @@ export class SabrStream extends PassThrough {
                     }
                     // The incomplete flag was true, so we check what's left
                     const res = incomplete;
-                    if (res && res.incomplete) {
+                    if (res?.incomplete) {
                         if (!activePartial) {
                             activePartial = {
                                 type: res.type,

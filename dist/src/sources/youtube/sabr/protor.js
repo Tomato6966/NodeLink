@@ -36,7 +36,7 @@ export class ProtoWriter {
             try {
                 buffer = base64ToU8(buffer);
             }
-            catch (e) {
+            catch (_e) {
                 buffer = Buffer.from(buffer, 'utf8');
             }
         }

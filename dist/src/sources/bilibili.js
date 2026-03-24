@@ -214,9 +214,9 @@ export default class BilibiliSource {
     extractPageParameter(url) {
         try {
             const pageMatch = url.match(/[?&]p=(\d+)/);
-            return pageMatch ? parseInt(pageMatch[1]) : 0;
+            return pageMatch ? parseInt(pageMatch[1], 10) : 0;
         }
-        catch (error) {
+        catch (_error) {
             return 0;
         }
     }

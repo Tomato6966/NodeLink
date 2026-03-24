@@ -15,8 +15,8 @@ import { resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import v8 from 'node:v8';
 import { isMainThread, parentPort, workerData as rawWorkerData, Worker } from 'node:worker_threads';
-import { createHeadQueue, dequeueHeadQueue, enqueueHeadQueue, getHeadQueueLength } from "./headQueue.js";
 import * as utils from "../utils.js";
+import { createHeadQueue, dequeueHeadQueue, enqueueHeadQueue, getHeadQueueLength } from "./headQueue.js";
 const __filename = fileURLToPath(import.meta.url);
 const getActiveResourcesBreakdown = () => {
     const list = typeof process.getActiveResourcesInfo === 'function'
@@ -474,16 +474,16 @@ else {
         }
         return meaningManagerPromise;
     };
-    nodelink['getLyricsManager'] =
+    nodelink.getLyricsManager =
         getLyricsManager;
-    nodelink['getMeaningManager'] =
+    nodelink.getMeaningManager =
         getMeaningManager;
     /**
      * Active live chat sessions (session ID -> active flag)
      * @internal
      */
     const activeChats = new Map();
-    const profilerBaseDir = process.env['NODELINK_PROFILER_DIR'] || '.profiles';
+    const profilerBaseDir = process.env.NODELINK_PROFILER_DIR || '.profiles';
     let activeCpuSession = null;
     let activeHeapSampling = null;
     const sanitizeProfileName = (value) => {
@@ -515,7 +515,7 @@ else {
         });
     });
     const summarizeHeapSamplingProfile = (profile, limit = null) => {
-        const head = profile['head'];
+        const head = profile.head;
         if (!head)
             return [];
         const aggregates = new Map();
@@ -557,7 +557,7 @@ else {
         return entries;
     };
     const handleProfilerCommand = async (payload) => {
-        const action = payload?.['action'];
+        const action = payload?.action;
         if (typeof action !== 'string' || action.length === 0) {
             return { success: false, error: 'Missing profiler action' };
         }
@@ -634,11 +634,11 @@ else {
             };
         }
         if (action === 'openInspector') {
-            const host = typeof payload['host'] === 'string' ? payload['host'] : '127.0.0.1';
-            const port = typeof payload['port'] === 'number' && Number.isInteger(payload['port'])
-                ? payload['port']
+            const host = typeof payload.host === 'string' ? payload.host : '127.0.0.1';
+            const port = typeof payload.port === 'number' && Number.isInteger(payload.port)
+                ? payload.port
                 : 0;
-            inspector.open(port, host, payload['exposeWait'] === true);
+            inspector.open(port, host, payload.exposeWait === true);
             return {
                 success: true,
                 pid: process.pid,
@@ -677,7 +677,7 @@ else {
             activeCpuSession = {
                 session,
                 startedAt: Date.now(),
-                name: sanitizeProfileName(typeof payload['name'] === 'string' ? payload['name'] : undefined) || null
+                name: sanitizeProfileName(typeof payload.name === 'string' ? payload.name : undefined) || null
             };
             return {
                 success: true,
@@ -691,12 +691,12 @@ else {
             }
             const { session, startedAt, name } = activeCpuSession;
             const result = await inspectorPost(session, 'Profiler.stop');
-            const outputPath = await buildProfilerFilePath('cpu', 'cpuprofile', (typeof payload['name'] === 'string'
-                ? sanitizeProfileName(payload['name'])
+            const outputPath = await buildProfilerFilePath('cpu', 'cpuprofile', (typeof payload.name === 'string'
+                ? sanitizeProfileName(payload.name)
                 : '') ||
                 name ||
                 undefined);
-            await fsPromises.writeFile(outputPath, JSON.stringify(result['profile']));
+            await fsPromises.writeFile(outputPath, JSON.stringify(result.profile));
             try {
                 session.disconnect();
             }
@@ -711,7 +711,7 @@ else {
             };
         }
         if (action === 'heapSnapshot') {
-            const outputPath = await buildProfilerFilePath('heap', 'heapsnapshot', typeof payload['name'] === 'string' ? payload['name'] : undefined);
+            const outputPath = await buildProfilerFilePath('heap', 'heapsnapshot', typeof payload.name === 'string' ? payload.name : undefined);
             const session = new inspector.Session();
             let fd = null;
             try {
@@ -750,10 +750,10 @@ else {
                     startedAt: activeHeapSampling.startedAt
                 };
             }
-            const samplingInterval = typeof payload['samplingInterval'] === 'number' &&
-                Number.isFinite(payload['samplingInterval']) &&
-                payload['samplingInterval'] > 0
-                ? Math.floor(payload['samplingInterval'])
+            const samplingInterval = typeof payload.samplingInterval === 'number' &&
+                Number.isFinite(payload.samplingInterval) &&
+                payload.samplingInterval > 0
+                ? Math.floor(payload.samplingInterval)
                 : 32768;
             const session = new inspector.Session();
             session.connect();
@@ -764,7 +764,7 @@ else {
             activeHeapSampling = {
                 session,
                 startedAt: Date.now(),
-                name: sanitizeProfileName(typeof payload['name'] === 'string' ? payload['name'] : undefined) || null,
+                name: sanitizeProfileName(typeof payload.name === 'string' ? payload.name : undefined) || null,
                 samplingInterval
             };
             return {
@@ -780,8 +780,8 @@ else {
             }
             const { session, startedAt, name } = activeHeapSampling;
             const result = await inspectorPost(session, 'HeapProfiler.stopSampling');
-            const outputPath = await buildProfilerFilePath('heap-sampling', 'heapsampling.json', (typeof payload['name'] === 'string'
-                ? sanitizeProfileName(payload['name'])
+            const outputPath = await buildProfilerFilePath('heap-sampling', 'heapsampling.json', (typeof payload.name === 'string'
+                ? sanitizeProfileName(payload.name)
                 : '') ||
                 name ||
                 undefined);
@@ -791,7 +791,7 @@ else {
             }
             catch { }
             activeHeapSampling = null;
-            const profile = result['profile'] || {};
+            const profile = result.profile || {};
             const topSites = summarizeHeapSamplingProfile(profile);
             return {
                 success: true,

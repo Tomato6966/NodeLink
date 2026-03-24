@@ -135,9 +135,8 @@ function parsePublishedAt(publishedText) {
         minutes: 0,
         seconds: 0
     };
-    let match;
     const regex = new RegExp(TIME_UNIT_REGEX.source, TIME_UNIT_REGEX.flags);
-    while ((match = regex.exec(text)) !== null) {
+    for (const match of text.matchAll(regex)) {
         const value = parseInt(match[1], 10);
         const unit = match[2].toLowerCase();
         if (unit.startsWith('year'))
@@ -1800,7 +1799,7 @@ export class BaseClient {
                 return { loadType: 'empty', data: {} };
         }
     }
-    async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
+    async getTrackUrl(decodedTrack, context, cipherManager, _itag, proxy) {
         const _sourceName = decodedTrack.sourceName || 'youtube';
         const headers = this.oauth ? await this.getAuthHeaders() : {};
         const { body: playerResponse, statusCode } = await this._makePlayerRequest(decodedTrack.identifier, context, headers, cipherManager, proxy);

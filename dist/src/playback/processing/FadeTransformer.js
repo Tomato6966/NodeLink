@@ -109,12 +109,12 @@ export class FadeTransformer extends Transform {
         if (gainStart === 1 && gainEnd === 1)
             return chunk;
         let view = null;
-        let useBuffer = false;
+        let _useBuffer = false;
         if (chunk.byteOffset % 2 === 0) {
             view = new Int16Array(chunk.buffer, chunk.byteOffset, sampleCount);
         }
         else {
-            useBuffer = true;
+            _useBuffer = true;
         }
         const step = sampleCount > 1 ? (gainEnd - gainStart) / (sampleCount - 1) : 0;
         if (view) {

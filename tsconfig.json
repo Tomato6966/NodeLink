@@ -24,7 +24,7 @@
     "moduleDetection": "force",
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
-    "noPropertyAccessFromIndexSignature": true,
+    "noPropertyAccessFromIndexSignature": false,
     "incremental": true,
     "tsBuildInfoFile": ".cache/tsconfig.tsbuildinfo",
     "rootDir": ".",

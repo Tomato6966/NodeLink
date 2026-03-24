@@ -109,7 +109,7 @@ async function getServerTime(spDc) {
     try {
         const headers = { 'User-Agent': USER_AGENT_MOBILE };
         if (spDc)
-            headers['Cookie'] = `sp_dc=${spDc}`;
+            headers.Cookie = `sp_dc=${spDc}`;
         const res = await http1makeRequest('https://open.spotify.com/api/server-time', {
             headers
         });
@@ -140,11 +140,11 @@ function generateTOTP(secretHex, timeSec, step = 30) {
     const hmac = crypto.createHmac('sha1', Buffer.from(secretHex, 'hex'));
     hmac.update(buf);
     const digest = hmac.digest();
-    const offset = digest[digest.length - 1] & 0xf;
-    const code = (((digest[offset] & 0x7f) << 24) |
-        ((digest[offset + 1] & 0xff) << 16) |
-        ((digest[offset + 2] & 0xff) << 8) |
-        (digest[offset + 3] & 0xff)) %
+    const offset = (digest[digest.length - 1] ?? 0) & 0xf;
+    const code = (((digest[offset] ?? 0 & 0x7f) << 24) |
+        ((digest[offset + 1] ?? 0 & 0xff) << 16) |
+        ((digest[offset + 2] ?? 0 & 0xff) << 8) |
+        (digest[offset + 3] ?? 0 & 0xff)) %
         1000000;
     return code.toString().padStart(6, '0');
 }
@@ -175,7 +175,7 @@ async function performTokenRequest(secret, version, spDc, productType) {
         Referer: 'https://open.spotify.com/'
     };
     if (spDc)
-        headers['Cookie'] = `sp_dc=${spDc}`;
+        headers.Cookie = `sp_dc=${spDc}`;
     const res = await http1makeRequest(url.toString(), {
         method: 'GET',
         headers

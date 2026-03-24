@@ -25,10 +25,10 @@ export default class ChannelMix extends AnimatableFilter {
         });
     }
     onConfigChanged(config) {
-        this.leftToLeft = Math.max(0.0, Math.min(1.0, config['leftToLeft'] ?? 1.0));
-        this.leftToRight = Math.max(0.0, Math.min(1.0, config['leftToRight'] ?? 0.0));
-        this.rightToLeft = Math.max(0.0, Math.min(1.0, config['rightToLeft'] ?? 0.0));
-        this.rightToRight = Math.max(0.0, Math.min(1.0, config['rightToRight'] ?? 1.0));
+        this.leftToLeft = Math.max(0.0, Math.min(1.0, config.leftToLeft ?? 1.0));
+        this.leftToRight = Math.max(0.0, Math.min(1.0, config.leftToRight ?? 0.0));
+        this.rightToLeft = Math.max(0.0, Math.min(1.0, config.rightToLeft ?? 0.0));
+        this.rightToRight = Math.max(0.0, Math.min(1.0, config.rightToRight ?? 1.0));
     }
     isConfigActive() {
         return (Math.abs(this.leftToLeft - 1.0) > 0.001 ||

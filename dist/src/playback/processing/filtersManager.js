@@ -54,6 +54,7 @@ export class FiltersManager extends Transform {
     nodelink;
     activeFilters;
     filterInstances;
+    _lastRawFilters = {};
     /**
      * When true, _transform passes chunks through without processing.
      * Used by transition handling to avoid double-processing: the upstream
@@ -62,8 +63,6 @@ export class FiltersManager extends Transform {
      * processes Track B — causing cross-contamination and 2x state advance.
      */
     bypass = false;
-    /** Stores the last raw update payload so resetState() can re-apply. */
-    _lastRawFilters = {};
     /**
      * Creates a new filter manager.
      * @param nodelink - NodeLink context for extensions.
@@ -170,7 +169,7 @@ export class FiltersManager extends Transform {
     getRate() {
         if (this.bypass)
             return 1.0;
-        const timescale = this.filterInstances['timescale'];
+        const timescale = this.filterInstances.timescale;
         return timescale?.getRate?.() ?? 1.0;
     }
     /**

@@ -1,6 +1,4 @@
 import crypto from 'node:crypto'
-import { logger, makeRequest } from '../utils.ts'
-import type { LyricsLine } from '../typings/lyrics/musixmatch.types.ts'
 import type {
   BilibiliLyricsResult,
   BilibiliLyricsTrackPayload,
@@ -10,6 +8,8 @@ import type {
   BilibiliWbiSubtitleResponse,
   NodelinkInstanceForBilibiliLyrics
 } from '../typings/lyrics/bilibili.types.ts'
+import type { LyricsLine } from '../typings/lyrics/musixmatch.types.ts'
+import { logger, makeRequest } from '../utils.ts'
 
 /**
  * WBI mixin index table used for signing.
@@ -71,16 +71,20 @@ export default class BilibiliLyrics {
       return this.wbiKeys
     }
 
-    const cachedKeys = this.nodelink.credentialManager.get<string>('bilibili_wbi_keys')
+    const cachedKeys =
+      this.nodelink.credentialManager.get<string>('bilibili_wbi_keys')
     if (cachedKeys) {
       this.wbiKeys = cachedKeys
       this.wbiKeysExpiry = Date.now() + 1000 * 60 * 60
       return this.wbiKeys
     }
 
-    const { body, error } = await makeRequest('https://api.bilibili.com/x/web-interface/nav', {
-      method: 'GET'
-    })
+    const { body, error } = await makeRequest(
+      'https://api.bilibili.com/x/web-interface/nav',
+      {
+        method: 'GET'
+      }
+    )
 
     const navBody = body as BilibiliNavResponse | undefined
     if (error || !navBody?.data?.wbi_img) {
@@ -88,8 +92,14 @@ export default class BilibiliLyrics {
     }
 
     const { img_url, sub_url } = navBody.data.wbi_img
-    const imgKey = img_url.slice(img_url.lastIndexOf('/') + 1, img_url.lastIndexOf('.'))
-    const subKey = sub_url.slice(sub_url.lastIndexOf('/') + 1, sub_url.lastIndexOf('.'))
+    const imgKey = img_url.slice(
+      img_url.lastIndexOf('/') + 1,
+      img_url.lastIndexOf('.')
+    )
+    const subKey = sub_url.slice(
+      sub_url.lastIndexOf('/') + 1,
+      sub_url.lastIndexOf('.')
+    )
 
     const rawKey = imgKey + subKey
     let mixinKey = ''
@@ -100,7 +110,11 @@ export default class BilibiliLyrics {
 
     this.wbiKeys = mixinKey.slice(0, 32)
     this.wbiKeysExpiry = Date.now() + 1000 * 60 * 60
-    this.nodelink.credentialManager.set('bilibili_wbi_keys', this.wbiKeys, 1000 * 60 * 60)
+    this.nodelink.credentialManager.set(
+      'bilibili_wbi_keys',
+      this.wbiKeys,
+      1000 * 60 * 60
+    )
 
     return this.wbiKeys
   }
@@ -117,7 +131,10 @@ export default class BilibiliLyrics {
     mixinKey: string
   ): string {
     const currTime = Math.round(Date.now() / 1000)
-    const newParams: Record<string, string | number> = { ...params, wts: currTime }
+    const newParams: Record<string, string | number> = {
+      ...params,
+      wts: currTime
+    }
 
     const query = Object.keys(newParams)
       .sort()
@@ -127,7 +144,10 @@ export default class BilibiliLyrics {
       })
       .join('&')
 
-    const wRid = crypto.createHash('md5').update(query + mixinKey).digest('hex')
+    const wRid = crypto
+      .createHash('md5')
+      .update(query + mixinKey)
+      .digest('hex')
     return `${query}&w_rid=${wRid}`
   }
 
@@ -180,9 +200,12 @@ export default class BilibiliLyrics {
       const mixinKey = await this._getWbiKeys()
       const query = this._signWbi({ bvid, cid }, mixinKey)
 
-      const { body } = await makeRequest(`https://api.bilibili.com/x/player/wbi/v2?${query}`, {
-        method: 'GET'
-      })
+      const { body } = await makeRequest(
+        `https://api.bilibili.com/x/player/wbi/v2?${query}`,
+        {
+          method: 'GET'
+        }
+      )
 
       const subtitleBody = body as BilibiliWbiSubtitleResponse | undefined
       const subtitles = subtitleBody?.data?.subtitle?.subtitles

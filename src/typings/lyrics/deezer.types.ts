@@ -1,4 +1,4 @@
-import type { TrackInfo, SourceResult } from '../sources/source.types.ts'
+import type { SourceResult, TrackInfo } from '../sources/source.types.ts'
 import type { BestMatchCandidate, BestMatchTrackInfo } from '../utils.types.ts'
 
 /**

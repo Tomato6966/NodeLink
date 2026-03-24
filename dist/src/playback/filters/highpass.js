@@ -2,7 +2,7 @@ import { SAMPLE_RATE } from "../../constants.js";
 import { AnimatableFilter } from "./AnimatableFilter.js";
 import { clamp16Bit } from "./dsp/clamp16Bit.js";
 const CHANNELS = 2;
-const BUTTERWORTH_Q = 0.7071067811865476;
+const BUTTERWORTH_Q = Math.SQRT1_2;
 const SUB_BLOCK_FRAMES = 64;
 const TWO_PI = 2 * Math.PI;
 export default class Highpass extends AnimatableFilter {
@@ -26,17 +26,16 @@ export default class Highpass extends AnimatableFilter {
         super.applyAnimatedUpdate({
             highpass: {
                 targetAlpha: targetAlpha,
-                transition: rawConfig.transition
             }
         }, 'highpass', { targetAlpha: 0.0 });
     }
     onConfigChanged(config) {
-        const alpha = config['targetAlpha'] ?? 0.0;
+        const alpha = config.targetAlpha ?? 0.0;
         this._currentAlpha = alpha;
         this._computeCoefficients(alpha);
     }
     isConfigActive(config) {
-        const alpha = config ? config['targetAlpha'] : this._currentAlpha;
+        const alpha = config ? config.targetAlpha : this._currentAlpha;
         return (alpha ?? 0) > 0.001;
     }
     /**

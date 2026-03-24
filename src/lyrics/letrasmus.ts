@@ -1,5 +1,3 @@
-import { http1makeRequest, logger } from '../utils.ts'
-import type { LyricsLine } from '../typings/lyrics/musixmatch.types.ts'
 import type {
   LetrasLyricsTrackInfo,
   LetrasMusLyricsResult,
@@ -10,6 +8,8 @@ import type {
   LetrasSubtitleRawEntry,
   LetrasTranslationLanguageEntry
 } from '../typings/lyrics/letrasmus.types.ts'
+import type { LyricsLine } from '../typings/lyrics/musixmatch.types.ts'
+import { http1makeRequest, logger } from '../utils.ts'
 
 /**
  * Letras suggest endpoint for track discovery.
@@ -58,7 +58,9 @@ const parseJsonp = (body?: string): LetrasSolrResponse | null => {
   if (!body) return null
   const trimmed = body.trim()
   if (trimmed.startsWith('LetrasSug(') && trimmed.endsWith(')')) {
-    return JSON.parse(trimmed.slice('LetrasSug('.length, -1)) as LetrasSolrResponse
+    return JSON.parse(
+      trimmed.slice('LetrasSug('.length, -1)
+    ) as LetrasSolrResponse
   }
   const start = trimmed.indexOf('(')
   const end = trimmed.lastIndexOf(')')
@@ -106,7 +108,9 @@ const extractOmqLyric = (html: string): LetrasOmqLyricPayload | null => {
  * @internal
  */
 const extractLyricOriginal = (html: string): string[] | null => {
-  const match = html.match(/<div class="lyric-original[^>]*">([\s\S]*?)<\/div>/i)
+  const match = html.match(
+    /<div class="lyric-original[^>]*">([\s\S]*?)<\/div>/i
+  )
   if (!match) return null
   let text = match[1] || ''
   text = text.replace(/<br\s*\/?>/gi, '\n')
@@ -124,7 +128,9 @@ const extractLyricOriginal = (html: string): string[] | null => {
 const extractTranslationLanguages = (
   html: string
 ): LetrasTranslationLanguageEntry[] => {
-  const match = html.match(/window\.__translationLanguages\s*=\s*(\[[\s\S]*?\]);/i)
+  const match = html.match(
+    /window\.__translationLanguages\s*=\s*(\[[\s\S]*?\]);/i
+  )
   if (!match) return []
   try {
     const parsed = JSON.parse(match[1] || '[]')
@@ -160,7 +166,9 @@ const normalizeLang = (lang?: string): string | null => {
  * @returns Translation URL or null.
  * @internal
  */
-const buildTranslationUrl = (entry: LetrasTranslationLanguageEntry): string | null => {
+const buildTranslationUrl = (
+  entry: LetrasTranslationLanguageEntry
+): string | null => {
   if (!entry?.url?.artist || !entry?.url?.song || !entry?.url?.translation) {
     return null
   }
@@ -224,10 +232,14 @@ const findBestDoc = (
 ): LetrasSolrDoc | null => {
   const wantedTitle = normalize(title)
   const wantedAuthor = normalize(author)
-  const candidates = docs.filter((doc) => doc?.t === '2' && doc?.dns && doc?.url)
+  const candidates = docs.filter(
+    (doc) => doc?.t === '2' && doc?.dns && doc?.url
+  )
   let best =
     candidates.find(
-      (doc) => normalize(doc.txt) === wantedTitle && normalize(doc.art) === wantedAuthor
+      (doc) =>
+        normalize(doc.txt) === wantedTitle &&
+        normalize(doc.art) === wantedAuthor
     ) || null
 
   if (!best) {
@@ -295,11 +307,16 @@ export default class LetrasMusLyrics {
     const { body, statusCode, error } = await http1makeRequest(url, {
       method: 'GET'
     })
-    if (error || statusCode !== 200 || !body || typeof body !== 'string') return null
+    if (error || statusCode !== 200 || !body || typeof body !== 'string')
+      return null
 
     const parsed = parseJsonp(body)
     const docs = parsed?.response?.docs || []
-    const best = findBestDoc(docs, trackInfo.title || '', trackInfo.author || '')
+    const best = findBestDoc(
+      docs,
+      trackInfo.title || '',
+      trackInfo.author || ''
+    )
     if (!best?.dns || !best.url) return null
     return buildTrackUrl(best.dns, best.url)
   }

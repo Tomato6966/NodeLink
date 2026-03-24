@@ -1,6 +1,6 @@
-import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
-import { fetchCanvas } from "../modules/spotifyCanvas.js";
 import { getLocalToken } from "../modules/spotifyAuth.js";
+import { fetchCanvas } from "../modules/spotifyCanvas.js";
+import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
 const SPOTIFY_API_BASE_URL = 'https://api.spotify.com/v1';
 const SPOTIFY_CLIENT_API_URL = 'https://spclient.wg.spotify.com';
 const SPOTIFY_INTERNAL_API_URL = 'https://api-partner.spotify.com/pathfinder/v2/query';
@@ -94,7 +94,9 @@ export default class SpotifySource {
             }
         }
         try {
-            if (!this.externalAuthUrl && !this.spDc && (!this.clientId || !this.clientSecret)) {
+            if (!this.externalAuthUrl &&
+                !this.spDc &&
+                (!this.clientId || !this.clientSecret)) {
                 logger('warn', 'Spotify', 'Neither externalAuthUrl, sp_dc nor Client ID/Secret provided. Disabling source.');
                 return false;
             }
@@ -131,7 +133,7 @@ export default class SpotifySource {
                 responseType: 'buffer',
                 headers: {
                     Authorization: `Bearer ${token}`,
-                    'Accept': 'application/json',
+                    Accept: 'application/json',
                     'App-Platform': 'WebPlayer',
                     'Spotify-App-Version': '1.2.83.284.g147edeea'
                 }
@@ -172,8 +174,8 @@ export default class SpotifySource {
             position: 0,
             title: data.name,
             uri: `https://open.spotify.com/track/${id}?explicit=${isExplicit}`,
-            artworkUrl: data.album?.cover_group?.image?.find(img => img.size === 'LARGE' || img.size === 'DEFAULT')?.file_id
-                ? `https://i.scdn.co/image/${data.album.cover_group.image.find(img => img.size === 'LARGE' || img.size === 'DEFAULT').file_id}`
+            artworkUrl: data.album?.cover_group?.image?.find((img) => img.size === 'LARGE' || img.size === 'DEFAULT')?.file_id
+                ? `https://i.scdn.co/image/${data.album.cover_group.image.find((img) => img.size === 'LARGE' || img.size === 'DEFAULT').file_id}`
                 : null,
             isrc: data.external_id?.find((e) => e.type === 'isrc')?.id || null,
             sourceName: 'spotify'
@@ -537,16 +539,13 @@ export default class SpotifySource {
         const author = decodedLocal?.author ||
             item?.artists?.map((artist) => artist.name).join(', ') ||
             this._getInternalTrackAuthor(item, null);
-        return [
-            decodedLocal?.title || item?.name,
-            author,
-            decodedLocal?.album
-        ]
+        return [decodedLocal?.title || item?.name, author, decodedLocal?.album]
             .filter(Boolean)
             .join(' ');
     }
     async _searchLocalTrack(item) {
-        if (!this.allowLocalFiles || (!this.externalAuthUrl && !this.anonymousToken)) {
+        if (!this.allowLocalFiles ||
+            (!this.externalAuthUrl && !this.anonymousToken)) {
             return null;
         }
         const searchTerm = this._buildLocalTrackSearchTerm(item);
@@ -741,7 +740,10 @@ export default class SpotifySource {
         return allItems;
     }
     async _fetchFullTracks(ids) {
-        if (!this.clientId || !this.clientSecret || !this.accessToken || ids.length === 0)
+        if (!this.clientId ||
+            !this.clientSecret ||
+            !this.accessToken ||
+            ids.length === 0)
             return [];
         const batches = [];
         for (let i = 0; i < ids.length; i += 50) {
@@ -846,7 +848,8 @@ export default class SpotifySource {
             }
             if (!/^[a-zA-Z0-9]{22}$/.test(trackId) && !query.includes('=')) {
                 const searchResult = await this.search(query, 'spsearch', 'track');
-                if (searchResult.loadType === 'search' && searchResult.data.length > 0) {
+                if (searchResult.loadType === 'search' &&
+                    searchResult.data.length > 0) {
                     trackId = searchResult.data[0].info.identifier;
                 }
             }
@@ -868,7 +871,8 @@ export default class SpotifySource {
                     uri: `spotify:track:${trackId}`,
                     limit: 20
                 });
-                const items = data?.internalLinkRecommenderTrack?.items || data?.seoRecommendedTrack?.items;
+                const items = data?.internalLinkRecommenderTrack?.items ||
+                    data?.seoRecommendedTrack?.items;
                 if (items?.length > 0) {
                     const tracks = items
                         .map((it) => this._buildTrackFromInternal(it.content?.data || it.data))
@@ -883,7 +887,8 @@ export default class SpotifySource {
                     };
                 }
             }
-            if (query.startsWith('mix:') || (!query.includes('=') && !query.includes(':'))) {
+            if (query.startsWith('mix:') ||
+                (!query.includes('=') && !query.includes(':'))) {
                 let seedType = 'track';
                 let seed = query;
                 if (query.startsWith('mix:')) {
@@ -1156,7 +1161,9 @@ export default class SpotifySource {
                     else {
                         const canvasRes = await fetchCanvas(`spotify:track:${id}`, this.mobileToken);
                         if (canvasRes?.data?.canvasesList?.[0]) {
-                            const compactCanvas = { canvasesList: [canvasRes.data.canvasesList[0]] };
+                            const compactCanvas = {
+                                canvasesList: [canvasRes.data.canvasesList[0]]
+                            };
                             track.pluginInfo.canvas = compactCanvas;
                             this.nodelink.trackCacheManager.set('spotify-canvas', id, compactCanvas, 1000 * 60 * 60 * 12);
                         }
@@ -1201,7 +1208,9 @@ export default class SpotifySource {
                     else {
                         const canvasRes = await fetchCanvas(`spotify:track:${id}`, this.mobileToken);
                         if (canvasRes?.data?.canvasesList?.[0]) {
-                            const compactCanvas = { canvasesList: [canvasRes.data.canvasesList[0]] };
+                            const compactCanvas = {
+                                canvasesList: [canvasRes.data.canvasesList[0]]
+                            };
                             track.pluginInfo.canvas = compactCanvas;
                             this.nodelink.trackCacheManager.set('spotify-canvas', id, compactCanvas, 1000 * 60 * 60 * 12);
                         }
@@ -1224,7 +1233,7 @@ export default class SpotifySource {
     }
     async _resolveAlbum(id) {
         // locally generated tokens can also work ig.
-        if (this._isTokenValid() && this.accessToken || this.externalAuthUrl) {
+        if ((this._isTokenValid() && this.accessToken) || this.externalAuthUrl) {
             const data = await this._internalApiRequest(QUERIES.getAlbum, {
                 uri: `spotify:album:${id}`,
                 locale: 'en',

@@ -29,7 +29,7 @@ export default class Tremolo extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const t = settings?.tremolo || {}
-    const isDisabled = (t as any)._disabled === true
+    const isDisabled = (t as Record<string, unknown>)._disabled === true
 
     this.targetFrequency = t.frequency || 0
     this.targetDepth = Math.max(0, Math.min(t.depth || 0, 1.0))
@@ -48,7 +48,6 @@ export default class Tremolo extends AnimatableFilter {
       {
         tremolo: {
           alpha: targetAlpha,
-          transition: (t as any).transition
         }
       },
       'tremolo',
@@ -57,11 +56,11 @@ export default class Tremolo extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 

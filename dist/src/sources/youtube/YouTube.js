@@ -169,7 +169,7 @@ export default class YouTubeSource {
         this.cipherManager?.cleanup?.();
     }
     async _fetchVisitorData() {
-        const cachedVisitorData = this.nodelink.credentialManager.get('yt_visitor_data');
+        const _cachedVisitorData = this.nodelink.credentialManager.get('yt_visitor_data');
         const cachedPlayerScript = this.nodelink.credentialManager.get('yt_player_script_url');
         if (cachedPlayerScript) {
             this.cipherManager.setPlayerScriptUrl(cachedPlayerScript);
@@ -522,7 +522,8 @@ export default class YouTubeSource {
             if (cached) {
                 const cachedProxyUrl = cached.additionalData?.proxy?.url;
                 const currentProxies = this.config.proxies || [];
-                const isProxyStillValid = !cachedProxyUrl || currentProxies.some(p => p.url === cachedProxyUrl);
+                const isProxyStillValid = !cachedProxyUrl ||
+                    currentProxies.some((p) => p.url === cachedProxyUrl);
                 if (isProxyStillValid) {
                     logger('debug', 'YouTube', `Using cached URL for ${decodedTrack.identifier}`);
                     return cached;
@@ -576,7 +577,8 @@ export default class YouTubeSource {
                     });
                     if (check.stream)
                         check.stream.destroy();
-                    this.reportProxyStatus(proxyToUse, !check.error && (check.statusCode === 200 || check.statusCode === 206), check.statusCode, Date.now() - proxyStartTime);
+                    this.reportProxyStatus(proxyToUse, !check.error &&
+                        (check.statusCode === 200 || check.statusCode === 206), check.statusCode, Date.now() - proxyStartTime);
                     if (!check.error &&
                         (check.statusCode === 200 || check.statusCode === 206)) {
                         let contentLength = null;
@@ -589,7 +591,10 @@ export default class YouTubeSource {
                             contentLength = Number.parseInt(check.headers['content-length'], 10);
                         }
                         logger('debug', 'YouTube', `URL pre-flight check successful for client ${clientName}.`);
-                        const result = { ...urlData, additionalData: { contentLength, proxy: proxyToUse } };
+                        const result = {
+                            ...urlData,
+                            additionalData: { contentLength, proxy: proxyToUse }
+                        };
                         this.nodelink.trackCacheManager.set('youtube', decodedTrack.identifier, result, 1000 * 60 * 60 * 5);
                         return result;
                     }
@@ -609,7 +614,8 @@ export default class YouTubeSource {
                         });
                         if (hlsCheck.stream)
                             hlsCheck.stream.destroy();
-                        this.reportProxyStatus(proxyToUse, !hlsCheck.error && (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206), hlsCheck.statusCode, Date.now() - proxyStartTime);
+                        this.reportProxyStatus(proxyToUse, !hlsCheck.error &&
+                            (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206), hlsCheck.statusCode, Date.now() - proxyStartTime);
                         if (!hlsCheck.error &&
                             (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)) {
                             logger('debug', 'YouTube', `HLS fallback check successful for client ${clientName}.`);
@@ -635,7 +641,8 @@ export default class YouTubeSource {
                     });
                     if (hlsCheck.stream)
                         hlsCheck.stream.destroy();
-                    this.reportProxyStatus(proxyToUse, !hlsCheck.error && (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206), hlsCheck.statusCode, Date.now() - proxyStartTime);
+                    this.reportProxyStatus(proxyToUse, !hlsCheck.error &&
+                        (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206), hlsCheck.statusCode, Date.now() - proxyStartTime);
                     if (!hlsCheck.error &&
                         (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)) {
                         logger('debug', 'YouTube', `HLS-only check successful for client ${clientName}.`);
@@ -953,7 +960,10 @@ export default class YouTubeSource {
                 throw new Error('No direct URL');
             let contentLength = additionalData?.contentLength || null;
             if (!contentLength) {
-                const testResponse = await http1makeRequest(url, { method: 'HEAD', timeout: 5000 });
+                const testResponse = await http1makeRequest(url, {
+                    method: 'HEAD',
+                    timeout: 5000
+                });
                 if (testResponse.headers?.['content-length']) {
                     contentLength = Number.parseInt(testResponse.headers['content-length'], 10);
                 }
@@ -987,7 +997,8 @@ export default class YouTubeSource {
                 proxy: additionalData?.proxy || this.getProxy(),
                 timeout: 20000
             });
-            this.reportProxyStatus(additionalData?.proxy || this.getProxy(false), !response.error && (response.statusCode === 200 || response.statusCode === 206), response.statusCode, Date.now() - fetchStartTime);
+            this.reportProxyStatus(additionalData?.proxy || this.getProxy(false), !response.error &&
+                (response.statusCode === 200 || response.statusCode === 206), response.statusCode, Date.now() - fetchStartTime);
             if (response.statusCode !== 200 && response.statusCode !== 206) {
                 throw new Error(`HTTP status ${response.statusCode}`);
             }

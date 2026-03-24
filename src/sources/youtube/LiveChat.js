@@ -11,7 +11,7 @@ class LiveChat {
   }
 
   async getLiveChat(videoId) {
-    const context = {
+    const _context = {
       client: { hl: 'en', gl: 'US' }
     }
 
@@ -64,7 +64,7 @@ class LiveChat {
                 continuation
               },
               disableBodyCompression: true,
-        proxy: this.source.getProxy()
+              proxy: this.source.getProxy()
             }
           )
 

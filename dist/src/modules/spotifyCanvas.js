@@ -187,8 +187,14 @@ function decodeCanvasResponse(buffer) {
 export async function fetchCanvas(trackUri, token) {
     try {
         const trackUriBuf = Buffer.from(trackUri);
-        const trackBuf = Buffer.concat([Buffer.from([0x0a, trackUriBuf.length]), trackUriBuf]);
-        const requestBuf = Buffer.concat([Buffer.from([0x0a, trackBuf.length]), trackBuf]);
+        const trackBuf = Buffer.concat([
+            Buffer.from([0x0a, trackUriBuf.length]),
+            trackUriBuf
+        ]);
+        const requestBuf = Buffer.concat([
+            Buffer.from([0x0a, trackBuf.length]),
+            trackBuf
+        ]);
         const res = await fetch('https://spclient.wg.spotify.com/canvaz-cache/v0/canvases', {
             method: 'POST',
             body: requestBuf,

@@ -28,7 +28,7 @@ export default class Rotation extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const r = settings?.rotation || {}
-    const isDisabled = (r as any)._disabled === true
+    const isDisabled = (r as Record<string, unknown>)._disabled === true
 
     this.rotationHz = r.rotationHz ?? 0
     if (this.rotationHz > 0.001) {
@@ -41,7 +41,6 @@ export default class Rotation extends AnimatableFilter {
       {
         rotation: {
           alpha: targetAlpha,
-          transition: (r as any).transition
         }
       },
       'rotation',
@@ -50,11 +49,11 @@ export default class Rotation extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 

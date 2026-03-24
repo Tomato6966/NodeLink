@@ -614,8 +614,8 @@ export default class MusixmatchLyrics {
     title: string | null
   ): Promise<MxmTrack | null> {
     const params: Record<string, string | undefined> = {}
-    if (artist) params['q_artist'] = artist
-    if (title) params['q_track'] = title
+    if (artist) params.q_artist = artist
+    if (title) params.q_track = title
 
     const body = (await this._request(ENDPOINTS.SEARCH, {
       ...params,

@@ -2,7 +2,7 @@ import { SAMPLE_RATE } from "../../constants.js";
 import { AnimatableFilter } from "./AnimatableFilter.js";
 import { clamp16Bit } from "./dsp/clamp16Bit.js";
 const CHANNELS = 2;
-const BUTTERWORTH_Q = 0.7071067811865476;
+const BUTTERWORTH_Q = Math.SQRT1_2;
 const SUB_BLOCK_FRAMES = 64;
 const TWO_PI = 2 * Math.PI;
 export default class Lowpass extends AnimatableFilter {
@@ -24,17 +24,16 @@ export default class Lowpass extends AnimatableFilter {
         super.applyAnimatedUpdate({
             lowpass: {
                 logSmoothing: targetLogSmoothing,
-                transition: rawConfig.transition
             }
         }, 'lowpass', { logSmoothing: 0 });
     }
     onConfigChanged(config) {
-        const logSmoothing = config['logSmoothing'] ?? 0;
+        const logSmoothing = config.logSmoothing ?? 0;
         this._currentLogSmoothing = logSmoothing;
         this._computeCoefficients(logSmoothing);
     }
     isConfigActive(config) {
-        const logSmoothing = config ? config['logSmoothing'] : null;
+        const logSmoothing = config ? config.logSmoothing : null;
         if (logSmoothing !== null && logSmoothing !== undefined) {
             return logSmoothing > 0.001;
         }

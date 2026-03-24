@@ -1,4 +1,3 @@
-import { Buffer } from 'node:buffer'
 import type {
   AnimationTransition,
   FilterSettings
@@ -42,12 +41,12 @@ export abstract class AnimatableFilter extends BaseFilter {
     configKey: string,
     defaults: Record<string, number>
   ): void {
-    const rawConfig = (settings[configKey] as Record<string, any>) || {}
+    const rawConfig = (settings[configKey] as Record<string, unknown>) || {}
     const newTarget: Record<string, number> = {}
 
     for (const key of Object.keys(defaults)) {
       if (typeof rawConfig[key] === 'number') {
-        newTarget[key] = rawConfig[key]
+        newTarget[key] = rawConfig[key] as number
       } else if (this.currentConfig[key] !== undefined) {
         // Carry over existing instead of resetting to default
         newTarget[key] = this.currentConfig[key]
@@ -56,13 +55,11 @@ export abstract class AnimatableFilter extends BaseFilter {
       }
     }
 
-    const transition = rawConfig['transition'] as
-      | AnimationTransition
-      | undefined
+    const transition = rawConfig.transition as AnimationTransition | undefined
 
     // If disabled via auto-injection hook, make sure transition executes properly but to default states
     // and if there's no transition, snap instantly to defaults
-    if (rawConfig['_disabled'] === true) {
+    if (rawConfig._disabled === true) {
       for (const key of Object.keys(defaults)) {
         newTarget[key] = defaults[key] as number
       }

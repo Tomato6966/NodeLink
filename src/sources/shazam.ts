@@ -470,7 +470,9 @@ export default class ShazamSource {
 
     try {
       const query = `${decodedTrack.title} ${decodedTrack.author}`
-      let searchResult = await sourceManager.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query)
+      let searchResult = await sourceManager.searchWithDefault(
+        decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query
+      )
       let searchTracks = this.extractTrackArray(searchResult)
 
       if (searchTracks.length === 0) {

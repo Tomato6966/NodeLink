@@ -53,7 +53,7 @@ export default class Chorus extends AnimatableFilter {
    */
   public override update(settings: FilterSettings): void {
     const c = settings?.chorus || {}
-    const isDisabled = (c as any)._disabled === true
+    const isDisabled = (c as Record<string, unknown>)._disabled === true
 
     this.rate = c.rate || 0
     this.depth = Math.max(0, Math.min(c.depth || 0, 1.0))
@@ -75,8 +75,7 @@ export default class Chorus extends AnimatableFilter {
     super.applyAnimatedUpdate(
       {
         chorus: {
-          alpha: targetAlpha,
-          transition: (c as any).transition
+          alpha: targetAlpha
         }
       },
       'chorus',
@@ -85,11 +84,11 @@ export default class Chorus extends AnimatableFilter {
   }
 
   protected override onConfigChanged(config: Record<string, number>): void {
-    this.alpha = config['alpha'] ?? 0
+    this.alpha = config.alpha ?? 0
   }
 
   protected override isConfigActive(config?: Record<string, number>): boolean {
-    const a = config ? config['alpha'] : this.alpha
+    const a = config ? config.alpha : this.alpha
     return (a ?? 0) > 0.001
   }
 

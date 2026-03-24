@@ -214,7 +214,7 @@ export default class WebRemix extends BaseClient {
               'X-Goog-Api-Format-Version': '2'
             },
             disableBodyCompression: true,
-        proxy: this.getProxy()
+            proxy: this.getProxy()
           }
         )
 

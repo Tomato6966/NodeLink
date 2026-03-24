@@ -505,7 +505,7 @@ export default class YandexMusicSource {
     return parsed
   }
 
-  _parsePlaylist(data, domain, playlistUrl) {
+  _parsePlaylist(data, domain, _playlistUrl) {
     const result = data?.result
     if (!result?.tracks?.length) return { loadType: 'empty', data: {} }
 
@@ -682,7 +682,9 @@ export default class YandexMusicSource {
   async _getMirrorUrl(decodedTrack, originalError) {
     try {
       const searchQuery = this._buildSearchQuery(decodedTrack)
-      let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : searchQuery)
+      let searchResult = await this.nodelink.sources.searchWithDefault(
+        decodedTrack.isrc ? `"${decodedTrack.isrc}"` : searchQuery
+      )
 
       if (
         !searchResult ||
