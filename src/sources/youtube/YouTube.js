@@ -708,7 +708,8 @@ export default class YouTubeSource {
           processUrl,
           sourceType,
           this.ytContext,
-          this.cipherManager
+          this.cipherManager,
+          this.reportProxyStatus.bind(this)
         )
 
         if (

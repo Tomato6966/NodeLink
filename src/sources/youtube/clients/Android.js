@@ -203,7 +203,13 @@ export default class Android extends BaseClient {
     }
   }
 
-  async resolve(url, _type, context, cipherManager) {
+  async resolve(
+    url,
+    _type,
+    context,
+    cipherManager,
+    reportProxyStatus = () => {}
+  ) {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = 'https://youtubei.googleapis.com'
