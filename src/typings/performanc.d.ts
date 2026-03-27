@@ -196,7 +196,7 @@ declare module '@performanc/voice' {
   export function joinVoiceChannel(
     options: JoinVoiceChannelOptions
   ): VoiceConnection
-  export function getSpeakStream(ssrc: number): Readable | null
+  export function getSpeakStream(ssrc: number, guildId: string): Readable | null
 
   const api: {
     joinVoiceChannel: typeof joinVoiceChannel

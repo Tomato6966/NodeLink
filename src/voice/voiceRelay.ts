@@ -109,7 +109,7 @@ export function createVoiceRelay({
     const key = `${guildId}:${ssrc}`
     if (activeStreams.has(key)) return
 
-    const stream = discordVoice.getSpeakStream(ssrc)
+    const stream = discordVoice.getSpeakStream(ssrc, guildId)
     if (!stream) return
 
     let decoder: OpusDecoderInstance | null = null
