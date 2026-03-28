@@ -1077,7 +1077,7 @@ export class Player {
           )
           this._isRecovering = true
 
-          this.seek(this._lastPosition)
+          this.seek(this._lastPosition, this.track.endTime, true)
             .then((success) => {
               if (success) {
                 logger(
@@ -1353,7 +1353,11 @@ export class Player {
    * @param endTime - Optional end time to enforce after the seek.
    * @returns True when the seek succeeds; false otherwise.
    */
-  public async seek(position?: number, endTime?: number): Promise<boolean> {
+  public async seek(
+    position?: number,
+    endTime?: number,
+    forceLegacy = false
+  ): Promise<boolean> {
     if (this.destroying || !this.track) return false
     if (!this.track.info.isSeekable && !this.track.info.isStream) return false
 
@@ -1424,7 +1428,12 @@ export class Player {
         !!hasSourceLoader &&
         (this.streamInfo?.protocol === 'sabr' || sourceName === 'deezer')
 
-      if (canNativeSeek) {
+      if (forceLegacy) {
+        seekPromise = this._legacySeek(
+          seekPosition,
+          endTime !== undefined ? endTime : this.track.endTime
+        )
+      } else if (canNativeSeek) {
         seekPromise = this._seekUsingSource(
           seekPosition,
           endTime !== undefined ? endTime : this.track.endTime

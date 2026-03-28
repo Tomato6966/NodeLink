@@ -740,7 +740,7 @@ export class Player {
                         statistics: this.connection?.statistics
                     });
                     this._isRecovering = true;
-                    this.seek(this._lastPosition)
+                    this.seek(this._lastPosition, this.track.endTime, true)
                         .then((success) => {
                         if (success) {
                             logger('info', 'Player', `Player for guild ${this.guildId} recovered successfully.`);
@@ -927,7 +927,7 @@ export class Player {
      * @param endTime - Optional end time to enforce after the seek.
      * @returns True when the seek succeeds; false otherwise.
      */
-    async seek(position, endTime) {
+    async seek(position, endTime, forceLegacy = false) {
         if (this.destroying || !this.track)
             return false;
         if (!this.track.info.isSeekable && !this.track.info.isStream)
@@ -973,7 +973,10 @@ export class Player {
             const hasSourceLoader = source && typeof source.loadStream === 'function';
             const canNativeSeek = !!hasSourceLoader &&
                 (this.streamInfo?.protocol === 'sabr' || sourceName === 'deezer');
-            if (canNativeSeek) {
+            if (forceLegacy) {
+                seekPromise = this._legacySeek(seekPosition, endTime !== undefined ? endTime : this.track.endTime);
+            }
+            else if (canNativeSeek) {
                 seekPromise = this._seekUsingSource(seekPosition, endTime !== undefined ? endTime : this.track.endTime);
             }
             else if (!unsupportedSources.includes(sourceName) &&
