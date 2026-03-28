@@ -67,7 +67,7 @@ export function createVoiceRelay({ enabled, format, sendFrame, logger }) {
         const key = `${guildId}:${ssrc}`;
         if (activeStreams.has(key))
             return;
-        const stream = discordVoice.getSpeakStream(ssrc);
+        const stream = discordVoice.getSpeakStream(ssrc, guildId);
         if (!stream)
             return;
         let decoder = null;

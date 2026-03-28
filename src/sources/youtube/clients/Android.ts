@@ -1,17 +1,51 @@
+import type {
+  SourceResult,
+  TrackInfo,
+  WorkerNodeLink
+} from '../../../typings/sources/source.types.ts'
+import type {
+  ICipherManager,
+  IOAuth,
+  YouTubeClientContext,
+  YouTubeContext
+} from '../../../typings/sources/youtube.types.ts'
+import type {
+  YouTubeNextRequestBody,
+  YouTubeNextResponse,
+  YouTubeSearchResponse
+} from '../../../typings/sources/youtubeClient.types.ts'
+import type { HttpProxyConfig } from '../../../typings/utils.types.ts'
 import { logger, makeRequest } from '../../../utils.ts'
 import {
   BaseClient,
   buildTrack,
   checkURLType,
   YOUTUBE_CONSTANTS
-} from '../common.js'
+} from '../common.ts'
 
+/**
+ * YouTube Android innertube client implementation.
+ *
+ * Simulates the official Android YouTube app for API requests.
+ * Used for search, URL resolution, and track playback.
+ *
+ * @public
+ */
 export default class Android extends BaseClient {
-  constructor(nodelink, oauth) {
+  /**
+   * @param nodelink - NodeLink worker instance providing options, sources, and logging
+   * @param oauth - OAuth manager for authenticated requests, or null if unauthenticated
+   */
+  constructor(nodelink: WorkerNodeLink, oauth: IOAuth | null) {
     super(nodelink, 'ANDROID', oauth)
   }
 
-  getClient(context) {
+  /**
+   * Returns the Android client context for innertube API requests.
+   * @param context - General YouTube context with language, region, and visitor data
+   * @returns Client context simulating an Android Pixel 6 device
+   */
+  override getClient(context: YouTubeContext): YouTubeClientContext {
     return {
       client: {
         clientName: 'ANDROID',
@@ -32,11 +66,40 @@ export default class Android extends BaseClient {
     }
   }
 
-  requirePlayerScript() {
+  /**
+   * Whether this client requires a player script for signature deciphering.
+   * Android client returns URLs directly without encryption.
+   * @returns false - Android formats do not require deciphering
+   */
+  override requirePlayerScript(): boolean {
     return false
   }
 
-  async search(query, type, context, proxy, reportProxyStatus = () => {}) {
+  /**
+   * Searches YouTube for tracks, playlists, channels, or artists.
+   *
+   * Extends the base class `search` with optional proxy and status reporting
+   * parameters. Called directly by YouTubeSource with these additional args.
+   *
+   * @param query - Search query string
+   * @param type - Search type ('track', 'playlist', 'album', 'artist', 'channel')
+   * @param context - YouTube API context
+   * @param proxy - Optional proxy configuration for the request
+   * @param reportProxyStatus - Callback to report proxy success/failure with latency
+   * @returns Search results or error
+   */
+  override async search(
+    query: string,
+    type: string,
+    context: YouTubeContext,
+    proxy?: HttpProxyConfig,
+    reportProxyStatus: (
+      proxy: unknown,
+      success: boolean,
+      statusCode: number,
+      latency: number
+    ) => void = () => {}
+  ): Promise<SourceResult> {
     const sourceName = 'youtube'
 
     let params = 'EgIQAQ%3D%3D' // Default to track (video)
@@ -53,7 +116,7 @@ export default class Android extends BaseClient {
     const searchStart = Date.now()
     try {
       const {
-        body: searchResult,
+        body: searchResultRaw,
         error,
         statusCode
       } = await makeRequest(
@@ -63,7 +126,9 @@ export default class Android extends BaseClient {
           headers: {
             'User-Agent': this.getClient(context).client.userAgent,
             'X-Goog-Api-Format-Version': '2',
-            'X-Goog-Visitor-Id': context.client.visitorData,
+            ...(context.client.visitorData
+              ? { 'X-Goog-Visitor-Id': context.client.visitorData }
+              : {}),
             'X-YouTube-Client-Name': '3',
             'X-YouTube-Client-Version':
               this.getClient(context).client.clientVersion
@@ -75,21 +140,23 @@ export default class Android extends BaseClient {
       )
 
       reportProxyStatus(
-        searchProxy,
+        searchProxy as unknown,
         !error && statusCode === 200,
-        statusCode,
+        statusCode as number,
         Date.now() - searchStart
       )
 
       if (error || statusCode !== 200) {
         const message =
-          error?.message ||
+          error ||
           `Failed to load results from ${sourceName}. Status: ${statusCode}`
         logger('error', 'YouTube-Android', message)
         return {
           exception: { message, severity: 'common', cause: 'Upstream' }
         }
       }
+
+      const searchResult = searchResultRaw as YouTubeSearchResponse
 
       if (!searchResult) {
         logger(
@@ -145,7 +212,8 @@ export default class Android extends BaseClient {
         return { loadType: 'empty', data: {} }
       }
 
-      const maxResults = this.config.maxSearchResults || 10
+      const maxResults =
+        (this.config.maxSearchResults as number | undefined) || 10
       let count = 0
       const filteredItems = items.filter((item) => {
         const isValid =
@@ -173,7 +241,7 @@ export default class Android extends BaseClient {
           sourceName,
           null,
           null,
-          this.config.enableHoloTracks
+          this.config.enableHoloTracks as boolean | undefined
         )
         if (track) {
           tracks.push(track)
@@ -190,26 +258,53 @@ export default class Android extends BaseClient {
       }
 
       return { loadType: 'search', data: tracks }
-    } catch (e) {
-      reportProxyStatus(searchProxy, false, 500, Date.now() - searchStart)
+    } catch (e: unknown) {
+      reportProxyStatus(
+        searchProxy as unknown,
+        false,
+        500,
+        Date.now() - searchStart
+      )
       logger(
         'error',
         'YouTube-Android',
-        `Exception during search for '${query}': ${e.message}`
+        `Exception during search for '${query}': ${e instanceof Error ? e.message : String(e)}`
       )
       return {
-        exception: { message: e.message, severity: 'fault', cause: 'Exception' }
+        exception: {
+          message: e instanceof Error ? e.message : String(e),
+          severity: 'fault',
+          cause: 'Exception'
+        }
       }
     }
   }
 
-  async resolve(
-    url,
-    _type,
-    context,
-    cipherManager,
-    reportProxyStatus = () => {}
-  ) {
+  /**
+   * Resolves a YouTube URL to track or playlist data.
+   *
+   * Extends the base class `resolve` with an optional `reportProxyStatus`
+   * callback for proxy latency tracking. Called directly by YouTubeSource.
+   *
+   * @param url - YouTube URL to resolve (video, short, or playlist)
+   * @param _type - Source type override (unused)
+   * @param context - YouTube API context
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @param reportProxyStatus - Callback to report proxy success/failure with latency
+   * @returns Resolved track/playlist data or error
+   */
+  override async resolve(
+    url: string,
+    _type: string,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null,
+    reportProxyStatus: (
+      proxy: unknown,
+      success: boolean,
+      statusCode: number,
+      latency: number
+    ) => void = () => {}
+  ): Promise<SourceResult> {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = 'https://youtubei.googleapis.com'
@@ -219,7 +314,7 @@ export default class Android extends BaseClient {
       case YOUTUBE_CONSTANTS.SHORTS: {
         const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/
         const videoIdMatch = url.match(idPattern)
-        if (!videoIdMatch || !videoIdMatch[1]) {
+        if (!videoIdMatch?.[1]) {
           logger(
             'error',
             'youtube-android',
@@ -254,7 +349,7 @@ export default class Android extends BaseClient {
 
       case YOUTUBE_CONSTANTS.PLAYLIST: {
         const playlistIdMatch = url.match(/[?&]list=([\w-]+)/)
-        if (!playlistIdMatch || !playlistIdMatch[1]) {
+        if (!playlistIdMatch?.[1]) {
           logger(
             'error',
             'youtube-android',
@@ -278,7 +373,8 @@ export default class Android extends BaseClient {
           'YouTube-Android',
           `User-Agent for playlist request: ${this.getClient(context).client.userAgent}`
         )
-        const requestBody = {
+
+        const requestBody: YouTubeNextRequestBody = {
           context: this.getClient(context),
           playlistId,
           contentCheckOk: true,
@@ -287,14 +383,17 @@ export default class Android extends BaseClient {
         if (playlistId.startsWith('RD') && currentVideoId) {
           requestBody.videoId = currentVideoId
         }
+
         const playlistProxy = this.getProxy()
         const playlistStart = Date.now()
-        const { body: playlistResponse, statusCode } = await makeRequest(
+        const { body: playlistResponseRaw, statusCode } = await makeRequest(
           `${apiEndpoint}/youtubei/v1/next`,
           {
             headers: {
               'User-Agent': this.getClient(context).client.userAgent,
-              'X-Goog-Visitor-Id': context.client.visitorData,
+              ...(context.client.visitorData
+                ? { 'X-Goog-Visitor-Id': context.client.visitorData }
+                : {}),
               'X-YouTube-Client-Name': '3',
               'X-YouTube-Client-Version':
                 this.getClient(context).client.clientVersion
@@ -307,9 +406,9 @@ export default class Android extends BaseClient {
         )
 
         reportProxyStatus(
-          playlistProxy,
+          playlistProxy as unknown,
           statusCode === 200,
-          statusCode,
+          statusCode as number,
           Date.now() - playlistStart
         )
 
@@ -329,6 +428,8 @@ export default class Android extends BaseClient {
           }
         }
 
+        const playlistResponse = playlistResponseRaw as YouTubeNextResponse
+
         return await this._handlePlaylistResponse(
           playlistId,
           currentVideoId,
@@ -342,7 +443,26 @@ export default class Android extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
+  /**
+   * Retrieves a playable stream URL for a track via the Android client.
+   *
+   * Overrides the base class implementation to add SABR (server-side ABR)
+   * protocol support for adaptive streaming.
+   *
+   * @param decodedTrack - Decoded track information with identifier and metadata
+   * @param context - YouTube API context
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @param itag - Optional specific format itag to request
+   * @param proxy - Optional proxy override for the request
+   * @returns Stream URL data including protocol, format, and additional metadata
+   */
+  override async getTrackUrl(
+    decodedTrack: TrackInfo,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null,
+    itag?: number | string,
+    proxy?: HttpProxyConfig
+  ): Promise<Record<string, unknown>> {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',
@@ -364,14 +484,18 @@ export default class Android extends BaseClient {
       return { exception: { message, severity: 'common', cause: 'Upstream' } }
     }
 
-    const streamingData =
-      playerResponse.streamingData || playerResponse.streaming_data
+    const playerData = playerResponse as Record<string, unknown>
+    const streamingData = (playerData.streamingData ||
+      playerData.streaming_data) as Record<string, unknown> | undefined
     const serverAbrUrl =
       streamingData?.serverAbrStreamingUrl ||
       streamingData?.server_abr_streaming_url
-    const ustreamerConfig =
-      playerResponse.playerConfig?.mediaCommonConfig
-        ?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig
+    const ustreamerConfig = (
+      playerData.playerConfig as Record<string, unknown> | undefined
+    )?.mediaCommonConfig as Record<string, unknown> | undefined
+    const videoPlaybackConfig = ustreamerConfig?.mediaUstreamerRequestConfig as
+      | Record<string, unknown>
+      | undefined
 
     if (serverAbrUrl) {
       logger(
@@ -381,34 +505,39 @@ export default class Android extends BaseClient {
       )
 
       const formats = [
-        ...(streamingData.formats || []),
-        ...(streamingData.adaptiveFormats ||
-          streamingData.adaptive_formats ||
+        ...((streamingData?.formats as unknown[] | undefined) || []),
+        ...((streamingData?.adaptiveFormats as unknown[] | undefined) ||
+          (streamingData?.adaptive_formats as unknown[] | undefined) ||
           [])
-      ].map((f) => ({
-        itag: f.itag,
-        lastModified: f.lastModified || f.last_modified_ms,
-        xtags: f.xtags,
-        width: f.width,
-        height: f.height,
-        mimeType: f.mimeType || f.mime_type,
-        audioQuality: f.audioQuality || f.audio_quality,
-        bitrate: f.bitrate,
-        averageBitrate: f.averageBitrate || f.average_bitrate,
-        quality: f.quality,
-        qualityLabel: f.qualityLabel || f.quality_label,
-        audioTrackId: f.audioTrack?.id,
-        approxDurationMs: f.approxDurationMs || f.approx_duration_ms,
-        contentLength: f.contentLength || f.content_length,
-        isDrc: !!f.isDrc
-      }))
+      ].map((fRaw) => {
+        const f = fRaw as Record<string, unknown>
+        return {
+          itag: f.itag,
+          lastModified: f.lastModified || f.last_modified_ms,
+          xtags: f.xtags,
+          width: f.width,
+          height: f.height,
+          mimeType: f.mimeType || f.mime_type,
+          audioQuality: f.audioQuality || f.audio_quality,
+          bitrate: f.bitrate,
+          averageBitrate: f.averageBitrate || f.average_bitrate,
+          quality: f.quality,
+          qualityLabel: f.qualityLabel || f.quality_label,
+          audioTrackId: (f.audioTrack as Record<string, unknown> | undefined)
+            ?.id,
+          approxDurationMs: f.approxDurationMs || f.approx_duration_ms,
+          contentLength: f.contentLength || f.content_length,
+          isDrc: !!f.isDrc
+        }
+      })
 
       return {
         protocol: 'sabr',
         url: serverAbrUrl,
         additionalData: {
           serverAbrStreamingUrl: serverAbrUrl,
-          videoPlaybackUstreamerConfig: ustreamerConfig,
+          videoPlaybackUstreamerConfig:
+            videoPlaybackConfig?.videoPlaybackUstreamerConfig,
           visitorData: this.getClient(context).client.visitorData,
           clientInfo: { clientName: 3, clientVersion: '20.51.39' },
           formats,

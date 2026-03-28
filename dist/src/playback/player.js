@@ -656,6 +656,8 @@ export class Player {
                 this.profilerStreamStats.lastChunkAt = Date.now();
             });
             streamForResource = fetchedStream.pipe(profilerTap);
+            profilerTap._sourceStream =
+                fetchedStream;
             eventStream.on?.('eternalboxJump', (data) => {
                 this.emitEvent(GatewayEvents.ETERNALBOX_JUMP, {
                     track: this.holoTrack || this.track,
@@ -708,6 +710,11 @@ export class Player {
                         return false;
                     }
                     if (!this.track.info.isSeekable) {
+                        if (this.profilerStreamStats.lastChunkAt &&
+                            Date.now() - this.profilerStreamStats.lastChunkAt < threshold) {
+                            this._stuckTime = 0;
+                            return true;
+                        }
                         logger('warn', 'Player', `Player for guild ${this.guildId} is stuck on a non-seekable track. Stopping track.`);
                         this.emitEvent(GatewayEvents.TRACK_STUCK, {
                             guildId: this.guildId,
@@ -813,15 +820,11 @@ export class Player {
         if (!this.connection) {
             this._initConnection();
         }
-        if (!this.connection ||
-            !this.connection.udpInfo ||
-            !this.connection.udpInfo.secretKey) {
+        if (!this.connection?.udpInfo?.secretKey) {
             logger('debug', 'Player', `Waiting for voice connection to be ready for guild ${this.guildId}`);
             await this.waitEvent('stateChange', (s) => s.status === 'connected' && !!this.connection?.udpInfo?.secretKey);
         }
-        if (!this.connection ||
-            !this.connection.udpInfo ||
-            !this.connection.udpInfo.secretKey) {
+        if (!this.connection?.udpInfo?.secretKey) {
             logger('error', 'Player', `Voice connection for guild ${this.guildId} is not ready, cannot start playback.`);
             this._onError(new Error('Voice connection is not ready.'));
             return false;
@@ -1045,14 +1048,10 @@ export class Player {
         if (!this.connection) {
             this._initConnection();
         }
-        if (!this.connection ||
-            !this.connection.udpInfo ||
-            !this.connection.udpInfo.secretKey) {
+        if (!this.connection?.udpInfo?.secretKey) {
             await this.waitEvent('stateChange', (s) => s.status === 'connected' && !!this.connection?.udpInfo?.secretKey);
         }
-        if (!this.connection ||
-            !this.connection.udpInfo ||
-            !this.connection.udpInfo.secretKey) {
+        if (!this.connection?.udpInfo?.secretKey) {
             const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`;
             logger('error', 'Player', errorMessage);
             this._onError(new Error(errorMessage));
@@ -1166,15 +1165,11 @@ export class Player {
         if (!this.connection) {
             this._initConnection();
         }
-        if (!this.connection ||
-            !this.connection.udpInfo ||
-            !this.connection.udpInfo.secretKey) {
+        if (!this.connection?.udpInfo?.secretKey) {
             logger('debug', 'Player', `Waiting for voice connection to be ready for guild ${this.guildId}`);
             await this.waitEvent('stateChange', (s) => s.status === 'connected' && !!this.connection?.udpInfo?.secretKey);
         }
-        if (!this.connection ||
-            !this.connection.udpInfo ||
-            !this.connection.udpInfo.secretKey) {
+        if (!this.connection?.udpInfo?.secretKey) {
             const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`;
             logger('error', 'Player', errorMessage);
             this._onError(new Error(errorMessage));
@@ -1636,7 +1631,7 @@ export class Player {
         const mixVolume = volume ?? mixConfig.defaultVolume ?? 0.8;
         const { createAudioResource: createResource } = await import("./processing/streamProcessor.js");
         const urlData = await this.nodelink.sources.getTrackUrl(trackPayload.info);
-        if (!urlData || !urlData.url) {
+        if (!urlData?.url) {
             throw new Error('Failed to get stream URL for mix track');
         }
         const fetched = await this.nodelink.sources.getTrackStream(urlData.newTrack?.info || trackPayload.info, urlData.url, urlData.protocol, urlData.additionalData);
@@ -1778,9 +1773,7 @@ export class Player {
      * Synchronizes lyrics with current playback position.
      */
     _syncLyrics(force = false) {
-        if (!this.isLyricsSubscribed ||
-            !this.currentLyrics ||
-            !this.currentLyrics.lines)
+        if (!this.isLyricsSubscribed || !this.currentLyrics?.lines)
             return;
         if (this._lyricsMarkerTimer && !force)
             return;
@@ -1797,9 +1790,7 @@ export class Player {
         const delayMs = Math.max(0, (nextTimestamp - position) / playbackSpeed);
         this._lyricsMarkerTimer = setTimeout(() => {
             this._lyricsMarkerTimer = null;
-            if (!this.isLyricsSubscribed ||
-                !this.currentLyrics ||
-                !this.currentLyrics.lines)
+            if (!this.isLyricsSubscribed || !this.currentLyrics?.lines)
                 return;
             const timedLine = this.currentLyrics.lines[nextIndex];
             if (!timedLine)
@@ -1835,7 +1826,7 @@ export class Player {
      * Recalculates the current lyric line index.
      */
     _recalculateLyricsIndex(positionOverride, linesOverride, allowBackward = false) {
-        if (!this.currentLyrics || !this.currentLyrics.lines)
+        if (!this.currentLyrics?.lines)
             return;
         const lines = linesOverride || this.currentLyrics.lines;
         let position = positionOverride;

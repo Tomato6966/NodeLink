@@ -1,4 +1,4 @@
-import { translateMany, translateText } from '../modules/googleTranslate.js'
+import { translateMany, translateText } from '../modules/googleTranslate.ts'
 import type {
   LetrasCandidate,
   LetrasTrackInfo,

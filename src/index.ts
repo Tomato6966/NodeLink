@@ -2522,7 +2522,7 @@ if (clusterEnabled && cluster.isPrimary) {
   if (config.sources?.youtube?.getOAuthToken) {
     // dynamicly import OAuth (if enabled)
     const OAuth = (
-      await import('./sources/youtube/OAuth.js').catch((e) => {
+      await import('./sources/youtube/OAuth.ts').catch((e) => {
         logger(
           'error',
           'youtube',

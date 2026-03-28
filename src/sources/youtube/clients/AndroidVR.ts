@@ -1,17 +1,61 @@
+/**
+ * YouTube Android VR Client
+ *
+ * Implements the YouTube ANDROID_VR innertube client for Oculus/Meta Quest
+ * virtual reality headset emulation. Provides search, resolve, and track URL
+ * resolution without requiring player script deciphering.
+ *
+ * @packageDocumentation
+ * @module YouTubeAndroidVRClient
+ */
+
+import type {
+  SourceResult,
+  TrackInfo,
+  WorkerNodeLink
+} from '../../../typings/sources/source.types.ts'
+import type {
+  ICipherManager,
+  IOAuth,
+  YouTubeClientContext,
+  YouTubeContext
+} from '../../../typings/sources/youtube.types.ts'
+import type { YouTubeSearchResponse } from '../../../typings/sources/youtubeClient.types.ts'
+import type { HttpProxyConfig } from '../../../typings/utils.types.ts'
 import { logger, makeRequest } from '../../../utils.ts'
 import {
   BaseClient,
   buildTrack,
   checkURLType,
   YOUTUBE_CONSTANTS
-} from '../common.js'
+} from '../common.ts'
 
+/**
+ * YouTube ANDROID_VR innertube client.
+ *
+ * Emulates an Oculus Quest VR headset for YouTube API requests.
+ * Does not require player script for signature deciphering.
+ *
+ * @public
+ */
 export default class AndroidVR extends BaseClient {
-  constructor(nodelink, oauth, youtubeInstance) {
-    super(nodelink, 'ANDROID_VR', oauth, youtubeInstance)
+  /**
+   * Creates a new AndroidVR client instance.
+   *
+   * @param nodelink - NodeLink worker instance providing options and source access
+   * @param oauth - OAuth manager for authenticated requests, or null if unauthenticated
+   */
+  constructor(nodelink: WorkerNodeLink, oauth: IOAuth | null) {
+    super(nodelink, 'ANDROID_VR', oauth)
   }
 
-  getClient(context) {
+  /**
+   * Builds the YouTube client context for ANDROID_VR innertube requests.
+   *
+   * @param context - General YouTube context with language, region, and visitor data
+   * @returns Client context object describing this ANDROID_VR client configuration
+   */
+  override getClient(context: YouTubeContext): YouTubeClientContext {
     return {
       client: {
         clientName: 'ANDROID_VR',
@@ -31,11 +75,28 @@ export default class AndroidVR extends BaseClient {
     }
   }
 
-  requirePlayerScript() {
+  /**
+   * ANDROID_VR client does not require a player script.
+   *
+   * @returns Always false for the ANDROID_VR client
+   */
+  override requirePlayerScript(): boolean {
     return false
   }
 
-  async search(query, _type, context) {
+  /**
+   * Searches YouTube for tracks matching the given query.
+   *
+   * @param query - Search query string (e.g., song name, artist)
+   * @param _type - Search type hint (unused by ANDROID_VR client)
+   * @param context - YouTube context with language and region settings
+   * @returns Search result with tracks or an exception
+   */
+  override async search(
+    query: string,
+    _type: string,
+    context: YouTubeContext
+  ): Promise<SourceResult> {
     const sourceName = 'youtube'
 
     const requestBody = {
@@ -46,7 +107,7 @@ export default class AndroidVR extends BaseClient {
 
     try {
       const {
-        body: searchResult,
+        body: searchResultRaw,
         error,
         statusCode
       } = await makeRequest(
@@ -63,9 +124,11 @@ export default class AndroidVR extends BaseClient {
         }
       )
 
+      const searchResult = searchResultRaw as YouTubeSearchResponse
+
       if (error || statusCode !== 200) {
         const message =
-          error?.message ||
+          error ||
           `Failed to load results from ${sourceName}. Status: ${statusCode}`
         logger('error', 'YouTube-AndroidVR', message)
         return {
@@ -97,9 +160,9 @@ export default class AndroidVR extends BaseClient {
         }
       }
 
-      const tracks = []
+      const tracks: unknown[] = []
       const allSections = searchResult.contents?.sectionListRenderer?.contents
-      const lastIdx = allSections?.length - 1
+      const lastIdx = (allSections?.length ?? 0) - 1
       let videos = allSections?.[lastIdx]?.itemSectionRenderer?.contents
 
       if (!videos || videos.length === 0) {
@@ -111,7 +174,8 @@ export default class AndroidVR extends BaseClient {
         return { loadType: 'empty', data: {} }
       }
 
-      const maxResults = this.config.maxSearchResults || 10
+      const maxResults =
+        (this.config.maxSearchResults as number | undefined) || 10
       if (videos.length > maxResults) {
         let count = 0
         videos = videos.filter((video) => {
@@ -130,7 +194,7 @@ export default class AndroidVR extends BaseClient {
           sourceName,
           null,
           null,
-          this.config.enableHoloTracks
+          this.config.enableHoloTracks as boolean | undefined
         )
         if (track) {
           tracks.push(track)
@@ -147,19 +211,39 @@ export default class AndroidVR extends BaseClient {
       }
 
       return { loadType: 'search', data: tracks }
-    } catch (e) {
+    } catch (e: unknown) {
       logger(
         'error',
         'YouTube-AndroidVR',
-        `Exception during search for '${query}': ${e.message}`
+        `Exception during search for '${query}': ${e instanceof Error ? e.message : String(e)}`
       )
       return {
-        exception: { message: e.message, severity: 'fault', cause: 'Exception' }
+        exception: {
+          message: e instanceof Error ? e.message : String(e),
+          severity: 'fault',
+          cause: 'Exception'
+        }
       }
     }
   }
 
-  async resolve(url, _type, context, cipherManager) {
+  /**
+   * Resolves a YouTube URL to track or playlist data.
+   *
+   * Supports video URLs, short URLs, and playlist URLs.
+   *
+   * @param url - YouTube URL to resolve
+   * @param _type - URL type hint (unused)
+   * @param context - YouTube context with language and region settings
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @returns Resolved track/playlist data or an exception
+   */
+  override async resolve(
+    url: string,
+    _type: string,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null
+  ): Promise<SourceResult> {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = 'https://youtubei.googleapis.com'
@@ -169,7 +253,7 @@ export default class AndroidVR extends BaseClient {
       case YOUTUBE_CONSTANTS.SHORTS: {
         const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/
         const videoIdMatch = url.match(idPattern)
-        if (!videoIdMatch || !videoIdMatch[1]) {
+        if (!videoIdMatch?.[1]) {
           logger(
             'error',
             'YouTube-AndroidVR',
@@ -204,9 +288,9 @@ export default class AndroidVR extends BaseClient {
       }
 
       case YOUTUBE_CONSTANTS.PLAYLIST: {
-        const playlistIdMatch = url.match(/[?&]list=([\w-]+)/) // Corrected escaping for \
+        const playlistIdMatch = url.match(/[?&]list=([\w-]+)/)
 
-        if (!playlistIdMatch || !playlistIdMatch[1]) {
+        if (!playlistIdMatch?.[1]) {
           logger(
             'error',
             'YouTube-AndroidVR',
@@ -222,11 +306,10 @@ export default class AndroidVR extends BaseClient {
         }
 
         const playlistId = playlistIdMatch[1]
-        const videoIdMatch = url.match(/[?&]v=([\w-]+)/) // Corrected escaping for \
-
+        const videoIdMatch = url.match(/[?&]v=([\w-]+)/)
         const currentVideoId = videoIdMatch?.[1] ?? null
 
-        const requestBody = {
+        const requestBody: Record<string, unknown> = {
           context: this.getClient(context),
           playlistId,
           contentCheckOk: true,
@@ -275,7 +358,23 @@ export default class AndroidVR extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
+  /**
+   * Retrieves a playable stream URL for a track.
+   *
+   * @param decodedTrack - Decoded track information with identifier
+   * @param context - YouTube context with language and region settings
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @param itag - Optional specific format itag to request
+   * @param proxy - Optional proxy override for this request
+   * @returns Track URL data with protocol info, or an exception
+   */
+  override async getTrackUrl(
+    decodedTrack: TrackInfo,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null,
+    itag?: number | string,
+    proxy?: HttpProxyConfig
+  ): Promise<Record<string, unknown>> {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',

@@ -2,28 +2,73 @@ import { logger, makeRequest } from "../../utils.js";
 const CLIENT_ID = '861556708454-d6dlm3lh05idd8npek18k6be8ba3oc68.apps.googleusercontent.com';
 const CLIENT_SECRET = 'SboVhoG9s0rNafixCSGGKXAT';
 const SCOPES = 'http://gdata.youtube.com https://www.googleapis.com/auth/youtube';
+/**
+ * Refresh-token helper for authenticated YouTube clients.
+ *
+ * The helper rotates configured refresh tokens, caches access tokens in the
+ * credential manager, and exposes the device-code flow used to mint new
+ * refresh tokens for TV-oriented clients.
+ *
+ * @example
+ * ```typescript
+ * const oauth = new OAuth(nodelink)
+ * const headers = await oauth.getAuthHeaders()
+ * ```
+ *
+ * @public
+ */
 export default class OAuth {
+    /** Runtime configuration and credential hooks consumed by the helper. */
+    nodelink;
+    /** Refresh tokens loaded from the YouTube client settings. */
+    refreshToken;
+    /** Index of the next refresh token candidate to try. */
+    currentTokenIndex;
+    /** In-memory cached access token. */
+    accessToken;
+    /** Epoch timestamp in milliseconds when the in-memory token expires. */
+    tokenExpiry;
+    /**
+     * Creates an OAuth helper bound to the current runtime configuration.
+     *
+     * @param nodelink - Runtime carrying YouTube client settings and credentials.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        const clientSettings = this.nodelink.options.sources.youtube.clients.settings;
+        const clientSettings = this.nodelink.options.sources?.youtube?.clients?.settings ?? {};
         let foundToken = null;
-        if (clientSettings) {
-            for (const clientName in clientSettings) {
-                if (clientSettings[clientName].refreshToken) {
-                    foundToken = clientSettings[clientName].refreshToken;
-                    break;
-                }
+        for (const clientName of Object.keys(clientSettings)) {
+            const refreshToken = clientSettings[clientName]?.refreshToken;
+            if (refreshToken) {
+                foundToken = refreshToken;
+                break;
             }
         }
         this.refreshToken = foundToken
             ? Array.isArray(foundToken)
-                ? foundToken
+                ? foundToken.filter((token) => typeof token === 'string')
                 : [foundToken]
             : [];
         this.currentTokenIndex = 0;
         this.accessToken = null;
         this.tokenExpiry = 0;
     }
+    /**
+     * Resolves a valid OAuth access token for authenticated YouTube requests.
+     *
+     * The helper first checks the in-memory token, then the credential cache,
+     * and finally rotates through configured refresh tokens until one succeeds.
+     *
+     * @example
+     * ```typescript
+     * const accessToken = await oauth.getAccessToken()
+     * if (accessToken) {
+     *   console.log('Authenticated requests enabled')
+     * }
+     * ```
+     *
+     * @returns Access token string, or `null` when authentication is unavailable.
+     */
     async getAccessToken() {
         if (!this.refreshToken.length ||
             (this.refreshToken.length === 1 && this.refreshToken[0] === '')) {
@@ -32,10 +77,10 @@ export default class OAuth {
         if (this.accessToken && Date.now() < this.tokenExpiry) {
             return this.accessToken;
         }
-        const cachedToken = this.nodelink.credentialManager.get('yt_access_token');
-        if (cachedToken) {
+        const cachedToken = this.nodelink.credentialManager?.get('yt_access_token');
+        if (typeof cachedToken === 'string' && cachedToken.length > 0) {
             this.accessToken = cachedToken;
-            this.tokenExpiry = Date.now() + 3500000; // Assume ~1h from now
+            this.tokenExpiry = Date.now() + 3_500_000;
             return this.accessToken;
         }
         const maxTokenAttempts = this.refreshToken.length;
@@ -61,15 +106,19 @@ export default class OAuth {
                             grant_type: 'refresh_token'
                         }
                     });
-                    if (!error && statusCode === 200 && body.access_token) {
-                        this.accessToken = body.access_token;
-                        this.tokenExpiry = Date.now() + body.expires_in * 1000 - 30000;
-                        this.nodelink.credentialManager.set('yt_access_token', this.accessToken, body.expires_in * 1000 - 30000);
+                    const response = (body ?? {});
+                    if (!error &&
+                        statusCode === 200 &&
+                        typeof response.access_token === 'string' &&
+                        typeof response.expires_in === 'number') {
+                        this.accessToken = response.access_token;
+                        this.tokenExpiry = Date.now() + response.expires_in * 1000 - 30000;
+                        this.nodelink.credentialManager?.set('yt_access_token', this.accessToken, response.expires_in * 1000 - 30000);
                         return this.accessToken;
                     }
                 }
-                catch (_e) { }
-                await new Promise((r) => setTimeout(r, 2000));
+                catch { }
+                await new Promise((resolve) => setTimeout(resolve, 2000));
             }
             this.currentTokenIndex =
                 (this.currentTokenIndex + 1) % this.refreshToken.length;
@@ -79,50 +128,89 @@ export default class OAuth {
         this.tokenExpiry = 0;
         return null;
     }
+    /**
+     * Validates whether the currently configured refresh tokens still work.
+     *
+     * @example
+     * ```typescript
+     * const isValid = await oauth.validateCurrentTokens()
+     * console.log(isValid)
+     * ```
+     *
+     * @returns `true` when at least one refresh token can produce an access token.
+     */
     async validateCurrentTokens() {
         if (!this.refreshToken.length ||
             (this.refreshToken.length === 1 && this.refreshToken[0] === '')) {
             return false;
         }
         const token = await this.getAccessToken();
-        if (token) {
-            logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m');
-            logger('info', 'OAuth', '\x1b[1m\x1b[32mYOUR refreshtoken IS VALID :)\x1b[0m');
-            logger('info', 'OAuth', '\x1b[37mPlease disable the \x1b[33mgetOAuthToken\x1b[37m option if you restarted by accident\x1b[0m');
-            logger('info', 'OAuth', "\x1b[37mand didn't change it to \x1b[31mfalse\x1b[37m. If you want to get a second token\x1b[0m");
-            logger('info', 'OAuth', '\x1b[37mfor fallback, follow the same steps and add \x1b[32m, ""\x1b[37m for this new token below.\x1b[0m');
-            logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m');
-            return true;
+        if (!token) {
+            return false;
         }
-        return false;
+        logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m');
+        logger('info', 'OAuth', '\x1b[1m\x1b[32mYOUR refreshtoken IS VALID :)\x1b[0m');
+        logger('info', 'OAuth', '\x1b[37mPlease disable the \x1b[33mgetOAuthToken\x1b[37m option if you restarted by accident\x1b[0m');
+        logger('info', 'OAuth', "\x1b[37mand didn't change it to \x1b[31mfalse\x1b[37m. If you want to get a second token\x1b[0m");
+        logger('info', 'OAuth', '\x1b[37mfor fallback, follow the same steps and add \x1b[32m, ""\x1b[37m for this new token below.\x1b[0m');
+        logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m');
+        return true;
     }
+    /**
+     * Builds the Authorization header map for authenticated client requests.
+     *
+     * @example
+     * ```typescript
+     * const headers = await oauth.getAuthHeaders()
+     * await makeRequest(url, { headers })
+     * ```
+     *
+     * @returns OAuth bearer headers, or an empty object when unauthenticated.
+     */
     async getAuthHeaders() {
         const token = await this.getAccessToken();
-        if (!token)
+        if (!token) {
             return {};
+        }
         return {
             Authorization: `Bearer ${token}`
         };
     }
+    /**
+     * Starts the OAuth device-code flow and returns a newly issued refresh token.
+     *
+     * @example
+     * ```typescript
+     * const refreshToken = await OAuth.acquireRefreshToken()
+     * console.log(refreshToken)
+     * ```
+     *
+     * @returns Refresh token granted by Google's device authorization flow.
+     */
     static async acquireRefreshToken() {
-        const data = {
-            client_id: CLIENT_ID,
-            scope: SCOPES
-        };
-        const { body: response, error, statusCode } = await makeRequest('https://www.youtube.com/o/oauth2/device/code', {
+        const { body, error, statusCode } = await makeRequest('https://www.youtube.com/o/oauth2/device/code', {
             method: 'POST',
-            body: data
+            body: {
+                client_id: CLIENT_ID,
+                scope: SCOPES
+            }
         });
-        if (error || statusCode !== 200 || response.error) {
-            throw new Error(`Error obtaining device code: ${error?.message || response.error_description || 'Invalid response'}`);
+        const response = (body ?? {});
+        if (error ||
+            statusCode !== 200 ||
+            response.error ||
+            typeof response.device_code !== 'string' ||
+            typeof response.user_code !== 'string' ||
+            typeof response.verification_url !== 'string') {
+            throw new Error(`Error obtaining device code: ${error || response.error_description || 'Invalid response'}`);
         }
         logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m');
-        logger('info', 'OAuth', '\x1b[1m\x1b[31m🚨 ALERT: DO NOT USE YOUR MAIN GOOGLE ACCOUNT! USE A SECONDARY OR BURNER ACCOUNT ONLY!\x1b[0m');
+        logger('info', 'OAuth', '\x1b[1m\x1b[31mALERT: DO NOT USE YOUR MAIN GOOGLE ACCOUNT! USE A SECONDARY OR BURNER ACCOUNT ONLY!\x1b[0m');
         logger('info', 'OAuth', '\x1b[36mTo authorize, visit the following URL in your browser:\x1b[0m');
         logger('info', 'OAuth', `\x1b[1m\x1b[32mURL: ${response.verification_url}\x1b[0m`);
         logger('info', 'OAuth', `\x1b[36mAnd enter the code: \x1b[1m\x1b[37m${response.user_code}\x1b[0m`);
         logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m');
-        const refreshToken = await OAuth.pollForToken(response.device_code, response.interval);
+        const refreshToken = await OAuth.pollForToken(response.device_code, response.interval ?? 5);
         logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m');
         logger('info', 'OAuth', '\x1b[1m\x1b[32mAuthorization granted successfully! :)\x1b[0m');
         logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m');
@@ -151,44 +239,62 @@ export default class OAuth {
         logger('info', 'OAuth', '\x1b[33m==================================================================\x1b[0m\n');
         return refreshToken;
     }
+    /**
+     * Polls Google's OAuth token endpoint until device authorization completes.
+     *
+     * @param deviceCode - Device code previously returned by `acquireRefreshToken`.
+     * @param interval - Suggested polling interval in seconds.
+     *
+     * @example
+     * ```typescript
+     * const refreshToken = await OAuth.pollForToken(deviceCode, 5)
+     * ```
+     *
+     * @returns Refresh token string once the user completes authorization.
+     */
     static async pollForToken(deviceCode, interval) {
-        const data = {
-            client_id: CLIENT_ID,
-            client_secret: CLIENT_SECRET,
-            code: deviceCode,
-            grant_type: 'http://oauth.net/grant_type/device/1.0'
-        };
         return new Promise((resolve, reject) => {
             const poll = async () => {
                 logger('info', 'OAuth', '\x1b[35m>>> AWAITING...\x1b[0m waiting for token :P');
                 try {
-                    const { body: response, error, statusCode } = await makeRequest('https://www.youtube.com/o/oauth2/token', {
+                    const { body, error, statusCode } = await makeRequest('https://www.youtube.com/o/oauth2/token', {
                         method: 'POST',
-                        body: data
+                        body: {
+                            client_id: CLIENT_ID,
+                            client_secret: CLIENT_SECRET,
+                            code: deviceCode,
+                            grant_type: 'http://oauth.net/grant_type/device/1.0'
+                        }
                     });
+                    const response = (body ?? {});
                     if (error || statusCode !== 200 || response.error) {
                         if (response.error === 'authorization_pending') {
                             setTimeout(poll, interval * 1000);
+                            return;
                         }
-                        else if (response.error === 'slow_down') {
+                        if (response.error === 'slow_down') {
                             setTimeout(poll, (interval + 5) * 1000);
+                            return;
                         }
-                        else if (response.error === 'expired_token') {
+                        if (response.error === 'expired_token') {
                             reject(new Error('Authorization code expired.'));
+                            return;
                         }
-                        else if (response.error === 'access_denied') {
+                        if (response.error === 'access_denied') {
                             reject(new Error('Access denied.'));
+                            return;
                         }
-                        else {
-                            reject(new Error(`Error during polling: ${response.error_description}`));
-                        }
+                        reject(new Error(`Error during polling: ${response.error_description || error || 'Unknown error'}`));
+                        return;
                     }
-                    else {
-                        logger('info', 'OAuth', '>>> TOKEN RECEIVED :)');
-                        resolve(response.refresh_token);
+                    if (typeof response.refresh_token !== 'string') {
+                        reject(new Error('Refresh token missing from OAuth response.'));
+                        return;
                     }
+                    logger('info', 'OAuth', '>>> TOKEN RECEIVED :)');
+                    resolve(response.refresh_token);
                 }
-                catch (_error) {
+                catch {
                     setTimeout(poll, interval * 1000);
                 }
             };

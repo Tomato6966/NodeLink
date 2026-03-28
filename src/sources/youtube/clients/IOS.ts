@@ -1,12 +1,56 @@
-import { logger, makeRequest } from '../../../utils.ts'
-import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.js'
+/**
+ * YouTube IOS Client
+ *
+ * Implements the YouTube IOS innertube client for iPhone device emulation.
+ * Delegates search to the Web client and handles resolve and track URL
+ * resolution through the IOS innertube API.
+ *
+ * @packageDocumentation
+ * @module YouTubeIOSClient
+ */
 
+import type {
+  SourceResult,
+  TrackInfo,
+  WorkerNodeLink
+} from '../../../typings/sources/source.types.ts'
+import type {
+  ICipherManager,
+  IOAuth,
+  YouTubeClientContext,
+  YouTubeContext
+} from '../../../typings/sources/youtube.types.ts'
+import type { YouTubeClientRegistry } from '../../../typings/sources/youtubeClient.types.ts'
+import type { HttpProxyConfig } from '../../../typings/utils.types.ts'
+import { logger, makeRequest } from '../../../utils.ts'
+import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.ts'
+
+/**
+ * YouTube IOS innertube client.
+ *
+ * Emulates an iPhone device for YouTube API requests.
+ * Search is delegated to the Web client since IOS search API is limited.
+ *
+ * @public
+ */
 export default class IOS extends BaseClient {
-  constructor(nodelink, oauth) {
+  /**
+   * Creates a new IOS client instance.
+   *
+   * @param nodelink - NodeLink worker instance providing options and source access
+   * @param oauth - OAuth manager for authenticated requests, or null if unauthenticated
+   */
+  constructor(nodelink: WorkerNodeLink, oauth: IOAuth | null) {
     super(nodelink, 'IOS', oauth)
   }
 
-  getClient(context) {
+  /**
+   * Builds the YouTube client context for IOS innertube requests.
+   *
+   * @param context - General YouTube context with language, region, and visitor data
+   * @returns Client context object describing this IOS client configuration
+   */
+  override getClient(context: YouTubeContext): YouTubeClientContext {
     return {
       client: {
         clientName: 'IOS',
@@ -27,19 +71,54 @@ export default class IOS extends BaseClient {
     }
   }
 
-  requirePlayerScript() {
+  /**
+   * IOS client does not require a player script.
+   *
+   * @returns Always false for the IOS client
+   */
+  override requirePlayerScript(): boolean {
     return false
   }
 
-  async search(query, type, context) {
-    const webClient = this.nodelink.sources.clients.Web
-    if (webClient) {
+  /**
+   * Searches YouTube for tracks. Delegates to the Web client.
+   *
+   * @param query - Search query string
+   * @param type - Search type hint
+   * @param context - YouTube context with language and region settings
+   * @returns Search result from the Web client, or empty result if unavailable
+   */
+  override async search(
+    query: string,
+    type: string,
+    context: YouTubeContext
+  ): Promise<SourceResult> {
+    const webClient = (
+      this.nodelink.sources as YouTubeClientRegistry | undefined
+    )?.clients?.Web
+    if (webClient?.search) {
       return webClient.search(query, type, context)
     }
     return { loadType: 'empty', data: {} }
   }
 
-  async resolve(url, _type, context, cipherManager) {
+  /**
+   * Resolves a YouTube URL to track or playlist data.
+   *
+   * Supports video URLs, short URLs, and playlist URLs.
+   *
+   * @param url - YouTube URL to resolve
+   * @param _type - URL type hint (unused)
+   * @param context - YouTube context with language and region settings
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @returns Resolved track/playlist data or an exception
+   */
+  override async resolve(
+    url: string,
+    _type: string,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null
+  ): Promise<SourceResult> {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = 'https://youtubei.googleapis.com'
@@ -49,7 +128,7 @@ export default class IOS extends BaseClient {
       case YOUTUBE_CONSTANTS.SHORTS: {
         const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/
         const videoIdMatch = url.match(idPattern)
-        if (!videoIdMatch || !videoIdMatch[1]) {
+        if (!videoIdMatch?.[1]) {
           logger(
             'error',
             'youtube-ios',
@@ -85,7 +164,7 @@ export default class IOS extends BaseClient {
 
       case YOUTUBE_CONSTANTS.PLAYLIST: {
         const playlistIdMatch = url.match(/[?&]list=([\w-]+)/)
-        if (!playlistIdMatch || !playlistIdMatch[1]) {
+        if (!playlistIdMatch?.[1]) {
           logger(
             'error',
             'youtube-ios',
@@ -104,7 +183,7 @@ export default class IOS extends BaseClient {
         const videoIdMatch = url.match(/[?&]v=([\w-]+)/)
         const currentVideoId = videoIdMatch?.[1] ?? null
 
-        const requestBody = {
+        const requestBody: Record<string, unknown> = {
           context: this.getClient(context),
           playlistId,
           contentCheckOk: true,
@@ -153,7 +232,23 @@ export default class IOS extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
+  /**
+   * Retrieves a playable stream URL for a track.
+   *
+   * @param decodedTrack - Decoded track information with identifier
+   * @param context - YouTube context with language and region settings
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @param itag - Optional specific format itag to request
+   * @param proxy - Optional proxy override for this request
+   * @returns Track URL data with protocol info, or an exception
+   */
+  override async getTrackUrl(
+    decodedTrack: TrackInfo,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null,
+    itag?: number | string,
+    proxy?: HttpProxyConfig
+  ): Promise<Record<string, unknown>> {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',

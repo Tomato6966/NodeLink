@@ -1,9 +1,27 @@
 import { logger, makeRequest } from "../../../utils.js";
-import { BaseClient, buildTrack, checkURLType, YOUTUBE_CONSTANTS } from '../common.js';
+import { BaseClient, buildTrack, checkURLType, YOUTUBE_CONSTANTS } from "../common.js";
+/**
+ * YouTube Music (WEB_REMIX) client implementation.
+ *
+ * Uses the YouTube Music innertube API to search for tracks,
+ * resolve playlist URLs, and provide track metadata. This client
+ * does not provide direct stream URLs.
+ *
+ * @public
+ */
 export default class WebRemix extends BaseClient {
+    /**
+     * @param nodelink - NodeLink worker instance providing options, sources, and logging
+     * @param oauth - OAuth manager for authenticated requests, or null if unauthenticated
+     */
     constructor(nodelink, oauth) {
         super(nodelink, 'WEB_REMIX', oauth);
     }
+    /**
+     * Returns the YouTube Music client context for innertube requests.
+     * @param context - General YouTube context with language, region, and visitor data
+     * @returns Client context configured for WEB_REMIX
+     */
     getClient(context) {
         return {
             client: {
@@ -18,9 +36,20 @@ export default class WebRemix extends BaseClient {
             request: { useSsl: true }
         };
     }
+    /**
+     * Whether this client requires a player script for signature deciphering.
+     * @returns false — WEB_REMIX does not need cipher resolution
+     */
     requirePlayerScript() {
         return false;
     }
+    /**
+     * Searches YouTube Music for tracks, playlists, albums, or artists.
+     * @param query - Search query string
+     * @param type - Search type ('track', 'playlist', 'album', 'artist')
+     * @param context - YouTube context with language and region settings
+     * @returns Search results with matched tracks or an exception
+     */
     async search(query, type, context) {
         const sourceName = 'ytmusic';
         let params = 'EgWKAQIIAWoSEAMQBRAEEAkQChAVEBAQDhAR'; // Default (Tracks)
@@ -35,7 +64,7 @@ export default class WebRemix extends BaseClient {
             query: query,
             params
         };
-        const { body: searchResult, error, statusCode } = await makeRequest('https://music.youtube.com/youtubei/v1/search?prettyPrint=false', {
+        const { body: searchResultRaw, error, statusCode } = await makeRequest('https://music.youtube.com/youtubei/v1/search?prettyPrint=false', {
             method: 'POST',
             headers: {
                 'User-Agent': this.getClient(context).client.userAgent,
@@ -46,13 +75,14 @@ export default class WebRemix extends BaseClient {
             proxy: this.getProxy()
         });
         if (error || statusCode !== 200) {
-            const message = error?.message ||
+            const message = error ||
                 `Failed to load results from ${sourceName}. Status: ${statusCode}`;
             logger('error', 'YouTube-Music', message);
             return {
                 exception: { message, severity: 'common', cause: 'Upstream' }
             };
         }
+        const searchResult = searchResultRaw;
         if (searchResult.error) {
             logger('error', 'YouTube-Music', `Error from ${sourceName} search API: ${searchResult.error.message}`);
             return {
@@ -72,8 +102,9 @@ export default class WebRemix extends BaseClient {
             if (!Array.isArray(contents))
                 return null;
             for (const section of contents) {
-                if (section.musicShelfRenderer) {
-                    return section.musicShelfRenderer.contents;
+                const sec = section;
+                if (sec.musicShelfRenderer) {
+                    return sec.musicShelfRenderer.contents;
                 }
             }
             return null;
@@ -91,9 +122,10 @@ export default class WebRemix extends BaseClient {
             return { loadType: 'empty', data: {} };
         }
         for (const video of videos) {
-            const renderer = video.musicResponsiveListItemRenderer ||
-                video.musicTwoColumnItemRenderer ||
-                (video.videoId ? video : null);
+            const v = video;
+            const renderer = v.musicResponsiveListItemRenderer ||
+                v.musicTwoColumnItemRenderer ||
+                (v.videoId ? v : null);
             if (!renderer) {
                 continue;
             }
@@ -104,6 +136,14 @@ export default class WebRemix extends BaseClient {
         }
         return { loadType: 'search', data: tracks };
     }
+    /**
+     * Resolves a YouTube Music URL to track or playlist data.
+     * @param url - YouTube or YouTube Music URL
+     * @param _type - Source type override (unused)
+     * @param context - YouTube context with language and region settings
+     * @param cipherManager - Cipher manager instance (unused for WEB_REMIX)
+     * @returns Resolved track or playlist data, or an exception
+     */
     async resolve(url, _type, context, cipherManager) {
         const sourceName = 'ytmusic';
         const urlType = checkURLType(url, sourceName);
@@ -113,7 +153,7 @@ export default class WebRemix extends BaseClient {
             case YOUTUBE_CONSTANTS.SHORTS: {
                 const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/;
                 const videoIdMatch = url.match(idPattern);
-                if (!videoIdMatch || !videoIdMatch[1]) {
+                if (!videoIdMatch?.[1]) {
                     logger('error', 'YouTube-Music', `Could not parse video ID from URL: ${url}`);
                     return {
                         exception: {
@@ -136,7 +176,7 @@ export default class WebRemix extends BaseClient {
             }
             case YOUTUBE_CONSTANTS.PLAYLIST: {
                 const listIdMatch = url.match(/[?&]list=([\w-]+)/);
-                if (!listIdMatch || !listIdMatch[1]) {
+                if (!listIdMatch?.[1]) {
                     return { loadType: 'empty', data: {} };
                 }
                 const playlistId = listIdMatch[1];
@@ -146,7 +186,7 @@ export default class WebRemix extends BaseClient {
                     enablePersistentPlaylistPanel: true,
                     isAudioOnly: true
                 };
-                const { body: res, statusCode } = await makeRequest('https://music.youtube.com/youtubei/v1/next', {
+                const { body: resRaw, statusCode } = await makeRequest('https://music.youtube.com/youtubei/v1/next', {
                     method: 'POST',
                     body,
                     headers: {
@@ -156,15 +196,24 @@ export default class WebRemix extends BaseClient {
                     disableBodyCompression: true,
                     proxy: this.getProxy()
                 });
-                if (statusCode !== 200 || !res) {
+                if (statusCode !== 200 || !resRaw) {
                     return { loadType: 'empty', data: {} };
                 }
+                const res = resRaw;
                 return await this._handlePlaylistResponse(playlistId, null, res, sourceName, context);
             }
             default:
                 return { loadType: 'empty', data: {} };
         }
     }
+    /**
+     * Retrieves a playable stream URL for a track.
+     * WEB_REMIX does not provide direct track URLs.
+     * @param _decodedTrack - Decoded track information (unused)
+     * @param _context - YouTube context (unused)
+     * @param _cipherManager - Cipher manager instance (unused)
+     * @returns Exception indicating this client cannot resolve stream URLs
+     */
     async getTrackUrl(_decodedTrack, _context, _cipherManager) {
         return {
             exception: {

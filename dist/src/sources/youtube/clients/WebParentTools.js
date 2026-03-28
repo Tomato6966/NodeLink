@@ -1,9 +1,19 @@
 import { makeRequest } from "../../../utils.js";
-import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.js';
+import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from "../common.js";
 export default class WebParentTools extends BaseClient {
+    /**
+     * Creates a new WebParentTools client instance.
+     * @param nodelink - NodeLink worker instance
+     * @param oauth - OAuth manager instance, or null if unauthenticated
+     */
     constructor(nodelink, oauth) {
         super(nodelink, 'WEB_PARENT_TOOLS', oauth);
     }
+    /**
+     * Returns the client-specific context for innertube requests.
+     * @param context - General YouTube context containing locale and visitor data
+     * @returns The YouTubeClientContext for the WEB_PARENT_TOOLS client
+     */
     getClient(context) {
         return {
             client: {
@@ -19,6 +29,21 @@ export default class WebParentTools extends BaseClient {
             }
         };
     }
+    /**
+     * Whether this client requires a player script for signature deciphering.
+     * @returns true, as WEB_PARENT_TOOLS needs the player script
+     */
+    requirePlayerScript() {
+        return true;
+    }
+    /**
+     * Resolves a YouTube URL to track or playlist data.
+     * @param url - The YouTube URL to resolve
+     * @param _type - The type hint (unused in this client)
+     * @param context - YouTube context for API requests
+     * @param cipherManager - Cipher manager for signature deciphering, or null
+     * @returns A SourceResult containing track/playlist data or an exception
+     */
     async resolve(url, _type, context, cipherManager) {
         const sourceName = 'youtube';
         const urlType = checkURLType(url, 'youtube');
@@ -27,7 +52,7 @@ export default class WebParentTools extends BaseClient {
             case YOUTUBE_CONSTANTS.SHORTS: {
                 const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/;
                 const videoIdMatch = url.match(idPattern);
-                if (!videoIdMatch || !videoIdMatch[1]) {
+                if (!videoIdMatch?.[1]) {
                     return {
                         exception: {
                             message: 'Invalid video URL.',
@@ -53,6 +78,15 @@ export default class WebParentTools extends BaseClient {
                 return { loadType: 'empty', data: {} };
         }
     }
+    /**
+     * Resolves a playable stream URL for a decoded track.
+     * @param decodedTrack - Decoded track information containing the video identifier
+     * @param context - YouTube context for API requests
+     * @param cipherManager - Cipher manager for signature deciphering, or null
+     * @param itag - Optional specific format itag to request
+     * @param proxy - Optional proxy configuration for the request
+     * @returns A record containing stream data or an exception
+     */
     async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
         const { body: playerResponse, statusCode } = await this._makePlayerRequest(decodedTrack.identifier, context, {}, cipherManager, proxy);
         if (statusCode !== 200) {
@@ -66,9 +100,15 @@ export default class WebParentTools extends BaseClient {
         }
         return await this._extractStreamData(playerResponse, decodedTrack, context, cipherManager, itag);
     }
-    requirePlayerScript() {
-        return true;
-    }
+    /**
+     * Performs an innertube player request for the WEB_PARENT_TOOLS client.
+     * @param videoId - The YouTube video identifier
+     * @param context - YouTube context for the request
+     * @param headers - Additional HTTP headers to include
+     * @param cipherManager - Cipher manager for signature timestamps, or null
+     * @param proxy - Optional proxy configuration for the request
+     * @returns The HTTP request result containing the player response
+     */
     async _makePlayerRequest(videoId, context, headers, cipherManager, proxy) {
         const requestBody = {
             context: this.getClient(context),
@@ -80,7 +120,8 @@ export default class WebParentTools extends BaseClient {
             const playerScript = await cipherManager.getCachedPlayerScript();
             if (playerScript?.url) {
                 const signatureTimestamp = await cipherManager.getTimestamp(playerScript.url);
-                requestBody.playbackContext = {
+                const body = requestBody;
+                body.playbackContext = {
                     contentPlaybackContext: {
                         signatureTimestamp
                     }
@@ -94,7 +135,7 @@ export default class WebParentTools extends BaseClient {
                 'User-Agent': this.getClient(context).client.userAgent,
                 'X-YouTube-Client-Name': '88',
                 'X-YouTube-Client-Version': '1.20220918',
-                'X-Goog-Visitor-Id': context.client.visitorData,
+                'X-Goog-Visitor-Id': context.client.visitorData ?? '',
                 Origin: 'https://www.youtube.com',
                 Referer: 'https://www.youtube.com/',
                 ...headers

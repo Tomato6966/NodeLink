@@ -25,7 +25,6 @@ import type {
   LyricsPayload,
   NodeLink,
   PlayerOptions,
-  PlayerPluginInfo,
   PlayerStateJSON,
   PlayerTrack,
   PlayerVoiceState,
@@ -241,11 +240,9 @@ export class Player {
   private _getAudioStream(): ExtendedAudioStream | null {
     return (this.connection?.audioStream as ExtendedAudioStream | null) ?? null
   }
-
   private _getPluginInfo(track: PlayerTrack | null): PlayerPluginInfo {
     return (track?.pluginInfo || {}) as PlayerPluginInfo
   }
-
   /**
    * Initializes the audio mixer instance used for mix layers and fading.
    */
@@ -955,6 +952,8 @@ export class Player {
         this.profilerStreamStats.lastChunkAt = Date.now()
       })
       streamForResource = (fetchedStream as Readable).pipe(profilerTap)
+      ;(profilerTap as unknown as Record<string, unknown>)._sourceStream =
+        fetchedStream
 
       eventStream.on?.('eternalboxJump', (data: unknown) => {
         this.emitEvent(GatewayEvents.ETERNALBOX_JUMP, {
@@ -1033,6 +1032,14 @@ export class Player {
           }
 
           if (!this.track.info.isSeekable) {
+            if (
+              this.profilerStreamStats.lastChunkAt &&
+              Date.now() - this.profilerStreamStats.lastChunkAt < threshold
+            ) {
+              this._stuckTime = 0
+              return true
+            }
+
             logger(
               'warn',
               'Player',
@@ -1175,11 +1182,7 @@ export class Player {
       this._initConnection()
     }
 
-    if (
-      !this.connection ||
-      !this.connection.udpInfo ||
-      !this.connection.udpInfo.secretKey
-    ) {
+    if (!this.connection?.udpInfo?.secretKey) {
       logger(
         'debug',
         'Player',
@@ -1193,11 +1196,7 @@ export class Player {
       )
     }
 
-    if (
-      !this.connection ||
-      !this.connection.udpInfo ||
-      !this.connection.udpInfo.secretKey
-    ) {
+    if (!this.connection?.udpInfo?.secretKey) {
       logger(
         'error',
         'Player',
@@ -1541,11 +1540,7 @@ export class Player {
       this._initConnection()
     }
 
-    if (
-      !this.connection ||
-      !this.connection.udpInfo ||
-      !this.connection.udpInfo.secretKey
-    ) {
+    if (!this.connection?.udpInfo?.secretKey) {
       await this.waitEvent(
         'stateChange',
         (s: VoiceConnectionState) =>
@@ -1553,11 +1548,7 @@ export class Player {
       )
     }
 
-    if (
-      !this.connection ||
-      !this.connection.udpInfo ||
-      !this.connection.udpInfo.secretKey
-    ) {
+    if (!this.connection?.udpInfo?.secretKey) {
       const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`
       logger('error', 'Player', errorMessage)
       this._onError(new Error(errorMessage))
@@ -1755,11 +1746,7 @@ export class Player {
       this._initConnection()
     }
 
-    if (
-      !this.connection ||
-      !this.connection.udpInfo ||
-      !this.connection.udpInfo.secretKey
-    ) {
+    if (!this.connection?.udpInfo?.secretKey) {
       logger(
         'debug',
         'Player',
@@ -1772,11 +1759,7 @@ export class Player {
       )
     }
 
-    if (
-      !this.connection ||
-      !this.connection.udpInfo ||
-      !this.connection.udpInfo.secretKey
-    ) {
+    if (!this.connection?.udpInfo?.secretKey) {
       const errorMessage = `Voice connection for guild ${this.guildId} is not ready (missing UDP info). Aborting playback.`
       logger('error', 'Player', errorMessage)
       this._onError(new Error(errorMessage))
@@ -2359,7 +2342,7 @@ export class Player {
     )
 
     const urlData = await this.nodelink.sources.getTrackUrl(trackPayload.info)
-    if (!urlData || !urlData.url) {
+    if (!urlData?.url) {
       throw new Error('Failed to get stream URL for mix track')
     }
 
@@ -2554,12 +2537,7 @@ export class Player {
    * Synchronizes lyrics with current playback position.
    */
   private _syncLyrics(force = false): void {
-    if (
-      !this.isLyricsSubscribed ||
-      !this.currentLyrics ||
-      !this.currentLyrics.lines
-    )
-      return
+    if (!this.isLyricsSubscribed || !this.currentLyrics?.lines) return
     if (this._lyricsMarkerTimer && !force) return
 
     const timescale = this._getTimescale()
@@ -2577,12 +2555,7 @@ export class Player {
 
     this._lyricsMarkerTimer = setTimeout(() => {
       this._lyricsMarkerTimer = null
-      if (
-        !this.isLyricsSubscribed ||
-        !this.currentLyrics ||
-        !this.currentLyrics.lines
-      )
-        return
+      if (!this.isLyricsSubscribed || !this.currentLyrics?.lines) return
       const timedLine = this.currentLyrics.lines[nextIndex]
       if (!timedLine) return
       const nowPosition = this._getLyricsPosition(playbackSpeed)
@@ -2626,7 +2599,7 @@ export class Player {
     linesOverride?: LyricsLine[],
     allowBackward = false
   ): void {
-    if (!this.currentLyrics || !this.currentLyrics.lines) return
+    if (!this.currentLyrics?.lines) return
 
     const lines = linesOverride || this.currentLyrics.lines
     let position = positionOverride

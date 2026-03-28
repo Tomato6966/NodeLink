@@ -1,29 +1,46 @@
 import { PassThrough } from 'node:stream';
 import HLSHandler from "../../playback/hls/HLSHandler.js";
 import { getBestMatch, http1makeRequest, logger, makeRequest } from "../../utils.js";
-import CipherManager from './CipherManager.js';
-import Android from './clients/Android.js';
-import AndroidVR from './clients/AndroidVR.js';
-import IOS from './clients/IOS.js';
-import Music from './clients/Music.js';
-import TV from './clients/TV.js';
-import TVCast from './clients/TVCast.js';
-import Web from './clients/Web.js';
-import WebRemix from './clients/Web_Remix.js';
-import WebEmbedded from './clients/WebEmbedded.js';
-import { checkURLType, YOUTUBE_CONSTANTS } from './common.js';
-import YouTubeLiveChat from './LiveChat.js';
-import OAuth from './OAuth.js';
+import CipherManager from "./CipherManager.js";
+import Android from "./clients/Android.js";
+import AndroidVR from "./clients/AndroidVR.js";
+import IOS from "./clients/IOS.js";
+import Music from "./clients/Music.js";
+import TV from "./clients/TV.js";
+import TVCast from "./clients/TVCast.js";
+import Web from "./clients/Web.js";
+import WebRemix from "./clients/Web_Remix.js";
+import WebEmbedded from "./clients/WebEmbedded.js";
+import { checkURLType, YOUTUBE_CONSTANTS } from "./common.js";
+import YouTubeLiveChat from "./LiveChat.js";
+import OAuth from "./OAuth.js";
 import { SabrStream } from './sabr/sabr.js';
+/** Size in bytes of each range-request chunk for direct HTTP streaming. */
 const CHUNK_SIZE = 64 * 1024;
+/** Maximum consecutive errors before triggering URL recovery. */
 const MAX_RETRIES = 3;
+/** Maximum number of URL refresh attempts during recovery. */
 const MAX_URL_REFRESH = 10;
-const VISITOR_DATA_INTERVAL = 3600000;
+/** Interval in milliseconds between visitor data refreshes. */
+const VISITOR_DATA_INTERVAL = 3_600_000;
+/**
+ * Manages a scored pool of proxies with automatic health tracking.
+ *
+ * Proxies are scored from 0 to 100; failed requests decrease the score and
+ * successful ones restore it. When selecting a proxy the top-3 healthiest
+ * candidates are picked at random to spread the load.
+ */
 class YouTubeProxyManager {
-    constructor(proxies) {
-        this.proxies = (proxies || []).map((p) => ({
+    /** Internal pool of proxy entries with health metrics. */
+    proxies;
+    /**
+     * Creates a new proxy manager from raw configuration entries.
+     * @param rawProxies - Array of proxy URLs or configuration objects.
+     */
+    constructor(rawProxies) {
+        this.proxies = (rawProxies || []).map((p) => ({
             url: typeof p === 'string' ? p : p.url,
-            type: p.type || 'forward',
+            type: (typeof p === 'string' ? 'forward' : p.type || 'forward'),
             failures: 0,
             lastFailure: 0,
             activeRequests: 0,
@@ -31,15 +48,24 @@ class YouTubeProxyManager {
             latency: 0
         }));
     }
+    /**
+     * Selects the healthiest available proxy from the pool.
+     *
+     * Filters out proxies that have been recently penalized (score 0 with
+     * recent failures), sorts by score then active requests then latency,
+     * and randomly picks one of the top-3 candidates to spread load.
+     *
+     * @returns A shallow copy {@link ProxySnapshot} of the selected proxy, or `undefined` if the pool is empty.
+     */
     getBestProxy() {
         if (!this.proxies.length)
             return undefined;
         const now = Date.now();
         const available = this.proxies.filter((p) => {
             if (p.score <= 0)
-                return now - p.lastFailure > 600000;
+                return now - p.lastFailure > 600_000;
             if (p.failures > 5)
-                return now - p.lastFailure > 60000;
+                return now - p.lastFailure > 60_000;
             return true;
         });
         const list = available.length ? available : this.proxies;
@@ -52,9 +78,23 @@ class YouTubeProxyManager {
         });
         const topCount = Math.min(3, list.length);
         const selected = list[Math.floor(Math.random() * topCount)];
+        if (!selected)
+            return undefined;
         selected.activeRequests++;
         return { ...selected };
     }
+    /**
+     * Reports the outcome of a proxy request for health tracking.
+     *
+     * Successful requests restore 5 score points; failures apply a penalty
+     * proportional to the HTTP status code (403 = 50, 429 = 30, 503 = 20, other = 10).
+     * The latency is exponentially smoothed into the proxy's running average.
+     *
+     * @param proxyUrl - Full URL of the proxy used.
+     * @param success - Whether the request succeeded.
+     * @param status - HTTP status code of the response.
+     * @param latency - Round-trip latency in milliseconds (defaults to 0).
+     */
     report(proxyUrl, success, status, latency = 0) {
         const p = this.proxies.find((pr) => pr.url === proxyUrl);
         if (!p)
@@ -82,10 +122,57 @@ class YouTubeProxyManager {
         }
     }
 }
+/**
+ * YouTube source implementation for NodeLink.
+ *
+ * Provides search, resolve, and stream-loading capabilities using a pool of
+ * interchangeable innertube clients (Android, Web, TV, etc.) with automatic
+ * fallback, proxy health tracking, and SABR/HLS protocol support.
+ *
+ * @public
+ */
 export default class YouTubeSource {
+    /** Reference to the global NodeLink context used for configuration, caching, and source delegation. */
+    nodelink;
+    /** YouTube-specific configuration block from `nodelink.options.sources.youtube`. */
+    config;
+    /** Scored proxy pool manager with automatic health tracking and load balancing. */
+    proxyManager;
+    /** Instantiated YouTube innertube client objects keyed by class name (e.g. `Android`, `Web`). */
+    // biome-ignore lint/suspicious/noExplicitAny: JS client class instances have heterogeneous method shapes
+    clients;
+    /** OAuth helper for authenticated client requests, or `null` when not configured. */
+    oauth;
+    /** Interval handle for periodic visitor data refresh, or `null` when not running. */
+    visitorDataInterval;
+    /** Cipher/signature decryption manager shared across all innertube clients. */
+    cipherManager;
+    /** Live chat connection handler for YouTube live streams. */
+    liveChat;
+    /** Map of active download streams keyed by a unique symbol or string, used for cancellation. */
+    activeStreams;
+    /** Set of fallback-mirror lookup keys currently in flight, used to prevent infinite recursion loops. */
+    mirrorFallbackInFlight;
+    /** YouTube innertube request context sent with every API call (device info, locale, visitor data). */
+    ytContext;
+    // -- Public fields consumed by the framework --
+    /** Additional source names this source can proxy through (e.g. `['ytmusic']`). */
+    additionalsSourceName;
+    /** Search term aliases recognized by the framework (e.g. `['ytsearch', 'ytmsearch']`). */
+    searchTerms;
+    /** Recommendation term aliases recognized by the framework (e.g. `['ytrec']`). */
+    recommendationTerm;
+    /** URL regex patterns this source can handle (YouTube watch, shorts, live, music URLs). */
+    patterns;
+    /** Source priority for URL matching (higher = preferred). */
+    priority;
+    /**
+     * Creates a new YouTube source instance.
+     * @param nodelink - Runtime NodeLink context providing configuration and utilities.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        this.config = nodelink.options.sources.youtube;
+        this.config = nodelink.options.sources?.youtube;
         this.proxyManager = new YouTubeProxyManager(this.config.proxies || []);
         this.additionalsSourceName = ['ytmusic'];
         this.searchTerms = ['ytsearch', 'ytmsearch'];
@@ -100,10 +187,12 @@ export default class YouTubeSource {
         this.oauth = null;
         this.visitorDataInterval = null;
         this.cipherManager = new CipherManager(nodelink);
-        this.liveChat = new YouTubeLiveChat(nodelink, this);
+        this.liveChat = new YouTubeLiveChat(nodelink, {
+            getProxy: this.getProxy.bind(this),
+            getContext: () => this.ytContext
+        });
         this.activeStreams = new Map();
         this.mirrorFallbackInFlight = new Set();
-        this.proxyIndex = 0;
         this.ytContext = {
             client: {
                 screenDensityFloat: 1,
@@ -116,14 +205,32 @@ export default class YouTubeSource {
             }
         };
     }
-    getProxy(rotate = true) {
-        return this.proxyManager.getBestProxy(rotate);
+    /**
+     * Returns the healthiest available proxy from the managed pool.
+     * @param _rotate - Whether to rotate the proxy selection (currently unused, kept for interface compatibility).
+     * @returns A {@link ProxySnapshot} of the selected proxy, or `undefined` if no proxies are configured.
+     */
+    getProxy(_rotate = true) {
+        return this.proxyManager.getBestProxy();
     }
+    /**
+     * Reports the outcome of a proxied request for health tracking.
+     * @param proxy - The proxy snapshot used for the request, or `undefined` if no proxy was used.
+     * @param success - Whether the request succeeded.
+     * @param status - HTTP status code returned.
+     * @param latency - Round-trip latency in milliseconds.
+     */
     reportProxyStatus(proxy, success, status, latency = 0) {
         if (proxy?.url) {
             this.proxyManager.report(proxy.url, success, status, latency);
         }
     }
+    /**
+     * Initializes the YouTube source by instantiating innertube clients,
+     * fetching visitor data, caching the player script, and starting
+     * periodic visitor data refresh.
+     * @returns Promise resolving to `true` when setup completes successfully.
+     */
     async setup() {
         logger('info', 'YouTube', 'Setting up YouTube source...');
         this.oauth = new OAuth(this.nodelink);
@@ -138,8 +245,11 @@ export default class YouTubeSource {
             Web,
             WebEmbedded
         };
-        for (const clientName in clientClasses) {
-            this.clients[clientName] = new clientClasses[clientName](this.nodelink, this.oauth);
+        for (const clientName of Object.keys(clientClasses)) {
+            const ClientCtor = clientClasses[clientName];
+            if (!ClientCtor)
+                continue;
+            this.clients[clientName] = new ClientCtor(this.nodelink, this.oauth);
         }
         logger('debug', 'YouTube', `Initialized clients: ${Object.keys(this.clients).join(', ')}`);
         await this._fetchVisitorData();
@@ -154,6 +264,10 @@ export default class YouTubeSource {
         logger('info', 'YouTube', 'YouTube source setup complete.');
         return true;
     }
+    /**
+     * Tears down the YouTube source by aborting active streams, clearing
+     * the visitor data interval, and cleaning up OAuth and cipher resources.
+     */
     cleanup() {
         logger('info', 'YouTube', 'Cleaning up YouTube source...');
         for (const [, cancelSignal] of this.activeStreams.entries()) {
@@ -168,9 +282,17 @@ export default class YouTubeSource {
             this.oauth.cleanup?.();
         this.cipherManager?.cleanup?.();
     }
+    /**
+     * Fetches visitor data and player script URL from YouTube embed pages.
+     *
+     * Tries the embed endpoint first, then falls back to the guide API.
+     * Both visitor data and player script URL are cached in the credential
+     * manager for use by innertube clients.
+     *
+     * @returns Promise that resolves when the fetch attempt completes.
+     */
     async _fetchVisitorData() {
-        const _cachedVisitorData = this.nodelink.credentialManager.get('yt_visitor_data');
-        const cachedPlayerScript = this.nodelink.credentialManager.get('yt_player_script_url');
+        const cachedPlayerScript = this.nodelink.credentialManager?.get('yt_player_script_url');
         if (cachedPlayerScript) {
             this.cipherManager.setPlayerScriptUrl(cachedPlayerScript);
             logger('debug', 'YouTube', 'Player script URL loaded from cache.');
@@ -185,17 +307,18 @@ export default class YouTubeSource {
                 }
             });
             if (!error && statusCode === 200) {
-                const visitorMatch = data?.match(/"VISITOR_DATA":"([^"]+)"/);
+                const bodyStr = data;
+                const visitorMatch = bodyStr?.match(/"VISITOR_DATA":"([^"]+)"/);
                 if (visitorMatch?.[1]) {
                     this.ytContext.client.visitorData = visitorMatch[1];
-                    this.nodelink.credentialManager.set('yt_visitor_data', visitorMatch[1], 60 * 60 * 1000);
+                    this.nodelink.credentialManager?.set('yt_visitor_data', visitorMatch[1], 60 * 60 * 1000);
                     visitorFound = true;
                     logger('debug', 'YouTube', 'visitorData refreshed and cached.');
                 }
-                const playerScriptMatch = data?.match(/"jsUrl":"([^"]+)"/);
+                const playerScriptMatch = bodyStr?.match(/"jsUrl":"([^"]+)"/);
                 if (playerScriptMatch?.[1]) {
                     playerScriptUrl = playerScriptMatch[1].replace(/\/[a-z]{2}_[A-Z]{2}\//, '/en_US/');
-                    this.nodelink.credentialManager.set('yt_player_script_url', playerScriptUrl, 12 * 60 * 60 * 1000);
+                    this.nodelink.credentialManager?.set('yt_player_script_url', playerScriptUrl, 12 * 60 * 60 * 1000);
                     logger('debug', 'YouTube', `Player script URL: ${playerScriptUrl}`);
                 }
             }
@@ -208,12 +331,13 @@ export default class YouTubeSource {
                     body: { context: this.ytContext },
                     disableBodyCompression: true
                 });
+                const guideBody = guideData;
                 if (!guideError &&
                     guideStatusCode === 200 &&
-                    guideData.responseContext?.visitorData) {
+                    guideBody?.responseContext?.visitorData) {
                     this.ytContext.client.visitorData =
-                        guideData.responseContext.visitorData;
-                    this.nodelink.credentialManager.set('yt_visitor_data', guideData.responseContext.visitorData, 60 * 60 * 1000);
+                        guideBody.responseContext.visitorData;
+                    this.nodelink.credentialManager?.set('yt_visitor_data', guideBody.responseContext.visitorData, 60 * 60 * 1000);
                     visitorFound = true;
                     logger('debug', 'YouTube', 'visitorData refreshed via guide and cached.');
                 }
@@ -229,6 +353,18 @@ export default class YouTubeSource {
         if (playerScriptUrl)
             this.cipherManager.setPlayerScriptUrl(playerScriptUrl);
     }
+    /**
+     * Searches YouTube for tracks, playlists, or recommendations.
+     *
+     * Iterates through the configured search clients in priority order,
+     * returning the first successful result. For YouTube Music searches
+     * (`ytmsearch`), only WebRemix and Music clients are used.
+     *
+     * @param query - Search query string.
+     * @param type - Search term alias (`'ytsearch'`, `'ytmsearch'`, `'ytrec'`).
+     * @param searchType - Content type to search for (`'track'`, `'playlist'`, etc.).
+     * @returns Promise resolving to a source result with search results or an exception.
+     */
     async search(query, type, searchType = 'track') {
         if (type === 'ytrec') {
             return this.getRecommendations(query);
@@ -250,12 +386,16 @@ export default class YouTubeSource {
                     logger('debug', 'YouTube', `Search successful with client: ${clientName}`);
                     return result;
                 }
-                const errorMessage = result?.data?.message || 'Client returned empty or failed.';
+                const errorMessage = result?.data?.message ||
+                    'Client returned empty or failed.';
                 clientErrors.push({ client: clientName, message: errorMessage });
                 logger('debug', 'YouTube', `Client ${clientName} returned empty or failed search.`);
             }
             catch (e) {
-                clientErrors.push({ client: clientName, message: e.message });
+                clientErrors.push({
+                    client: clientName,
+                    message: e.message
+                });
                 logger('warn', 'YouTube', `Client ${clientName} threw an exception during search: ${e.message}`);
             }
         }
@@ -269,11 +409,22 @@ export default class YouTubeSource {
             }
         };
     }
+    /**
+     * Fetches YouTube auto-mix recommendations for a given video or query.
+     *
+     * Constructs an auto-mix playlist ID (`RD{videoId}`) and attempts to
+     * resolve it through music and TV clients in priority order. If the
+     * query is not a valid video ID, performs a search first to resolve one.
+     *
+     * @param query - YouTube video ID or search query string.
+     * @returns Promise resolving to a playlist result with recommendations, or an empty result.
+     */
     async getRecommendations(query) {
         let videoId = query;
         if (!/^[a-zA-Z0-9_-]{11}$/.test(query)) {
             const searchRes = await this.search(query, 'ytmsearch');
-            if (searchRes.loadType !== 'search' || !searchRes.data.length) {
+            if (searchRes.loadType !== 'search' ||
+                !searchRes.data?.length) {
                 return { loadType: 'empty', data: {} };
             }
             videoId = searchRes.data[0].info.identifier;
@@ -281,10 +432,11 @@ export default class YouTubeSource {
         try {
             const automixId = `RD${videoId}`;
             let automixRes = null;
-            // Try WebRemix first, then Music
             if (this.clients.WebRemix || this.clients.Music) {
                 try {
-                    const musicClient = this.clients.WebRemix || this.clients.Music;
+                    const musicClient = this.clients.WebRemix ?? this.clients.Music;
+                    if (!musicClient)
+                        throw new Error('no music client');
                     const clientName = this.clients.WebRemix ? 'WebRemix' : 'Music';
                     logger('debug', 'YouTube', `Attempting recommendations with ${clientName} client`);
                     automixRes = await musicClient.resolve(`https://music.youtube.com/playlist?list=${automixId}`, 'ytmusic', this.ytContext, this.cipherManager);
@@ -296,7 +448,9 @@ export default class YouTubeSource {
             if ((!automixRes || automixRes.loadType !== 'playlist') &&
                 (this.clients.TV || this.clients.TVCast || this.clients.WebRemix)) {
                 try {
-                    const tvClient = this.clients.TV || this.clients.TVCast;
+                    const tvClient = this.clients.TV ?? this.clients.TVCast;
+                    if (!tvClient)
+                        throw new Error('no tv client');
                     const clientName = this.clients.TV ? 'TV' : 'TVCast';
                     logger('debug', 'YouTube', `Attempting recommendations with ${clientName} client`);
                     automixRes = await tvClient.resolve(`https://www.youtube.com/playlist?list=${automixId}`, 'youtube', this.ytContext, this.cipherManager);
@@ -305,10 +459,12 @@ export default class YouTubeSource {
                     logger('debug', 'YouTube', `TV client failed for recommendations: ${e.message}`);
                 }
             }
+            const automixData = automixRes?.data;
             if (automixRes &&
                 automixRes.loadType === 'playlist' &&
-                automixRes.data.tracks.length > 0) {
-                const tracks = automixRes.data.tracks.filter((t) => t.info.identifier !== videoId);
+                automixData?.tracks &&
+                automixData.tracks.length > 0) {
+                const tracks = automixData.tracks.filter((t) => t.info.identifier !== videoId);
                 return {
                     loadType: 'playlist',
                     data: {
@@ -322,9 +478,22 @@ export default class YouTubeSource {
         }
         catch (e) {
             logger('error', 'YouTube', `Recommendations failed: ${e.message}`);
-            return { exception: { message: e.message, severity: 'fault' } };
+            return {
+                exception: { message: e.message, severity: 'fault' }
+            };
         }
     }
+    /**
+     * Resolves a YouTube or YouTube Music URL into a track or playlist result.
+     *
+     * Normalizes live URLs, detects music URLs for specialized client routing,
+     * and iterates through configured clients with automatic fallback between
+     * music and standard YouTube clients when playability errors occur.
+     *
+     * @param url - YouTube or YouTube Music URL to resolve.
+     * @param type - Optional source type override (e.g. `'youtube-fallback'` for recursive fallback).
+     * @returns Promise resolving to a source result with track/playlist data or an exception.
+     */
     async resolve(url, type) {
         const liveMatch = url.match(/^https?:\/\/(?:www\.)?youtube\.com\/live\/([\w-]+)/);
         if (liveMatch) {
@@ -379,6 +548,7 @@ export default class YouTubeSource {
                                     fallbackResult.loadType === 'empty')) {
                                 if (fallbackResult.loadType === 'track' &&
                                     fallbackResult.data?.info) {
+                                    ;
                                     fallbackResult.data.info.sourceName = 'ytmusic';
                                     fallbackResult.data.info.uri = url;
                                 }
@@ -402,11 +572,13 @@ export default class YouTubeSource {
                     logger('debug', 'YouTube', `${clientName} client returned empty or failed for Music URL.`);
                 }
                 catch (e) {
-                    clientErrors.push({ client: clientName, message: e.message });
+                    clientErrors.push({
+                        client: clientName,
+                        message: e.message
+                    });
                     logger('warn', 'YouTube', `${clientName} client threw an exception during Music URL resolve: ${e.message}`);
                 }
             }
-            // If we get here, both clients failed
             const msg = 'All music clients failed for direct Music URL.';
             logger('error', 'YouTube', msg);
             return {
@@ -431,12 +603,16 @@ export default class YouTubeSource {
                         logger('debug', 'YouTube', 'Successfully resolved playlist with Android client.');
                         return result;
                     }
-                    const errorMessage = result?.data?.message || 'Android client failed for playlist.';
+                    const errorMessage = result?.data?.message ||
+                        'Android client failed for playlist.';
                     clientErrors.push({ client: 'Android', message: errorMessage });
                     logger('debug', 'YouTube', 'Android client returned empty or failed to resolve playlist.');
                 }
                 catch (e) {
-                    clientErrors.push({ client: 'Android', message: e.message });
+                    clientErrors.push({
+                        client: 'Android',
+                        message: e.message
+                    });
                     logger('warn', 'YouTube', `Android client threw an exception during playlist resolve: ${e.message}`);
                 }
             }
@@ -463,7 +639,7 @@ export default class YouTubeSource {
             }
             try {
                 logger('debug', 'YouTube', `Attempting to resolve URL with client: ${clientName}`);
-                const result = await client.resolve(processUrl, sourceType, this.ytContext, this.cipherManager);
+                const result = await client.resolve(processUrl, sourceType, this.ytContext, this.cipherManager, this.reportProxyStatus.bind(this));
                 if (result &&
                     (result.loadType === 'track' ||
                         result.loadType === 'playlist' ||
@@ -471,12 +647,16 @@ export default class YouTubeSource {
                     logger('debug', 'YouTube', `Successfully resolved URL with client: ${clientName}`);
                     return result;
                 }
-                const errorMessage = result?.data?.message || 'Client returned empty or failed.';
+                const errorMessage = result?.data?.message ||
+                    'Client returned empty or failed.';
                 clientErrors.push({ client: clientName, message: errorMessage });
                 logger('debug', 'YouTube', `Client ${clientName} returned empty or failed to resolve URL.`);
             }
             catch (e) {
-                clientErrors.push({ client: clientName, message: e.message });
+                clientErrors.push({
+                    client: clientName,
+                    message: e.message
+                });
                 logger('warn', 'YouTube', `Client ${clientName} threw an exception during resolve: ${e.message}`);
             }
         }
@@ -490,6 +670,13 @@ export default class YouTubeSource {
             }
         };
     }
+    /**
+     * Enriches a basic track with "Holo" metadata by querying the Web client
+     * player API. Falls back to the original track if enrichment fails.
+     * @param vanillaTrack - Basic track object with `info` and optional `userData`.
+     * @param options - Optional overrides for channel info and external link resolution.
+     * @returns Promise resolving to the enriched track or the original if enrichment fails.
+     */
     async resolveHoloTrack(vanillaTrack, options = {}) {
         try {
             const { info, userData } = vanillaTrack;
@@ -499,11 +686,14 @@ export default class YouTubeSource {
                 return vanillaTrack;
             }
             const videoId = info.identifier;
-            const playerResponse = await webClient._makePlayerRequest(videoId, this.ytContext, {}, this.cipherManager);
-            if (!playerResponse || playerResponse.error)
+            const playerResult = await webClient._makePlayerRequest?.(videoId, this.ytContext, {}, this.cipherManager);
+            const playerBody = playerResult?.body;
+            if (!playerBody || playerBody.error)
                 return vanillaTrack;
-            const { buildHoloTrack } = await import('./common.js');
-            const holoTrack = await buildHoloTrack(info, null, info.sourceName === 'ytmusic' ? 'ytmusic' : 'youtube', playerResponse, {
+            const { buildHoloTrack } = await import("./common.js");
+            const holoTrack = await buildHoloTrack(info, null, info.sourceName === 'ytmusic' ? 'ytmusic' : 'youtube', 
+            // biome-ignore lint/suspicious/noExplicitAny: buildHoloTrack is dynamically imported from JS with inferred null-typed param
+            playerBody, {
                 fetchChannelInfo: options.fetchChannelInfo ?? false,
                 resolveExternalLinks: options.resolveExternalLinks ?? false
             });
@@ -516,21 +706,32 @@ export default class YouTubeSource {
             return vanillaTrack;
         }
     }
+    /**
+     * Resolves the playable stream URL for a decoded track.
+     *
+     * Checks the track cache first (unless `forceRefresh` is set), then
+     * iterates through configured playback clients. Validates direct URLs
+     * with a pre-flight range request and falls back to HLS when direct
+     * URLs return 403. If all clients fail, attempts mirror-source fallback.
+     *
+     * @param decodedTrack - Track metadata to resolve.
+     * @param itag - Optional specific format itag to request.
+     * @param forceRefresh - When `true`, bypasses the track cache and forces a fresh URL fetch.
+     * @returns Promise resolving to track URL data with stream info or an exception.
+     */
     async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
         if (!forceRefresh) {
-            const cached = this.nodelink.trackCacheManager.get('youtube', decodedTrack.identifier);
+            const cached = this.nodelink.trackCacheManager?.get('youtube', decodedTrack.identifier);
             if (cached) {
                 const cachedProxyUrl = cached.additionalData?.proxy?.url;
                 const currentProxies = this.config.proxies || [];
                 const isProxyStillValid = !cachedProxyUrl ||
-                    currentProxies.some((p) => p.url === cachedProxyUrl);
+                    currentProxies.some((p) => (typeof p === 'string' ? p : p.url) === cachedProxyUrl);
                 if (isProxyStillValid) {
                     logger('debug', 'YouTube', `Using cached URL for ${decodedTrack.identifier}`);
                     return cached;
                 }
-                else {
-                    logger('debug', 'YouTube', `Cached proxy for ${decodedTrack.identifier} is no longer in config. Forcing refresh...`);
-                }
+                logger('debug', 'YouTube', `Cached proxy for ${decodedTrack.identifier} is no longer in config. Forcing refresh...`);
             }
         }
         let clientList = [...this.config.clients.playback];
@@ -578,27 +779,28 @@ export default class YouTubeSource {
                     if (check.stream)
                         check.stream.destroy();
                     this.reportProxyStatus(proxyToUse, !check.error &&
-                        (check.statusCode === 200 || check.statusCode === 206), check.statusCode, Date.now() - proxyStartTime);
+                        (check.statusCode === 200 || check.statusCode === 206), check.statusCode || 0, Date.now() - proxyStartTime);
                     if (!check.error &&
                         (check.statusCode === 200 || check.statusCode === 206)) {
                         let contentLength = null;
-                        if (check.headers?.['content-range']) {
-                            const match = check.headers['content-range'].match(/\/(\d+)/);
+                        const headers = check.headers;
+                        if (headers?.['content-range']) {
+                            const match = headers['content-range']?.match(/\/(\d+)/);
                             if (match)
-                                contentLength = Number.parseInt(match[1], 10);
+                                contentLength = Number.parseInt(match[1] ?? '0', 10);
                         }
-                        if (!contentLength && check.headers?.['content-length']) {
-                            contentLength = Number.parseInt(check.headers['content-length'], 10);
+                        if (!contentLength && headers?.['content-length']) {
+                            contentLength = Number.parseInt(headers['content-length'], 10);
                         }
                         logger('debug', 'YouTube', `URL pre-flight check successful for client ${clientName}.`);
                         const result = {
                             ...urlData,
                             additionalData: { contentLength, proxy: proxyToUse }
                         };
-                        this.nodelink.trackCacheManager.set('youtube', decodedTrack.identifier, result, 1000 * 60 * 60 * 5);
+                        this.nodelink.trackCacheManager?.set('youtube', decodedTrack.identifier, result, 1000 * 60 * 60 * 5);
                         return result;
                     }
-                    const errorMessage = `URL pre-flight failed. Status: ${check.statusCode}, Error: ${check.error?.message}`;
+                    const errorMessage = `URL pre-flight failed. Status: ${check.statusCode}, Error: ${check.error}`;
                     clientErrors.push({
                         client: clientName,
                         message: `Direct URL: ${errorMessage}`
@@ -615,7 +817,7 @@ export default class YouTubeSource {
                         if (hlsCheck.stream)
                             hlsCheck.stream.destroy();
                         this.reportProxyStatus(proxyToUse, !hlsCheck.error &&
-                            (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206), hlsCheck.statusCode, Date.now() - proxyStartTime);
+                            (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206), hlsCheck.statusCode || 0, Date.now() - proxyStartTime);
                         if (!hlsCheck.error &&
                             (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)) {
                             logger('debug', 'YouTube', `HLS fallback check successful for client ${clientName}.`);
@@ -624,10 +826,10 @@ export default class YouTubeSource {
                                 protocol: 'hls',
                                 format: 'mpegts'
                             };
-                            this.nodelink.trackCacheManager.set('youtube', decodedTrack.identifier, result, 1000 * 60 * 60 * 5);
+                            this.nodelink.trackCacheManager?.set('youtube', decodedTrack.identifier, result, 1000 * 60 * 60 * 5);
                             return result;
                         }
-                        const hlsError = `HLS fallback failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`;
+                        const hlsError = `HLS fallback failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error}`;
                         clientErrors.push({ client: clientName, message: hlsError });
                         logger('warn', 'YouTube', `Client ${clientName}: ${hlsError}`);
                     }
@@ -642,7 +844,7 @@ export default class YouTubeSource {
                     if (hlsCheck.stream)
                         hlsCheck.stream.destroy();
                     this.reportProxyStatus(proxyToUse, !hlsCheck.error &&
-                        (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206), hlsCheck.statusCode, Date.now() - proxyStartTime);
+                        (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206), hlsCheck.statusCode || 0, Date.now() - proxyStartTime);
                     if (!hlsCheck.error &&
                         (hlsCheck.statusCode === 200 || hlsCheck.statusCode === 206)) {
                         logger('debug', 'YouTube', `HLS-only check successful for client ${clientName}.`);
@@ -651,16 +853,19 @@ export default class YouTubeSource {
                             protocol: 'hls',
                             format: 'mpegts'
                         };
-                        this.nodelink.trackCacheManager.set('youtube', decodedTrack.identifier, result, 1000 * 60 * 60 * 5);
+                        this.nodelink.trackCacheManager?.set('youtube', decodedTrack.identifier, result, 1000 * 60 * 60 * 5);
                         return result;
                     }
-                    const hlsError = `HLS-only check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error?.message}`;
+                    const hlsError = `HLS-only check failed. Status: ${hlsCheck.statusCode}, Error: ${hlsCheck.error}`;
                     clientErrors.push({ client: clientName, message: hlsError });
                     logger('warn', 'YouTube', `Client ${clientName}: ${hlsError}`);
                 }
             }
             catch (e) {
-                clientErrors.push({ client: clientName, message: e.message });
+                clientErrors.push({
+                    client: clientName,
+                    message: e.message
+                });
                 logger('warn', 'YouTube', `Client ${clientName} threw an exception in getTrackUrl: ${e.message}`);
             }
         }
@@ -678,11 +883,18 @@ export default class YouTubeSource {
             exception: {
                 message: 'Failed to get a working track URL from any client.',
                 severity: 'fault',
-                cause: 'All clients failed.',
-                errors: clientErrors
+                cause: 'All clients failed.'
             }
         };
     }
+    /**
+     * Attempts to resolve a track URL via alternative enabled sources when all
+     * YouTube clients fail. Uses a debounce set to prevent infinite recursion.
+     * @param decodedTrack - Track metadata to mirror.
+     * @param itag - Optional specific format itag to request from the mirror source.
+     * @param forceRefresh - Whether to bypass caches in the mirror source.
+     * @returns Promise resolving to a track URL data with a `newTrack` redirect, or `null` on failure.
+     */
     async _tryMirrorSourceTrackUrl(decodedTrack, itag, forceRefresh = false) {
         const key = `${decodedTrack?.identifier || ''}:${decodedTrack?.title || ''}:${decodedTrack?.author || ''}`;
         if (this.mirrorFallbackInFlight.has(key))
@@ -720,9 +932,10 @@ export default class YouTubeSource {
         const configuredFallbackSources = Array.isArray(this.config?.fallbackSources)
             ? this.config.fallbackSources
             : [];
-        const defaultSources = Array.isArray(this.nodelink.options.defaultSearchSource)
-            ? this.nodelink.options.defaultSearchSource
-            : [this.nodelink.options.defaultSearchSource];
+        const opts = this.nodelink.options;
+        const defaultSources = Array.isArray(opts.defaultSearchSource)
+            ? opts.defaultSearchSource
+            : [opts.defaultSearchSource];
         const fallbackOrder = [
             ...configuredFallbackSources,
             ...defaultSources,
@@ -742,12 +955,13 @@ export default class YouTubeSource {
             'nicovideo'
         ].filter((name, index, arr) => {
             const source = this.nodelink.sources?.getSource(name);
+            const sourcesConfig = (opts.sources ?? {});
             return (typeof name === 'string' &&
                 name.length > 0 &&
                 arr.indexOf(name) === index &&
                 !['youtube', 'ytmusic'].includes(name) &&
                 !blockedFallbackSources.has(name) &&
-                this.nodelink.options?.sources?.[name]?.enabled &&
+                sourcesConfig[name]?.enabled &&
                 source &&
                 typeof source.search === 'function' &&
                 typeof source.getTrackUrl === 'function');
@@ -761,7 +975,7 @@ export default class YouTubeSource {
         try {
             for (const fallbackSource of fallbackOrder) {
                 try {
-                    const search = await this.nodelink.sources.search(fallbackSource, query);
+                    const search = await this.nodelink.sources?.search(fallbackSource, query);
                     if (!search ||
                         search.loadType !== 'search' ||
                         !Array.isArray(search.data) ||
@@ -774,10 +988,13 @@ export default class YouTubeSource {
                         ['youtube', 'ytmusic'].includes(bestInfo.sourceName)) {
                         continue;
                     }
-                    const stream = await this.nodelink.sources.getTrackUrl(bestInfo, itag, forceRefresh);
+                    const stream = await this.nodelink.sources?.getTrackUrl(bestInfo, itag ?? undefined, forceRefresh);
                     if (!stream?.exception) {
                         logger('warn', 'YouTube', `Fallback source succeeded via ${bestInfo.sourceName} for "${bestInfo.title}".`);
-                        return { ...stream, newTrack: bestMatch };
+                        return {
+                            ...stream,
+                            newTrack: bestMatch
+                        };
                     }
                 }
                 catch (e) {
@@ -790,6 +1007,21 @@ export default class YouTubeSource {
         }
         return null;
     }
+    /**
+     * Opens a readable audio stream for the given track.
+     *
+     * Dispatches to the appropriate protocol handler:
+     * - `sabr` – SABR streaming with automatic stall recovery.
+     * - `hls` – HLS manifest with n-token decryption.
+     * - Direct HTTP – range-request streaming when content length is known,
+     *   otherwise a simple single-stream download.
+     *
+     * @param decodedTrack - Track metadata.
+     * @param url - Resolved playback URL (direct or manifest).
+     * @param protocol - Streaming protocol identifier (`'sabr'`, `'hls'`, `'http'`, `'https'`).
+     * @param additionalData - Protocol-specific metadata from {@link TrackUrlAdditionalData}.
+     * @returns Promise resolving to a {@link StreamResult} with the readable stream or an exception.
+     */
     async loadStream(decodedTrack, url, protocol, additionalData) {
         logger('debug', 'YouTube', `Loading stream for "${decodedTrack.title}" with protocol ${protocol}`);
         const cancelSignal = { aborted: false };
@@ -797,175 +1029,22 @@ export default class YouTubeSource {
         this.activeStreams.set(streamKey, cancelSignal);
         try {
             if (protocol === 'sabr') {
-                const sabr = new SabrStream({
-                    videoId: decodedTrack.identifier,
-                    accessToken: additionalData.accessToken,
-                    visitorData: additionalData.visitorData,
-                    serverAbrStreamingUrl: additionalData.serverAbrStreamingUrl,
-                    videoPlaybackUstreamerConfig: additionalData.videoPlaybackUstreamerConfig,
-                    poToken: additionalData.poToken,
-                    clientInfo: additionalData.clientInfo,
-                    formats: additionalData.formats,
-                    startTime: additionalData.startTime || 0,
-                    positionCallback: additionalData.positionCallback,
-                    previousSession: additionalData.previousSession
-                });
-                const stream = new PassThrough();
-                let readyResolved = false;
-                let readyResolve;
-                let readyReject;
-                const ready = new Promise((resolve, reject) => {
-                    readyResolve = resolve;
-                    readyReject = reject;
-                });
-                let isRecovering = false;
-                let lastRecoverAt = 0;
-                sabr.on('data', (chunk) => {
-                    if (!readyResolved) {
-                        readyResolved = true;
-                        readyResolve();
-                    }
-                    if (!stream.write(chunk)) {
-                        sabr.pause();
-                    }
-                });
-                stream.on('drain', () => sabr.resume());
-                sabr.on('end', () => {
-                    if (!readyResolved) {
-                        readyResolved = true;
-                        readyReject(new Error('SABR stream ended before data'));
-                    }
-                    stream.end();
-                });
-                sabr.on('finishBuffering', () => stream.emit('finishBuffering'));
-                sabr.on('stall', async () => {
-                    if (isRecovering || stream.destroyed)
-                        return;
-                    const now = Date.now();
-                    if (now - lastRecoverAt < 2000)
-                        return;
-                    lastRecoverAt = now;
-                    isRecovering = true;
-                    try {
-                        logger('warn', 'YouTube', `SABR stall detected for ${decodedTrack.title}. Refreshing session...`);
-                        const newUrlData = await this.getTrackUrl(decodedTrack, null, true);
-                        if (!newUrlData || newUrlData.protocol !== 'sabr') {
-                            throw new Error('No SABR session available for recovery');
-                        }
-                        const ad = newUrlData.additionalData || {};
-                        sabr.clearBuffers();
-                        sabr.updateSession({
-                            serverAbrStreamingUrl: ad.serverAbrStreamingUrl || newUrlData.url,
-                            videoPlaybackUstreamerConfig: ad.videoPlaybackUstreamerConfig,
-                            poToken: ad.poToken,
-                            visitorData: ad.visitorData,
-                            clientInfo: ad.clientInfo,
-                            formats: ad.formats,
-                            userAgent: ad.userAgent,
-                            playbackCookie: ad.playbackCookie
-                        });
-                    }
-                    catch (err) {
-                        logger('warn', 'YouTube', `SABR recovery failed: ${err.message}`);
-                        if (!stream.destroyed)
-                            stream.destroy(err);
-                    }
-                    finally {
-                        isRecovering = false;
-                    }
-                });
-                sabr.on('error', async (err) => {
-                    logger('error', 'YouTube', `SABR stream error: ${err.message}`);
-                    if (!readyResolved) {
-                        readyResolved = true;
-                        readyReject(err);
-                    }
-                    if ((err.message.includes('sabr.malformed_config') ||
-                        err.message.includes('sabr.media_serving_enforcement_id_error')) &&
-                        !isRecovering) {
-                        logger('info', 'YouTube', `Known recoverable error detected (${err.message}), triggering stall recovery...`);
-                        sabr.emit('stall');
-                        return;
-                    }
-                    if (!stream.destroyed)
-                        stream.destroy(err);
-                });
-                const originalDestroy = stream.destroy.bind(stream);
-                let isDestroying = false;
-                stream.destroy = (err) => {
-                    if (isDestroying)
-                        return;
-                    isDestroying = true;
-                    sabr.destroy(err);
-                    this.activeStreams.delete(streamKey);
-                    originalDestroy(err);
-                };
-                stream.once('close', () => {
-                    if (isDestroying)
-                        return;
-                    isDestroying = true;
-                    sabr.destroy();
-                    this.activeStreams.delete(streamKey);
-                });
-                stream._sabrStream = sabr;
-                stream.getSessionState = () => {
-                    if (isDestroying || stream.destroyed)
-                        return null;
-                    return sabr.getSessionState();
-                };
-                const bestAudio = additionalData.formats
-                    .filter((f) => f.mimeType?.includes('audio'))
-                    .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-                sabr.start(bestAudio.itag);
-                const type = bestAudio.mimeType?.includes('webm') ? 'webm/opus' : 'm4a';
-                await ready;
-                return { stream, type };
+                return await this._loadSabrStream(decodedTrack, additionalData ?? {}, cancelSignal, streamKey);
             }
             if (protocol === 'hls') {
-                const playerScript = await this.cipherManager.getCachedPlayerScript();
-                const stream = new HLSHandler(url, {
-                    type: 'mpegts',
-                    localAddress: this.nodelink.routePlanner?.getIP(),
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-                        Referer: 'https://www.youtube.com/',
-                        Origin: 'https://www.youtube.com'
-                    },
-                    onResolveUrl: async (segmentUrl) => {
-                        if (segmentUrl.includes('/n/')) {
-                            const nToken = segmentUrl.match(/\/n\/([^/]+)/)?.[1];
-                            if (nToken && playerScript) {
-                                try {
-                                    return await this.cipherManager.resolveUrl(segmentUrl, null, nToken, null, playerScript);
-                                }
-                                catch (err) {
-                                    logger('warn', 'YouTube', `Failed to resolve n-token: ${err.message}`);
-                                }
-                            }
-                        }
-                        return null;
-                    }
-                });
-                const originalDestroy = stream.destroy.bind(stream);
-                stream.destroy = (err) => {
-                    if (cancelSignal.aborted)
-                        return;
-                    cancelSignal.aborted = true;
-                    this.activeStreams.delete(streamKey);
-                    originalDestroy(err);
-                };
-                return { stream };
+                return this._loadHlsStream(url, cancelSignal, streamKey);
             }
             if (!url)
                 throw new Error('No direct URL');
-            let contentLength = additionalData?.contentLength || null;
+            let contentLength = additionalData?.contentLength ?? null;
             if (!contentLength) {
                 const testResponse = await http1makeRequest(url, {
                     method: 'HEAD',
                     timeout: 5000
                 });
-                if (testResponse.headers?.['content-length']) {
-                    contentLength = Number.parseInt(testResponse.headers['content-length'], 10);
+                const headers = testResponse.headers;
+                if (headers?.['content-length']) {
+                    contentLength = Number.parseInt(headers['content-length'] ?? '0', 10);
                 }
                 if (testResponse.statusCode === 403) {
                     throw new Error('URL returned 403 Forbidden');
@@ -979,10 +1058,11 @@ export default class YouTubeSource {
                     });
                     if (rangeResponse.stream)
                         rangeResponse.stream.destroy();
-                    if (rangeResponse.headers?.['content-range']) {
-                        const match = rangeResponse.headers['content-range'].match(/\/(\d+)/);
+                    const rangeHeaders = rangeResponse.headers;
+                    if (rangeHeaders?.['content-range']) {
+                        const match = rangeHeaders['content-range']?.match(/\/(\d+)/);
                         if (match)
-                            contentLength = Number.parseInt(match[1], 10);
+                            contentLength = Number.parseInt(match[1] ?? '0', 10);
                     }
                 }
             }
@@ -990,78 +1070,310 @@ export default class YouTubeSource {
                 logger('debug', 'YouTube', `Using range buffering for ${decodedTrack.title} (${Math.round(contentLength / 1024 / 1024)}MB)`);
                 return this._streamWithRangeRequests(url, contentLength, decodedTrack, cancelSignal, streamKey, additionalData);
             }
-            const fetchStartTime = Date.now();
-            const response = await http1makeRequest(url, {
-                method: 'GET',
-                streamOnly: true,
-                proxy: additionalData?.proxy || this.getProxy(),
-                timeout: 20000
-            });
-            this.reportProxyStatus(additionalData?.proxy || this.getProxy(false), !response.error &&
-                (response.statusCode === 200 || response.statusCode === 206), response.statusCode, Date.now() - fetchStartTime);
-            if (response.statusCode !== 200 && response.statusCode !== 206) {
-                throw new Error(`HTTP status ${response.statusCode}`);
-            }
-            const stream = new PassThrough();
-            stream.responseStream = response.stream;
-            let cleanedUp = false;
-            const cleanup = () => {
-                if (cleanedUp)
-                    return;
-                cleanedUp = true;
-                cancelSignal.aborted = true;
-                response.stream.removeAllListeners();
-                if (!response.stream.destroyed)
-                    response.stream.destroy();
-                this.activeStreams.delete(streamKey);
-                stream.removeListener('close', cleanup);
-            };
-            response.stream.on('data', (chunk) => {
-                if (!stream.write(chunk)) {
-                    response.stream.pause();
-                }
-            });
-            stream.on('drain', () => {
-                if (!response.stream.destroyed)
-                    response.stream.resume();
-            });
-            response.stream.on('end', () => {
-                cleanup();
-                if (!stream.writableEnded) {
-                    stream.emit('finishBuffering');
-                    stream.end();
-                }
-            });
-            response.stream.on('error', (error) => {
-                cleanup();
-                if (error.message === 'aborted' || error.code === 'ECONNRESET') {
-                    logger('debug', 'YouTube', 'Client disconnected from stream');
-                    if (!stream.destroyed)
-                        stream.destroy();
-                    return;
-                }
-                logger('error', 'YouTube', `Stream error: ${error.message}`);
-                if (!stream.destroyed) {
-                    stream.emit('error', new Error(`Stream failed: ${error.message}`));
-                    stream.destroy();
-                }
-            });
-            const originalDestroy = stream.destroy.bind(stream);
-            stream.destroy = (err) => {
-                cleanup();
-                originalDestroy(err);
-            };
-            stream.once('close', cleanup);
-            return { stream };
+            return await this._loadDirectStream(url, decodedTrack, cancelSignal, streamKey, additionalData);
         }
         catch (e) {
             this.activeStreams.delete(streamKey);
             logger('error', 'YouTube', `Error loading stream for ${decodedTrack.identifier}: ${e.message}`);
             return {
-                exception: { message: e.message, severity: 'fault', cause: 'Upstream' }
+                exception: {
+                    message: e.message,
+                    severity: 'fault',
+                    cause: 'Upstream'
+                }
             };
         }
     }
+    /**
+     * Creates a SABR streaming session with automatic stall recovery.
+     *
+     * Initializes a {@link SabrStream} instance with the track's session data,
+     * pipes audio chunks through a PassThrough stream, and sets up a stall
+     * recovery handler that refreshes the session on failure.
+     *
+     * @param decodedTrack - Track metadata for stall recovery URL refresh.
+     * @param additionalData - SABR session data (tokens, config, formats).
+     * @param _cancelSignal - Shared cancel token (unused; stream owns cancellation via destroy).
+     * @param streamKey - Unique key for tracking this stream in the active streams map.
+     * @returns Promise resolving to a {@link StreamResult} with the PassThrough stream and media type.
+     */
+    async _loadSabrStream(decodedTrack, additionalData, _cancelSignal, streamKey) {
+        const sabr = new SabrStream({
+            videoId: decodedTrack.identifier,
+            accessToken: additionalData.accessToken,
+            visitorData: additionalData.visitorData,
+            serverAbrStreamingUrl: additionalData.serverAbrStreamingUrl,
+            videoPlaybackUstreamerConfig: additionalData.videoPlaybackUstreamerConfig,
+            poToken: additionalData.poToken,
+            clientInfo: additionalData.clientInfo,
+            formats: additionalData.formats,
+            startTime: additionalData.startTime || 0,
+            positionCallback: additionalData.positionCallback,
+            previousSession: additionalData.previousSession
+        });
+        const stream = new PassThrough();
+        let readyResolved = false;
+        let readyResolve;
+        let readyReject;
+        const ready = new Promise((resolve, reject) => {
+            readyResolve = resolve;
+            readyReject = reject;
+        });
+        let isRecovering = false;
+        let lastRecoverAt = 0;
+        sabr.on('data', (chunk) => {
+            if (!readyResolved) {
+                readyResolved = true;
+                readyResolve();
+            }
+            if (!stream.write(chunk)) {
+                sabr.pause();
+            }
+        });
+        stream.on('drain', () => sabr.resume());
+        sabr.on('end', () => {
+            if (!readyResolved) {
+                readyResolved = true;
+                readyReject(new Error('SABR stream ended before data'));
+            }
+            stream.end();
+        });
+        sabr.on('finishBuffering', () => stream.emit('finishBuffering'));
+        sabr.on('stall', async () => {
+            if (isRecovering || stream.destroyed)
+                return;
+            const now = Date.now();
+            if (now - lastRecoverAt < 2000)
+                return;
+            lastRecoverAt = now;
+            isRecovering = true;
+            try {
+                logger('warn', 'YouTube', `SABR stall detected for ${decodedTrack.title}. Refreshing session...`);
+                const newUrlData = await this.getTrackUrl(decodedTrack, null, true);
+                if (!newUrlData || newUrlData.protocol !== 'sabr') {
+                    throw new Error('No SABR session available for recovery');
+                }
+                const ad = (newUrlData.additionalData || {});
+                sabr.clearBuffers();
+                sabr.updateSession({
+                    serverAbrStreamingUrl: ad.serverAbrStreamingUrl || newUrlData.url,
+                    videoPlaybackUstreamerConfig: ad.videoPlaybackUstreamerConfig,
+                    poToken: ad.poToken,
+                    visitorData: ad.visitorData,
+                    clientInfo: ad.clientInfo,
+                    formats: ad.formats,
+                    userAgent: ad.userAgent,
+                    playbackCookie: ad.playbackCookie
+                });
+            }
+            catch (err) {
+                logger('warn', 'YouTube', `SABR recovery failed: ${err.message}`);
+                if (!stream.destroyed)
+                    stream.destroy(err);
+            }
+            finally {
+                isRecovering = false;
+            }
+        });
+        sabr.on('error', async (err) => {
+            logger('error', 'YouTube', `SABR stream error: ${err.message}`);
+            if (!readyResolved) {
+                readyResolved = true;
+                readyReject(err);
+            }
+            if ((err.message.includes('sabr.malformed_config') ||
+                err.message.includes('sabr.media_serving_enforcement_id_error')) &&
+                !isRecovering) {
+                logger('info', 'YouTube', `Known recoverable error detected (${err.message}), triggering stall recovery...`);
+                sabr.emit('stall');
+                return;
+            }
+            if (!stream.destroyed)
+                stream.destroy(err);
+        });
+        const originalDestroy = stream.destroy.bind(stream);
+        let isDestroying = false;
+        stream.destroy = ((err) => {
+            if (isDestroying)
+                return stream;
+            isDestroying = true;
+            sabr.destroy(err);
+            this.activeStreams.delete(streamKey);
+            originalDestroy(err);
+            return stream;
+        });
+        stream.once('close', () => {
+            if (isDestroying)
+                return;
+            isDestroying = true;
+            sabr.destroy();
+            this.activeStreams.delete(streamKey);
+        });
+        stream._sabrStream = sabr;
+        stream.getSessionState = () => {
+            if (isDestroying || stream.destroyed)
+                return null;
+            return sabr.getSessionState();
+        };
+        const bestAudio = (additionalData.formats ?? [])
+            .filter((f) => f.mimeType?.includes('audio'))
+            .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+        if (!bestAudio) {
+            stream.destroy(new Error('No audio format available in SABR stream'));
+            throw new Error('No audio format available in SABR stream');
+        }
+        sabr.start(bestAudio.itag);
+        const type = bestAudio.mimeType?.includes('webm') ? 'webm/opus' : 'm4a';
+        await ready;
+        return { stream, type };
+    }
+    /**
+     * Creates an HLS stream handler for the given manifest URL.
+     *
+     * Configures n-token decryption for segment URLs and wires up
+     * cancellation via the shared cancel signal.
+     *
+     * @param url - HLS manifest URL.
+     * @param cancelSignal - Shared cancel token for stream abort.
+     * @param streamKey - Unique key for tracking this stream in the active streams map.
+     * @returns A {@link StreamResult} containing the HLS handler stream.
+     */
+    _loadHlsStream(url, cancelSignal, streamKey) {
+        const playerScriptPromise = this.cipherManager.getCachedPlayerScript();
+        const stream = new HLSHandler(url, {
+            type: 'mpegts',
+            localAddress: this.nodelink.routePlanner?.getIP?.(),
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                Referer: 'https://www.youtube.com/',
+                Origin: 'https://www.youtube.com'
+            },
+            onResolveUrl: async (segmentUrl) => {
+                if (segmentUrl.includes('/n/')) {
+                    const nToken = segmentUrl.match(/\/n\/([^/]+)/)?.[1];
+                    const playerScript = await playerScriptPromise;
+                    if (nToken && playerScript) {
+                        try {
+                            return await this.cipherManager.resolveUrl(segmentUrl, null, nToken, null, playerScript);
+                        }
+                        catch (err) {
+                            logger('warn', 'YouTube', `Failed to resolve n-token: ${err.message}`);
+                        }
+                    }
+                }
+                return null;
+            }
+        });
+        const originalDestroy = stream.destroy.bind(stream);
+        stream.destroy = ((err) => {
+            if (cancelSignal.aborted)
+                return stream;
+            cancelSignal.aborted = true;
+            this.activeStreams.delete(streamKey);
+            originalDestroy(err);
+            return stream;
+        });
+        return { stream };
+    }
+    /**
+     * Streams audio from a direct HTTP URL using a single-pass download.
+     *
+     * Pipes the raw HTTP response through a PassThrough stream with
+     * back-pressure support, error handling, and proper cleanup on
+     * stream close or destruction.
+     *
+     * @param url - Direct playback URL.
+     * @param _decodedTrack - Track metadata (unused; reserved for future use).
+     * @param cancelSignal - Shared cancel token for stream abort.
+     * @param streamKey - Unique key for tracking this stream in the active streams map.
+     * @param additionalData - Optional additional data containing proxy info.
+     * @returns Promise resolving to a {@link StreamResult} with the PassThrough stream.
+     */
+    async _loadDirectStream(url, _decodedTrack, cancelSignal, streamKey, additionalData) {
+        const fetchStartTime = Date.now();
+        const response = await http1makeRequest(url, {
+            method: 'GET',
+            streamOnly: true,
+            proxy: (additionalData?.proxy ||
+                this.getProxy()),
+            timeout: 20000
+        });
+        this.reportProxyStatus((additionalData?.proxy || this.getProxy(false)), !response.error &&
+            (response.statusCode === 200 || response.statusCode === 206), response.statusCode || 0, Date.now() - fetchStartTime);
+        if (response.statusCode !== 200 && response.statusCode !== 206) {
+            throw new Error(`HTTP status ${response.statusCode}`);
+        }
+        const responseStream = response.stream;
+        const stream = new PassThrough();
+        stream.responseStream =
+            responseStream;
+        let cleanedUp = false;
+        const cleanup = () => {
+            if (cleanedUp)
+                return;
+            cleanedUp = true;
+            cancelSignal.aborted = true;
+            responseStream.removeAllListeners();
+            if (!responseStream.destroyed)
+                responseStream.destroy();
+            this.activeStreams.delete(streamKey);
+            stream.removeListener('close', cleanup);
+        };
+        responseStream.on('data', (chunk) => {
+            if (!stream.write(chunk)) {
+                responseStream.pause();
+            }
+        });
+        stream.on('drain', () => {
+            if (!responseStream.destroyed)
+                responseStream.resume();
+        });
+        responseStream.on('end', () => {
+            cleanup();
+            if (!stream.writableEnded) {
+                stream.emit('finishBuffering');
+                stream.end();
+            }
+        });
+        responseStream.on('error', (error) => {
+            cleanup();
+            if (error.message === 'aborted' || error.code === 'ECONNRESET') {
+                logger('debug', 'YouTube', 'Client disconnected from stream');
+                if (!stream.destroyed)
+                    stream.destroy();
+                return;
+            }
+            logger('error', 'YouTube', `Stream error: ${error.message}`);
+            if (!stream.destroyed) {
+                stream.emit('error', new Error(`Stream failed: ${error.message}`));
+                stream.destroy();
+            }
+        });
+        const originalDestroy = stream.destroy.bind(stream);
+        stream.destroy = ((err) => {
+            cleanup();
+            originalDestroy(err);
+            return stream;
+        });
+        stream.once('close', cleanup);
+        return { stream };
+    }
+    /**
+     * Streams audio using HTTP range requests with automatic URL recovery.
+     *
+     * Fetches the media in {@link CHUNK_SIZE} chunks, tracks the byte position,
+     * and performs URL recovery when the upstream returns 403/404/5xx errors
+     * or connection resets. Recovery attempts a fresh URL from `getTrackUrl`
+     * and resumes from the last known position.
+     *
+     * @param url - Initial playback URL.
+     * @param contentLength - Total content length in bytes.
+     * @param decodedTrack - Track metadata used for URL recovery.
+     * @param cancelSignal - Shared cancel token for stream abort.
+     * @param streamKey - Unique key for tracking this stream in the active streams map.
+     * @param additionalData - Optional additional data containing proxy info.
+     * @returns A {@link StreamResult} containing the range-request PassThrough stream.
+     */
     _streamWithRangeRequests(url, contentLength, decodedTrack, cancelSignal, streamKey, additionalData) {
         const stream = new PassThrough({ highWaterMark: CHUNK_SIZE * 2 });
         let position = 0;
@@ -1072,6 +1384,7 @@ export default class YouTubeSource {
         let fetching = false;
         let activeRequest = null;
         let recoverTimeout = null;
+        let currentAdditionalData = additionalData;
         const cleanup = () => {
             if (destroyed)
                 return;
@@ -1131,12 +1444,13 @@ export default class YouTubeSource {
                     method: 'GET',
                     headers: { Range: `bytes=${start}-${end}` },
                     streamOnly: true,
-                    proxy: additionalData?.proxy || this.getProxy(),
+                    proxy: (currentAdditionalData?.proxy ||
+                        this.getProxy()),
                     timeout: 20000
                 });
                 const responseStream = result.stream;
                 const { error, statusCode } = result;
-                this.reportProxyStatus(additionalData?.proxy || this.getProxy(false), !error && (statusCode === 200 || statusCode === 206), statusCode, Date.now() - fetchStartTime);
+                this.reportProxyStatus((currentAdditionalData?.proxy || this.getProxy(false)), !error && (statusCode === 200 || statusCode === 206), statusCode || 0, Date.now() - fetchStartTime);
                 if (destroyed || cancelSignal.aborted) {
                     if (responseStream && !responseStream.destroyed) {
                         responseStream.destroy();
@@ -1144,9 +1458,12 @@ export default class YouTubeSource {
                     fetching = false;
                     return;
                 }
-                activeRequest = responseStream;
+                const rs = responseStream;
+                activeRequest = rs;
                 if (error || (statusCode !== 200 && statusCode !== 206)) {
-                    if (statusCode === 403 || statusCode === 404 || statusCode >= 500) {
+                    if (statusCode === 403 ||
+                        statusCode === 404 ||
+                        (statusCode ?? 0) >= 500) {
                         logger('warn', 'YouTube', `Got ${statusCode} at pos ${position} → forcing recovery`);
                         fetching = false;
                         recover();
@@ -1156,21 +1473,21 @@ export default class YouTubeSource {
                 }
                 const onData = (chunk) => {
                     if (destroyed || cancelSignal.aborted) {
-                        responseStream.destroy();
+                        rs.destroy();
                         return;
                     }
                     if (refreshes > 0)
                         refreshes = 0;
                     position += chunk.length;
                     if (!stream.write(chunk)) {
-                        responseStream.pause();
+                        rs.pause();
                     }
                 };
                 const onEnd = () => {
                     cleanupRequestListeners();
                     activeRequest = null;
                     fetching = false;
-                    if (!destroyed && position < contentLength) {
+                    if (!destroyed && !cancelSignal.aborted && position < contentLength) {
                         setImmediate(fetchNext);
                     }
                     else if (!stream.writableEnded && position >= contentLength) {
@@ -1183,7 +1500,7 @@ export default class YouTubeSource {
                     cleanupRequestListeners();
                     activeRequest = null;
                     fetching = false;
-                    if (!destroyed) {
+                    if (!destroyed && !cancelSignal.aborted) {
                         logger('warn', 'YouTube', `Range request error at pos ${position}: ${err.message}`);
                         const isAborted = err.message === 'aborted' || err.code === 'ECONNRESET';
                         if (++errors >= MAX_RETRIES || isAborted) {
@@ -1199,20 +1516,21 @@ export default class YouTubeSource {
                     }
                 };
                 const cleanupRequestListeners = () => {
-                    responseStream.removeListener('data', onData);
-                    responseStream.removeListener('end', onEnd);
-                    responseStream.removeListener('error', onError);
+                    rs.removeListener('data', onData);
+                    rs.removeListener('end', onEnd);
+                    rs.removeListener('error', onError);
                 };
-                responseStream.on('data', onData);
-                responseStream.on('end', onEnd);
-                responseStream.on('error', onError);
+                rs.on('data', onData);
+                rs.on('end', onEnd);
+                rs.on('error', onError);
             }
             catch (err) {
                 activeRequest = null;
                 fetching = false;
-                if (!destroyed) {
+                if (!destroyed && !cancelSignal.aborted) {
                     logger('warn', 'YouTube', `Range request exception at pos ${position}: ${err.message}`);
-                    const isAborted = err.message === 'aborted' || err.code === 'ECONNRESET';
+                    const isAborted = err.message === 'aborted' ||
+                        err.code === 'ECONNRESET';
                     if (++errors >= MAX_RETRIES || isAborted) {
                         if (isAborted)
                             logger('warn', 'YouTube', 'Connection aborted, forcing immediate recovery with new URL.');
@@ -1230,7 +1548,8 @@ export default class YouTubeSource {
             if (destroyed || cancelSignal.aborted)
                 return;
             const isForbidden = causeError?.message?.includes('403') || causeError?.statusCode === 403;
-            const isAborted = causeError?.message === 'aborted' || causeError?.code === 'ECONNRESET';
+            const isAborted = causeError?.message === 'aborted' ||
+                causeError?.code === 'ECONNRESET';
             if (!isForbidden && !isAborted && refreshes === 0) {
                 logger('debug', 'YouTube', `Retrying same URL for recovery first (cause: ${causeError?.message})...`);
                 errors = 0;
@@ -1258,7 +1577,8 @@ export default class YouTubeSource {
                     throw new Error('No valid URL from getTrackUrl');
                 }
                 currentUrl = newUrlData.url;
-                additionalData = newUrlData.additionalData;
+                currentAdditionalData =
+                    newUrlData.additionalData;
                 errors = 0;
                 logger('debug', 'YouTube', `URL recovered for ${decodedTrack.title} (resume at ${position} bytes, attempt ${refreshes}, cause: ${causeError?.message})`);
                 fetching = false;
@@ -1276,12 +1596,18 @@ export default class YouTubeSource {
         };
         fetchNext();
         const originalDestroy = stream.destroy.bind(stream);
-        stream.destroy = (err) => {
+        stream.destroy = ((err) => {
             cleanup();
             originalDestroy(err);
-        };
+            return stream;
+        });
         return { stream };
     }
+    /**
+     * Fetches chapter markers for a track using the Web client.
+     * @param trackInfo - Track metadata containing the video identifier.
+     * @returns Promise resolving to an array of chapter objects, or an empty array on failure.
+     */
     async getChapters(trackInfo) {
         const webClient = this.clients.Web;
         if (!webClient) {
@@ -1289,13 +1615,19 @@ export default class YouTubeSource {
             return [];
         }
         try {
-            return await webClient.getChapters(trackInfo, this.ytContext);
+            return (await webClient.getChapters?.(trackInfo, this.ytContext)) ?? [];
         }
         catch (e) {
             logger('error', 'YouTube', `Failed to fetch chapters: ${e.message}`);
             return [];
         }
     }
+    /**
+     * Handles a new live chat WebSocket connection for the given track.
+     * @param socket - WebSocket connection object from the framework.
+     * @param id - YouTube video identifier for the live stream.
+     * @returns Promise resolving when the live chat handler completes.
+     */
     async handleLiveChat(socket, id) {
         return this.liveChat.handleConnection(socket, id);
     }

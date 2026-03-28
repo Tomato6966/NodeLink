@@ -1,17 +1,60 @@
+/**
+ * YouTube WEB_REMIX client.
+ *
+ * Targets the YouTube Music web surface for search and playlist resolution
+ * while intentionally delegating direct stream extraction to other clients.
+ *
+ * @packageDocumentation
+ * @module YouTubeWebRemixClient
+ */
+import type {
+  SourceResult,
+  TrackInfo,
+  WorkerNodeLink
+} from '../../../typings/sources/source.types.ts'
+import type {
+  ICipherManager,
+  IOAuth,
+  YouTubeClientContext,
+  YouTubeContext
+} from '../../../typings/sources/youtube.types.ts'
+import type {
+  YouTubeNextResponse,
+  YouTubeSearchResponse,
+  YouTubeSearchTabContent
+} from '../../../typings/sources/youtubeClient.types.ts'
 import { logger, makeRequest } from '../../../utils.ts'
 import {
   BaseClient,
   buildTrack,
   checkURLType,
   YOUTUBE_CONSTANTS
-} from '../common.js'
+} from '../common.ts'
 
+/**
+ * YouTube Music (WEB_REMIX) client implementation.
+ *
+ * Uses the YouTube Music innertube API to search for tracks,
+ * resolve playlist URLs, and provide track metadata. This client
+ * does not provide direct stream URLs.
+ *
+ * @public
+ */
 export default class WebRemix extends BaseClient {
-  constructor(nodelink, oauth) {
+  /**
+   * @param nodelink - NodeLink worker instance providing options, sources, and logging
+   * @param oauth - OAuth manager for authenticated requests, or null if unauthenticated
+   */
+  constructor(nodelink: WorkerNodeLink, oauth: IOAuth | null) {
     super(nodelink, 'WEB_REMIX', oauth)
   }
 
-  getClient(context) {
+  /**
+   * Returns the YouTube Music client context for innertube requests.
+   * @param context - General YouTube context with language, region, and visitor data
+   * @returns Client context configured for WEB_REMIX
+   */
+  override getClient(context: YouTubeContext): YouTubeClientContext {
     return {
       client: {
         clientName: 'WEB_REMIX',
@@ -27,11 +70,26 @@ export default class WebRemix extends BaseClient {
     }
   }
 
-  requirePlayerScript() {
+  /**
+   * Whether this client requires a player script for signature deciphering.
+   * @returns false — WEB_REMIX does not need cipher resolution
+   */
+  override requirePlayerScript(): boolean {
     return false
   }
 
-  async search(query, type, context) {
+  /**
+   * Searches YouTube Music for tracks, playlists, albums, or artists.
+   * @param query - Search query string
+   * @param type - Search type ('track', 'playlist', 'album', 'artist')
+   * @param context - YouTube context with language and region settings
+   * @returns Search results with matched tracks or an exception
+   */
+  override async search(
+    query: string,
+    type: string,
+    context: YouTubeContext
+  ): Promise<SourceResult> {
     const sourceName = 'ytmusic'
 
     let params = 'EgWKAQIIAWoSEAMQBRAEEAkQChAVEBAQDhAR' // Default (Tracks)
@@ -47,7 +105,7 @@ export default class WebRemix extends BaseClient {
     }
 
     const {
-      body: searchResult,
+      body: searchResultRaw,
       error,
       statusCode
     } = await makeRequest(
@@ -66,13 +124,16 @@ export default class WebRemix extends BaseClient {
 
     if (error || statusCode !== 200) {
       const message =
-        error?.message ||
+        error ||
         `Failed to load results from ${sourceName}. Status: ${statusCode}`
       logger('error', 'YouTube-Music', message)
       return {
         exception: { message, severity: 'common', cause: 'Upstream' }
       }
     }
+
+    const searchResult = searchResultRaw as YouTubeSearchResponse
+
     if (searchResult.error) {
       logger(
         'error',
@@ -88,18 +149,24 @@ export default class WebRemix extends BaseClient {
       }
     }
 
-    const tabContent =
+    const tabContent: YouTubeSearchTabContent | undefined =
       searchResult.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer
         ?.content
+
     const _loggedVideoData = false
     const tracks = []
-    let videos = null
+    let videos: unknown[] | null = null
 
-    const findShelf = (contents) => {
+    const findShelf = (
+      contents: unknown[] | null | undefined
+    ): unknown[] | null => {
       if (!Array.isArray(contents)) return null
       for (const section of contents) {
-        if (section.musicShelfRenderer) {
-          return section.musicShelfRenderer.contents
+        const sec = section as Record<string, unknown>
+        if (sec.musicShelfRenderer) {
+          return (sec.musicShelfRenderer as Record<string, unknown>).contents as
+            | unknown[]
+            | null
         }
       }
       return null
@@ -129,15 +196,21 @@ export default class WebRemix extends BaseClient {
     }
 
     for (const video of videos) {
+      const v = video as Record<string, unknown>
       const renderer =
-        video.musicResponsiveListItemRenderer ||
-        video.musicTwoColumnItemRenderer ||
-        (video.videoId ? video : null)
+        v.musicResponsiveListItemRenderer ||
+        v.musicTwoColumnItemRenderer ||
+        (v.videoId ? v : null)
       if (!renderer) {
         continue
       }
 
-      const track = await buildTrack(video, 'ytmusic', 'ytmusic', searchResult)
+      const track = await buildTrack(
+        video as Parameters<typeof buildTrack>[0],
+        'ytmusic',
+        'ytmusic',
+        searchResult as Record<string, unknown>
+      )
       if (track) {
         tracks.push(track)
       }
@@ -146,7 +219,20 @@ export default class WebRemix extends BaseClient {
     return { loadType: 'search', data: tracks }
   }
 
-  async resolve(url, _type, context, cipherManager) {
+  /**
+   * Resolves a YouTube Music URL to track or playlist data.
+   * @param url - YouTube or YouTube Music URL
+   * @param _type - Source type override (unused)
+   * @param context - YouTube context with language and region settings
+   * @param cipherManager - Cipher manager instance (unused for WEB_REMIX)
+   * @returns Resolved track or playlist data, or an exception
+   */
+  override async resolve(
+    url: string,
+    _type: string,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null
+  ): Promise<SourceResult> {
     const sourceName = 'ytmusic'
     const urlType = checkURLType(url, sourceName)
     const _apiEndpoint = this.getApiEndpoint()
@@ -156,7 +242,7 @@ export default class WebRemix extends BaseClient {
       case YOUTUBE_CONSTANTS.SHORTS: {
         const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/
         const videoIdMatch = url.match(idPattern)
-        if (!videoIdMatch || !videoIdMatch[1]) {
+        if (!videoIdMatch?.[1]) {
           logger(
             'error',
             'YouTube-Music',
@@ -192,7 +278,7 @@ export default class WebRemix extends BaseClient {
 
       case YOUTUBE_CONSTANTS.PLAYLIST: {
         const listIdMatch = url.match(/[?&]list=([\w-]+)/)
-        if (!listIdMatch || !listIdMatch[1]) {
+        if (!listIdMatch?.[1]) {
           return { loadType: 'empty', data: {} }
         }
         const playlistId = listIdMatch[1]
@@ -204,7 +290,7 @@ export default class WebRemix extends BaseClient {
           isAudioOnly: true
         }
 
-        const { body: res, statusCode } = await makeRequest(
+        const { body: resRaw, statusCode } = await makeRequest(
           'https://music.youtube.com/youtubei/v1/next',
           {
             method: 'POST',
@@ -218,9 +304,11 @@ export default class WebRemix extends BaseClient {
           }
         )
 
-        if (statusCode !== 200 || !res) {
+        if (statusCode !== 200 || !resRaw) {
           return { loadType: 'empty', data: {} }
         }
+
+        const res = resRaw as YouTubeNextResponse
 
         return await this._handlePlaylistResponse(
           playlistId,
@@ -236,7 +324,19 @@ export default class WebRemix extends BaseClient {
     }
   }
 
-  async getTrackUrl(_decodedTrack, _context, _cipherManager) {
+  /**
+   * Retrieves a playable stream URL for a track.
+   * WEB_REMIX does not provide direct track URLs.
+   * @param _decodedTrack - Decoded track information (unused)
+   * @param _context - YouTube context (unused)
+   * @param _cipherManager - Cipher manager instance (unused)
+   * @returns Exception indicating this client cannot resolve stream URLs
+   */
+  override async getTrackUrl(
+    _decodedTrack: TrackInfo,
+    _context: YouTubeContext,
+    _cipherManager: ICipherManager | null
+  ): Promise<Record<string, unknown>> {
     return {
       exception: {
         message: 'WebRemix client does not provide direct track URLs.',

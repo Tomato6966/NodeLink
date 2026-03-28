@@ -406,7 +406,7 @@ function validateProperty<T>(
  */
 function parseSemver(version: string): SemverInfo | null {
   const match = SEMVER_PATTERN.exec(version)
-  if (!match || !match.groups) return null
+  if (!match?.groups) return null
   const { major, minor, patch, prerelease, build } = match.groups
   return {
     major: Number(major),
@@ -1397,7 +1397,7 @@ async function _internalHttp1Request(
       }
 
       if (streamOnly) {
-        resolve({ statusCode, headers: respHeaders, stream: finalStream })
+        resolve({ statusCode, headers: respHeaders, stream: finalStream, finalUrl: urlString })
         return
       }
 
@@ -1424,7 +1424,7 @@ async function _internalHttp1Request(
           const responseBuffer = Buffer.concat(chunks)
 
           if (options.responseType === 'buffer') {
-            resolve({ statusCode, headers: respHeaders, body: responseBuffer })
+            resolve({ statusCode, headers: respHeaders, body: responseBuffer, finalUrl: urlString })
             return
           }
 
@@ -1437,7 +1437,7 @@ async function _internalHttp1Request(
             .toLowerCase()
             .startsWith('application/json')
           const responseBody = isJson && text ? JSON.parse(text) : text
-          resolve({ statusCode, headers: respHeaders, body: responseBody })
+          resolve({ statusCode, headers: respHeaders, body: responseBody, finalUrl: urlString })
         } catch (err) {
           reject(
             new Error(

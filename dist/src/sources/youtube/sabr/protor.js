@@ -475,7 +475,7 @@ export const NextRequestPolicy = {
     }
 };
 function isMostlyPrintableUtf8(u8) {
-    if (!u8 || !u8.length)
+    if (!u8?.length)
         return false;
     try {
         const s = TD.decode(u8);

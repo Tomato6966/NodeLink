@@ -634,6 +634,16 @@ class BaseAudioResource {
       firstPipe.responseStream.destroy()
     }
 
+    const src = firstPipe as Readable & {
+      _sourceStream?: Readable & {
+        destroyed?: boolean
+        destroy?: (err?: Error) => void
+      }
+    }
+    if (src._sourceStream && !src._sourceStream.destroyed) {
+      src._sourceStream.destroy()
+    }
+
     for (let i = this.pipes.length - 1; i >= 0; i--) {
       const pipe = this.pipes[i] as Transform & {
         abort?: () => void

@@ -1,4 +1,4 @@
-import { translateMany, translateText } from '../modules/googleTranslate.js';
+import { translateMany, translateText } from "../modules/googleTranslate.js";
 import { getBestMatch, http1makeRequest, logger } from "../utils.js";
 /**
  * Letras suggest endpoint used to discover candidate tracks.

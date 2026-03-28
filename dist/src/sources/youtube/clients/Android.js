@@ -1,9 +1,26 @@
 import { logger, makeRequest } from "../../../utils.js";
-import { BaseClient, buildTrack, checkURLType, YOUTUBE_CONSTANTS } from '../common.js';
+import { BaseClient, buildTrack, checkURLType, YOUTUBE_CONSTANTS } from "../common.js";
+/**
+ * YouTube Android innertube client implementation.
+ *
+ * Simulates the official Android YouTube app for API requests.
+ * Used for search, URL resolution, and track playback.
+ *
+ * @public
+ */
 export default class Android extends BaseClient {
+    /**
+     * @param nodelink - NodeLink worker instance providing options, sources, and logging
+     * @param oauth - OAuth manager for authenticated requests, or null if unauthenticated
+     */
     constructor(nodelink, oauth) {
         super(nodelink, 'ANDROID', oauth);
     }
+    /**
+     * Returns the Android client context for innertube API requests.
+     * @param context - General YouTube context with language, region, and visitor data
+     * @returns Client context simulating an Android Pixel 6 device
+     */
     getClient(context) {
         return {
             client: {
@@ -23,9 +40,27 @@ export default class Android extends BaseClient {
             request: { useSsl: true }
         };
     }
+    /**
+     * Whether this client requires a player script for signature deciphering.
+     * Android client returns URLs directly without encryption.
+     * @returns false - Android formats do not require deciphering
+     */
     requirePlayerScript() {
         return false;
     }
+    /**
+     * Searches YouTube for tracks, playlists, channels, or artists.
+     *
+     * Extends the base class `search` with optional proxy and status reporting
+     * parameters. Called directly by YouTubeSource with these additional args.
+     *
+     * @param query - Search query string
+     * @param type - Search type ('track', 'playlist', 'album', 'artist', 'channel')
+     * @param context - YouTube API context
+     * @param proxy - Optional proxy configuration for the request
+     * @param reportProxyStatus - Callback to report proxy success/failure with latency
+     * @returns Search results or error
+     */
     async search(query, type, context, proxy, reportProxyStatus = () => { }) {
         const sourceName = 'youtube';
         let params = 'EgIQAQ%3D%3D'; // Default to track (video)
@@ -41,12 +76,14 @@ export default class Android extends BaseClient {
         const searchProxy = proxy || this.getProxy();
         const searchStart = Date.now();
         try {
-            const { body: searchResult, error, statusCode } = await makeRequest('https://youtubei.googleapis.com/youtubei/v1/search', {
+            const { body: searchResultRaw, error, statusCode } = await makeRequest('https://youtubei.googleapis.com/youtubei/v1/search', {
                 method: 'POST',
                 headers: {
                     'User-Agent': this.getClient(context).client.userAgent,
                     'X-Goog-Api-Format-Version': '2',
-                    'X-Goog-Visitor-Id': context.client.visitorData,
+                    ...(context.client.visitorData
+                        ? { 'X-Goog-Visitor-Id': context.client.visitorData }
+                        : {}),
                     'X-YouTube-Client-Name': '3',
                     'X-YouTube-Client-Version': this.getClient(context).client.clientVersion
                 },
@@ -56,13 +93,14 @@ export default class Android extends BaseClient {
             });
             reportProxyStatus(searchProxy, !error && statusCode === 200, statusCode, Date.now() - searchStart);
             if (error || statusCode !== 200) {
-                const message = error?.message ||
+                const message = error ||
                     `Failed to load results from ${sourceName}. Status: ${statusCode}`;
                 logger('error', 'YouTube-Android', message);
                 return {
                     exception: { message, severity: 'common', cause: 'Upstream' }
                 };
             }
+            const searchResult = searchResultRaw;
             if (!searchResult) {
                 logger('debug', 'YouTube-Android', `Empty search result for '${query}'.`);
                 return { loadType: 'empty', data: {} };
@@ -131,13 +169,30 @@ export default class Android extends BaseClient {
         }
         catch (e) {
             reportProxyStatus(searchProxy, false, 500, Date.now() - searchStart);
-            logger('error', 'YouTube-Android', `Exception during search for '${query}': ${e.message}`);
+            logger('error', 'YouTube-Android', `Exception during search for '${query}': ${e instanceof Error ? e.message : String(e)}`);
             return {
-                exception: { message: e.message, severity: 'fault', cause: 'Exception' }
+                exception: {
+                    message: e instanceof Error ? e.message : String(e),
+                    severity: 'fault',
+                    cause: 'Exception'
+                }
             };
         }
     }
-    async resolve(url, _type, context, cipherManager) {
+    /**
+     * Resolves a YouTube URL to track or playlist data.
+     *
+     * Extends the base class `resolve` with an optional `reportProxyStatus`
+     * callback for proxy latency tracking. Called directly by YouTubeSource.
+     *
+     * @param url - YouTube URL to resolve (video, short, or playlist)
+     * @param _type - Source type override (unused)
+     * @param context - YouTube API context
+     * @param cipherManager - Cipher manager for signature deciphering
+     * @param reportProxyStatus - Callback to report proxy success/failure with latency
+     * @returns Resolved track/playlist data or error
+     */
+    async resolve(url, _type, context, cipherManager, reportProxyStatus = () => { }) {
         const sourceName = 'youtube';
         const urlType = checkURLType(url, 'youtube');
         const apiEndpoint = 'https://youtubei.googleapis.com';
@@ -146,7 +201,7 @@ export default class Android extends BaseClient {
             case YOUTUBE_CONSTANTS.SHORTS: {
                 const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/;
                 const videoIdMatch = url.match(idPattern);
-                if (!videoIdMatch || !videoIdMatch[1]) {
+                if (!videoIdMatch?.[1]) {
                     logger('error', 'youtube-android', `Could not parse video ID from URL: ${url}`);
                     return {
                         exception: {
@@ -169,7 +224,7 @@ export default class Android extends BaseClient {
             }
             case YOUTUBE_CONSTANTS.PLAYLIST: {
                 const playlistIdMatch = url.match(/[?&]list=([\w-]+)/);
-                if (!playlistIdMatch || !playlistIdMatch[1]) {
+                if (!playlistIdMatch?.[1]) {
                     logger('error', 'youtube-android', `Could not parse playlist ID from URL: ${url}`);
                     return {
                         exception: {
@@ -194,10 +249,12 @@ export default class Android extends BaseClient {
                 }
                 const playlistProxy = this.getProxy();
                 const playlistStart = Date.now();
-                const { body: playlistResponse, statusCode } = await makeRequest(`${apiEndpoint}/youtubei/v1/next`, {
+                const { body: playlistResponseRaw, statusCode } = await makeRequest(`${apiEndpoint}/youtubei/v1/next`, {
                     headers: {
                         'User-Agent': this.getClient(context).client.userAgent,
-                        'X-Goog-Visitor-Id': context.client.visitorData,
+                        ...(context.client.visitorData
+                            ? { 'X-Goog-Visitor-Id': context.client.visitorData }
+                            : {}),
                         'X-YouTube-Client-Name': '3',
                         'X-YouTube-Client-Version': this.getClient(context).client.clientVersion
                     },
@@ -218,12 +275,26 @@ export default class Android extends BaseClient {
                         }
                     };
                 }
+                const playlistResponse = playlistResponseRaw;
                 return await this._handlePlaylistResponse(playlistId, currentVideoId, playlistResponse, sourceName);
             }
             default:
                 return { loadType: 'empty', data: {} };
         }
     }
+    /**
+     * Retrieves a playable stream URL for a track via the Android client.
+     *
+     * Overrides the base class implementation to add SABR (server-side ABR)
+     * protocol support for adaptive streaming.
+     *
+     * @param decodedTrack - Decoded track information with identifier and metadata
+     * @param context - YouTube API context
+     * @param cipherManager - Cipher manager for signature deciphering
+     * @param itag - Optional specific format itag to request
+     * @param proxy - Optional proxy override for the request
+     * @returns Stream URL data including protocol, format, and additional metadata
+     */
     async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
         const sourceName = decodedTrack.sourceName || 'youtube';
         logger('debug', 'youtube-android', `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`);
@@ -233,41 +304,47 @@ export default class Android extends BaseClient {
             logger('error', 'youtube-android', message);
             return { exception: { message, severity: 'common', cause: 'Upstream' } };
         }
-        const streamingData = playerResponse.streamingData || playerResponse.streaming_data;
+        const playerData = playerResponse;
+        const streamingData = (playerData.streamingData ||
+            playerData.streaming_data);
         const serverAbrUrl = streamingData?.serverAbrStreamingUrl ||
             streamingData?.server_abr_streaming_url;
-        const ustreamerConfig = playerResponse.playerConfig?.mediaCommonConfig
-            ?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig;
+        const ustreamerConfig = playerData.playerConfig?.mediaCommonConfig;
+        const videoPlaybackConfig = ustreamerConfig?.mediaUstreamerRequestConfig;
         if (serverAbrUrl) {
             logger('debug', 'YouTube-Android', `SABR URL found for ${decodedTrack.identifier}. Using SABR protocol.`);
             const formats = [
-                ...(streamingData.formats || []),
-                ...(streamingData.adaptiveFormats ||
-                    streamingData.adaptive_formats ||
+                ...(streamingData?.formats || []),
+                ...(streamingData?.adaptiveFormats ||
+                    streamingData?.adaptive_formats ||
                     [])
-            ].map((f) => ({
-                itag: f.itag,
-                lastModified: f.lastModified || f.last_modified_ms,
-                xtags: f.xtags,
-                width: f.width,
-                height: f.height,
-                mimeType: f.mimeType || f.mime_type,
-                audioQuality: f.audioQuality || f.audio_quality,
-                bitrate: f.bitrate,
-                averageBitrate: f.averageBitrate || f.average_bitrate,
-                quality: f.quality,
-                qualityLabel: f.qualityLabel || f.quality_label,
-                audioTrackId: f.audioTrack?.id,
-                approxDurationMs: f.approxDurationMs || f.approx_duration_ms,
-                contentLength: f.contentLength || f.content_length,
-                isDrc: !!f.isDrc
-            }));
+            ].map((fRaw) => {
+                const f = fRaw;
+                return {
+                    itag: f.itag,
+                    lastModified: f.lastModified || f.last_modified_ms,
+                    xtags: f.xtags,
+                    width: f.width,
+                    height: f.height,
+                    mimeType: f.mimeType || f.mime_type,
+                    audioQuality: f.audioQuality || f.audio_quality,
+                    bitrate: f.bitrate,
+                    averageBitrate: f.averageBitrate || f.average_bitrate,
+                    quality: f.quality,
+                    qualityLabel: f.qualityLabel || f.quality_label,
+                    audioTrackId: f.audioTrack
+                        ?.id,
+                    approxDurationMs: f.approxDurationMs || f.approx_duration_ms,
+                    contentLength: f.contentLength || f.content_length,
+                    isDrc: !!f.isDrc
+                };
+            });
             return {
                 protocol: 'sabr',
                 url: serverAbrUrl,
                 additionalData: {
                     serverAbrStreamingUrl: serverAbrUrl,
-                    videoPlaybackUstreamerConfig: ustreamerConfig,
+                    videoPlaybackUstreamerConfig: videoPlaybackConfig?.videoPlaybackUstreamerConfig,
                     visitorData: this.getClient(context).client.visitorData,
                     clientInfo: { clientName: 3, clientVersion: '20.51.39' },
                     formats,

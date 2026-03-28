@@ -212,23 +212,36 @@ export default class SpotifySource {
         let success = false;
         if (!this.anonymousToken) {
             this.nodelink.credentialManager.set('spotify_anonymous_token', null);
-            try {
-                const tokenData = await getLocalToken(null, 'web-player');
-                if (tokenData?.accessToken) {
-                    this.anonymousToken = tokenData.accessToken;
-                    const expiresMs = tokenData.accessTokenExpirationTimestampMs
-                        ? tokenData.accessTokenExpirationTimestampMs - Date.now()
-                        : 3600000;
-                    if (!this.accessToken) {
-                        this.tokenExpiry = Date.now() + Math.max(expiresMs, 60000);
+            let retryCount = 0;
+            const maxRetries = 3;
+            while (retryCount <= maxRetries) {
+                try {
+                    const tokenData = await getLocalToken(null, 'web-player');
+                    if (tokenData?.accessToken) {
+                        this.anonymousToken = tokenData.accessToken;
+                        const expiresMs = tokenData.accessTokenExpirationTimestampMs
+                            ? tokenData.accessTokenExpirationTimestampMs - Date.now()
+                            : 3600000;
+                        if (!this.accessToken) {
+                            this.tokenExpiry = Date.now() + Math.max(expiresMs, 60000);
+                        }
+                        this.nodelink.credentialManager.set('spotify_anonymous_token', this.anonymousToken, Math.max(expiresMs, 60000));
+                        success = true;
+                        logger('debug', 'Spotify', 'Generated local anonymous token');
+                        break;
                     }
-                    this.nodelink.credentialManager.set('spotify_anonymous_token', this.anonymousToken, Math.max(expiresMs, 60000));
-                    success = true;
-                    logger('debug', 'Spotify', 'Generated local anonymous token');
                 }
-            }
-            catch (e) {
-                logger('warn', 'Spotify', `Local anonymous token generation failed: ${e.message}`);
+                catch (e) {
+                    if (e.message.includes('400') && retryCount < maxRetries) {
+                        logger('warn', 'Spotify', `Local anonymous token generation failed with 400, retrying (${retryCount + 1}/${maxRetries}): ${e.message}`);
+                        retryCount++;
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    }
+                    else {
+                        logger('warn', 'Spotify', `Local anonymous token generation failed: ${e.message}`);
+                        break;
+                    }
+                }
             }
             if (!this.anonymousToken && this.externalAuthUrl) {
                 try {

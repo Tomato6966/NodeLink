@@ -1,49 +1,107 @@
+import type {
+  SourceResult,
+  TrackInfo,
+  WorkerNodeLink
+} from '../../../typings/sources/source.types.ts'
+import type {
+  ICipherManager,
+  IOAuth,
+  YouTubeClientContext,
+  YouTubeContext
+} from '../../../typings/sources/youtube.types.ts'
+import type {
+  Chapter,
+  MacroMarkersListItemData,
+  VideoRendererWithChapters,
+  YouTubeNextRequestBody,
+  YouTubeNextResponse,
+  YouTubeSearchResponse
+} from '../../../typings/sources/youtubeClient.types.ts'
+import type { HttpProxyConfig } from '../../../typings/utils.types.ts'
 import { logger, makeRequest } from '../../../utils.ts'
 import {
   BaseClient,
   buildTrack,
   checkURLType,
   YOUTUBE_CONSTANTS
-} from '../common.js'
-import { poTokenManager } from '../sabr/potoken.js'
+} from '../common.ts'
 
-export default class Web extends BaseClient {
-  constructor(nodelink, oauth) {
-    super(nodelink, 'WEB', oauth)
-    this.poTokenManager = poTokenManager
+export default class WebEmbedded extends BaseClient {
+  /**
+   * Creates a new WebEmbedded client instance.
+   *
+   * @param nodelink - NodeLink worker instance providing options and source access
+   * @param oauth - OAuth manager for authenticated requests, or null if unauthenticated
+   */
+  constructor(nodelink: WorkerNodeLink, oauth: IOAuth | null) {
+    super(nodelink, 'WEB_EMBEDDED_PLAYER', oauth)
   }
 
-  getClient(context) {
+  /**
+   * Builds the YouTube client context for WEB_EMBEDDED_PLAYER innertube requests.
+   *
+   * @param context - General YouTube context with language, region, and visitor data
+   * @returns Client context object describing this embedded player client configuration
+   */
+  override getClient(context: YouTubeContext): YouTubeClientContext {
     return {
       client: {
-        clientName: 'WEB',
-        clientVersion: '2.20260114.01.00',
+        clientName: 'WEB_EMBEDDED_PLAYER',
+        clientVersion: '1.20260128.01.00',
         platform: 'DESKTOP',
         userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36,gzip(gfe)',
         hl: context.client.hl,
-        gl: context.client.gl
+        gl: context.client.gl,
+        visitorData: context.client.visitorData
       },
       user: { lockedSafetyMode: false },
-      request: { useSsl: true }
+      request: { useSsl: true },
+      thirdParty: { embedUrl: 'https://www.google.com/' }
     }
   }
 
-  requirePlayerScript() {
+  /**
+   * WEB_EMBEDDED_PLAYER client requires a player script for signature deciphering.
+   *
+   * @returns Always true for the embedded player client
+   */
+  override requirePlayerScript(): boolean {
     return true
   }
 
-  async search(query, _type, context) {
+  /**
+   * Indicates this client operates in embedded mode.
+   *
+   * @returns Always true for the embedded player client
+   */
+  override isEmbedded(): boolean {
+    return true
+  }
+
+  /**
+   * Searches YouTube for tracks matching the given query.
+   *
+   * @param query - Search query string (e.g., song name, artist)
+   * @param _type - Search type hint (unused, always returns videos)
+   * @param context - YouTube context with language and region settings
+   * @returns Search result with tracks or an exception
+   */
+  override async search(
+    query: string,
+    _type: string,
+    context: YouTubeContext
+  ): Promise<SourceResult> {
     const sourceName = 'youtube'
 
     const requestBody = {
       context: this.getClient(context),
       query: query,
-      params: 'EgIQAQ%3D%3D'
+      params: 'EgVo2aDSNQ=='
     }
 
     const {
-      body: searchResult,
+      body: searchResultRaw,
       error,
       statusCode
     } = await makeRequest('https://www.youtube.com/youtubei/v1/search', {
@@ -57,11 +115,13 @@ export default class Web extends BaseClient {
       proxy: this.getProxy()
     })
 
+    const searchResult = searchResultRaw as YouTubeSearchResponse
+
     if (error || statusCode !== 200) {
       const message =
-        error?.message ||
+        error ||
         `Failed to load results from ${sourceName}. Status: ${statusCode}`
-      logger('error', 'YouTube-Web', message)
+      logger('error', 'YouTube-WebEmbedded', message)
       return {
         exception: { message, severity: 'common', cause: 'Upstream' }
       }
@@ -69,7 +129,7 @@ export default class Web extends BaseClient {
     if (searchResult.error) {
       logger(
         'error',
-        'YouTube-Web',
+        'YouTube-WebEmbedded',
         `Error from ${sourceName} search API: ${searchResult.error.message}`
       )
       return {
@@ -80,21 +140,22 @@ export default class Web extends BaseClient {
         }
       }
     }
-    const tracks = []
+    const tracks: unknown[] = []
     const allSections = searchResult.contents?.sectionListRenderer?.contents
-    const lastIdx = allSections?.length - 1
+    const lastIdx = (allSections?.length ?? 0) - 1
     let videos = allSections?.[lastIdx]?.itemSectionRenderer?.contents
 
     if (!videos || videos.length === 0) {
       logger(
         'debug',
-        'YouTube-Web',
+        'YouTube-WebEmbedded',
         `No matches found on ${sourceName} for: ${query}`
       )
       return { loadType: 'empty', data: {} }
     }
 
-    const maxResults = this.config.maxSearchResults || 10
+    const maxResults =
+      (this.config.maxSearchResults as number | undefined) || 10
     if (videos.length > maxResults) {
       let count = 0
       videos = videos.filter((video) => {
@@ -113,7 +174,7 @@ export default class Web extends BaseClient {
         sourceName,
         null,
         null,
-        this.config.enableHoloTracks
+        this.config.enableHoloTracks as boolean | undefined
       )
       if (track) {
         tracks.push(track)
@@ -123,7 +184,7 @@ export default class Web extends BaseClient {
     if (tracks.length === 0) {
       logger(
         'debug',
-        'YouTube-Web',
+        'YouTube-WebEmbedded',
         `No processable tracks found on ${sourceName} for: ${query}`
       )
       return { loadType: 'empty', data: {} }
@@ -132,7 +193,23 @@ export default class Web extends BaseClient {
     return { loadType: 'search', data: tracks }
   }
 
-  async resolve(url, _type, context, cipherManager) {
+  /**
+   * Resolves a YouTube URL to track or playlist data.
+   *
+   * Supports video URLs, short URLs, and playlist URLs.
+   *
+   * @param url - YouTube URL to resolve
+   * @param _type - URL type hint (unused)
+   * @param context - YouTube context with language and region settings
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @returns Resolved track/playlist data or an exception
+   */
+  override async resolve(
+    url: string,
+    _type: string,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null
+  ): Promise<SourceResult> {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()
@@ -142,10 +219,10 @@ export default class Web extends BaseClient {
       case YOUTUBE_CONSTANTS.SHORTS: {
         const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/
         const videoIdMatch = url.match(idPattern)
-        if (!videoIdMatch || !videoIdMatch[1]) {
+        if (!videoIdMatch?.[1]) {
           logger(
             'error',
-            'youtube-web',
+            'youtube-webembedded',
             `Could not parse video ID from URL: ${url}`
           )
           return {
@@ -163,7 +240,7 @@ export default class Web extends BaseClient {
 
         if (statusCode !== 200) {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
-          logger('error', 'youtube-web', message)
+          logger('error', 'youtube-webembedded', message)
           return {
             exception: { message, severity: 'common', cause: 'Upstream' }
           }
@@ -178,10 +255,10 @@ export default class Web extends BaseClient {
 
       case YOUTUBE_CONSTANTS.PLAYLIST: {
         const playlistIdMatch = url.match(/[?&]list=([\w-]+)/)
-        if (!playlistIdMatch || !playlistIdMatch[1]) {
+        if (!playlistIdMatch?.[1]) {
           logger(
             'error',
-            'youtube-web',
+            'youtube-webembedded',
             `Could not parse playlist ID from URL: ${url}`
           )
           return {
@@ -197,7 +274,7 @@ export default class Web extends BaseClient {
         const videoIdMatch = url.match(/[?&]v=([\w-]+)/)
         const currentVideoId = videoIdMatch?.[1] ?? null
 
-        const requestBody = {
+        const requestBody: YouTubeNextRequestBody = {
           context: this.getClient(context),
           playlistId,
           contentCheckOk: true,
@@ -210,8 +287,7 @@ export default class Web extends BaseClient {
           `${apiEndpoint}/youtubei/v1/next`,
           {
             headers: {
-              'User-Agent': this.getClient(context).client.userAgent,
-              ...headers
+              'User-Agent': this.getClient(context).client.userAgent
             },
             body: requestBody,
             method: 'POST',
@@ -220,13 +296,15 @@ export default class Web extends BaseClient {
           }
         )
 
-        if (statusCode !== 200 || playlistResponse?.error) {
+        const plResponse = playlistResponse as YouTubeNextResponse
+
+        if (statusCode !== 200 || plResponse?.error) {
           const errMsg =
-            playlistResponse?.error?.message ||
+            plResponse?.error?.message ||
             `Failed to fetch playlist. Status: ${statusCode}`
           logger(
             'error',
-            'youtube-web',
+            'youtube-webembedded',
             `Error loading playlist ${playlistId}: ${errMsg}`
           )
           return {
@@ -251,153 +329,71 @@ export default class Web extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
-    if (this.oauth?.accessToken) {
-      await this.oauth.getAccessToken()
-    }
-
-    const { poToken, visitorData } = await this.poTokenManager.generate(
-      decodedTrack.identifier
+  /**
+   * Retrieves a playable stream URL for a track.
+   *
+   * @param decodedTrack - Decoded track information with identifier
+   * @param context - YouTube context with language and region settings
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @param itag - Optional specific format itag to request
+   * @param proxy - Optional proxy override for this request
+   * @returns Track URL data with protocol info, or an exception
+   */
+  override async getTrackUrl(
+    decodedTrack: TrackInfo,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null,
+    itag?: number | string,
+    proxy?: HttpProxyConfig
+  ): Promise<Record<string, unknown>> {
+    const sourceName = decodedTrack.sourceName || 'youtube'
+    logger(
+      'debug',
+      'youtube-webembedded',
+      `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`
     )
 
-    if (poToken) {
-      const client = this.getClient(context)
-      client.client.visitorData = visitorData
+    const { body: playerResponse, statusCode } = await this._makePlayerRequest(
+      decodedTrack.identifier,
+      context,
+      {},
+      cipherManager,
+      proxy
+    )
 
-      let signatureTimestamp = null
-      try {
-        const playerScript = await cipherManager.getCachedPlayerScript()
-        if (playerScript) {
-          signatureTimestamp = await cipherManager.getTimestamp(
-            playerScript.url
-          )
-        }
-      } catch (e) {
-        logger('warn', 'YouTube-Web', `Failed to get STS: ${e.message}`)
-      }
-
-      const requestBody = {
-        context: client,
-        videoId: decodedTrack.identifier,
-        contentCheckOk: true,
-        racyCheckOk: true,
-        serviceIntegrityDimensions: { poToken }
-      }
-
-      if (signatureTimestamp) {
-        requestBody.playbackContext = {
-          contentPlaybackContext: {
-            signatureTimestamp
-          }
-        }
-      }
-
-      try {
-        const { body: playerResponse } = await makeRequest(
-          'https://youtubei.googleapis.com/youtubei/v1/player?prettyPrint=false',
-          {
-            method: 'POST',
-            headers: {
-              'User-Agent': client.client.userAgent,
-              'X-Goog-Visitor-Id': visitorData,
-              'X-Youtube-Client-Name': '1',
-              'X-Youtube-Client-Version': client.client.clientVersion,
-              Origin: 'https://www.youtube.com',
-              Referer: `https://www.youtube.com/watch?v=${decodedTrack.identifier}`
-            },
-            body: requestBody,
-            disableBodyCompression: true,
-            proxy: proxy || this.getProxy()
-          }
-        )
-
-        const streamingData =
-          playerResponse.streamingData || playerResponse.streaming_data
-        const serverAbrUrl =
-          streamingData?.serverAbrStreamingUrl ||
-          streamingData?.server_abr_streaming_url
-        const ustreamerConfig =
-          playerResponse.playerConfig?.mediaCommonConfig
-            ?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig
-
-        if (serverAbrUrl) {
-          const playerScript = await cipherManager.getCachedPlayerScript()
-
-          let resolvedUrl = serverAbrUrl
-          if (playerScript) {
-            try {
-              resolvedUrl = await cipherManager.resolveUrl(
-                serverAbrUrl,
-                null,
-                null,
-                null,
-                playerScript,
-                context
-              )
-            } catch (e) {
-              logger(
-                'warn',
-                'YouTube-Web',
-                `Failed to resolve SABR URL via cipher server: ${e.message}`
-              )
-            }
-          }
-
-          const formats = [
-            ...(streamingData.formats || []),
-            ...(streamingData.adaptiveFormats ||
-              streamingData.adaptive_formats ||
-              [])
-          ].map((f) => ({
-            itag: f.itag,
-            lastModified: f.lastModified || f.last_modified_ms,
-            xtags: f.xtags,
-            width: f.width,
-            height: f.height,
-            mimeType: f.mimeType || f.mime_type,
-            audioQuality: f.audioQuality || f.audio_quality,
-            bitrate: f.bitrate,
-            averageBitrate: f.averageBitrate || f.average_bitrate,
-            quality: f.quality,
-            qualityLabel: f.qualityLabel || f.quality_label,
-            audioTrackId: f.audioTrack?.id,
-            approxDurationMs: f.approxDurationMs || f.approx_duration_ms,
-            contentLength: f.contentLength || f.content_length,
-            isDrc: !!f.isDrc
-          }))
-
-          return {
-            protocol: 'sabr',
-            url: resolvedUrl,
-            additionalData: {
-              serverAbrStreamingUrl: resolvedUrl,
-              videoPlaybackUstreamerConfig: ustreamerConfig,
-              poToken,
-              visitorData,
-              clientInfo: {
-                clientName: 1,
-                clientVersion: client.client.clientVersion
-              },
-              formats,
-              accessToken: null,
-              userAgent: client.client.userAgent
-            }
-          }
-        }
-      } catch (_e) {}
+    if (statusCode !== 200) {
+      const message = `Failed to get player data for stream. Status: ${statusCode}`
+      logger('error', 'youtube-webembedded', message)
+      return { exception: { message, severity: 'common', cause: 'Upstream' } }
     }
 
-    return super.getTrackUrl(decodedTrack, context, cipherManager, itag)
+    return await this._extractStreamData(
+      playerResponse,
+      decodedTrack,
+      context,
+      cipherManager,
+      itag
+    )
   }
 
-  async getChapters(trackInfo, context) {
+  /**
+   * Extracts chapter information for a video from YouTube search results.
+   *
+   * @param trackInfo - Track information containing the video identifier and length
+   * @param context - YouTube context with language and region settings
+   * @returns Array of chapter objects with title, startTime, and computed duration/endTime
+   */
+  async getChapters(
+    trackInfo: TrackInfo,
+    context: YouTubeContext
+  ): Promise<Chapter[]> {
     const requestBody = {
       context: this.getClient(context),
       query: trackInfo.identifier
     }
 
     const {
-      body: searchResult,
+      body: searchResultRaw,
       error,
       statusCode
     } = await makeRequest('https://www.youtube.com/youtubei/v1/search', {
@@ -411,27 +407,27 @@ export default class Web extends BaseClient {
     })
 
     if (error || statusCode !== 200) {
-      throw new Error(
-        `Search failed for chapters: ${error?.message || statusCode}`
-      )
+      throw new Error(`Search failed for chapters: ${error || statusCode}`)
     }
 
+    const searchResult = searchResultRaw as YouTubeSearchResponse
     const contents =
       searchResult.contents?.twoColumnSearchResultsRenderer?.primaryContents
         ?.sectionListRenderer?.contents
 
     if (!contents) return []
 
-    let videoRenderer = null
+    let videoRenderer: VideoRendererWithChapters | null = null
 
     for (const section of contents) {
       if (section.itemSectionRenderer) {
-        for (const item of section.itemSectionRenderer.contents) {
+        for (const item of section.itemSectionRenderer.contents ?? []) {
           if (
             item.videoRenderer &&
-            item.videoRenderer.videoId === trackInfo.identifier
+            (item.videoRenderer as Record<string, unknown>).videoId ===
+              trackInfo.identifier
           ) {
-            videoRenderer = item.videoRenderer
+            videoRenderer = item.videoRenderer as VideoRendererWithChapters
             break
           }
         }
@@ -447,10 +443,12 @@ export default class Web extends BaseClient {
 
     if (!macroMarkersCards) return []
 
-    const chapters = []
+    const chapters: Chapter[] = []
 
     for (const card of macroMarkersCards) {
-      const renderer = card.macroMarkersListItemRenderer
+      const renderer = card.macroMarkersListItemRenderer as
+        | MacroMarkersListItemData
+        | undefined
       if (renderer) {
         const title =
           renderer.title?.simpleText || renderer.title?.runs?.[0]?.text
@@ -458,7 +456,7 @@ export default class Web extends BaseClient {
           renderer.timeDescription?.simpleText ||
           renderer.timeDescription?.runs?.[0]?.text
 
-        let thumbnails = []
+        let thumbnails: Chapter['thumbnails'] = []
         if (renderer.thumbnail?.thumbnails) {
           thumbnails = renderer.thumbnail.thumbnails
         }
@@ -475,6 +473,9 @@ export default class Web extends BaseClient {
 
     for (let i = 0; i < chapters.length; i++) {
       const current = chapters[i]
+      if (!current) {
+        continue
+      }
       const next = chapters[i + 1]
 
       if (next) {
@@ -489,15 +490,22 @@ export default class Web extends BaseClient {
     return chapters
   }
 
-  _parseTime(timeStr) {
+  /**
+   * Parses a time string (e.g., "1:23" or "1:23:45") into milliseconds.
+   *
+   * @param timeStr - Time string in HH:MM:SS, MM:SS, or SS format
+   * @returns Time in milliseconds
+   */
+  private _parseTime(timeStr: string): number {
     const parts = timeStr.split(':').map(Number)
     let ms = 0
     if (parts.length === 3) {
-      ms = (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000
+      ms =
+        ((parts[0] ?? 0) * 3600 + (parts[1] ?? 0) * 60 + (parts[2] ?? 0)) * 1000
     } else if (parts.length === 2) {
-      ms = (parts[0] * 60 + parts[1]) * 1000
+      ms = ((parts[0] ?? 0) * 60 + (parts[1] ?? 0)) * 1000
     } else {
-      ms = parts[0] * 1000
+      ms = (parts[0] ?? 0) * 1000
     }
     return ms
   }

@@ -404,6 +404,10 @@ class BaseAudioResource {
         if (firstPipe?.responseStream?.destroyed === false) {
             firstPipe.responseStream.destroy();
         }
+        const src = firstPipe;
+        if (src._sourceStream && !src._sourceStream.destroyed) {
+            src._sourceStream.destroy();
+        }
         for (let i = this.pipes.length - 1; i >= 0; i--) {
             const pipe = this.pipes[i];
             pipe.abort?.();

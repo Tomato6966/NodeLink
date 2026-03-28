@@ -131,6 +131,8 @@ export interface HttpRequestResult {
   body?: unknown
   /** Streaming response body when streaming mode is used. */
   stream?: NodeJS.ReadableStream
+  /** The final URL after following redirects. */
+  finalUrl?: string
   /** Error message when request fails. */
   error?: string
 }

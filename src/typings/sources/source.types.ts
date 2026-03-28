@@ -341,9 +341,9 @@ export interface TrackInfo {
   /** Track source URI */
   uri: string
   /** Artwork/thumbnail URL */
-  artworkUrl?: string | null
+  artworkUrl: string | null
   /** International Standard Recording Code */
-  isrc?: string | null
+  isrc: string | null
   /** Source name (e.g., 'youtube', 'spotify') */
   sourceName: string
 }

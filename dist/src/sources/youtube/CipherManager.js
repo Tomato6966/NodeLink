@@ -1,16 +1,80 @@
 import { getVersion, http1makeRequest, logger, makeRequest } from "../../utils.js";
 const CACHE_DURATION_MS = 12 * 60 * 60 * 1000;
 const VERSION = getVersion();
+/**
+ * Runtime type guard for source instances exposing YouTube proxy helpers.
+ *
+ * @param value - Source instance returned by the source manager.
+ * @returns `true` when the instance exposes proxy selection or reporting hooks.
+ */
+function isYouTubeSourceProxyRuntime(value) {
+    if (!value) {
+        return false;
+    }
+    return (typeof value.getProxy === 'function' ||
+        typeof value.reportProxyStatus === 'function');
+}
+/**
+ * Cached player script descriptor with a fixed TTL.
+ *
+ * @internal
+ */
 class CachedPlayerScript {
+    url;
+    expireTimestampMs;
+    /**
+     * Creates a cached player script descriptor.
+     *
+     * @param url - Absolute or relative YouTube player script URL.
+     */
     constructor(url) {
         this.url = url.startsWith('http') ? url : `https://www.youtube.com${url}`;
         this.expireTimestampMs = Date.now() + CACHE_DURATION_MS;
     }
 }
+/**
+ * Helper responsible for player-script discovery and cipher-service access.
+ *
+ * It keeps the active player script cached, resolves signature timestamps,
+ * proxies remote cipher-service requests, and forwards proxy health feedback
+ * to the main YouTube source.
+ *
+ * @example
+ * ```typescript
+ * const cipherManager = new CipherManager(nodelink)
+ * const playerScript = await cipherManager.getCachedPlayerScript()
+ * ```
+ *
+ * @public
+ */
 export default class CipherManager {
+    /** Worker runtime used for configuration, credentials, and source access. */
+    nodelink;
+    /** Remote cipher-service configuration loaded from the YouTube source config. */
+    config;
+    /** Lazily refreshed player script descriptor discovered from YouTube. */
+    cachedPlayerScript;
+    /** Cooperative lock preventing concurrent player-script discovery. */
+    cipherLoadLock;
+    /** Explicitly configured player script descriptor that overrides discovery. */
+    explicitPlayerScriptUrl;
+    /** User-Agent sent to the remote cipher service. */
+    userAgent;
+    /** In-memory cache of STS values keyed by player script URL. */
+    stsCache;
+    /** Periodic timer used to clear the STS cache. */
+    stsCacheInterval;
+    /**
+     * Creates a cipher manager bound to the active NodeLink YouTube runtime.
+     *
+     * @param nodelink - Worker runtime used for config, credentials, and proxy hooks.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        this.config = nodelink.options.sources.youtube.cipher;
+        this.config = {
+            ...(nodelink.options.sources
+                ?.youtube?.cipher ?? {})
+        };
         if (this.config.url) {
             this.config.url = this.config.url.replace(/\/+$/, '');
         }
@@ -19,22 +83,25 @@ export default class CipherManager {
         this.explicitPlayerScriptUrl = null;
         this.userAgent = `nodelink/${VERSION} (https://github.com/PerformanC/NodeLink)`;
         this.stsCache = new Map();
-        this.stsCacheInterval = null;
         this.stsCacheInterval = setInterval(() => {
             this.stsCache.clear();
             logger('debug', 'YouTube-Cipher', 'Cleared STS cache (12h interval)');
-        }, 12 * 60 * 60 * 1000);
+        }, CACHE_DURATION_MS);
         this.stsCacheInterval.unref();
     }
-    _getYouTubeSource() {
-        return this.nodelink?.sources?.getSource?.('youtube');
+    getYouTubeSource() {
+        const source = this.nodelink.sources?.getSource?.('youtube');
+        return isYouTubeSourceProxyRuntime(source) ? source : null;
     }
-    _pickProxy(rotate = true) {
-        return this._getYouTubeSource()?.getProxy?.(rotate);
+    pickProxy(rotate = true) {
+        return this.getYouTubeSource()?.getProxy?.(rotate);
     }
-    _reportProxyStatus(proxy, success, status, latency = 0) {
-        this._getYouTubeSource()?.reportProxyStatus?.(proxy, success, status, latency);
+    reportProxyStatus(proxy, success, status, latency = 0) {
+        this.getYouTubeSource()?.reportProxyStatus?.(proxy, success, status, latency);
     }
+    /**
+     * Releases timers and in-memory caches held by the cipher manager.
+     */
     cleanup() {
         if (this.stsCacheInterval) {
             clearInterval(this.stsCacheInterval);
@@ -42,17 +109,40 @@ export default class CipherManager {
         }
         this.stsCache.clear();
     }
+    /**
+     * Forces the cipher manager to use a specific player script URL.
+     *
+     * @param url - Absolute or relative player script URL.
+     */
     setPlayerScriptUrl(url) {
         this.explicitPlayerScriptUrl = new CachedPlayerScript(url);
         logger('debug', 'YouTube-Cipher', `Explicit player script URL set: ${this.explicitPlayerScriptUrl.url}`);
     }
+    /**
+     * Loads the current player script URL, refreshing it when the cache expires.
+     *
+     * Resolution order:
+     * 1. Explicitly configured player script URL
+     * 2. Credential-manager cache
+     * 3. Watch-page discovery fallback
+     *
+     * @example
+     * ```typescript
+     * const playerScript = await cipherManager.getPlayerScript()
+     * console.log(playerScript?.url)
+     * ```
+     *
+     * @returns Cached player script descriptor, or `null` when discovery fails.
+     */
     async getPlayerScript() {
         if (this.cipherLoadLock) {
             await new Promise((resolve) => setTimeout(resolve, 100));
             return this.getCachedPlayerScript();
         }
-        const cachedUrl = this.nodelink.credentialManager.get('yt_player_script_url');
-        if (cachedUrl && !this.explicitPlayerScriptUrl) {
+        const cachedUrl = this.nodelink.credentialManager?.get('yt_player_script_url');
+        if (typeof cachedUrl === 'string' &&
+            cachedUrl &&
+            !this.explicitPlayerScriptUrl) {
             this.cachedPlayerScript = new CachedPlayerScript(cachedUrl);
             return this.cachedPlayerScript;
         }
@@ -64,7 +154,7 @@ export default class CipherManager {
                 this.cachedPlayerScript = this.explicitPlayerScriptUrl;
                 return this.cachedPlayerScript;
             }
-            const scriptUrl = await this._fetchPlayerScriptFromWatchPage('dQw4w9WgXcQ');
+            const scriptUrl = await this.fetchPlayerScriptFromWatchPage('dQw4w9WgXcQ');
             if (!scriptUrl) {
                 logger('warn', 'YouTube-Cipher', 'Failed to obtain player script URL. Cipher manager might not function correctly.');
                 return null;
@@ -77,6 +167,16 @@ export default class CipherManager {
             this.cipherLoadLock = false;
         }
     }
+    /**
+     * Returns the active player script descriptor, refreshing it if necessary.
+     *
+     * @example
+     * ```typescript
+     * const playerScript = await cipherManager.getCachedPlayerScript()
+     * ```
+     *
+     * @returns Cached player script descriptor, or `null` when unavailable.
+     */
     async getCachedPlayerScript() {
         if (this.explicitPlayerScriptUrl &&
             Date.now() < this.explicitPlayerScriptUrl.expireTimestampMs) {
@@ -88,46 +188,61 @@ export default class CipherManager {
         }
         return this.cachedPlayerScript;
     }
+    /**
+     * Resolves the signature timestamp associated with a player script URL.
+     *
+     * The timestamp is read from the in-memory cache, the credential manager, the
+     * local player script body, or the configured remote cipher service.
+     *
+     * @param playerUrl - Fully qualified YouTube player script URL.
+     *
+     * @example
+     * ```typescript
+     * const sts = await cipherManager.getTimestamp(playerScriptUrl)
+     * ```
+     *
+     * @returns Signature timestamp string used in innertube playback requests.
+     */
     async getTimestamp(playerUrl) {
-        if (this.stsCache.has(playerUrl)) {
-            return this.stsCache.get(playerUrl);
-        }
-        const cachedSts = this.nodelink.credentialManager.get(`yt_sts_${playerUrl}`);
+        const cachedSts = this.stsCache.get(playerUrl);
         if (cachedSts) {
-            this.stsCache.set(playerUrl, cachedSts);
             return cachedSts;
         }
+        const persistedSts = this.nodelink.credentialManager?.get(`yt_sts_${playerUrl}`);
+        if (typeof persistedSts === 'string' && persistedSts) {
+            this.stsCache.set(playerUrl, persistedSts);
+            return persistedSts;
+        }
         if (!this.config.url) {
-            const proxy = this._pickProxy(true);
+            const proxy = this.pickProxy(true);
             const startTime = Date.now();
             let response;
             try {
                 response = await makeRequest(playerUrl, { method: 'GET', proxy });
             }
-            catch (err) {
-                this._reportProxyStatus(proxy, false, 500, Date.now() - startTime);
-                throw err;
+            catch (error) {
+                this.reportProxyStatus(proxy, false, 500, Date.now() - startTime);
+                throw error;
             }
-            const { body: scriptContent, error, statusCode } = response;
-            this._reportProxyStatus(proxy, !error && statusCode === 200, statusCode, Date.now() - startTime);
-            if (error || statusCode !== 200) {
-                logger('error', 'YouTube-Cipher', `Failed to fetch player script for timestamp: ${error?.message || `Status ${statusCode}`}`);
-                throw new Error(`Failed to fetch player script for timestamp: ${error?.message || `Status ${statusCode}`}`);
+            const { body, error, statusCode } = response;
+            this.reportProxyStatus(proxy, !error && statusCode === 200, statusCode ?? 500, Date.now() - startTime);
+            const scriptContent = typeof body === 'string' ? body : '';
+            if (error || statusCode !== 200 || !scriptContent) {
+                const reason = error || `Status ${statusCode ?? 'unknown'}`;
+                logger('error', 'YouTube-Cipher', `Failed to fetch player script for timestamp: ${reason}`);
+                throw new Error(`Failed to fetch player script for timestamp: ${reason}`);
             }
             const timestampMatch = scriptContent.match(/(?:signatureTimestamp|sts):(\d+)/);
-            if (!timestampMatch || !timestampMatch[1]) {
+            const sts = timestampMatch?.[1];
+            if (!sts) {
                 logger('error', 'YouTube-Cipher', `Timestamp not found in player script: ${playerUrl}`);
                 throw new Error(`Timestamp not found in player script: ${playerUrl}`);
             }
-            const sts = timestampMatch[1];
             logger('debug', 'YouTube-Cipher', `Extracted timestamp from player script: ${sts}`);
             this.stsCache.set(playerUrl, sts);
-            this.nodelink.credentialManager.set(`yt_sts_${playerUrl}`, sts, 12 * 60 * 60 * 1000);
+            this.nodelink.credentialManager?.set(`yt_sts_${playerUrl}`, sts, CACHE_DURATION_MS);
             return sts;
         }
-        const requestBody = {
-            player_url: playerUrl
-        };
         const headers = {
             'Content-Type': 'application/json',
             'User-Agent': this.userAgent
@@ -136,34 +251,42 @@ export default class CipherManager {
             headers.Authorization = this.config.token;
         }
         logger('debug', 'YouTube-Cipher', `Fetching STS via /get_sts: ${playerUrl}`);
-        const proxy = this._pickProxy(true);
+        const proxy = this.pickProxy(true);
         const startTime = Date.now();
-        let stsResponse;
+        let response;
         try {
-            stsResponse = await makeRequest(`${this.config.url}/get_sts`, {
+            response = await makeRequest(`${this.config.url}/get_sts`, {
                 method: 'POST',
                 headers,
-                body: requestBody,
+                body: { player_url: playerUrl },
                 disableBodyCompression: true,
                 proxy
             });
         }
-        catch (err) {
-            this._reportProxyStatus(proxy, false, 500, Date.now() - startTime);
-            throw err;
+        catch (error) {
+            this.reportProxyStatus(proxy, false, 500, Date.now() - startTime);
+            throw error;
         }
-        const { body, error, statusCode } = stsResponse;
-        this._reportProxyStatus(proxy, !error && statusCode === 200, statusCode, Date.now() - startTime);
-        if (error || statusCode !== 200) {
-            throw new Error(`Failed to get STS: ${error?.message || body?.message || 'Invalid response'}`);
+        const { body, error, statusCode } = response;
+        this.reportProxyStatus(proxy, !error && statusCode === 200, statusCode ?? 500, Date.now() - startTime);
+        const parsedBody = (body ?? {});
+        if (error || statusCode !== 200 || !parsedBody.sts) {
+            throw new Error(`Failed to get STS: ${error || parsedBody.message || 'Invalid response'}`);
         }
-        if (!body.sts) {
-            throw new Error('Server did not return STS.');
-        }
-        logger('debug', 'YouTube-Cipher', `Received STS: ${body.sts}`);
-        this.stsCache.set(playerUrl, body.sts);
-        return body.sts;
+        logger('debug', 'YouTube-Cipher', `Received STS: ${parsedBody.sts}`);
+        this.stsCache.set(playerUrl, parsedBody.sts);
+        return parsedBody.sts;
     }
+    /**
+     * Checks whether the configured remote cipher service is reachable.
+     *
+     * @example
+     * ```typescript
+     * const online = await cipherManager.checkCipherServerStatus()
+     * ```
+     *
+     * @returns `true` when the service responds with HTTP 200; otherwise `false`.
+     */
     async checkCipherServerStatus() {
         if (!this.config.url) {
             logger('warn', 'YouTube-Cipher', 'Remote cipher URL is not configured. Skipping online check.');
@@ -176,7 +299,7 @@ export default class CipherManager {
             if (this.config.token) {
                 headers.Authorization = this.config.token;
             }
-            const proxy = this._pickProxy(true);
+            const proxy = this.pickProxy(true);
             const startTime = Date.now();
             const { statusCode, error } = await http1makeRequest(`${this.config.url}/`, {
                 method: 'GET',
@@ -184,7 +307,7 @@ export default class CipherManager {
                 headers,
                 proxy
             });
-            this._reportProxyStatus(proxy, !error && statusCode === 200, statusCode, Date.now() - startTime);
+            this.reportProxyStatus(proxy, !error && statusCode === 200, statusCode ?? 500, Date.now() - startTime);
             if (error || statusCode !== 200) {
                 logger('warn', 'YouTube-Cipher', `Cipher server at ${this.config.url} is offline or unreachable. Status: ${statusCode || 'N/A'}`);
                 return false;
@@ -192,12 +315,35 @@ export default class CipherManager {
             logger('info', 'YouTube-Cipher', `Cipher server at ${this.config.url} is online.`);
             return true;
         }
-        catch (_e) {
-            this._reportProxyStatus(undefined, false, 500, 0);
+        catch {
+            this.reportProxyStatus(undefined, false, 500, 0);
             logger('warn', 'YouTube-Cipher', `Cipher server at ${this.config.url} is offline or unreachable.`);
             return false;
         }
     }
+    /**
+     * Resolves a cipher-protected YouTube playback URL through the remote service.
+     *
+     * @param streamUrl - Original playback URL returned by YouTube.
+     * @param encryptedSignature - Encrypted signature payload, when present.
+     * @param nParam - Obfuscated `n` token requiring transformation.
+     * @param signatureKey - Query-string key used for the resolved signature.
+     * @param playerScript - Player script metadata used by the remote resolver.
+     * @param _context - Optional YouTube context reserved for future use.
+     *
+     * @example
+     * ```typescript
+     * const url = await cipherManager.resolveUrl(
+     *   streamUrl,
+     *   encryptedSignature,
+     *   nParam,
+     *   signatureKey,
+     *   playerScript
+     * )
+     * ```
+     *
+     * @returns Final playable URL returned by the cipher service.
+     */
     async resolveUrl(streamUrl, encryptedSignature, nParam, signatureKey, playerScript, _context) {
         if (!this.config.url) {
             throw new Error('Remote cipher URL is not configured.');
@@ -221,12 +367,12 @@ export default class CipherManager {
             headers.Authorization = this.config.token;
         }
         logger('debug', 'YouTube-Cipher', `Resolving URL via /resolve_url: ${streamUrl}`);
-        logger('debug', 'YouTube-Cipher', `Sending to cipher service: ${JSON.stringify(requestBody, null, 2)}`);
-        const proxy = this._pickProxy(true);
+        logger('debug', 'YouTube-Cipher', `Sending to cipher service for player ${playerScript.url}`);
+        const proxy = this.pickProxy(true);
         const startTime = Date.now();
-        let resolveResponse;
+        let response;
         try {
-            resolveResponse = await makeRequest(`${this.config.url}/resolve_url`, {
+            response = await makeRequest(`${this.config.url}/resolve_url`, {
                 method: 'POST',
                 headers,
                 body: requestBody,
@@ -234,25 +380,36 @@ export default class CipherManager {
                 proxy
             });
         }
-        catch (err) {
-            this._reportProxyStatus(proxy, false, 500, Date.now() - startTime);
-            throw err;
+        catch (error) {
+            this.reportProxyStatus(proxy, false, 500, Date.now() - startTime);
+            throw error;
         }
-        const { body, error, statusCode } = resolveResponse;
-        this._reportProxyStatus(proxy, !error && statusCode === 200, statusCode, Date.now() - startTime);
-        logger('debug', 'YouTube-Cipher', `Received from cipher service (Status: ${statusCode}): ${JSON.stringify(body, null, 2)}`);
-        if (error || statusCode !== 200) {
-            throw new Error(`Failed to resolve URL: ${error?.message || body?.message || 'Invalid response'}`);
+        const { body, error, statusCode } = response;
+        this.reportProxyStatus(proxy, !error && statusCode === 200, statusCode ?? 500, Date.now() - startTime);
+        logger('debug', 'YouTube-Cipher', `Received from cipher service (Status: ${statusCode})`);
+        const parsedBody = (body ?? {});
+        if (error || statusCode !== 200 || !parsedBody.resolved_url) {
+            throw new Error(`Failed to resolve URL: ${error || parsedBody.message || 'Invalid response'}`);
         }
-        if (!body.resolved_url) {
-            throw new Error('Server did not return a resolved URL.');
-        }
-        logger('debug', 'YouTube-Cipher', `Resolved URL: ${body.resolved_url}`);
-        return body.resolved_url;
+        logger('debug', 'YouTube-Cipher', `Resolved URL: ${parsedBody.resolved_url}`);
+        return parsedBody.resolved_url;
     }
-    async _fetchPlayerScriptFromWatchPage(videoId) {
+    /**
+     * Fetches the player script URL directly from a YouTube watch page.
+     *
+     * @param videoId - Video identifier used to build the watch-page URL.
+     *
+     * @example
+     * ```typescript
+     * const playerScriptUrl =
+     *   await cipherManager.fetchPlayerScriptFromWatchPage('dQw4w9WgXcQ')
+     * ```
+     *
+     * @returns Fully qualified player script URL, or `null` if not found.
+     */
+    async fetchPlayerScriptFromWatchPage(videoId) {
         const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
-        const proxy = this._pickProxy(true);
+        const proxy = this.pickProxy(true);
         const startTime = Date.now();
         let response;
         try {
@@ -264,22 +421,22 @@ export default class CipherManager {
                 proxy
             });
         }
-        catch (err) {
-            this._reportProxyStatus(proxy, false, 500, Date.now() - startTime);
-            throw err;
+        catch (error) {
+            this.reportProxyStatus(proxy, false, 500, Date.now() - startTime);
+            throw error;
         }
-        const { body: watchPage, error, statusCode } = response;
-        this._reportProxyStatus(proxy, !error && statusCode === 200, statusCode, Date.now() - startTime);
-        if (error || statusCode !== 200) {
-            throw new Error(`Failed to fetch watch page for player script: ${error?.message || statusCode}`);
+        const { body, error, statusCode } = response;
+        this.reportProxyStatus(proxy, !error && statusCode === 200, statusCode ?? 500, Date.now() - startTime);
+        const watchPage = typeof body === 'string' ? body : '';
+        if (error || statusCode !== 200 || !watchPage) {
+            throw new Error(`Failed to fetch watch page for player script: ${error || statusCode || 'unknown'}`);
         }
         const jsUrlMatch = watchPage.match(/"jsUrl":"([^"]+)"/);
-        if (!jsUrlMatch || !jsUrlMatch[1]) {
+        const scriptUrl = jsUrlMatch?.[1];
+        if (!scriptUrl) {
             logger('warn', 'YouTube-Cipher', 'Could not find jsUrl in watch page. Player script fetching failed.');
             return null;
         }
-        let scriptUrl = jsUrlMatch[1];
-        scriptUrl = scriptUrl.replace(/\/[a-z]{2}_[A-Z]{2}\//, '/en_US/');
-        return `https://www.youtube.com${scriptUrl}`;
+        return `https://www.youtube.com${scriptUrl.replace(/\/[a-z]{2}_[A-Z]{2}\//, '/en_US/')}`;
     }
 }

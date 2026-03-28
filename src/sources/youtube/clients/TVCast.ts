@@ -1,12 +1,55 @@
-import { logger, makeRequest } from '../../../utils.ts'
-import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.js'
+/**
+ * YouTube TV Cast Client
+ *
+ * Implements the YouTube TVHTML5_CAST innertube client for Chromecast
+ * casting emulation. Supports video/playlist resolution with player
+ * script deciphering but without OAuth authentication.
+ *
+ * @packageDocumentation
+ * @module YouTubeTVCastClient
+ */
 
-export default class TV extends BaseClient {
-  constructor(nodelink, oauth) {
+import type {
+  SourceResult,
+  TrackInfo,
+  WorkerNodeLink
+} from '../../../typings/sources/source.types.ts'
+import type {
+  ICipherManager,
+  IOAuth,
+  YouTubeClientContext,
+  YouTubeContext
+} from '../../../typings/sources/youtube.types.ts'
+import type { HttpProxyConfig } from '../../../typings/utils.types.ts'
+import { logger, makeRequest } from '../../../utils.ts'
+import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.ts'
+
+/**
+ * YouTube TVHTML5_CAST innertube client.
+ *
+ * Emulates a Chromecast device for YouTube API requests.
+ * Does not use OAuth since audio is being cast.
+ *
+ * @public
+ */
+export default class TVCast extends BaseClient {
+  /**
+   * Creates a new TVCast client instance.
+   *
+   * @param nodelink - NodeLink worker instance providing options and source access
+   * @param oauth - OAuth manager (unused for cast clients)
+   */
+  constructor(nodelink: WorkerNodeLink, oauth: IOAuth | null) {
     super(nodelink, 'TVHTML5_CAST', oauth)
   }
 
-  getClient(context) {
+  /**
+   * Builds the YouTube client context for TVHTML5_CAST innertube requests.
+   *
+   * @param context - General YouTube context with language, region, and visitor data
+   * @returns Client context object describing this TVHTML5_CAST client configuration
+   */
+  override getClient(context: YouTubeContext): YouTubeClientContext {
     return {
       client: {
         clientName: 'TVHTML5_CAST',
@@ -22,16 +65,39 @@ export default class TV extends BaseClient {
     }
   }
 
-  requirePlayerScript() {
+  /**
+   * TV Cast client requires a player script for signature deciphering.
+   *
+   * @returns Always true for the TV Cast client
+   */
+  override requirePlayerScript(): boolean {
     return true
   }
 
-  async getAuthHeaders() {
-    // this client does not work with oauth, does not require it to function, because the audio is beign casted (prob)
-    return {}
+  /**
+   * Returns empty auth headers since cast clients do not use OAuth.
+   *
+   * @returns Empty headers object
+   */
+  override async getAuthHeaders(): Promise<Record<string, string>> {
+    return {} as Record<string, string>
   }
 
-  async resolve(url, _type, context, cipherManager) {
+  /**
+   * Resolves a YouTube URL to track or playlist data.
+   *
+   * @param url - YouTube URL to resolve
+   * @param _type - URL type hint (unused)
+   * @param context - YouTube context with language and region settings
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @returns Resolved track/playlist data or an exception
+   */
+  override async resolve(
+    url: string,
+    _type: string,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null
+  ): Promise<SourceResult> {
     const sourceName = 'youtube'
     const urlType = checkURLType(url, 'youtube')
     const apiEndpoint = this.getApiEndpoint()
@@ -41,7 +107,7 @@ export default class TV extends BaseClient {
       case YOUTUBE_CONSTANTS.SHORTS: {
         const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/
         const videoIdMatch = url.match(idPattern)
-        if (!videoIdMatch || !videoIdMatch[1]) {
+        if (!videoIdMatch?.[1]) {
           logger(
             'error',
             'YouTube-TVCast',
@@ -83,7 +149,7 @@ export default class TV extends BaseClient {
 
       case YOUTUBE_CONSTANTS.PLAYLIST: {
         const playlistIdMatch = url.match(/[?&]list=([\w-]+)/)
-        if (!playlistIdMatch || !playlistIdMatch[1]) {
+        if (!playlistIdMatch?.[1]) {
           logger(
             'error',
             'YouTube-TVCast',
@@ -102,7 +168,7 @@ export default class TV extends BaseClient {
         const videoIdMatch = url.match(/[?&]v=([\w-]+)/)
         const currentVideoId = videoIdMatch?.[1] ?? null
 
-        const requestBody = {
+        const requestBody: Record<string, unknown> = {
           context: this.getClient(context),
           playlistId,
           contentCheckOk: true,
@@ -126,7 +192,7 @@ export default class TV extends BaseClient {
           const errMsg = `Failed to fetch playlist. Status: ${statusCode}`
           logger(
             'error',
-            'YouTube-TV',
+            'YouTube-TVCast',
             `Error loading playlist ${playlistId}: ${errMsg}`
           )
           return {
@@ -152,7 +218,23 @@ export default class TV extends BaseClient {
     }
   }
 
-  async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
+  /**
+   * Retrieves a playable stream URL for a track.
+   *
+   * @param decodedTrack - Decoded track information with identifier
+   * @param context - YouTube context with language and region settings
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @param itag - Optional specific format itag to request
+   * @param proxy - Optional proxy override for this request
+   * @returns Track URL data with protocol info, or an exception
+   */
+  override async getTrackUrl(
+    decodedTrack: TrackInfo,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null,
+    itag?: number | string,
+    proxy?: HttpProxyConfig
+  ): Promise<Record<string, unknown>> {
     const sourceName = decodedTrack.sourceName || 'youtube'
     logger(
       'debug',

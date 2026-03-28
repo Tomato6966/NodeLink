@@ -1,4 +1,4 @@
-import OAuth from '../sources/youtube/OAuth.js'
+import OAuth from '../sources/youtube/OAuth.ts'
 import type {
   ApiNodelinkServer,
   ApiRequest,
@@ -380,7 +380,7 @@ async function collectCurrentConfig(
     currentRefreshToken !== null
   ) {
     try {
-      const validator = new OAuth(runtime) as OAuthRuntime
+      const validator = new OAuth(runtime) as unknown as OAuthRuntime
       validator.refreshToken = currentRefreshToken
       validator.accessToken = null
       validator.tokenExpiry = 0
@@ -411,7 +411,7 @@ async function validateRefreshToken(
 ): Promise<void> {
   logger('info', 'API', 'Sandboxing new YouTube refresh token for validation.')
 
-  const sandboxOAuth = new OAuth(runtime) as OAuthRuntime
+  const sandboxOAuth = new OAuth(runtime) as unknown as OAuthRuntime
   sandboxOAuth.refreshToken = refreshToken
   sandboxOAuth.accessToken = null
   sandboxOAuth.tokenExpiry = 0

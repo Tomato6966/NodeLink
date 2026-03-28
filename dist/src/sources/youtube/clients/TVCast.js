@@ -1,9 +1,39 @@
+/**
+ * YouTube TV Cast Client
+ *
+ * Implements the YouTube TVHTML5_CAST innertube client for Chromecast
+ * casting emulation. Supports video/playlist resolution with player
+ * script deciphering but without OAuth authentication.
+ *
+ * @packageDocumentation
+ * @module YouTubeTVCastClient
+ */
 import { logger, makeRequest } from "../../../utils.js";
-import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from '../common.js';
-export default class TV extends BaseClient {
+import { BaseClient, checkURLType, YOUTUBE_CONSTANTS } from "../common.js";
+/**
+ * YouTube TVHTML5_CAST innertube client.
+ *
+ * Emulates a Chromecast device for YouTube API requests.
+ * Does not use OAuth since audio is being cast.
+ *
+ * @public
+ */
+export default class TVCast extends BaseClient {
+    /**
+     * Creates a new TVCast client instance.
+     *
+     * @param nodelink - NodeLink worker instance providing options and source access
+     * @param oauth - OAuth manager (unused for cast clients)
+     */
     constructor(nodelink, oauth) {
         super(nodelink, 'TVHTML5_CAST', oauth);
     }
+    /**
+     * Builds the YouTube client context for TVHTML5_CAST innertube requests.
+     *
+     * @param context - General YouTube context with language, region, and visitor data
+     * @returns Client context object describing this TVHTML5_CAST client configuration
+     */
     getClient(context) {
         return {
             client: {
@@ -18,13 +48,31 @@ export default class TV extends BaseClient {
             request: { useSsl: true }
         };
     }
+    /**
+     * TV Cast client requires a player script for signature deciphering.
+     *
+     * @returns Always true for the TV Cast client
+     */
     requirePlayerScript() {
         return true;
     }
+    /**
+     * Returns empty auth headers since cast clients do not use OAuth.
+     *
+     * @returns Empty headers object
+     */
     async getAuthHeaders() {
-        // this client does not work with oauth, does not require it to function, because the audio is beign casted (prob)
         return {};
     }
+    /**
+     * Resolves a YouTube URL to track or playlist data.
+     *
+     * @param url - YouTube URL to resolve
+     * @param _type - URL type hint (unused)
+     * @param context - YouTube context with language and region settings
+     * @param cipherManager - Cipher manager for signature deciphering
+     * @returns Resolved track/playlist data or an exception
+     */
     async resolve(url, _type, context, cipherManager) {
         const sourceName = 'youtube';
         const urlType = checkURLType(url, 'youtube');
@@ -34,7 +82,7 @@ export default class TV extends BaseClient {
             case YOUTUBE_CONSTANTS.SHORTS: {
                 const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/;
                 const videoIdMatch = url.match(idPattern);
-                if (!videoIdMatch || !videoIdMatch[1]) {
+                if (!videoIdMatch?.[1]) {
                     logger('error', 'YouTube-TVCast', `Could not parse video ID from URL: ${url}`);
                     return {
                         exception: {
@@ -58,7 +106,7 @@ export default class TV extends BaseClient {
             }
             case YOUTUBE_CONSTANTS.PLAYLIST: {
                 const playlistIdMatch = url.match(/[?&]list=([\w-]+)/);
-                if (!playlistIdMatch || !playlistIdMatch[1]) {
+                if (!playlistIdMatch?.[1]) {
                     logger('error', 'YouTube-TVCast', `Could not parse playlist ID from URL: ${url}`);
                     return {
                         exception: {
@@ -89,7 +137,7 @@ export default class TV extends BaseClient {
                 });
                 if (statusCode !== 200) {
                     const errMsg = `Failed to fetch playlist. Status: ${statusCode}`;
-                    logger('error', 'YouTube-TV', `Error loading playlist ${playlistId}: ${errMsg}`);
+                    logger('error', 'YouTube-TVCast', `Error loading playlist ${playlistId}: ${errMsg}`);
                     return {
                         exception: {
                             message: errMsg,
@@ -104,6 +152,16 @@ export default class TV extends BaseClient {
                 return { loadType: 'empty', data: {} };
         }
     }
+    /**
+     * Retrieves a playable stream URL for a track.
+     *
+     * @param decodedTrack - Decoded track information with identifier
+     * @param context - YouTube context with language and region settings
+     * @param cipherManager - Cipher manager for signature deciphering
+     * @param itag - Optional specific format itag to request
+     * @param proxy - Optional proxy override for this request
+     * @returns Track URL data with protocol info, or an exception
+     */
     async getTrackUrl(decodedTrack, context, cipherManager, itag, proxy) {
         const sourceName = decodedTrack.sourceName || 'youtube';
         logger('debug', 'YouTube-TVCast', `Getting stream URL for: ${decodedTrack.title} (ID: ${decodedTrack.identifier}) on ${sourceName}`);

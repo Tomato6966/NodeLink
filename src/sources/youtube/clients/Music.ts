@@ -1,17 +1,65 @@
+/**
+ * YouTube Music (Android) Client
+ *
+ * Implements the YouTube ANDROID_MUSIC innertube client for YouTube Music
+ * mobile app emulation. Provides search and resolve capabilities for
+ * YouTube Music content but does not provide direct track URLs.
+ *
+ * @packageDocumentation
+ * @module YouTubeMusicClient
+ */
+
+import type {
+  SourceResult,
+  TrackInfo,
+  WorkerNodeLink
+} from '../../../typings/sources/source.types.ts'
+import type {
+  ICipherManager,
+  IOAuth,
+  YouTubeClientContext,
+  YouTubeContext,
+  YouTubeRenderer
+} from '../../../typings/sources/youtube.types.ts'
+import type {
+  YouTubeSearchResponse,
+  YouTubeSearchTabContent
+} from '../../../typings/sources/youtubeClient.types.ts'
 import { logger, makeRequest } from '../../../utils.ts'
 import {
   BaseClient,
   buildTrack,
   checkURLType,
   YOUTUBE_CONSTANTS
-} from '../common.js'
+} from '../common.ts'
 
+/**
+ * YouTube ANDROID_MUSIC innertube client.
+ *
+ * Emulates the YouTube Music Android app for API requests.
+ * Search and resolve are supported; track URL resolution returns an exception
+ * since this client does not provide direct playback URLs.
+ *
+ * @public
+ */
 export default class Music extends BaseClient {
-  constructor(nodelink, oauth) {
+  /**
+   * Creates a new Music client instance.
+   *
+   * @param nodelink - NodeLink worker instance providing options and source access
+   * @param oauth - OAuth manager for authenticated requests, or null if unauthenticated
+   */
+  constructor(nodelink: WorkerNodeLink, oauth: IOAuth | null) {
     super(nodelink, 'ANDROID_MUSIC', oauth)
   }
 
-  getClient(context) {
+  /**
+   * Builds the YouTube client context for ANDROID_MUSIC innertube requests.
+   *
+   * @param context - General YouTube context with language, region, and visitor data
+   * @returns Client context object describing this ANDROID_MUSIC client configuration
+   */
+  override getClient(context: YouTubeContext): YouTubeClientContext {
     return {
       client: {
         clientName: 'ANDROID_MUSIC',
@@ -31,7 +79,19 @@ export default class Music extends BaseClient {
     }
   }
 
-  async search(query, type, context) {
+  /**
+   * Searches YouTube Music for tracks matching the given query.
+   *
+   * @param query - Search query string (e.g., song name, artist)
+   * @param type - Search type hint ('track', 'playlist', 'album', 'artist')
+   * @param context - YouTube context with language and region settings
+   * @returns Search result with tracks or an exception
+   */
+  override async search(
+    query: string,
+    type: string,
+    context: YouTubeContext
+  ): Promise<SourceResult> {
     const sourceName = 'ytmusic'
 
     let params = 'EgWKAQIIAWoQEAMQBBAJEAoQBRAREBAQFQ%3D%3D' // Default (Tracks)
@@ -46,7 +106,7 @@ export default class Music extends BaseClient {
     }
 
     const {
-      body: searchResult,
+      body: searchResultRaw,
       error,
       statusCode
     } = await makeRequest('https://music.youtube.com/youtubei/v1/search', {
@@ -60,9 +120,11 @@ export default class Music extends BaseClient {
       proxy: this.getProxy()
     })
 
+    const searchResult = searchResultRaw as YouTubeSearchResponse
+
     if (error || statusCode !== 200) {
       const message =
-        error?.message ||
+        error ||
         `Failed to load results from ${sourceName}. Status: ${statusCode}`
       logger('error', 'YouTube-Music', message)
       return {
@@ -84,19 +146,22 @@ export default class Music extends BaseClient {
       }
     }
 
-    const tabContent =
-      searchResult.contents?.tabbedSearchResultsRenderer?.tabs?.[0]?.tabRenderer
-        ?.content
+    const tabContent = searchResult.contents?.tabbedSearchResultsRenderer
+      ?.tabs?.[0]?.tabRenderer?.content as YouTubeSearchTabContent | undefined
 
-    const _loggedVideoData = false
-    const tracks = []
-    let videos = null
+    const tracks: unknown[] = []
+    let videos: unknown[] | null = null
 
-    const findShelf = (contents) => {
+    const findShelf = (
+      contents: unknown[] | null | undefined
+    ): unknown[] | null => {
       if (!Array.isArray(contents)) return null
       for (const section of contents) {
-        if (section.musicShelfRenderer) {
-          return section.musicShelfRenderer.contents
+        const sec = section as Record<string, unknown>
+        if (sec.musicShelfRenderer) {
+          return (sec.musicShelfRenderer as Record<string, unknown>).contents as
+            | unknown[]
+            | null
         }
       }
       return null
@@ -126,14 +191,20 @@ export default class Music extends BaseClient {
     }
 
     for (const video of videos) {
+      const videoObj = video as Record<string, unknown>
       const renderer =
-        video.musicResponsiveListItemRenderer ||
-        video.musicTwoColumnItemRenderer
+        videoObj.musicResponsiveListItemRenderer ||
+        videoObj.musicTwoColumnItemRenderer
       if (!renderer) {
         continue
       }
 
-      const track = await buildTrack(video, 'ytmusic', 'ytmusic', searchResult)
+      const track = await buildTrack(
+        video as YouTubeRenderer,
+        'ytmusic',
+        'ytmusic',
+        searchResult as Record<string, unknown>
+      )
       if (track) {
         tracks.push(track)
       }
@@ -142,17 +213,30 @@ export default class Music extends BaseClient {
     return { loadType: 'search', data: tracks }
   }
 
-  async resolve(url, _type, context, cipherManager) {
+  /**
+   * Resolves a YouTube URL to track or playlist data.
+   *
+   * @param url - YouTube URL to resolve
+   * @param _type - URL type hint (unused)
+   * @param context - YouTube context with language and region settings
+   * @param cipherManager - Cipher manager for signature deciphering
+   * @returns Resolved track/playlist data or an exception
+   */
+  override async resolve(
+    url: string,
+    _type: string,
+    context: YouTubeContext,
+    cipherManager: ICipherManager | null
+  ): Promise<SourceResult> {
     const sourceName = 'ytmusic'
     const urlType = checkURLType(url, sourceName)
-    const _apiEndpoint = this.getApiEndpoint()
 
     switch (urlType) {
       case YOUTUBE_CONSTANTS.VIDEO:
       case YOUTUBE_CONSTANTS.SHORTS: {
         const idPattern = /(?:v=|\/shorts\/|youtu\.be\/)([^&?]+)/
         const videoIdMatch = url.match(idPattern)
-        if (!videoIdMatch || !videoIdMatch[1]) {
+        if (!videoIdMatch?.[1]) {
           logger(
             'error',
             'YouTube-Music',
@@ -188,7 +272,7 @@ export default class Music extends BaseClient {
 
       case YOUTUBE_CONSTANTS.PLAYLIST: {
         const listIdMatch = url.match(/[?&]list=([\w-]+)/)
-        if (!listIdMatch || !listIdMatch[1]) {
+        if (!listIdMatch?.[1]) {
           return { loadType: 'empty', data: {} }
         }
         const playlistId = listIdMatch[1]
@@ -232,7 +316,19 @@ export default class Music extends BaseClient {
     }
   }
 
-  async getTrackUrl(_decodedTrack, _context, _cipherManager) {
+  /**
+   * Returns an exception indicating the Music client does not provide direct track URLs.
+   *
+   * @param _decodedTrack - Decoded track information (unused)
+   * @param _context - YouTube context (unused)
+   * @param _cipherManager - Cipher manager (unused)
+   * @returns Exception indicating no direct URLs are available
+   */
+  override async getTrackUrl(
+    _decodedTrack: TrackInfo,
+    _context: YouTubeContext,
+    _cipherManager: ICipherManager | null
+  ): Promise<Record<string, unknown>> {
     return {
       exception: {
         message: 'Music client does not provide direct track URLs.',
