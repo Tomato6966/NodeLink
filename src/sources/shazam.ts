@@ -18,7 +18,7 @@ import {
 } from '../utils.ts'
 
 const SHAZAM_PATTERN =
-  /https?:\/\/(?:www\.)?shazam\.com\/song\/\d+(?:\/[^/?#]+)?/
+  /^https?:\/\/(?:www\.)?shazam\.com\/song\/\d+(?:\/[^/?#]+)?\/?(?:[?#].*)?$/
 const SHAZAM_SEARCH_BASE =
   'https://www.shazam.com/services/amapi/v1/catalog/US/search'
 
@@ -318,9 +318,14 @@ export default class ShazamSource {
    */
   public async search(query: string): Promise<SourceResult> {
     try {
+      const normalizedQuery = query.trim()
+      if (!normalizedQuery) {
+        return { loadType: 'empty', data: {} }
+      }
+
       const limit = this.getMaxSearchResults()
       const url =
-        `${SHAZAM_SEARCH_BASE}?types=songs&term=${encodeURIComponent(query)}` +
+        `${SHAZAM_SEARCH_BASE}?types=songs&term=${encodeURIComponent(normalizedQuery)}` +
         `&limit=${limit}`
 
       const { body, statusCode, error } = await http1makeRequest(url)
@@ -333,9 +338,13 @@ export default class ShazamSource {
         return { loadType: 'empty', data: {} }
       }
 
-      const tracks = songs
-        .map((item) => this.buildTrack(item))
-        .filter((track): track is ShazamTrackData => track !== null)
+      const tracks: ShazamTrackData[] = []
+      for (const item of songs) {
+        const track = this.buildTrack(item)
+        if (track) {
+          tracks.push(track)
+        }
+      }
 
       return tracks.length > 0
         ? { loadType: 'search', data: tracks }
@@ -356,12 +365,16 @@ export default class ShazamSource {
    */
   public async resolve(url: string): Promise<SourceResult> {
     try {
-      const response = await http1makeRequest(url)
-      if (response.statusCode !== 200) {
+      if (!this.patterns.some((pattern) => pattern.test(url))) {
         return { loadType: 'empty', data: {} }
       }
 
-      const html = this.getTextBody(response)
+      const { body, statusCode, error } = await http1makeRequest(url)
+      if (error || statusCode !== 200) {
+        return { loadType: 'empty', data: {} }
+      }
+
+      const html = this.getTextBody({ body })
       if (!html) {
         return { loadType: 'empty', data: {} }
       }
@@ -407,15 +420,19 @@ export default class ShazamSource {
         return { loadType: 'empty', data: {} }
       }
 
-      const cleanUrl = url.endsWith('/') ? url.slice(0, -1) : url
-      const identifier = cleanUrl.slice(cleanUrl.lastIndexOf('/') + 1)
+      const cleanUrl = url.replace(/[?#].*$/, '').replace(/\/$/, '')
+      const identifierMatch = cleanUrl.match(/\/song\/(\d+)(?:\/[^/?#]+)?$/)
+      if (!identifierMatch) {
+        return { loadType: 'empty', data: {} }
+      }
+      const identifier = identifierMatch[1]!
       const track = this.createTrack(
         {
           identifier,
           author: artist,
           length: durationMs || 0,
           title,
-          uri: url,
+          uri: cleanUrl,
           artworkUrl,
           isrc
         },
@@ -611,9 +628,14 @@ export default class ShazamSource {
     const songs = results ? this.getRecord(results, 'songs') : null
     const data = songs ? this.getArray(songs, 'data') : []
 
-    return data
-      .map((value) => this.toSongItem(value))
-      .filter((item): item is ShazamSongItem => item !== null)
+    const songsList: ShazamSongItem[] = []
+    for (const value of data) {
+      const item = this.toSongItem(value)
+      if (item) {
+        songsList.push(item)
+      }
+    }
+    return songsList
   }
 
   /**
@@ -761,11 +783,9 @@ export default class ShazamSource {
    * @returns The best artwork URL or `null`.
    */
   private extractArtworkFromImgAlt(html: string): string | null {
-    const ogImageMatch = html.match(
-      /<meta property="og:image" content="([^"]+)"/
-    )
-    if (ogImageMatch?.[1]) {
-      return ogImageMatch[1]
+    const ogImage = this.extractMetaContent(html, 'og:image')
+    if (ogImage) {
+      return ogImage
     }
 
     let altIndex = html.indexOf('alt="album cover"')
@@ -961,9 +981,27 @@ export default class ShazamSource {
    * @returns The meta content or `null`.
    */
   private extractMetaContent(html: string, property: string): string | null {
-    const regex = new RegExp(`<meta property="${property}" content="([^"]+)"`)
-    const match = html.match(regex)
-    return match?.[1] ?? null
+    const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+    const patterns = [
+      new RegExp(
+        `<meta\\s+[^>]*(?:property|name)=["']${escaped}["'][^>]*content=["']([^"']+)["'][^>]*>`,
+        'i'
+      ),
+      new RegExp(
+        `<meta\\s+[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["']${escaped}["'][^>]*>`,
+        'i'
+      )
+    ]
+
+    for (const pattern of patterns) {
+      const match = pattern.exec(html)
+      if (match?.[1]) {
+        return match[1]
+      }
+    }
+
+    return null
   }
 
   /**
@@ -983,9 +1021,11 @@ export default class ShazamSource {
       return response.body.toString('utf8')
     }
 
-    return response.body !== undefined && response.body !== null
-      ? String(response.body)
-      : null
+    if (response.body instanceof Uint8Array) {
+      return Buffer.from(response.body).toString('utf8')
+    }
+
+    return null
   }
 
   /**
@@ -999,7 +1039,8 @@ export default class ShazamSource {
       body &&
       typeof body === 'object' &&
       !Array.isArray(body) &&
-      !Buffer.isBuffer(body)
+      !Buffer.isBuffer(body) &&
+      !(body instanceof Uint8Array)
     ) {
       return body as JsonRecord
     }
@@ -1126,6 +1167,14 @@ export default class ShazamSource {
         return resultData as ShazamTrackData[]
       }
     }
+
+    if (result.loadType === 'track') {
+      const singleTrack = result.data as ShazamTrackData | undefined
+      if (this.isTrackData(singleTrack)) {
+        return [singleTrack]
+      }
+    }
+
     return []
   }
 
