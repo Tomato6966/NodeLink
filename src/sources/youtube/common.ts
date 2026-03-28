@@ -71,7 +71,6 @@ export {
  */
 const FALLBACK_TITLE = 'Unknown Title'
 const FALLBACK_AUTHOR = 'Unknown Artist'
-const FALLBACK_CHANNEL = 'Unknown Channel'
 
 /**
  * Regular expressions for parsing YouTube URLs and extracting IDs.
@@ -433,12 +432,12 @@ async function fetchOEmbedMetadata(
  * @param fullApiResponse - Full API response for metadata lookup
  * @param _videoId - Video ID (unused, reserved for future use)
  * @param _makeRequestFn - Optional makeRequest function (unused, reserved for future use)
- * @returns The extracted title string, or FALLBACK_TITLE if not found
+ * @returns The extracted title string, or `null` if not found
  *
  * @example
  * ```typescript
  * const title = extractTitle(renderer, response, videoId);
- * // Returns: "Never Gonna Give You Up" or "Unknown Title"
+ * // Returns: "Never Gonna Give You Up" or null
  * ```
  *
  * @internal
@@ -471,7 +470,7 @@ function extractTitle(
     return title
   }
 
-  return FALLBACK_TITLE
+  return null
 }
 
 /**
@@ -482,12 +481,12 @@ function extractTitle(
  * @param fullApiResponse - Full API response for metadata lookup
  * @param _videoId - Video ID (unused, reserved for future use)
  * @param _makeRequestFn - Optional makeRequest function (unused, reserved for future use)
- * @returns The extracted author string, or FALLBACK_CHANNEL if not found
+ * @returns The extracted author string, or `null` if not found
  *
  * @example
  * ```typescript
  * const author = extractAuthor(renderer, response, videoId);
- * // Returns: "RickAstley" or "Unknown Channel"
+ * // Returns: "RickAstley" or null
  * ```
  *
  * @internal
@@ -522,7 +521,7 @@ function extractAuthor(
     return author
   }
 
-  return FALLBACK_CHANNEL
+  return null
 }
 
 /**
@@ -1538,24 +1537,6 @@ export async function buildTrack(
     artworkUrl = extractThumbnail(renderer || undefined, videoId)
     uri = `https://music.youtube.com/watch?v=${videoId}`
   } else {
-    let oEmbedData: Awaited<ReturnType<typeof fetchOEmbedMetadata>> | null = null
-    try {
-      oEmbedData = await fetchOEmbedMetadata(videoId, requestFn)
-      if (oEmbedData) {
-        logger(
-          'debug',
-          'buildTrack',
-          `Got metadata from oEmbed: title="${safeString(oEmbedData.title, FALLBACK_TITLE)}", author="${safeString(oEmbedData.author, FALLBACK_AUTHOR)}"`
-        )
-      }
-    } catch (e: unknown) {
-      logger(
-        'warn',
-        'buildTrack',
-        `Failed to fetch oEmbed metadata: ${e instanceof Error ? e.message : String(e)}`
-      )
-    }
-
     const extractedTitle = extractTitle(
       renderer || undefined,
       fullApiResponse,
@@ -1568,6 +1549,29 @@ export async function buildTrack(
       videoId,
       requestFn
     )
+
+    let oEmbedData: Awaited<ReturnType<typeof fetchOEmbedMetadata>> | null = null
+    const shouldFetchOEmbed =
+      !!fullApiResponse && (extractedTitle === null || extractedAuthor === null)
+
+    if (shouldFetchOEmbed) {
+      try {
+        oEmbedData = await fetchOEmbedMetadata(videoId, requestFn)
+        if (oEmbedData) {
+          logger(
+            'debug',
+            'buildTrack',
+            `Got metadata from oEmbed: title="${safeString(oEmbedData.title, FALLBACK_TITLE)}", author="${safeString(oEmbedData.author, FALLBACK_AUTHOR)}"`
+          )
+        }
+      } catch (e: unknown) {
+        logger(
+          'warn',
+          'buildTrack',
+          `Failed to fetch oEmbed metadata: ${e instanceof Error ? e.message : String(e)}`
+        )
+      }
+    }
 
     title = safeString(oEmbedData?.title ?? extractedTitle, FALLBACK_TITLE)
     author = safeString(oEmbedData?.author ?? extractedAuthor, FALLBACK_AUTHOR)
