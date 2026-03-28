@@ -203,6 +203,8 @@ export interface TrackEncodeInput {
   length: number
   /** Unique track identifier. */
   identifier: string
+  /** Whether the track is seekable. */
+  isSeekable: boolean
   /** Whether the track is a live stream. */
   isStream: boolean
   /** Track URI (required for v2+ payloads). */

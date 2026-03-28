@@ -1,5 +1,6 @@
 import { PassThrough } from 'node:stream';
 import HLSHandler from "../playback/hls/HLSHandler.js";
+import { SEARCH_TYPE_MAP } from "../typings/sources/soundcloud.types.js";
 import { encodeTrack, http1makeRequest, logger, makeRequest } from "../utils.js";
 const BASE_URL = 'https://api-v2.soundcloud.com';
 const SOUNDCLOUD_URL = 'https://soundcloud.com';
@@ -9,25 +10,6 @@ const TRACK_PATTERN = /^https?:\/\/(?:www\.|m\.)?soundcloud\.com\/[^/\s]+\/(?:se
 const SEARCH_URL_PATTERN = /^https?:\/\/(?:www\.)?soundcloud\.com\/search(?:\/(sounds|people|albums|sets))?(?:\?|$)/;
 const BATCH_SIZE = 50;
 const DEFAULT_PRIORITY = 85;
-const SEARCH_TYPE_MAP = {
-    track: 'tracks',
-    tracks: 'tracks',
-    sounds: 'tracks',
-    sound: 'tracks',
-    user: 'users',
-    users: 'users',
-    people: 'users',
-    artist: 'users',
-    artists: 'users',
-    album: 'albums',
-    albums: 'albums',
-    playlist: 'playlists',
-    playlists: 'playlists',
-    set: 'playlists',
-    sets: 'playlists',
-    all: 'all',
-    everything: 'all'
-};
 export default class SoundCloudSource {
     constructor(nodelink) {
         this.nodelink = nodelink;
@@ -35,7 +17,7 @@ export default class SoundCloudSource {
         this.searchTerms = ['scsearch'];
         this.patterns = [TRACK_PATTERN, SEARCH_URL_PATTERN];
         this.priority = DEFAULT_PRIORITY;
-        this.clientId = nodelink.options?.sources?.soundcloud.clientId ?? null;
+        this.clientId = nodelink.options?.sources?.soundcloud?.clientId ?? null;
     }
     async setup() {
         const cachedId = this.nodelink.credentialManager.get('soundcloud_client_id');
@@ -50,16 +32,14 @@ export default class SoundCloudSource {
                 this._logError('Failed to load SoundCloud main page', mainPage?.error);
                 return false;
             }
-            /**
-             * @type {string | undefined}
-             */
             let clientId;
-            if (mainPage.body?.match(CLIENT_ID_PATTERN)) {
-                clientId = mainPage.body.match(CLIENT_ID_PATTERN)[1];
+            if (typeof mainPage.body === 'string' &&
+                mainPage.body.match(CLIENT_ID_PATTERN)) {
+                clientId = mainPage.body.match(CLIENT_ID_PATTERN)?.[1];
                 logger('debug', 'Sources', `SoundCloud client_id (${clientId}) Found from main page`);
             }
             try {
-                if (!clientId) {
+                if (!clientId && typeof mainPage.body === 'string') {
                     const assetMatches = [...mainPage.body.matchAll(ASSET_PATTERN)];
                     if (assetMatches.length === 0) {
                         logger('warn', 'Sources', 'SoundCloud asset URL not found');
@@ -68,7 +48,7 @@ export default class SoundCloudSource {
                     clientId = await Promise.any(assetMatches.map(async (match) => {
                         const assetUrl = match[0];
                         const asset = await http1makeRequest(assetUrl);
-                        if (asset && !asset.error) {
+                        if (asset && !asset.error && typeof asset.body === 'string') {
                             const idMatch = asset.body.match(CLIENT_ID_PATTERN);
                             if (idMatch?.[1]) {
                                 return idMatch[1];
@@ -77,9 +57,11 @@ export default class SoundCloudSource {
                         throw new Error('No client_id found in asset');
                     }));
                 }
-                this.clientId = clientId;
-                this.nodelink.credentialManager.set('soundcloud_client_id', clientId, 7 * 24 * 60 * 60 * 1000);
-                logger('info', 'Sources', `Loaded SoundCloud (clientId: ${this.clientId})`);
+                if (clientId) {
+                    this.clientId = clientId;
+                    this.nodelink.credentialManager.set('soundcloud_client_id', clientId, 7 * 24 * 60 * 60 * 1000);
+                    logger('info', 'Sources', `Loaded SoundCloud (clientId: ${this.clientId})`);
+                }
                 return true;
             }
             catch {
@@ -138,8 +120,8 @@ export default class SoundCloudSource {
         try {
             const params = new URLSearchParams({
                 q: searchQuery,
-                client_id: this.clientId,
-                limit: String(this.nodelink.options.maxSearchResults),
+                client_id: this.clientId ?? '',
+                limit: String(this.nodelink.options.maxSearchResults ?? 50),
                 offset: '0',
                 linked_partitioning: '1'
             });
@@ -148,19 +130,22 @@ export default class SoundCloudSource {
             }
             const req = await http1makeRequest(`${BASE_URL}${endpoint}?${params}`);
             if (req.error || req.statusCode !== 200) {
-                return this._buildError(req.error?.message ?? `Status: ${req.statusCode}`);
+                return this._buildError(req.error?.message ??
+                    `Status: ${req.statusCode}`);
             }
-            if (!req.body?.total_results && !req.body?.collection?.length) {
+            const body = req.body;
+            if (!body?.total_results && !body?.collection?.length) {
                 logger('debug', 'Sources', `No SoundCloud results for '${searchQuery}' (type: ${searchType})`);
                 return { loadType: 'empty', data: {} };
             }
-            const data = this._processSearchResults(req.body.collection, searchType);
+            const collection = body?.collection ?? [];
+            const data = this._processSearchResults(collection, searchType);
             logger('debug', 'Sources', `Found ${data.length} SoundCloud results for '${searchQuery}' (type: ${searchType})`);
             return { loadType: 'search', data };
         }
         catch (err) {
             this._logError('Search failed', err);
-            return this._buildError(err.message);
+            return this._buildError(err instanceof Error ? err.message : 'Unknown error');
         }
     }
     _getSearchEndpoint(type) {
@@ -196,11 +181,11 @@ export default class SoundCloudSource {
         }
     }
     _processUsers(collection) {
-        const max = this.nodelink.options.maxSearchResults;
+        const max = this.nodelink.options.maxSearchResults ?? 50;
         const users = [];
         for (let i = 0; i < collection.length && users.length < max; i++) {
             const user = collection[i];
-            if (user?.kind === 'user' || user?.username) {
+            if (user && (user.kind === 'user' || 'username' in user)) {
                 const info = {
                     title: user.username ?? 'Unknown',
                     author: 'SoundCloud',
@@ -211,11 +196,13 @@ export default class SoundCloudSource {
                     uri: user.permalink_url ?? '',
                     artworkUrl: user.avatar_url ?? null,
                     sourceName: 'soundcloud',
-                    position: 0
+                    position: 0,
+                    isrc: null,
+                    details: []
                 };
                 users.push({
                     encoded: encodeTrack(info),
-                    info,
+                    info: this._toTrackInfo(info),
                     pluginInfo: {
                         type: 'user',
                         followers: user.followers_count ?? 0,
@@ -227,14 +214,15 @@ export default class SoundCloudSource {
         return users;
     }
     _processAlbums(collection) {
-        const max = this.nodelink.options.maxSearchResults;
+        const max = this.nodelink.options.maxSearchResults ?? 50;
         const albums = [];
         for (let i = 0; i < collection.length && albums.length < max; i++) {
             const album = collection[i];
-            if (album?.kind === 'playlist' || album?.title) {
+            if (album && (album.kind === 'playlist' || 'title' in album)) {
                 const info = {
                     title: album.title ?? 'Unknown',
-                    author: album.user?.username ?? 'Unknown',
+                    author: album.user?.username ??
+                        'Unknown',
                     length: 0,
                     identifier: String(album.id ?? ''),
                     isSeekable: true,
@@ -242,11 +230,13 @@ export default class SoundCloudSource {
                     uri: album.permalink_url ?? '',
                     artworkUrl: album.artwork_url ?? null,
                     sourceName: 'soundcloud',
-                    position: 0
+                    position: 0,
+                    isrc: null,
+                    details: []
                 };
                 albums.push({
                     encoded: encodeTrack(info),
-                    info,
+                    info: this._toTrackInfo(info),
                     pluginInfo: {
                         type: 'album',
                         trackCount: album.track_count ?? 0
@@ -257,14 +247,15 @@ export default class SoundCloudSource {
         return albums;
     }
     _processPlaylists(collection) {
-        const max = this.nodelink.options.maxSearchResults;
+        const max = this.nodelink.options.maxSearchResults ?? 50;
         const playlists = [];
         for (let i = 0; i < collection.length && playlists.length < max; i++) {
             const playlist = collection[i];
-            if (playlist?.kind === 'playlist' || playlist?.title) {
+            if (playlist && (playlist.kind === 'playlist' || 'title' in playlist)) {
                 const info = {
                     title: playlist.title ?? 'Unknown',
-                    author: playlist.user?.username ?? 'Unknown',
+                    author: playlist.user?.username ??
+                        'Unknown',
                     length: 0,
                     identifier: String(playlist.id ?? ''),
                     isSeekable: true,
@@ -272,11 +263,13 @@ export default class SoundCloudSource {
                     uri: playlist.permalink_url ?? '',
                     artworkUrl: playlist.artwork_url ?? null,
                     sourceName: 'soundcloud',
-                    position: 0
+                    position: 0,
+                    isrc: null,
+                    details: []
                 };
                 playlists.push({
                     encoded: encodeTrack(info),
-                    info,
+                    info: this._toTrackInfo(info),
                     pluginInfo: {
                         type: 'playlist',
                         trackCount: playlist.track_count ?? 0
@@ -287,7 +280,7 @@ export default class SoundCloudSource {
         return playlists;
     }
     _processAll(collection) {
-        const max = this.nodelink.options.maxSearchResults;
+        const max = this.nodelink.options.maxSearchResults ?? 50;
         const results = [];
         for (let i = 0; i < collection.length && results.length < max; i++) {
             const item = collection[i];
@@ -305,11 +298,13 @@ export default class SoundCloudSource {
                     uri: item.permalink_url ?? '',
                     artworkUrl: item.avatar_url ?? null,
                     sourceName: 'soundcloud',
-                    position: 0
+                    position: 0,
+                    isrc: null,
+                    details: []
                 };
                 results.push({
                     encoded: encodeTrack(info),
-                    info,
+                    info: this._toTrackInfo(info),
                     pluginInfo: {
                         type: 'user',
                         followers: item.followers_count ?? 0,
@@ -320,7 +315,8 @@ export default class SoundCloudSource {
             else if (item?.kind === 'playlist') {
                 const info = {
                     title: item.title ?? 'Unknown',
-                    author: item.user?.username ?? 'Unknown',
+                    author: item.user?.username ??
+                        'Unknown',
                     length: 0,
                     identifier: String(item.id ?? ''),
                     isSeekable: true,
@@ -328,13 +324,17 @@ export default class SoundCloudSource {
                     uri: item.permalink_url ?? '',
                     artworkUrl: item.artwork_url ?? null,
                     sourceName: 'soundcloud',
-                    position: 0
+                    position: 0,
+                    isrc: null,
+                    details: []
                 };
                 results.push({
                     encoded: encodeTrack(info),
-                    info,
+                    info: this._toTrackInfo(info),
                     pluginInfo: {
-                        type: item.is_album ? 'album' : 'playlist',
+                        type: item.is_album
+                            ? 'album'
+                            : 'playlist',
                         trackCount: item.track_count ?? 0
                     }
                 });
@@ -351,18 +351,22 @@ export default class SoundCloudSource {
             return this._resolveSearchUrl(url, searchMatch[1]);
         }
         try {
-            const reqUrl = `${BASE_URL}/resolve?${new URLSearchParams({ url, client_id: this.clientId })}`;
+            const reqUrl = `${BASE_URL}/resolve?${new URLSearchParams({ url, client_id: this.clientId ?? '' })}`;
             const req = await http1makeRequest(reqUrl);
             if (req.statusCode === 404)
                 return { loadType: 'empty', data: {} };
             if (req.error || req.statusCode !== 200) {
-                return this._buildError(req.error?.message ?? `Status: ${req.statusCode}`);
+                return this._buildError(req.error?.message ??
+                    `Status: ${req.statusCode}`);
             }
-            const { body } = req;
+            const body = req.body;
             if (!body?.kind)
                 return this._buildError('Invalid response');
             if (body.kind === 'track') {
-                return { loadType: 'track', data: this._buildTrack(body) };
+                return {
+                    loadType: 'track',
+                    data: this._buildTrack(body)
+                };
             }
             if (body.kind === 'playlist') {
                 return await this._resolvePlaylist(body);
@@ -371,7 +375,7 @@ export default class SoundCloudSource {
         }
         catch (err) {
             this._logError('Resolve failed', err);
-            return this._buildError(err.message);
+            return this._buildError(err instanceof Error ? err.message : 'Unknown error');
         }
     }
     async _resolveSearchUrl(url, searchType) {
@@ -387,26 +391,26 @@ export default class SoundCloudSource {
                 albums: 'albums',
                 sets: 'playlists'
             };
-            const type = typeMap[searchType] || 'all';
+            const type = searchType ? typeMap[searchType] || 'all' : 'all';
             return await this.search(query, type);
         }
         catch (err) {
             this._logError('Search URL resolve failed', err);
-            return this._buildError(err.message);
+            return this._buildError(err instanceof Error ? err.message : 'Unknown error');
         }
     }
     async _resolvePlaylist(body) {
         const complete = [];
         const ids = [];
         for (const t of body.tracks ?? []) {
-            if (t?.title && t?.user) {
+            if (t && 'title' in t && 'user' in t) {
                 complete.push(t);
             }
-            else if (t?.id) {
+            else if (t && 'id' in t && typeof t.id === 'number') {
                 ids.push(t.id);
             }
         }
-        const limit = this.nodelink.options.maxAlbumPlaylistLength;
+        const limit = this.nodelink.options.maxAlbumPlaylistLength ?? 100;
         const neededIds = ids.slice(0, Math.max(0, limit - complete.length));
         if (neededIds.length > 0) {
             const chunks = [];
@@ -416,10 +420,10 @@ export default class SoundCloudSource {
             const promises = chunks.map((chunk) => {
                 const batchUrl = `${BASE_URL}/tracks?${new URLSearchParams({
                     ids: chunk.join(','),
-                    client_id: this.clientId
+                    client_id: this.clientId ?? ''
                 })}`;
                 return http1makeRequest(batchUrl, { method: 'GET' })
-                    .then((res) => (Array.isArray(res.body) ? res.body : []))
+                    .then((res) => Array.isArray(res.body) ? res.body : [])
                     .catch((err) => {
                     this._logError('Batch fetch failed', err);
                     return [];
@@ -447,13 +451,14 @@ export default class SoundCloudSource {
         };
     }
     _processTracks(collection) {
-        const max = this.nodelink.options.maxSearchResults;
+        const max = this.nodelink.options.maxSearchResults ?? 50;
         const tracks = [];
         if (!Array.isArray(collection))
             return [];
         for (let i = 0; i < collection.length && tracks.length < max; i++) {
-            if (collection[i]?.kind === 'track') {
-                tracks.push(this._buildTrack(collection[i]));
+            const item = collection[i];
+            if (item?.kind === 'track') {
+                tracks.push(this._buildTrack(item));
             }
         }
         return tracks;
@@ -470,12 +475,28 @@ export default class SoundCloudSource {
             artworkUrl: item.artwork_url ?? null,
             isrc: item.publisher_metadata?.isrc ?? null,
             sourceName: 'soundcloud',
-            position: 0
+            position: 0,
+            details: []
         };
         return {
             encoded: encodeTrack(info),
-            info,
+            info: this._toTrackInfo(info),
             pluginInfo: {}
+        };
+    }
+    _toTrackInfo(input) {
+        return {
+            title: input.title,
+            author: input.author,
+            length: input.length,
+            identifier: input.identifier,
+            isSeekable: input.isSeekable,
+            isStream: input.isStream,
+            uri: input.uri ?? '',
+            artworkUrl: input.artworkUrl ?? null,
+            isrc: input.isrc ?? null,
+            sourceName: input.sourceName,
+            position: input.position
         };
     }
     async getTrackUrl(info, forceRefresh = false) {
@@ -486,7 +507,9 @@ export default class SoundCloudSource {
             const cached = this.nodelink.trackCacheManager.get('soundcloud', info.identifier);
             if (cached) {
                 const expiresMatch = cached.url.match(/expires=(\d+)/);
-                const expires = expiresMatch ? parseInt(expiresMatch[1], 10) * 1000 : 0;
+                const expires = expiresMatch?.[1]
+                    ? parseInt(expiresMatch[1], 10) * 1000
+                    : 0;
                 if (expires > Date.now() + 5000) {
                     logger('debug', 'Sources', `Using cached SoundCloud URL for ${info.identifier}`);
                     return cached;
@@ -495,18 +518,20 @@ export default class SoundCloudSource {
         }
         try {
             const trackUrl = `https://api.soundcloud.com/tracks/${info.identifier}`;
-            const reqUrl = `${BASE_URL}/resolve?${new URLSearchParams({ url: trackUrl, client_id: this.clientId })}`;
+            const reqUrl = `${BASE_URL}/resolve?${new URLSearchParams({ url: trackUrl, client_id: this.clientId ?? '' })}`;
             const req = await http1makeRequest(reqUrl);
             if (req.error || req.statusCode !== 200) {
                 this._logError('getTrackUrl failed', req.error);
-                return this._buildException(req.error?.message ?? `Status: ${req.statusCode}`);
+                return this._buildException(req.error?.message ??
+                    `Status: ${req.statusCode}`);
             }
-            if (req.body?.errors?.[0]) {
-                const msg = req.body.errors[0].error_message;
+            const body = req.body;
+            if (body?.errors?.[0]) {
+                const msg = body.errors[0].error_message ?? 'Unknown error';
                 this._logError('API error', new Error(msg));
                 return this._buildException(msg);
             }
-            const result = await this._selectTranscoding(req.body);
+            const result = await this._selectTranscoding(body);
             if (result && !result.exception) {
                 this.nodelink.trackCacheManager.set('soundcloud', info.identifier, result, 1000 * 60 * 15);
             }
@@ -514,7 +539,7 @@ export default class SoundCloudSource {
         }
         catch (err) {
             this._logError('getTrackUrl exception', err);
-            return this._buildException(err.message);
+            return this._buildException(err instanceof Error ? err.message : 'Unknown error');
         }
     }
     async _selectTranscoding(body) {
@@ -524,14 +549,14 @@ export default class SoundCloudSource {
                 transcodings.push({
                     format: { protocol: 'hls', mime_type: 'audio/aac' },
                     url: body.hls_aac_160_url,
-                    quality: 'high'
+                    quality: 'hq'
                 });
             }
             if (body.hls_aac_96_url) {
                 transcodings.push({
                     format: { protocol: 'hls', mime_type: 'audio/aac' },
                     url: body.hls_aac_96_url,
-                    quality: 'low'
+                    quality: 'sq'
                 });
             }
         }
@@ -547,7 +572,7 @@ export default class SoundCloudSource {
                 t.format?.mime_type?.includes('mp4')) &&
             (t.quality === 'hq' ||
                 t.preset?.includes('160') ||
-                t.url.includes('160')));
+                t.url?.includes('160')));
         const hlsAacStandard = transcodings.find((t) => t.format?.protocol === 'hls' &&
             (t.format?.mime_type?.includes('aac') ||
                 t.format?.mime_type?.includes('mp4')));
@@ -560,20 +585,27 @@ export default class SoundCloudSource {
             anyProgressive ||
             anyHls ||
             transcodings[0];
+        if (!selected?.url) {
+            return this._buildException('No valid transcoding found');
+        }
         if (selected.format?.mime_type?.includes('opus')) {
             logger('warn', 'Sources', `Using Opus codec which may cause decoder issues (track: ${body.id})`);
         }
         const streamAuthUrl = `${selected.url}?client_id=${this.clientId}`;
         const urlReq = await http1makeRequest(streamAuthUrl, { method: 'GET' });
         let finalUrl = null;
-        if (urlReq.url && urlReq.url !== streamAuthUrl) {
-            finalUrl = urlReq.url;
+        if (urlReq.finalUrl && urlReq.finalUrl !== streamAuthUrl) {
+            finalUrl = urlReq.finalUrl;
         }
         else if (urlReq.statusCode === 302 || urlReq.statusCode === 301) {
-            finalUrl = urlReq.headers?.location;
+            finalUrl =
+                typeof urlReq.headers?.location === 'string'
+                    ? urlReq.headers.location
+                    : null;
         }
         else if (urlReq.body &&
             typeof urlReq.body === 'object' &&
+            'url' in urlReq.body &&
             urlReq.body.url) {
             finalUrl = urlReq.body.url;
         }
@@ -630,7 +662,7 @@ export default class SoundCloudSource {
             }
             const stream = new HLSHandler(url, {
                 type,
-                localAddress: this.nodelink.routePlanner?.getIP(),
+                localAddress: this.nodelink.routePlanner?.getIP?.() ?? undefined,
                 startTime: additionalData?.startTime || 0
             });
             return { stream, type };
@@ -648,27 +680,31 @@ export default class SoundCloudSource {
                 streamOnly: true
             });
             if (res.error) {
-                stream.destroy(new Error(`Stream load failed: ${res.error.message}`));
+                const errorMsg = typeof res.error === 'string' ? res.error : 'Unknown error';
+                stream.destroy(new Error(`Stream load failed: ${errorMsg}`));
                 return;
             }
-            res.stream.on('data', (chunk) => {
+            const responseStream = res.stream;
+            if (!responseStream) {
+                stream.destroy(new Error('No stream in response'));
+                return;
+            }
+            responseStream.on('data', (chunk) => {
                 if (!stream.write(chunk))
-                    res.stream.pause();
+                    responseStream.pause();
             });
             stream.on('drain', () => {
-                if (!res.stream.destroyed)
-                    res.stream.resume();
+                if (!('destroyed' in responseStream && responseStream.destroyed))
+                    responseStream.resume();
             });
-            res.stream.on('end', () => {
+            responseStream.on('end', () => {
                 if (!stream.writableEnded) {
                     stream.emit('finishBuffering');
                     stream.end();
                 }
             });
-            res.stream.on('error', (err) => {
+            responseStream.on('error', (err) => {
                 if (err.message === 'aborted') {
-                    // Aborted is a non-fatal error, plus when it gets "emitted" to the stream, the playback will continue as normal,
-                    // even if the stream is aborted, all the data is already transferred or buffered, so it's safe to ignore ig.
                     logger('debug', 'Sources', 'SoundCloud progressive stream aborted (most of the time this is harmless)');
                     if (!stream.writableEnded) {
                         stream.emit('finishBuffering');
@@ -683,19 +719,20 @@ export default class SoundCloudSource {
         }
         catch (err) {
             this._logError('Progressive stream failed', err);
-            stream.destroy(err);
+            stream.destroy(err instanceof Error ? err : new Error('Unknown error'));
         }
     }
     _isValidString(val) {
         return typeof val === 'string' && val.length > 0;
     }
     _logError(msg, err) {
-        logger('error', 'Sources', `${msg}: ${err?.message ?? 'Unknown'}`);
+        const message = err instanceof Error ? err.message : String(err);
+        logger('error', 'Sources', `${msg}: ${message}`);
     }
     _buildError(message) {
         return {
             loadType: 'error',
-            data: {
+            exception: {
                 message,
                 severity: 'fault',
                 cause: 'Unknown'
