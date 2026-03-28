@@ -1051,6 +1051,7 @@ export async function buildTrack(itemData, itemType, sourceNameOverride = null, 
     let isStream = true;
     let artworkUrl = null;
     let uri = '';
+    const requestFn = makeRequestFn || makeRequest;
     if (itemType === 'ytmusic') {
         title = safeString(getRunsText(getItemValue(renderer, ['title.runs']) ?? undefined) ||
             getItemValue(renderer, ['title.simpleText']) ||
@@ -1115,39 +1116,22 @@ export async function buildTrack(itemData, itemType, sourceNameOverride = null, 
         uri = `https://music.youtube.com/watch?v=${videoId}`;
     }
     else {
-        const extractedTitle = extractTitle(renderer || undefined, fullApiResponse, videoId, makeRequestFn);
-        const extractedAuthor = extractAuthor(renderer || undefined, fullApiResponse, videoId, makeRequestFn);
-        if (extractedTitle === null || extractedAuthor === null) {
-            if (makeRequestFn) {
-                try {
-                    const oEmbedData = await fetchOEmbedMetadata(videoId, makeRequestFn);
-                    if (oEmbedData) {
-                        title = safeString(oEmbedData.title, FALLBACK_TITLE);
-                        author = safeString(oEmbedData.author, FALLBACK_AUTHOR);
-                        logger('debug', 'buildTrack', `Got metadata from oEmbed: title="${title}", author="${author}"`);
-                        if (oEmbedData.thumbnail_url && !artworkUrl) {
-                            artworkUrl = oEmbedData.thumbnail_url;
-                        }
-                    }
-                    else {
-                        title = FALLBACK_TITLE;
-                        author = FALLBACK_AUTHOR;
-                    }
-                }
-                catch (e) {
-                    logger('warn', 'buildTrack', `Failed to fetch oEmbed metadata: ${e instanceof Error ? e.message : String(e)}`);
-                    title = FALLBACK_TITLE;
-                    author = FALLBACK_AUTHOR;
-                }
-            }
-            else {
-                title = FALLBACK_TITLE;
-                author = FALLBACK_AUTHOR;
+        let oEmbedData = null;
+        try {
+            oEmbedData = await fetchOEmbedMetadata(videoId, requestFn);
+            if (oEmbedData) {
+                logger('debug', 'buildTrack', `Got metadata from oEmbed: title="${safeString(oEmbedData.title, FALLBACK_TITLE)}", author="${safeString(oEmbedData.author, FALLBACK_AUTHOR)}"`);
             }
         }
-        else {
-            title = safeString(extractedTitle, FALLBACK_TITLE);
-            author = safeString(extractedAuthor, FALLBACK_AUTHOR);
+        catch (e) {
+            logger('warn', 'buildTrack', `Failed to fetch oEmbed metadata: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        const extractedTitle = extractTitle(renderer || undefined, fullApiResponse, videoId, requestFn);
+        const extractedAuthor = extractAuthor(renderer || undefined, fullApiResponse, videoId, requestFn);
+        title = safeString(oEmbedData?.title ?? extractedTitle, FALLBACK_TITLE);
+        author = safeString(oEmbedData?.author ?? extractedAuthor, FALLBACK_AUTHOR);
+        if (oEmbedData?.thumbnail_url && !artworkUrl) {
+            artworkUrl = oEmbedData.thumbnail_url;
         }
         const lengthText = getItemValue(renderer, ['lengthText.simpleText']) ||
             getRunsText(renderer?.lengthText?.runs);
@@ -1201,7 +1185,7 @@ export async function buildTrack(itemData, itemType, sourceNameOverride = null, 
         }
     };
     if (enableHolo) {
-        return await buildHoloTrack(trackInfo, itemData, itemType, fullApiResponse, config, makeRequestFn);
+        return await buildHoloTrack(trackInfo, itemData, itemType, fullApiResponse, config, requestFn);
     }
     return basicTrack;
 }
@@ -1640,6 +1624,7 @@ export class BaseClient {
     }
     /**
      * Performs an innertube next request (for playlists/recommendations).
+     * TVHTML5 now requires this to fetch title and author after fetching the /player endpoint. Tho, oEmbed is preferred.
      * @internal
      */
     async _makeNextRequest(videoId, context, headers, proxy) {

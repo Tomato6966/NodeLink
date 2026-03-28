@@ -1444,6 +1444,7 @@ export async function buildTrack(
   let isStream = true
   let artworkUrl: string | null = null
   let uri = ''
+  const requestFn = makeRequestFn || makeRequest
 
   if (itemType === 'ytmusic') {
     title = safeString(
@@ -1537,55 +1538,42 @@ export async function buildTrack(
     artworkUrl = extractThumbnail(renderer || undefined, videoId)
     uri = `https://music.youtube.com/watch?v=${videoId}`
   } else {
+    let oEmbedData: Awaited<ReturnType<typeof fetchOEmbedMetadata>> | null = null
+    try {
+      oEmbedData = await fetchOEmbedMetadata(videoId, requestFn)
+      if (oEmbedData) {
+        logger(
+          'debug',
+          'buildTrack',
+          `Got metadata from oEmbed: title="${safeString(oEmbedData.title, FALLBACK_TITLE)}", author="${safeString(oEmbedData.author, FALLBACK_AUTHOR)}"`
+        )
+      }
+    } catch (e: unknown) {
+      logger(
+        'warn',
+        'buildTrack',
+        `Failed to fetch oEmbed metadata: ${e instanceof Error ? e.message : String(e)}`
+      )
+    }
+
     const extractedTitle = extractTitle(
       renderer || undefined,
       fullApiResponse,
       videoId,
-      makeRequestFn
+      requestFn
     )
     const extractedAuthor = extractAuthor(
       renderer || undefined,
       fullApiResponse,
       videoId,
-      makeRequestFn
+      requestFn
     )
 
-    if (extractedTitle === null || extractedAuthor === null) {
-      if (makeRequestFn) {
-        try {
-          const oEmbedData = await fetchOEmbedMetadata(videoId, makeRequestFn)
-          if (oEmbedData) {
-            title = safeString(oEmbedData.title, FALLBACK_TITLE)
-            author = safeString(oEmbedData.author, FALLBACK_AUTHOR)
-            logger(
-              'debug',
-              'buildTrack',
-              `Got metadata from oEmbed: title="${title}", author="${author}"`
-            )
+    title = safeString(oEmbedData?.title ?? extractedTitle, FALLBACK_TITLE)
+    author = safeString(oEmbedData?.author ?? extractedAuthor, FALLBACK_AUTHOR)
 
-            if (oEmbedData.thumbnail_url && !artworkUrl) {
-              artworkUrl = oEmbedData.thumbnail_url
-            }
-          } else {
-            title = FALLBACK_TITLE
-            author = FALLBACK_AUTHOR
-          }
-        } catch (e: unknown) {
-          logger(
-            'warn',
-            'buildTrack',
-            `Failed to fetch oEmbed metadata: ${e instanceof Error ? e.message : String(e)}`
-          )
-          title = FALLBACK_TITLE
-          author = FALLBACK_AUTHOR
-        }
-      } else {
-        title = FALLBACK_TITLE
-        author = FALLBACK_AUTHOR
-      }
-    } else {
-      title = safeString(extractedTitle, FALLBACK_TITLE)
-      author = safeString(extractedAuthor, FALLBACK_AUTHOR)
+    if (oEmbedData?.thumbnail_url && !artworkUrl) {
+      artworkUrl = oEmbedData.thumbnail_url
     }
 
     const lengthText =
@@ -1666,7 +1654,7 @@ export async function buildTrack(
       itemType,
       fullApiResponse,
       config,
-      makeRequestFn
+      requestFn
     )
   }
 
@@ -2273,6 +2261,7 @@ export abstract class BaseClient {
 
   /**
    * Performs an innertube next request (for playlists/recommendations).
+   * TVHTML5 now requires this to fetch title and author after fetching the /player endpoint. Tho, oEmbed is preferred.
    * @internal
    */
   async _makeNextRequest(
