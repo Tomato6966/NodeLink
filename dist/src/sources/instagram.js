@@ -1,7 +1,45 @@
 import { PassThrough } from 'node:stream';
 import { URLSearchParams } from 'node:url';
 import { encodeTrack, getBestMatch, http1makeRequest, logger, makeRequest } from "../utils.js";
+/**
+ * Instagram source implementation.
+ *
+ * Supports resolving Instagram posts, reels, and audio pages into
+ * playable tracks. Post/reel URLs are resolved via the Instagram
+ * GraphQL API, while audio pages use a combination of OG metadata
+ * extraction, authenticated audio API calls, and mirror track
+ * resolution on other sources.
+ */
 export default class InstagramSource {
+    /**
+     * Runtime worker context used by the source implementation.
+     */
+    nodelink;
+    /**
+     * URL patterns supported by this source.
+     *
+     * @remarks
+     * - Index 0: Audio page (`/reels/audio/:id`)
+     * - Index 1: Standard post (`/p/:shortcode`)
+     * - Index 2: Reel/short-video (`/reel/:shortcode` or `/reels/:shortcode`)
+     */
+    patterns;
+    /**
+     * Match priority used by the source manager.
+     */
+    priority;
+    /**
+     * Internal API configuration state.
+     *
+     * Stores CSRF tokens, app IDs, and GraphQL document IDs
+     * required to authenticate requests against the Instagram API.
+     */
+    apiConfig;
+    /**
+     * Creates a new Instagram source wrapper.
+     *
+     * @param nodelink - Worker runtime used by the source implementation.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
         this.patterns = [
@@ -20,6 +58,16 @@ export default class InstagramSource {
             jazoest: '2957'
         };
     }
+    /**
+     * Initializes the Instagram source by fetching API parameters.
+     *
+     * Attempts to load cached configuration from the CredentialManager
+     * first, then falls back to scraping the Instagram homepage for
+     * CSRF tokens, app IDs, and LSD tokens.
+     *
+     * @returns `true` when the source is ready to use, `false` when
+     * initialization fails and the source should be considered unavailable.
+     */
     async setup() {
         logger('info', 'Sources', 'Checking Instagram API parameters...');
         const cachedConfig = this.nodelink.credentialManager.get('instagram_api_config');
@@ -63,13 +111,26 @@ export default class InstagramSource {
             return true;
         }
         catch (e) {
-            logger('error', 'Sources', `Instagram setup failed: ${e.message}. Source will be unavailable.`);
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Sources', `Instagram setup failed: ${message}. Source will be unavailable.`);
             return false;
         }
     }
+    /**
+     * Tests whether a URL matches any of the supported Instagram patterns.
+     *
+     * @param link - Candidate URL to test.
+     * @returns `true` when the URL matches a supported Instagram pattern.
+     */
     isLinkMatch(link) {
         return this.patterns.some((pattern) => pattern.test(link));
     }
+    /**
+     * Decodes common HTML entities in a string.
+     *
+     * @param value - String potentially containing HTML entities.
+     * @returns Decoded and trimmed string, or the original falsy value.
+     */
     _decodeHtmlEntities(value) {
         if (!value)
             return value;
@@ -81,6 +142,13 @@ export default class InstagramSource {
             .replace(/&gt;/g, '>')
             .trim();
     }
+    /**
+     * Extracts the content attribute from a `<meta>` tag matching a given property.
+     *
+     * @param html - Raw HTML string to search.
+     * @param property - OG/meta property name (e.g., `'og:title'`).
+     * @returns Decoded content value, or `null` when the tag is not found.
+     */
     _extractMetaContent(html, property) {
         if (!html || !property)
             return null;
@@ -96,6 +164,16 @@ export default class InstagramSource {
         }
         return null;
     }
+    /**
+     * Parses OG title and description to extract audio metadata.
+     *
+     * Handles both the `Author | Title` format and the
+     * `Listen to ... on Instagram and watch reels using ... audio` format.
+     *
+     * @param ogTitle - OG title string from the audio page.
+     * @param ogDescription - OG description string from the audio page.
+     * @returns Parsed author, title, and search query.
+     */
     _parseAudioOgMetadata(ogTitle, ogDescription) {
         const normalizedOgTitle = (ogTitle || '')
             .replace(/\s+on Instagram$/i, '')
@@ -122,6 +200,14 @@ export default class InstagramSource {
             searchQuery: searchQuery || normalizedTitle
         };
     }
+    /**
+     * Normalizes text for mirror candidate comparison.
+     *
+     * Converts to lowercase, strips special characters, and collapses whitespace.
+     *
+     * @param value - Raw text to normalize.
+     * @returns Normalized text suitable for token comparison.
+     */
     _normalizeMirrorText(value) {
         return String(value || '')
             .toLowerCase()
@@ -132,6 +218,14 @@ export default class InstagramSource {
             .replace(/\s+/g, ' ')
             .trim();
     }
+    /**
+     * Tokenizes normalized text for mirror candidate matching.
+     *
+     * Filters out common stop words like 'official', 'audio', 'video', etc.
+     *
+     * @param value - Raw text to tokenize.
+     * @returns Array of meaningful tokens.
+     */
     _tokenizeMirrorText(value) {
         const ignored = new Set([
             'official',
@@ -147,6 +241,17 @@ export default class InstagramSource {
             .split(' ')
             .filter((token) => token.length > 1 && !ignored.has(token));
     }
+    /**
+     * Determines whether a search result candidate is an acceptable mirror
+     * for the original Instagram audio track.
+     *
+     * Uses token-based matching: at least 50% of title tokens must match,
+     * and at least one author token must match (when available).
+     *
+     * @param original - Original Instagram track metadata.
+     * @param candidateInfo - Candidate track info from a search result.
+     * @returns `true` when the candidate is an acceptable mirror.
+     */
     _isMirrorCandidateAcceptable(original, candidateInfo) {
         if (!candidateInfo)
             return false;
@@ -168,6 +273,15 @@ export default class InstagramSource {
         const authorMatches = authorTokens.filter((token) => candidateText.includes(token)).length;
         return authorMatches > 0;
     }
+    /**
+     * Fetches audio metadata from an Instagram audio page using OG meta tags.
+     *
+     * Serves as a lightweight fallback before attempting the authenticated
+     * audio API endpoint.
+     *
+     * @param audioId - Instagram audio cluster ID.
+     * @returns Fetch result containing parsed OG metadata or an error.
+     */
     async _fetchAudioOgMetadata(audioId) {
         if (!audioId) {
             return {
@@ -188,10 +302,11 @@ export default class InstagramSource {
             });
         }
         catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
             return {
                 data: null,
                 exception: {
-                    message: `Failed to fetch Instagram audio page: ${e.message}`,
+                    message: `Failed to fetch Instagram audio page: ${message}`,
                     severity: 'fault'
                 }
             };
@@ -221,8 +336,9 @@ export default class InstagramSource {
         const parsed = this._parseAudioOgMetadata(ogTitle, ogDescription);
         return {
             data: {
-                author: parsed.author,
-                title: parsed.title,
+                videoUrl: '',
+                author: parsed.author || 'User Unknown',
+                title: parsed.title || 'Instagram Audio',
                 thumbnail: ogImage || '',
                 length: -1,
                 isStream: false,
@@ -233,6 +349,17 @@ export default class InstagramSource {
             exception: null
         };
     }
+    /**
+     * Attempts to find a playable mirror track on other sources.
+     *
+     * Generates multiple search queries from the decoded track metadata,
+     * searches using the default source, and applies token-based
+     * candidate filtering to find the best match.
+     *
+     * @param decodedTrack - Original Instagram track metadata.
+     * @param preferredQuery - Optional pre-constructed search query to try first.
+     * @returns Mirror resolution result with the matched track, or an exception.
+     */
     async _resolveAudioMirrorTrack(decodedTrack, preferredQuery = null) {
         const queries = [
             preferredQuery || '',
@@ -248,12 +375,13 @@ export default class InstagramSource {
             if (triedQueries.has(query))
                 continue;
             triedQueries.add(query);
-            let searchResult = null;
+            let searchResult;
             try {
                 searchResult = await this.nodelink.sources.searchWithDefault(query);
             }
             catch (e) {
-                logger('debug', 'Sources', `Instagram audio mirror lookup failed on search for "${query}": ${e.message}`);
+                const message = e instanceof Error ? e.message : String(e);
+                logger('debug', 'Sources', `Instagram audio mirror lookup failed on search for "${query}": ${message}`);
                 continue;
             }
             if (searchResult.loadType !== 'search' ||
@@ -271,7 +399,10 @@ export default class InstagramSource {
                 continue;
             const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info);
             if (!streamInfo?.exception) {
-                return { newTrack: bestMatch, ...streamInfo };
+                return {
+                    newTrack: bestMatch,
+                    ...streamInfo
+                };
             }
         }
         return {
@@ -281,6 +412,12 @@ export default class InstagramSource {
             }
         };
     }
+    /**
+     * Extracts the content type and identifier from an Instagram URL.
+     *
+     * @param url - Candidate Instagram URL.
+     * @returns Parsed URL info with content type, identifier, and optional path segment.
+     */
     _extractInfo(url) {
         if (!url) {
             return {
@@ -313,14 +450,21 @@ export default class InstagramSource {
             type: null
         };
     }
+    /**
+     * Converts a numeric Instagram media ID to a base62 shortcode.
+     *
+     * @param mediaId - Numeric media ID (may contain an underscore suffix).
+     * @returns Base62 shortcode, or `null` when conversion fails.
+     */
     _getShortcodeFromMediaId(mediaId) {
         const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
         let shortcode = '';
-        if (String(mediaId).includes('_')) {
-            mediaId = String(mediaId).substring(0, String(mediaId).indexOf('_'));
+        let idStr = String(mediaId);
+        if (idStr.includes('_')) {
+            idStr = idStr.substring(0, idStr.indexOf('_'));
         }
         try {
-            let mediaIdBigInt = BigInt(mediaId);
+            let mediaIdBigInt = BigInt(idStr);
             if (mediaIdBigInt <= 0)
                 return null;
             while (mediaIdBigInt > 0) {
@@ -331,10 +475,17 @@ export default class InstagramSource {
             return shortcode;
         }
         catch (e) {
-            logger('debug', 'Sources', `Could not convert Instagram mediaId "${mediaId}" to shortcode: ${e.message}`);
+            const message = e instanceof Error ? e.message : String(e);
+            logger('debug', 'Sources', `Could not convert Instagram mediaId "${mediaId}" to shortcode: ${message}`);
             return null;
         }
     }
+    /**
+     * Encodes the GraphQL request body for a post query.
+     *
+     * @param shortcode - Instagram post shortcode.
+     * @returns URL-encoded form body string.
+     */
     _encodePostRequestData(shortcode) {
         const variables = JSON.stringify({
             shortcode: shortcode,
@@ -356,7 +507,7 @@ export default class InstagramSource {
             __req: '3',
             dpr: '1',
             __ccg: 'UNKNOWN',
-            lsd: this.apiConfig.fbLsd,
+            lsd: this.apiConfig.fbLsd ?? '',
             jazoest: this.apiConfig.jazoest,
             doc_id: this.apiConfig.docId_post,
             variables: variables,
@@ -365,10 +516,21 @@ export default class InstagramSource {
         };
         const params = new URLSearchParams();
         for (const key in requestData) {
-            params.append(key, requestData[key]);
+            const value = requestData[key];
+            if (value !== undefined) {
+                params.append(key, value);
+            }
         }
         return params.toString();
     }
+    /**
+     * Fetches audio information from the authenticated Instagram audio API.
+     *
+     * Supports both original sound info and music info payloads.
+     *
+     * @param audioId - Instagram audio cluster ID.
+     * @returns Fetch result containing audio stream URL and metadata, or an error.
+     */
     async _fetchFromAudioAPI(audioId) {
         if (!audioId) {
             return {
@@ -381,9 +543,9 @@ export default class InstagramSource {
             'Accept-Language': 'en-US,en;q=0.9',
             'Content-Type': 'application/x-www-form-urlencoded',
             'X-FB-Friendly-Name': 'PolarisClipsAudioRoute',
-            'X-CSRFToken': this.apiConfig.csrfToken,
-            'X-IG-App-ID': this.apiConfig.igAppId,
-            'X-FB-LSD': this.apiConfig.fbLsd,
+            'X-CSRFToken': this.apiConfig.csrfToken ?? '',
+            'X-IG-App-ID': this.apiConfig.igAppId ?? '',
+            'X-FB-LSD': this.apiConfig.fbLsd ?? '',
             'X-ASBD-ID': '129477',
             'Sec-Fetch-Site': 'same-origin',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
@@ -392,7 +554,7 @@ export default class InstagramSource {
         };
         const body = new URLSearchParams({
             audio_cluster_id: audioId,
-            lsd: this.apiConfig.fbLsd,
+            lsd: this.apiConfig.fbLsd ?? '',
             jazoest: this.apiConfig.jazoest,
             __user: '0',
             __a: '1'
@@ -407,22 +569,23 @@ export default class InstagramSource {
             });
         }
         catch (e) {
-            logger('error', 'Sources', `Internal error during Instagram Audio API request for audioId ${audioId}: ${e.message}`);
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Sources', `Internal error during Instagram Audio API request for audioId ${audioId}: ${message}`);
             return {
                 data: null,
                 exception: {
-                    message: `Internal error during Audio API request: ${e.message}`,
+                    message: `Internal error during Audio API request: ${message}`,
                     severity: 'fault'
                 }
             };
         }
         if (response.error || response.statusCode !== 200) {
-            const errorMsg = response.error?.message ||
+            const errorMsg = response.error ||
                 `Audio API request failed with code ${response.statusCode}`;
             return {
                 data: null,
                 exception: {
-                    message: errorMsg,
+                    message: String(errorMsg),
                     severity: 'fault',
                     cause: `Status: ${response.statusCode}`
                 }
@@ -430,11 +593,12 @@ export default class InstagramSource {
         }
         let responseData = response.body;
         if (typeof responseData === 'string') {
-            if (responseData.startsWith('for (;;);')) {
-                responseData = responseData.substring('for (;;);'.length);
+            let bodyStr = responseData;
+            if (bodyStr.startsWith('for (;;);')) {
+                bodyStr = bodyStr.substring('for (;;);'.length);
             }
             try {
-                responseData = JSON.parse(responseData);
+                responseData = JSON.parse(bodyStr);
             }
             catch (_e) {
                 return {
@@ -455,12 +619,13 @@ export default class InstagramSource {
                 }
             };
         }
+        const data = responseData;
         let payload = null;
-        if (responseData.payload) {
-            payload = responseData.payload;
+        if (data.payload) {
+            payload = data.payload;
         }
-        else if (responseData.metadata) {
-            payload = responseData;
+        else if (data.metadata) {
+            payload = data;
         }
         else {
             return {
@@ -471,10 +636,11 @@ export default class InstagramSource {
                 }
             };
         }
-        let audioInfo = payload.metadata?.original_sound_info;
+        const metadata = payload.metadata;
+        let audioInfo = metadata?.original_sound_info;
         let infoSource = 'original_sound_info';
         if (!audioInfo) {
-            audioInfo = payload.metadata?.music_info;
+            audioInfo = metadata?.music_info;
             infoSource = 'music_info';
         }
         if (!audioInfo) {
@@ -492,24 +658,26 @@ export default class InstagramSource {
         let duration = null;
         let thumbnail = null;
         if (infoSource === 'original_sound_info') {
-            audioUrl = audioInfo.progressive_download_url;
-            artist = audioInfo.ig_artist?.username || 'User Unknown';
-            title = audioInfo.original_audio_title || 'Instagram Audio';
+            audioUrl = audioInfo.progressive_download_url || null;
+            const igArtist = audioInfo.ig_artist;
+            artist = igArtist?.username || 'User Unknown';
+            title =
+                audioInfo.original_audio_title || 'Instagram Audio';
             duration = audioInfo.duration_in_ms || 0;
-            thumbnail = audioInfo.ig_artist?.profile_pic_url || '';
+            thumbnail = igArtist?.profile_pic_url || '';
         }
         else {
             const musicAsset = audioInfo.music_asset_info;
             const musicConsumption = audioInfo.music_consumption_info;
-            audioUrl = musicAsset?.progressive_download_url;
+            audioUrl = musicAsset?.progressive_download_url || null;
             if (!audioUrl && musicConsumption?.dash_manifest) {
-                const urlMatch = musicConsumption.dash_manifest.match(/<BaseURL>(.*?)<\/BaseURL>/);
+                const urlMatch = String(musicConsumption.dash_manifest).match(/<BaseURL>(.*?)<\/BaseURL>/);
                 if (urlMatch?.[1]) {
                     audioUrl = urlMatch[1].replace(/&amp;/g, '&');
                 }
             }
             if (!audioUrl) {
-                audioUrl = audioInfo.progressive_download_url;
+                audioUrl = audioInfo.progressive_download_url || null;
             }
             artist = musicAsset?.artist_name || 'User Unknown';
             title = musicAsset?.title || 'Instagram Audio';
@@ -538,6 +706,15 @@ export default class InstagramSource {
             exception: null
         };
     }
+    /**
+     * Fetches post/reel media information from the Instagram GraphQL API.
+     *
+     * Handles both single video posts and carousel posts with video children.
+     *
+     * @param postId - Instagram shortcode for the post.
+     * @param pathSegment - URL path segment used in the Referer header (`'p'` or `'reel'`).
+     * @returns Fetch result containing video stream URL and metadata, or an error.
+     */
     async _fetchFromGraphQL(postId, pathSegment) {
         if (!postId) {
             return {
@@ -550,9 +727,9 @@ export default class InstagramSource {
             'Accept-Language': 'en-US,en;q=0.9',
             'Content-Type': 'application/x-www-form-urlencoded',
             'X-FB-Friendly-Name': 'PolarisPostActionLoadPostQueryQuery',
-            'X-CSRFToken': this.apiConfig.csrfToken,
-            'X-IG-App-ID': this.apiConfig.igAppId,
-            'X-FB-LSD': this.apiConfig.fbLsd,
+            'X-CSRFToken': this.apiConfig.csrfToken ?? '',
+            'X-IG-App-ID': this.apiConfig.igAppId ?? '',
+            'X-FB-LSD': this.apiConfig.fbLsd ?? '',
             'X-ASBD-ID': '129477',
             'Sec-Fetch-Site': 'same-origin',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36',
@@ -570,22 +747,23 @@ export default class InstagramSource {
             });
         }
         catch (e) {
-            logger('error', 'Sources', `Internal error during Instagram GraphQL request for postId ${postId}: ${e.message}`);
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Sources', `Internal error during Instagram GraphQL request for postId ${postId}: ${message}`);
             return {
                 data: null,
                 exception: {
-                    message: `Internal error during GraphQL request: ${e.message}`,
+                    message: `Internal error during GraphQL request: ${message}`,
                     severity: 'fault'
                 }
             };
         }
         if (response.error || response.statusCode !== 200) {
-            const errorMsg = response.error?.message ||
+            const errorMsg = response.error ||
                 `GraphQL request failed with code ${response.statusCode}`;
             return {
                 data: null,
                 exception: {
-                    message: errorMsg,
+                    message: String(errorMsg),
                     severity: 'fault',
                     cause: `Status: ${response.statusCode}`
                 }
@@ -606,7 +784,8 @@ export default class InstagramSource {
                 };
             }
         }
-        if (!responseData || !responseData.data) {
+        const data = responseData;
+        if (!data?.data) {
             return {
                 data: null,
                 exception: {
@@ -615,7 +794,8 @@ export default class InstagramSource {
                 }
             };
         }
-        const media = responseData.data.xdt_shortcode_media;
+        const media = data.data
+            .xdt_shortcode_media;
         if (media === null) {
             return {
                 data: null,
@@ -631,7 +811,8 @@ export default class InstagramSource {
         }
         else if (media.__typename === 'XDTGraphSidecar' &&
             media.edge_sidecar_to_children) {
-            const videoEdge = media.edge_sidecar_to_children.edges.find((edge) => edge.node.is_video);
+            const edges = media.edge_sidecar_to_children.edges;
+            const videoEdge = edges?.find((edge) => edge.node.is_video);
             if (videoEdge) {
                 videoNode = videoEdge.node;
             }
@@ -655,13 +836,17 @@ export default class InstagramSource {
                 }
             };
         }
-        const title = media?.edge_media_to_caption?.edges[0]?.node?.text || 'Instagram Video';
+        const captionEdges = media.edge_media_to_caption?.edges;
+        const title = captionEdges?.[0]?.node?.text || 'Instagram Video';
+        const owner = media.owner;
         return {
             data: {
                 videoUrl: videoUrl,
-                author: media.owner?.username || 'User Unknown',
+                author: owner?.username || 'User Unknown',
                 length: (videoNode.video_duration || 0) * 1000,
-                thumbnail: videoNode.display_url || media.display_url || '',
+                thumbnail: videoNode.display_url ||
+                    media.display_url ||
+                    '',
                 title: title,
                 isStream: false,
                 isSeekable: true
@@ -669,13 +854,30 @@ export default class InstagramSource {
             exception: null
         };
     }
+    /**
+     * Resolves an Instagram URL into a single playable track.
+     *
+     * For post/reel URLs, fetches from the GraphQL API. For audio URLs,
+     * tries OG metadata first, then falls back to the authenticated
+     * audio API.
+     *
+     * @param queryUrl - Candidate Instagram URL.
+     * @returns Track result payload, empty result, or error result.
+     */
     async resolve(queryUrl) {
-        const { id: contentId, error: idError, type, pathSegment } = this._extractInfo(queryUrl);
-        if (idError) {
+        const urlInfo = this._extractInfo(queryUrl);
+        if (urlInfo.error || !urlInfo.id) {
             return {
-                exception: { message: idError, severity: 'common', cause: 'URLParsing' }
+                loadType: 'error',
+                exception: {
+                    message: urlInfo.error ?? 'Instagram URL not provided',
+                    severity: 'common',
+                    cause: 'URLParsing'
+                }
             };
         }
+        const contentId = urlInfo.id;
+        const { type, pathSegment } = urlInfo;
         let trackData = null;
         let fetchError = null;
         if (type === 'post') {
@@ -695,6 +897,7 @@ export default class InstagramSource {
         }
         else {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Unknown URL type',
                     severity: 'fault',
@@ -706,11 +909,32 @@ export default class InstagramSource {
             if (fetchError.message?.includes('Media not found')) {
                 return { loadType: 'empty', data: {} };
             }
-            return { exception: { ...fetchError, cause: 'APIRequest' } };
+            return {
+                loadType: 'error',
+                exception: { ...fetchError, cause: 'APIRequest' }
+            };
+        }
+        if (!trackData) {
+            return {
+                loadType: 'error',
+                exception: {
+                    message: 'Could not retrieve track data.',
+                    severity: 'fault',
+                    cause: 'APIRequest'
+                }
+            };
         }
         const track = this.buildTrack(trackData, queryUrl, contentId);
         return { loadType: 'track', data: track };
     }
+    /**
+     * Builds an encoded Instagram track payload from raw track data.
+     *
+     * @param trackData - Raw track data from API or OG metadata.
+     * @param queryUrl - Original Instagram URL.
+     * @param contentId - Extracted content identifier.
+     * @returns Complete encoded track payload.
+     */
     buildTrack(trackData, queryUrl, contentId) {
         const trackInfo = {
             identifier: contentId,
@@ -718,7 +942,7 @@ export default class InstagramSource {
             author: trackData.author,
             length: trackData.length || -1,
             sourceName: 'instagram',
-            artworkUrl: trackData.thumbnail || trackData.artworkUrl,
+            artworkUrl: trackData.thumbnail || null,
             uri: queryUrl,
             isStream: trackData.isStream,
             isSeekable: !trackData.isStream,
@@ -726,20 +950,39 @@ export default class InstagramSource {
             isrc: null
         };
         return {
-            encoded: encodeTrack(trackInfo),
+            encoded: encodeTrack({
+                ...trackInfo,
+                details: []
+            }),
             info: trackInfo,
             pluginInfo: {
                 description: trackData.description || null
             }
         };
     }
+    /**
+     * Resolves the direct playable URL for an Instagram track.
+     *
+     * For post URLs, re-fetches from the GraphQL API. For audio URLs,
+     * attempts mirror track resolution first, then falls back to
+     * the authenticated audio API.
+     *
+     * @param track - Decoded Instagram track information.
+     * @returns Direct media URL descriptor or an exception payload.
+     */
     async getTrackUrl(track) {
-        const { id: contentId, error: idError, type, pathSegment } = this._extractInfo(track.uri);
-        if (idError) {
+        const urlInfo = this._extractInfo(track.uri);
+        if (urlInfo.error || !urlInfo.id) {
             return {
-                exception: { message: idError, severity: 'common', cause: 'URLParsing' }
+                exception: {
+                    message: urlInfo.error ?? 'Instagram URL not provided',
+                    severity: 'common',
+                    cause: 'URLParsing'
+                }
             };
         }
+        const contentId = urlInfo.id;
+        const { type, pathSegment } = urlInfo;
         let trackData = null;
         let fetchError = null;
         if (type === 'post') {
@@ -756,10 +999,10 @@ export default class InstagramSource {
                 const ogMetadata = await this._fetchAudioOgMetadata(contentId);
                 if (!ogMetadata.exception && ogMetadata.data) {
                     mirrorTrack = {
-                        ...track,
                         title: ogMetadata.data.title || track.title,
                         author: ogMetadata.data.author || track.author,
-                        artworkUrl: ogMetadata.data.thumbnail || track.artworkUrl
+                        length: track.length,
+                        uri: track.uri
                     };
                     preferredQuery = ogMetadata.data.searchQuery || null;
                 }
@@ -797,9 +1040,18 @@ export default class InstagramSource {
             format: 'mp4'
         };
     }
+    /**
+     * Opens a media stream from a direct Instagram media URL.
+     *
+     * @param decodedTrack - Decoded track metadata being played.
+     * @param url - Direct media URL returned by `getTrackUrl`.
+     * @param _protocol - Unused protocol hint.
+     * @param _additionalData - Unused additional data.
+     * @returns Playable stream payload or an exception payload.
+     */
     async loadStream(decodedTrack, url, _protocol, _additionalData) {
         try {
-            const options = {
+            const response = await http1makeRequest(url, {
                 method: 'GET',
                 streamOnly: true,
                 headers: {
@@ -807,11 +1059,9 @@ export default class InstagramSource {
                     Referer: decodedTrack.uri || 'https://www.instagram.com/'
                 },
                 disableBodyCompression: true
-            };
-            const response = await http1makeRequest(url, options);
+            });
             if (response.error || !response.stream) {
-                throw (response.error ||
-                    new Error('Failed to get stream, no stream object returned.'));
+                throw new Error(response.error || 'Failed to get stream, no stream object returned.');
             }
             const stream = new PassThrough();
             response.stream.on('data', (chunk) => {
@@ -827,15 +1077,26 @@ export default class InstagramSource {
             return { stream, type: 'video/mp4' };
         }
         catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
             return {
                 exception: {
-                    message: err.message,
+                    message,
                     severity: 'fault',
                     cause: 'StreamLoadFailed'
                 }
             };
         }
     }
+    /**
+     * Searches Instagram by URL or numeric media ID.
+     *
+     * Text search is not supported; only direct URL and numeric ID
+     * lookups are handled.
+     *
+     * @param query - Search query (Instagram URL or numeric media ID).
+     * @param _type - Unused search type parameter.
+     * @returns Track result, or error when no results are found.
+     */
     async search(query, _type) {
         if (this.isLinkMatch(query)) {
             return this.resolve(query);
@@ -848,6 +1109,7 @@ export default class InstagramSource {
             }
         }
         return {
+            loadType: 'error',
             exception: {
                 message: 'No results found for the query.',
                 severity: 'common',
