@@ -120,7 +120,7 @@ export default class JioSaavnSource {
         let id = query;
         if (!IDENTIFIER_REGEX.test(query)) {
             const searchRes = await this.search(query, 'jssearch');
-            if (this.isSearchResult(searchRes) &&
+            if (searchRes.loadType === 'search' &&
                 searchRes.data[0]?.info.identifier) {
                 id = searchRes.data[0].info.identifier;
             }
@@ -252,7 +252,8 @@ export default class JioSaavnSource {
             logger('warn', 'JioSaavn', `Direct stream failed for ${decodedTrack.title}: ${this.getErrorMessage(error)}. Falling back to default search.`);
         }
         const searchResult = await this.nodelink.sources.searchWithDefault(`${decodedTrack.title} ${decodedTrack.author}`);
-        if (!Array.isArray(searchResult.data)) {
+        if (searchResult.loadType !== 'search' ||
+            !Array.isArray(searchResult.data)) {
             return this.exceptionTrackUrlResult('No suitable alternative found.');
         }
         const candidates = [];
@@ -570,7 +571,7 @@ export default class JioSaavnSource {
      * @returns Exception result payload.
      */
     exceptionResult(message, severity = 'fault') {
-        return { exception: { message, severity } };
+        return { loadType: 'error', exception: { message, severity } };
     }
     /**
      * Creates a typed exception payload for URL resolution.

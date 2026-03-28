@@ -54,6 +54,7 @@ export default class WebParentTools extends BaseClient {
                 const videoIdMatch = url.match(idPattern);
                 if (!videoIdMatch?.[1]) {
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Invalid video URL.',
                             severity: 'common',
@@ -65,6 +66,7 @@ export default class WebParentTools extends BaseClient {
                 const { body: playerResponse, statusCode } = await this._makePlayerRequest(videoId, context, {}, cipherManager);
                 if (statusCode !== 200) {
                     return {
+                        loadType: 'error',
                         exception: {
                             message: `Failed to load video data. Status: ${statusCode}`,
                             severity: 'common',
@@ -91,6 +93,7 @@ export default class WebParentTools extends BaseClient {
         const { body: playerResponse, statusCode } = await this._makePlayerRequest(decodedTrack.identifier, context, {}, cipherManager, proxy);
         if (statusCode !== 200) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Failed to get player data. Status: ${statusCode}`,
                     severity: 'common',

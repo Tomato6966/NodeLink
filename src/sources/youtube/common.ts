@@ -5,9 +5,9 @@
  * @packageDocumentation
  * @module YouTubeSourceCommon
  */
-import type { TrackData } from '../../typings/index.types.ts'
 import type {
   SourceResult,
+  TrackData,
   TrackInfo,
   WorkerNodeLink
 } from '../../typings/sources/source.types.ts'
@@ -1289,6 +1289,7 @@ export interface TrackBuildOptions {
  */
 export interface YouTubeTrackData extends TrackData {
   info: Required<NonNullable<TrackData['info']>>
+  userData?: unknown
 }
 
 /**
@@ -1550,7 +1551,8 @@ export async function buildTrack(
       requestFn
     )
 
-    let oEmbedData: Awaited<ReturnType<typeof fetchOEmbedMetadata>> | null = null
+    let oEmbedData: Awaited<ReturnType<typeof fetchOEmbedMetadata>> | null =
+      null
     const shouldFetchOEmbed =
       !!fullApiResponse && (extractedTitle === null || extractedAuthor === null)
 
@@ -1959,17 +1961,16 @@ export async function buildHoloTrack(
   const result: YouTubeTrackData = {
     encoded: encodeTrack({ ...trackInfo, details: [] } as TrackEncodeInput),
     info: trackInfo,
-    pluginInfo,
-    keywords: JSON.stringify(keywords),
-    externalLinks: externalLinks as unknown as Record<
-      string,
-      string | number | boolean | null
-    >,
-    videoQualities: JSON.stringify(videoQualities),
-    audioFormats: JSON.stringify(audioFormats),
-    audioTracks: JSON.stringify(audioTracks),
-    captions: JSON.stringify(captions),
-    channel: channelData as Record<string, string | number | boolean | null>
+    pluginInfo: {
+      ...pluginInfo,
+      keywords: JSON.stringify(keywords),
+      externalLinks: JSON.stringify(externalLinks),
+      videoQualities: JSON.stringify(videoQualities),
+      audioFormats: JSON.stringify(audioFormats),
+      audioTracks: JSON.stringify(audioTracks),
+      captions: JSON.stringify(captions),
+      channel: JSON.stringify(channelData)
+    }
   }
 
   return result
@@ -2742,6 +2743,7 @@ export abstract class BaseClient {
         `No streaming data found for ${decodedTrack.identifier}`
       )
       return {
+        loadType: 'error',
         exception: {
           message: 'No streaming data available.',
           severity: 'common',
@@ -2821,6 +2823,7 @@ export abstract class BaseClient {
             `Requested audio track ${dt.audioTrackId} not found in client ${this.name}.`
           )
           return {
+            loadType: 'error',
             exception: {
               message: 'Requested audio track not available in this client.',
               severity: 'common',
@@ -2915,6 +2918,7 @@ export abstract class BaseClient {
         'Failed to obtain player script for deciphering. Cannot extract stream data.'
       )
       return {
+        loadType: 'error',
         exception: {
           message: 'Failed to obtain player script for deciphering.',
           severity: 'fault',
@@ -3012,6 +3016,7 @@ export abstract class BaseClient {
         'No suitable stream found after all fallbacks, and no HLS manifest URL.'
       )
       return {
+        loadType: 'error',
         exception: {
           message: 'No suitable audio stream found after all fallbacks.',
           severity: 'common',
@@ -3047,6 +3052,7 @@ export abstract class BaseClient {
         'No direct URL resolved and no HLS manifest. Returning error.'
       )
       return {
+        loadType: 'error',
         exception: {
           message: 'No suitable audio stream found.',
 
@@ -3287,7 +3293,10 @@ export abstract class BaseClient {
     if (playerResult.statusCode !== 200 || !playerResult.body) {
       const message = `Failed to get player data for stream. Status: ${playerResult.statusCode}`
       logger('error', `youtube-${this.name}`, message)
-      return { exception: { message, severity: 'common', cause: 'Upstream' } }
+      return {
+        loadType: 'error',
+        exception: { message, severity: 'common', cause: 'Upstream' }
+      }
     }
 
     return await this._extractStreamData(

@@ -441,19 +441,18 @@ export default class GeniusSource {
      * @returns The first usable track reference or `null`.
      */
     extractTrackReferenceFromSourceResult(result) {
-        const resultData = result.data;
-        if (!resultData) {
-            return null;
+        if (result.loadType === 'track') {
+            const trackData = result.data;
+            if (this.isTrackReference(trackData)) {
+                return trackData;
+            }
         }
-        const trackData = resultData;
-        if (result.loadType === 'track' && this.isTrackReference(trackData)) {
-            return trackData;
-        }
-        const playlistData = resultData;
-        if (result.loadType === 'playlist' &&
-            this.isTrackCollection(playlistData) &&
-            playlistData.tracks.length > 0) {
-            return playlistData.tracks[0] ?? null;
+        if (result.loadType === 'playlist') {
+            const playlistData = result.data;
+            if (this.isTrackCollection(playlistData) &&
+                playlistData.tracks.length > 0) {
+                return playlistData.tracks[0] ?? null;
+            }
         }
         return null;
     }
@@ -464,9 +463,11 @@ export default class GeniusSource {
      * @returns Track references suitable for title/author matching.
      */
     extractSearchCandidates(result) {
+        if (result.loadType !== 'search') {
+            return [];
+        }
         const resultData = result.data;
-        if (result.loadType === 'search' &&
-            Array.isArray(resultData) &&
+        if (Array.isArray(resultData) &&
             resultData.every((item) => this.isTrackReference(item))) {
             return resultData;
         }

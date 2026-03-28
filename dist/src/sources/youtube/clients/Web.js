@@ -94,12 +94,14 @@ export default class Web extends BaseClient {
                 `Failed to load results from ${sourceName}. Status: ${statusCode}`;
             logger('error', 'YouTube-Web', message);
             return {
+                loadType: 'error',
                 exception: { message, severity: 'common', cause: 'Upstream' }
             };
         }
         if (searchResult.error) {
             logger('error', 'YouTube-Web', `Error from ${sourceName} search API: ${searchResult.error.message}`);
             return {
+                loadType: 'error',
                 exception: {
                     message: searchResult.error.message,
                     severity: 'fault',
@@ -162,6 +164,7 @@ export default class Web extends BaseClient {
                 if (!videoIdMatch?.[1]) {
                     logger('error', 'youtube-web', `Could not parse video ID from URL: ${url}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Invalid video URL.',
                             severity: 'common',
@@ -175,6 +178,7 @@ export default class Web extends BaseClient {
                     const message = `Failed to load video/short player data. Status: ${statusCode}`;
                     logger('error', 'youtube-web', message);
                     return {
+                        loadType: 'error',
                         exception: { message, severity: 'common', cause: 'Upstream' }
                     };
                 }
@@ -185,6 +189,7 @@ export default class Web extends BaseClient {
                 if (!playlistIdMatch?.[1]) {
                     logger('error', 'youtube-web', `Could not parse playlist ID from URL: ${url}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Invalid playlist URL.',
                             severity: 'common',
@@ -219,6 +224,7 @@ export default class Web extends BaseClient {
                         `Failed to fetch playlist. Status: ${statusCode}`;
                     logger('error', 'youtube-web', `Error loading playlist ${playlistId}: ${errMsg}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: errMsg,
                             severity: 'common',

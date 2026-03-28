@@ -540,24 +540,28 @@ export default class LastFMSource {
         };
     }
     extractTrackData(result) {
-        const trackData = result.data;
-        if (result.loadType === 'track' && this.isTrackData(trackData)) {
-            return trackData;
+        if (result.loadType === 'track') {
+            const trackData = result.data;
+            if (this.isTrackData(trackData)) {
+                return trackData;
+            }
         }
-        const playlistData = result.data;
-        if (result.loadType === 'playlist' &&
-            this.isTrackCollection(playlistData) &&
-            playlistData.tracks.length > 0) {
-            return playlistData.tracks[0] ?? null;
+        if (result.loadType === 'playlist') {
+            const playlistData = result.data;
+            if (this.isTrackCollection(playlistData) &&
+                playlistData.tracks.length > 0) {
+                return playlistData.tracks[0] ?? null;
+            }
         }
         return null;
     }
     extractTrackArray(result) {
-        const resultData = result.data;
-        if (result.loadType === 'search' &&
-            Array.isArray(resultData) &&
-            resultData.every((item) => this.isTrackData(item))) {
-            return resultData;
+        if (result.loadType === 'search') {
+            const resultData = result.data;
+            if (Array.isArray(resultData) &&
+                resultData.every((item) => this.isTrackData(item))) {
+                return resultData;
+            }
         }
         return [];
     }

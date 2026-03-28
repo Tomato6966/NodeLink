@@ -517,9 +517,11 @@ export default class TwitterSource {
      * @returns Encoded Twitter track payload or `null`.
      */
     extractTrackFromResult(result) {
-        const resultData = result.data;
-        if (result.loadType === 'track' && this.isTrackData(resultData)) {
-            return resultData;
+        if (result.loadType === 'track') {
+            const resultData = result.data;
+            if (this.isTrackData(resultData)) {
+                return resultData;
+            }
         }
         return null;
     }

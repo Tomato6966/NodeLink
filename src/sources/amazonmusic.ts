@@ -690,7 +690,7 @@ export default class AmazonMusicSource implements SourceInstance {
             position: 0,
             title: t.name,
             uri: t.url || url,
-            artworkUrl: collectionImage,
+            artworkUrl: collectionImage ?? null,
             isrc: t.isrcCode || null,
             sourceName: 'amazonmusic'
           })
@@ -723,7 +723,7 @@ export default class AmazonMusicSource implements SourceInstance {
             position: 0,
             title: tTitle,
             uri: `${origin}/tracks/${tId}`,
-            artworkUrl: tImage,
+            artworkUrl: tImage ?? null,
             isrc: null,
             sourceName: 'amazonmusic'
           })

@@ -9,7 +9,6 @@ export { YOUTUBE_CONSTANTS };
  */
 const FALLBACK_TITLE = 'Unknown Title';
 const FALLBACK_AUTHOR = 'Unknown Artist';
-const FALLBACK_CHANNEL = 'Unknown Channel';
 /**
  * Regular expressions for parsing YouTube URLs and extracting IDs.
  * Each pattern handles a specific URL format used by YouTube.
@@ -318,12 +317,12 @@ async function fetchOEmbedMetadata(videoId, makeRequestFn) {
  * @param fullApiResponse - Full API response for metadata lookup
  * @param _videoId - Video ID (unused, reserved for future use)
  * @param _makeRequestFn - Optional makeRequest function (unused, reserved for future use)
- * @returns The extracted title string, or FALLBACK_TITLE if not found
+ * @returns The extracted title string, or `null` if not found
  *
  * @example
  * ```typescript
  * const title = extractTitle(renderer, response, videoId);
- * // Returns: "Never Gonna Give You Up" or "Unknown Title"
+ * // Returns: "Never Gonna Give You Up" or null
  * ```
  *
  * @internal
@@ -346,7 +345,7 @@ function extractTitle(renderer, fullApiResponse, _videoId, _makeRequestFn = null
     if (title && title !== 'undefined') {
         return title;
     }
-    return FALLBACK_TITLE;
+    return null;
 }
 /**
  * Extracts the video author/channel name from various possible locations in a YouTube response.
@@ -356,12 +355,12 @@ function extractTitle(renderer, fullApiResponse, _videoId, _makeRequestFn = null
  * @param fullApiResponse - Full API response for metadata lookup
  * @param _videoId - Video ID (unused, reserved for future use)
  * @param _makeRequestFn - Optional makeRequest function (unused, reserved for future use)
- * @returns The extracted author string, or FALLBACK_CHANNEL if not found
+ * @returns The extracted author string, or `null` if not found
  *
  * @example
  * ```typescript
  * const author = extractAuthor(renderer, response, videoId);
- * // Returns: "RickAstley" or "Unknown Channel"
+ * // Returns: "RickAstley" or null
  * ```
  *
  * @internal
@@ -384,7 +383,7 @@ function extractAuthor(renderer, fullApiResponse, _videoId, _makeRequestFn = nul
     if (author && author !== 'undefined') {
         return author;
     }
-    return FALLBACK_CHANNEL;
+    return null;
 }
 /**
  * Extracts the best thumbnail URL from a renderer or video ID.
@@ -1116,18 +1115,21 @@ export async function buildTrack(itemData, itemType, sourceNameOverride = null, 
         uri = `https://music.youtube.com/watch?v=${videoId}`;
     }
     else {
-        let oEmbedData = null;
-        try {
-            oEmbedData = await fetchOEmbedMetadata(videoId, requestFn);
-            if (oEmbedData) {
-                logger('debug', 'buildTrack', `Got metadata from oEmbed: title="${safeString(oEmbedData.title, FALLBACK_TITLE)}", author="${safeString(oEmbedData.author, FALLBACK_AUTHOR)}"`);
-            }
-        }
-        catch (e) {
-            logger('warn', 'buildTrack', `Failed to fetch oEmbed metadata: ${e instanceof Error ? e.message : String(e)}`);
-        }
         const extractedTitle = extractTitle(renderer || undefined, fullApiResponse, videoId, requestFn);
         const extractedAuthor = extractAuthor(renderer || undefined, fullApiResponse, videoId, requestFn);
+        let oEmbedData = null;
+        const shouldFetchOEmbed = !!fullApiResponse && (extractedTitle === null || extractedAuthor === null);
+        if (shouldFetchOEmbed) {
+            try {
+                oEmbedData = await fetchOEmbedMetadata(videoId, requestFn);
+                if (oEmbedData) {
+                    logger('debug', 'buildTrack', `Got metadata from oEmbed: title="${safeString(oEmbedData.title, FALLBACK_TITLE)}", author="${safeString(oEmbedData.author, FALLBACK_AUTHOR)}"`);
+                }
+            }
+            catch (e) {
+                logger('warn', 'buildTrack', `Failed to fetch oEmbed metadata: ${e instanceof Error ? e.message : String(e)}`);
+            }
+        }
         title = safeString(oEmbedData?.title ?? extractedTitle, FALLBACK_TITLE);
         author = safeString(oEmbedData?.author ?? extractedAuthor, FALLBACK_AUTHOR);
         if (oEmbedData?.thumbnail_url && !artworkUrl) {
@@ -1409,14 +1411,16 @@ export async function buildHoloTrack(trackInfo, itemData, itemType, fullApiRespo
     const result = {
         encoded: encodeTrack({ ...trackInfo, details: [] }),
         info: trackInfo,
-        pluginInfo,
-        keywords: JSON.stringify(keywords),
-        externalLinks: externalLinks,
-        videoQualities: JSON.stringify(videoQualities),
-        audioFormats: JSON.stringify(audioFormats),
-        audioTracks: JSON.stringify(audioTracks),
-        captions: JSON.stringify(captions),
-        channel: channelData
+        pluginInfo: {
+            ...pluginInfo,
+            keywords: JSON.stringify(keywords),
+            externalLinks: JSON.stringify(externalLinks),
+            videoQualities: JSON.stringify(videoQualities),
+            audioFormats: JSON.stringify(audioFormats),
+            audioTracks: JSON.stringify(audioTracks),
+            captions: JSON.stringify(captions),
+            channel: JSON.stringify(channelData)
+        }
     };
     return result;
 }
@@ -1895,6 +1899,7 @@ export class BaseClient {
         if (!streamingData) {
             logger('error', `youtube-${this.name}`, `No streaming data found for ${decodedTrack.identifier}`);
             return {
+                loadType: 'error',
                 exception: {
                     message: 'No streaming data available.',
                     severity: 'common',
@@ -1951,6 +1956,7 @@ export class BaseClient {
                 if (hasAudioTracks) {
                     logger('warn', `youtube-${this.name}`, `Requested audio track ${dt.audioTrackId} not found in client ${this.name}.`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Requested audio track not available in this client.',
                             severity: 'common',
@@ -2008,6 +2014,7 @@ export class BaseClient {
         if (this.requirePlayerScript() && !playerScript) {
             logger('error', `youtube-${this.name}`, 'Failed to obtain player script for deciphering. Cannot extract stream data.');
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Failed to obtain player script for deciphering.',
                     severity: 'fault',
@@ -2049,6 +2056,7 @@ export class BaseClient {
         if (!resolvedFormat && !streamingData.hlsManifestUrl) {
             logger('debug', `youtube-${this.name}`, 'No suitable stream found after all fallbacks, and no HLS manifest URL.');
             return {
+                loadType: 'error',
                 exception: {
                     message: 'No suitable audio stream found after all fallbacks.',
                     severity: 'common',
@@ -2069,6 +2077,7 @@ export class BaseClient {
         if (!directUrl && !streamingData.hlsManifestUrl) {
             logger('debug', `youtube-${this.name}`, 'No direct URL resolved and no HLS manifest. Returning error.');
             return {
+                loadType: 'error',
                 exception: {
                     message: 'No suitable audio stream found.',
                     severity: 'common',
@@ -2229,7 +2238,10 @@ export class BaseClient {
         if (playerResult.statusCode !== 200 || !playerResult.body) {
             const message = `Failed to get player data for stream. Status: ${playerResult.statusCode}`;
             logger('error', `youtube-${this.name}`, message);
-            return { exception: { message, severity: 'common', cause: 'Upstream' } };
+            return {
+                loadType: 'error',
+                exception: { message, severity: 'common', cause: 'Upstream' }
+            };
         }
         return await this._extractStreamData(playerResult.body, decodedTrack, context, cipherManager, itag);
     }

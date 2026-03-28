@@ -207,7 +207,9 @@ export default class GaanaSource {
             };
         }
         const searchResult = await this.nodelink.sources.searchWithDefault(`${decodedTrack.title} ${decodedTrack.author}`);
-        const tracks = this.toTrackInfoArray(searchResult.data);
+        const tracks = searchResult.loadType === 'search'
+            ? this.toTrackInfoArray(searchResult.data)
+            : [];
         const candidates = tracks.map((track) => ({
             info: {
                 title: track.title,

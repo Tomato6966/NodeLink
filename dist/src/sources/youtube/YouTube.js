@@ -401,6 +401,7 @@ export default class YouTubeSource {
         }
         logger('error', 'YouTube', 'No search results found from any configured client.');
         return {
+            loadType: 'error',
             exception: {
                 message: 'No search results found from any configured client.',
                 severity: 'fault',
@@ -423,8 +424,7 @@ export default class YouTubeSource {
         let videoId = query;
         if (!/^[a-zA-Z0-9_-]{11}$/.test(query)) {
             const searchRes = await this.search(query, 'ytmsearch');
-            if (searchRes.loadType !== 'search' ||
-                !searchRes.data?.length) {
+            if (searchRes.loadType !== 'search' || searchRes.data.length === 0) {
                 return { loadType: 'empty', data: {} };
             }
             videoId = searchRes.data[0].info.identifier;
@@ -459,12 +459,10 @@ export default class YouTubeSource {
                     logger('debug', 'YouTube', `TV client failed for recommendations: ${e.message}`);
                 }
             }
-            const automixData = automixRes?.data;
             if (automixRes &&
                 automixRes.loadType === 'playlist' &&
-                automixData?.tracks &&
-                automixData.tracks.length > 0) {
-                const tracks = automixData.tracks.filter((t) => t.info.identifier !== videoId);
+                automixRes.data.tracks.length > 0) {
+                const tracks = automixRes.data.tracks.filter((t) => t.info.identifier !== videoId);
                 return {
                     loadType: 'playlist',
                     data: {
@@ -479,6 +477,7 @@ export default class YouTubeSource {
         catch (e) {
             logger('error', 'YouTube', `Recommendations failed: ${e.message}`);
             return {
+                loadType: 'error',
                 exception: { message: e.message, severity: 'fault' }
             };
         }
@@ -582,6 +581,7 @@ export default class YouTubeSource {
             const msg = 'All music clients failed for direct Music URL.';
             logger('error', 'YouTube', msg);
             return {
+                loadType: 'error',
                 exception: {
                     message: msg,
                     severity: 'fault',
@@ -662,6 +662,7 @@ export default class YouTubeSource {
         }
         logger('error', 'YouTube', 'All clients failed to resolve the URL.');
         return {
+            loadType: 'error',
             exception: {
                 message: 'All clients failed to resolve the URL.',
                 severity: 'fault',
@@ -880,6 +881,7 @@ export default class YouTubeSource {
             return mirrored;
         logger('error', 'YouTube', 'Failed to get a working track URL from any configured client.');
         return {
+            loadType: 'error',
             exception: {
                 message: 'Failed to get a working track URL from any client.',
                 severity: 'fault',

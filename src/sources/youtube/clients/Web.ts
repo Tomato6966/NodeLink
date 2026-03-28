@@ -14,6 +14,7 @@
 
 import type {
   SourceResult,
+  TrackData,
   TrackInfo,
   WorkerNodeLink
 } from '../../../typings/sources/source.types.ts'
@@ -139,6 +140,7 @@ export default class Web extends BaseClient {
         `Failed to load results from ${sourceName}. Status: ${statusCode}`
       logger('error', 'YouTube-Web', message)
       return {
+        loadType: 'error',
         exception: { message, severity: 'common', cause: 'Upstream' }
       }
     }
@@ -149,6 +151,7 @@ export default class Web extends BaseClient {
         `Error from ${sourceName} search API: ${searchResult.error.message}`
       )
       return {
+        loadType: 'error',
         exception: {
           message: searchResult.error.message,
           severity: 'fault',
@@ -156,7 +159,7 @@ export default class Web extends BaseClient {
         }
       }
     }
-    const tracks: unknown[] = []
+    const tracks: TrackData[] = []
     const allSections = searchResult.contents?.sectionListRenderer?.contents
     const lastIdx = (allSections?.length ?? 0) - 1
     let videos = allSections?.[lastIdx]?.itemSectionRenderer?.contents
@@ -242,6 +245,7 @@ export default class Web extends BaseClient {
             `Could not parse video ID from URL: ${url}`
           )
           return {
+            loadType: 'error',
             exception: {
               message: 'Invalid video URL.',
               severity: 'common',
@@ -258,6 +262,7 @@ export default class Web extends BaseClient {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
           logger('error', 'youtube-web', message)
           return {
+            loadType: 'error',
             exception: { message, severity: 'common', cause: 'Upstream' }
           }
         }
@@ -278,6 +283,7 @@ export default class Web extends BaseClient {
             `Could not parse playlist ID from URL: ${url}`
           )
           return {
+            loadType: 'error',
             exception: {
               message: 'Invalid playlist URL.',
               severity: 'common',
@@ -324,6 +330,7 @@ export default class Web extends BaseClient {
             `Error loading playlist ${playlistId}: ${errMsg}`
           )
           return {
+            loadType: 'error',
             exception: {
               message: errMsg,
               severity: 'common',

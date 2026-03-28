@@ -99,6 +99,7 @@ export default class IOS extends BaseClient {
                 if (!videoIdMatch?.[1]) {
                     logger('error', 'youtube-ios', `Could not parse video ID from URL: ${url}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Invalid video URL.',
                             severity: 'common',
@@ -112,6 +113,7 @@ export default class IOS extends BaseClient {
                     const message = `Failed to load video/short player data. Status: ${statusCode}`;
                     logger('error', 'youtube-ios', message);
                     return {
+                        loadType: 'error',
                         exception: { message, severity: 'common', cause: 'Upstream' }
                     };
                 }
@@ -122,6 +124,7 @@ export default class IOS extends BaseClient {
                 if (!playlistIdMatch?.[1]) {
                     logger('error', 'youtube-ios', `Could not parse playlist ID from URL: ${url}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Invalid playlist URL.',
                             severity: 'common',
@@ -152,6 +155,7 @@ export default class IOS extends BaseClient {
                     const errMsg = `Failed to fetch playlist. Status: ${statusCode}`;
                     logger('error', 'youtube-ios', `Error loading playlist ${playlistId}: ${errMsg}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: errMsg,
                             severity: 'common',
@@ -182,7 +186,10 @@ export default class IOS extends BaseClient {
         if (statusCode !== 200) {
             const message = `Failed to get player data for stream. Status: ${statusCode}`;
             logger('error', 'youtube-ios', message);
-            return { exception: { message, severity: 'common', cause: 'Upstream' } };
+            return {
+                loadType: 'error',
+                exception: { message, severity: 'common', cause: 'Upstream' }
+            };
         }
         return await this._extractStreamData(playerResponse, decodedTrack, context, cipherManager, itag);
     }

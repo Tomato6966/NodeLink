@@ -211,8 +211,11 @@ export default class TidalSource {
         let trackId = query;
         if (!/^[0-9]+$/.test(query)) {
             const searchRes = await this.search(query, 'tdsearch');
+            if (searchRes.loadType !== 'search') {
+                return { loadType: 'empty', data: {} };
+            }
             const tracks = this.toTrackInfoArray(searchRes.data);
-            if (searchRes.loadType === 'search' && tracks.length > 0) {
+            if (tracks.length > 0) {
                 trackId = tracks[0]?.identifier || trackId;
             }
             else {
@@ -290,12 +293,12 @@ export default class TidalSource {
                 };
             }
             let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
-            let tracks = this.toTrackInfoArray(searchResult.data);
-            if (searchResult.loadType !== 'search' || tracks.length === 0) {
+            if (searchResult.loadType !== 'search' ||
+                searchResult.data.length === 0) {
                 searchResult = await this.nodelink.sources.searchWithDefault(query);
-                tracks = this.toTrackInfoArray(searchResult.data);
             }
-            if (searchResult.loadType !== 'search' || tracks.length === 0) {
+            if (searchResult.loadType !== 'search' ||
+                searchResult.data.length === 0) {
                 return {
                     exception: {
                         message: 'No matching track found on default source.',
@@ -303,6 +306,7 @@ export default class TidalSource {
                     }
                 };
             }
+            const tracks = this.toTrackInfoArray(searchResult.data);
             const candidates = tracks.map((track) => ({
                 info: track
             }));

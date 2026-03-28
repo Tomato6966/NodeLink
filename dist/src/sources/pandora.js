@@ -1,127 +1,267 @@
-import { encodeTrack, getBestMatch, http1makeRequest, logger, makeRequest } from "../utils.js";
+/**
+ * Pandora music source implementation.
+ * Provides search, playlist, station, artist, and podcast resolution.
+ * @module sources/pandora
+ */
+import { encodeTrack, getBestMatch, http1makeRequest, logger, makeRequest } from '../utils.js';
+/**
+ * Default credential cache TTL (24 hours).
+ * @internal
+ */
+const DEFAULT_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+/**
+ * Pandora content image CDN base URL.
+ * @internal
+ */
+const PANDORA_CDN_BASE = 'https://content-images.p-cdn.com/';
+/**
+ * Pandora web base URL.
+ * @internal
+ */
+const PANDORA_BASE_URL = 'https://www.pandora.com';
+/**
+ * Pandora music source.
+ * Integrates with the Pandora web API for search, playlists, stations, artists, and podcasts.
+ * @public
+ */
 export default class PandoraSource {
+    /**
+     * Runtime NodeLink context.
+     * @internal
+     */
+    nodelink;
+    /**
+     * Pandora source configuration.
+     * @internal
+     */
+    config;
+    /**
+     * NodeLink options reference.
+     * @internal
+     */
+    options;
+    /**
+     * Search aliases handled by this source.
+     * @public
+     */
+    searchTerms = ['pdsearch'];
+    /**
+     * URL patterns handled by this source.
+     * @public
+     */
+    patterns = [
+        /^https?:\/\/(?:www\.)?pandora\.com\/(?:playlist|station|podcast|artist)\/.+/
+    ];
+    /**
+     * URL resolution priority.
+     * @public
+     */
+    priority = 80;
+    /**
+     * Pre-configured CSRF token from config.
+     * @internal
+     */
+    csrfTokenConfig;
+    /**
+     * Active CSRF token.
+     * @internal
+     */
+    csrfToken = null;
+    /**
+     * Active authentication token.
+     * @internal
+     */
+    authToken = null;
+    /**
+     * Setup promise to prevent duplicate initialization.
+     * @internal
+     */
+    setupPromise = null;
+    /**
+     * Constructs a new PandoraSource instance.
+     * @param nodelink - The worker NodeLink context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        this.config = nodelink.options;
-        this.searchTerms = ['pdsearch'];
-        this.patterns = [
-            /^https?:\/\/(?:www\.)?pandora\.com\/(?:playlist|station|podcast|artist)\/.+/
-        ];
-        this.priority = 80;
-        this.csrfTokenConfig = this.config.sources?.pandora?.csrfToken || null;
-        this.csrfToken = null;
-        this.authToken = null;
-        this.setupPromise = null;
+        this.options = nodelink.options;
+        this.config = (nodelink.options.sources?.pandora ??
+            {});
+        this.csrfTokenConfig = this.config.csrfToken ?? null;
     }
+    /**
+     * Initializes the Pandora source by obtaining authentication tokens.
+     * @returns Promise resolving to true if setup succeeded.
+     * @public
+     */
     async setup() {
         if (this.authToken)
             return true;
         if (this.setupPromise)
             return this.setupPromise;
-        this.setupPromise = (async () => {
-            try {
-                const cachedAuth = this.nodelink.credentialManager.get('pandora_auth_token');
-                const cachedCsrf = this.nodelink.credentialManager.get('pandora_csrf_token');
+        this.setupPromise = this.performSetup();
+        return this.setupPromise;
+    }
+    /**
+     * Performs the actual setup logic.
+     * @returns Promise resolving to true if setup succeeded.
+     * @internal
+     */
+    async performSetup() {
+        try {
+            const credMgr = this.nodelink.credentialManager;
+            if (credMgr) {
+                const cachedAuth = credMgr.get('pandora_auth_token');
+                const cachedCsrf = credMgr.get('pandora_csrf_token');
                 if (cachedAuth && cachedCsrf) {
                     this.authToken = cachedAuth;
                     this.csrfToken = cachedCsrf;
                     logger('info', 'Pandora', 'Loaded Pandora credentials from CredentialManager.');
                     return true;
                 }
-                logger('debug', 'Pandora', 'Setting Pandora auth and CSRF token.');
-                const csrfTokenValue = this.csrfTokenConfig;
-                const remoteUrl = this.config.sources?.pandora?.remoteTokenUrl;
-                if (remoteUrl) {
-                    logger('info', 'Pandora', `Fetching tokens from remote provider: ${remoteUrl}`);
-                    try {
-                        const { body, error, statusCode } = await makeRequest(remoteUrl, {
-                            method: 'GET'
-                        });
-                        if (!error &&
-                            statusCode === 200 &&
-                            body.success &&
-                            body.authToken &&
-                            body.csrfToken) {
-                            this.authToken = body.authToken;
-                            this.csrfToken = {
-                                raw: `csrftoken=${body.csrfToken};Path=/;Domain=.pandora.com;Secure`,
-                                parsed: body.csrfToken
-                            };
-                            const cacheTtlMs = (body.expires_in_seconds || 3600) * 1000;
-                            this.nodelink.credentialManager.set('pandora_auth_token', this.authToken, cacheTtlMs);
-                            this.nodelink.credentialManager.set('pandora_csrf_token', this.csrfToken, cacheTtlMs);
-                            logger('info', 'Pandora', 'Successfully initialized with remote tokens (bypass active).');
-                            return true;
-                        }
-                        logger('warn', 'Pandora', `Remote provider failed (Status: ${statusCode}). Falling back to local login.`);
-                    }
-                    catch (e) {
-                        logger('warn', 'Pandora', `Exception during remote token fetch: ${e.message}. Falling back to local login.`);
-                    }
-                }
-                if (csrfTokenValue) {
-                    this.csrfToken = {
-                        raw: `csrftoken=${csrfTokenValue};Path=/;Domain=.pandora.com;Secure`,
-                        parsed: csrfTokenValue
-                    };
-                }
-                else {
-                    const pandoraRequest = await makeRequest('https://www.pandora.com', {
-                        method: 'HEAD'
-                    });
-                    if (pandoraRequest.error) {
-                        logger('error', 'Pandora', 'Failed to set CSRF token from Pandora.');
-                        return false;
-                    }
-                    const cookies = pandoraRequest.headers['set-cookie'];
-                    const csrfCookie = cookies
-                        ? cookies.find((cookie) => cookie.startsWith('csrftoken='))
-                        : null;
-                    if (!csrfCookie) {
-                        logger('error', 'Pandora', 'Failed to find CSRF token cookie.');
-                        return false;
-                    }
-                    const csrfMatch = /csrftoken=([a-f0-9]{16})/.exec(csrfCookie);
-                    if (!csrfMatch) {
-                        logger('error', 'Pandora', 'Failed to parse CSRF token.');
-                        return false;
-                    }
-                    this.csrfToken = {
-                        raw: csrfCookie.split(';')[0],
-                        parsed: csrfMatch[1]
-                    };
-                }
-                const tokenRequest = await makeRequest('https://www.pandora.com/api/v1/auth/anonymousLogin', {
-                    headers: {
-                        Cookie: this.csrfToken.raw,
-                        'Content-Type': 'application/json',
-                        Accept: '*/*',
-                        'X-CsrfToken': this.csrfToken.parsed
-                    },
-                    method: 'POST'
-                });
-                if (tokenRequest.error || tokenRequest.body.errorCode === 0) {
-                    logger('error', 'Pandora', 'Failed to set auth token from Pandora.');
-                    return false;
-                }
-                this.authToken = tokenRequest.body.authToken;
-                this.nodelink.credentialManager.set('pandora_auth_token', this.authToken, 24 * 60 * 60 * 1000);
-                this.nodelink.credentialManager.set('pandora_csrf_token', this.csrfToken, 24 * 60 * 60 * 1000);
-                logger('info', 'Pandora', 'Successfully set Pandora auth and CSRF token.');
+            }
+            logger('debug', 'Pandora', 'Setting Pandora auth and CSRF token.');
+            if (await this.tryRemoteTokenProvider()) {
                 return true;
             }
-            catch (e) {
-                logger('error', 'Pandora', `Setup failed: ${e.message}`);
+            if (!(await this.initializeCsrfToken())) {
                 return false;
             }
-            finally {
-                this.setupPromise = null;
+            if (!(await this.performAnonymousLogin())) {
+                return false;
             }
-        })();
-        return this.setupPromise;
+            this.cacheCredentials(DEFAULT_CACHE_TTL_MS);
+            logger('info', 'Pandora', 'Successfully set Pandora auth and CSRF token.');
+            return true;
+        }
+        catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Pandora', `Setup failed: ${message}`);
+            return false;
+        }
+        finally {
+            this.setupPromise = null;
+        }
     }
+    /**
+     * Attempts to fetch tokens from a remote provider.
+     * @returns Promise resolving to true if remote tokens were obtained.
+     * @internal
+     */
+    async tryRemoteTokenProvider() {
+        const remoteUrl = this.config.remoteTokenUrl;
+        if (!remoteUrl)
+            return false;
+        logger('info', 'Pandora', `Fetching tokens from remote provider: ${remoteUrl}`);
+        try {
+            const response = await makeRequest(remoteUrl, { method: 'GET' });
+            const body = response.body;
+            if (!response.error &&
+                response.statusCode === 200 &&
+                body?.success &&
+                body.authToken &&
+                body.csrfToken) {
+                this.authToken = body.authToken;
+                this.csrfToken = {
+                    raw: `csrftoken=${body.csrfToken};Path=/;Domain=.pandora.com;Secure`,
+                    parsed: body.csrfToken
+                };
+                const cacheTtlMs = (body.expires_in_seconds ?? 3600) * 1000;
+                this.cacheCredentials(cacheTtlMs);
+                logger('info', 'Pandora', 'Successfully initialized with remote tokens (bypass active).');
+                return true;
+            }
+            logger('warn', 'Pandora', `Remote provider failed (Status: ${response.statusCode}). Falling back to local login.`);
+        }
+        catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            logger('warn', 'Pandora', `Exception during remote token fetch: ${message}. Falling back to local login.`);
+        }
+        return false;
+    }
+    /**
+     * Initializes the CSRF token from config or Pandora website.
+     * @returns Promise resolving to true if CSRF token was obtained.
+     * @internal
+     */
+    async initializeCsrfToken() {
+        if (this.csrfTokenConfig) {
+            this.csrfToken = {
+                raw: `csrftoken=${this.csrfTokenConfig};Path=/;Domain=.pandora.com;Secure`,
+                parsed: this.csrfTokenConfig
+            };
+            return true;
+        }
+        const response = await makeRequest(PANDORA_BASE_URL, { method: 'HEAD' });
+        if (response.error) {
+            logger('error', 'Pandora', 'Failed to set CSRF token from Pandora.');
+            return false;
+        }
+        const cookies = response.headers?.['set-cookie'];
+        const csrfCookie = cookies?.find((cookie) => cookie.startsWith('csrftoken='));
+        if (!csrfCookie) {
+            logger('error', 'Pandora', 'Failed to find CSRF token cookie.');
+            return false;
+        }
+        const csrfMatch = /csrftoken=([a-f0-9]{16})/.exec(csrfCookie);
+        if (!csrfMatch?.[1]) {
+            logger('error', 'Pandora', 'Failed to parse CSRF token.');
+            return false;
+        }
+        this.csrfToken = {
+            raw: csrfCookie.split(';')[0] ?? '',
+            parsed: csrfMatch[1]
+        };
+        return true;
+    }
+    /**
+     * Performs anonymous login to obtain auth token.
+     * @returns Promise resolving to true if login succeeded.
+     * @internal
+     */
+    async performAnonymousLogin() {
+        if (!this.csrfToken)
+            return false;
+        const response = await makeRequest(`${PANDORA_BASE_URL}/api/v1/auth/anonymousLogin`, {
+            headers: {
+                Cookie: this.csrfToken.raw,
+                'Content-Type': 'application/json',
+                Accept: '*/*',
+                'X-CsrfToken': this.csrfToken.parsed
+            },
+            method: 'POST'
+        });
+        const body = response.body;
+        if (response.error || body?.errorCode === 0) {
+            logger('error', 'Pandora', 'Failed to set auth token from Pandora.');
+            return false;
+        }
+        this.authToken = body?.authToken ?? null;
+        return this.authToken !== null;
+    }
+    /**
+     * Caches credentials in the credential manager.
+     * @param ttlMs - Time to live in milliseconds.
+     * @internal
+     */
+    cacheCredentials(ttlMs) {
+        const credMgr = this.nodelink.credentialManager;
+        if (!credMgr)
+            return;
+        if (this.authToken) {
+            credMgr.set('pandora_auth_token', this.authToken, ttlMs);
+        }
+        if (this.csrfToken) {
+            credMgr.set('pandora_csrf_token', this.csrfToken, ttlMs);
+        }
+    }
+    /**
+     * Searches for tracks on Pandora.
+     * @param query - Search query string.
+     * @returns Promise resolving to search results.
+     * @public
+     */
     async search(query) {
-        const authError = await this._ensureAuth();
+        const authError = await this.ensureAuth();
         if (authError)
             return authError;
         logger('debug', 'Pandora', `Searching for: ${query}`);
@@ -130,12 +270,12 @@ export default class PandoraSource {
             types: ['TR'],
             listener: null,
             start: 0,
-            count: this.config.maxSearchResults || 10,
+            count: this.options.maxSearchResults ?? 10,
             annotate: true,
             searchTime: 0,
             annotationRecipe: 'CLASS_OF_2019'
         };
-        const { body: data, error } = await makeRequest('https://www.pandora.com/api/v3/sod/search', {
+        const response = await makeRequest(`${PANDORA_BASE_URL}/api/v3/sod/search`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -144,24 +284,31 @@ export default class PandoraSource {
             body,
             disableBodyCompression: true
         });
-        if (error) {
-            return this._buildException(error);
+        if (response.error) {
+            return this.buildException(response.error);
         }
-        if (!data.results || data.results.length === 0) {
+        const data = response.body;
+        if (!data?.results || data.results.length === 0) {
             return { loadType: 'empty', data: {} };
         }
         const tracks = [];
-        const annotationKeys = Object.keys(data.annotations);
-        for (const key of annotationKeys) {
-            if (data.annotations[key].type === 'TR') {
-                const item = data.annotations[key];
+        const annotations = data.annotations ?? {};
+        for (const key of Object.keys(annotations)) {
+            const item = annotations[key];
+            if (item?.type === 'TR') {
                 tracks.push(this.buildTrack(item));
             }
         }
         return { loadType: 'search', data: tracks };
     }
+    /**
+     * Resolves a Pandora URL to track/playlist data.
+     * @param url - The Pandora URL to resolve.
+     * @returns Promise resolving to the resolved content.
+     * @public
+     */
     async resolve(url) {
-        const authError = await this._ensureAuth();
+        const authError = await this.ensureAuth();
         if (authError)
             return authError;
         const typeMatch = /^(https:\/\/www\.pandora\.com\/)((playlist)|(station)|(podcast)|(artist))\/.+/.exec(url);
@@ -169,27 +316,33 @@ export default class PandoraSource {
             return { loadType: 'empty', data: {} };
         }
         const type = typeMatch[2];
-        const lastPart = url.split('/').pop();
+        const lastPart = url.split('/').pop() ?? '';
         logger('debug', 'Pandora', `Resolving ${type} with ID: ${lastPart}`);
         switch (type) {
             case 'artist':
-                return this._resolveArtist(lastPart);
+                return this.resolveArtist(lastPart);
             case 'playlist':
-                return this._resolvePlaylist(lastPart);
+                return this.resolvePlaylist(lastPart);
             case 'station':
-                return this._resolveStation(lastPart);
+                return this.resolveStation(lastPart);
             case 'podcast':
-                return this._resolvePodcast(lastPart);
+                return this.resolvePodcast(lastPart);
             default:
                 return { loadType: 'empty', data: {} };
         }
     }
-    async _ensureAuth() {
+    /**
+     * Ensures authentication is available.
+     * @returns Null if authenticated, exception result otherwise.
+     * @internal
+     */
+    async ensureAuth() {
         if (!this.authToken) {
             await this.setup();
         }
         if (!this.authToken) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Pandora source is not available.',
                     severity: 'common',
@@ -199,212 +352,319 @@ export default class PandoraSource {
         }
         return null;
     }
-    _buildException(error, data) {
+    /**
+     * Builds an exception result.
+     * @param error - Error object or undefined.
+     * @param data - Additional data with message.
+     * @returns SourceResult with exception.
+     * @internal
+     */
+    buildException(error, data) {
+        const errorMessage = typeof error === 'string' ? error : (error?.message ?? null);
         return {
+            loadType: 'error',
             exception: {
-                message: error?.message || data?.message || 'Unknown error',
+                message: errorMessage ?? data?.message ?? 'Unknown error',
                 severity: 'common'
             }
         };
     }
-    _getHeaders() {
+    /**
+     * Builds request headers for Pandora API.
+     * @returns Headers object.
+     * @internal
+     */
+    getHeaders() {
         return {
-            Cookie: this.csrfToken.raw,
-            'X-CsrfToken': this.csrfToken.parsed,
-            'X-AuthToken': this.authToken,
+            Cookie: this.csrfToken?.raw ?? '',
+            'X-CsrfToken': this.csrfToken?.parsed ?? '',
+            'X-AuthToken': this.authToken ?? '',
             'Content-Type': 'application/json'
         };
     }
-    _buildArtworkUrl(artwork) {
+    /**
+     * Builds a full artwork URL.
+     * @param artwork - Partial or full artwork URL.
+     * @returns Full artwork URL or null.
+     * @internal
+     */
+    buildArtworkUrl(artwork) {
         if (!artwork)
             return null;
         return artwork.startsWith('http')
             ? artwork
-            : `https://content-images.p-cdn.com/${artwork}`;
+            : `${PANDORA_CDN_BASE}${artwork}`;
     }
-    _buildUri(shareableUrlPath) {
+    /**
+     * Builds a full URI from a shareable path.
+     * @param shareableUrlPath - Partial or full URL path.
+     * @returns Full URI.
+     * @internal
+     */
+    buildUri(shareableUrlPath) {
         if (!shareableUrlPath)
             return '';
         return shareableUrlPath.startsWith('http')
             ? shareableUrlPath
-            : `https://www.pandora.com${shareableUrlPath}`;
+            : `${PANDORA_BASE_URL}${shareableUrlPath}`;
     }
-    _limitArray(arr, limit) {
+    /**
+     * Limits array to specified length.
+     * @param arr - Array to limit.
+     * @param limit - Maximum length.
+     * @returns Limited array.
+     * @internal
+     */
+    limitArray(arr, limit) {
         return arr.length > limit ? arr.slice(0, limit) : arr;
     }
-    async _resolveArtist(id) {
-        const { body: trackData, error } = await http1makeRequest('https://www.pandora.com/api/v4/catalog/annotateObjectsSimple', {
-            body: { pandoraIds: [id] },
-            headers: this._getHeaders(),
+    /**
+     * Gets the maximum playlist/album length from config.
+     * @returns Maximum length.
+     * @internal
+     */
+    getMaxPlaylistLength() {
+        return this.options.maxAlbumPlaylistLength ?? 100;
+    }
+    /**
+     * Resolves an artist, album, or track by ID.
+     * @param id - Pandora ID.
+     * @returns Promise resolving to the content.
+     * @internal
+     */
+    async resolveArtist(id) {
+        const response = await http1makeRequest(`${PANDORA_BASE_URL}/api/v4/catalog/annotateObjectsSimple`, {
+            body: JSON.stringify({ pandoraIds: [id] }),
+            headers: this.getHeaders(),
             method: 'POST',
             disableBodyCompression: true
         });
-        if (error || trackData.message) {
-            return this._buildException(error, trackData);
+        const trackData = this.parseJsonBody(response.body);
+        if (response.error || this.hasApiError(trackData)) {
+            return this.buildException(response.error, trackData);
         }
-        const keys = Object.keys(trackData);
-        if (keys.length === 0)
+        const keys = Object.keys(trackData ?? {});
+        if (keys.length === 0 || !keys[0])
             return { loadType: 'empty', data: {} };
-        const item = trackData[keys[0]];
+        const item = trackData?.[keys[0]];
+        if (!item)
+            return { loadType: 'empty', data: {} };
         if (item.type === 'TR') {
             const track = this.buildTrack(item);
             return { loadType: 'track', data: track };
         }
-        else if (item.type === 'AL') {
-            return this._resolveAlbumDetails(item.pandoraId, item.name);
+        if (item.type === 'AL' && item.pandoraId) {
+            return this.resolveAlbumDetails(item.pandoraId, item.name ?? 'Unknown Album');
         }
-        else if (item.type === 'AR') {
-            return this._resolveArtistDetails(item.pandoraId);
+        if (item.type === 'AR' && item.pandoraId) {
+            return this.resolveArtistDetails(item.pandoraId);
         }
         return { loadType: 'empty', data: {} };
     }
-    async _resolveAlbumDetails(id, name) {
-        const { body: data, error } = await http1makeRequest('https://www.pandora.com/api/v4/catalog/getDetails', {
-            body: { pandoraId: id },
-            headers: this._getHeaders(),
+    /**
+     * Resolves album details.
+     * @param id - Album ID.
+     * @param name - Album name.
+     * @returns Promise resolving to album tracks.
+     * @internal
+     */
+    async resolveAlbumDetails(id, name) {
+        const response = await http1makeRequest(`${PANDORA_BASE_URL}/api/v4/catalog/getDetails`, {
+            body: JSON.stringify({ pandoraId: id }),
+            headers: this.getHeaders(),
             method: 'POST',
             disableBodyCompression: true
         });
-        if (error || data.errors) {
-            return this._buildException(error, { message: 'Unknown album error' });
+        const data = this.parseJsonBody(response.body);
+        if (response.error || data?.errors) {
+            return this.buildException(response.error, {
+                message: 'Unknown album error'
+            });
         }
-        const trackKeys = this._limitArray(Object.keys(data.annotations), this.config.maxAlbumPlaylistLength);
-        const tracks = trackKeys.map((key) => this.buildTrack(data.annotations[key]));
+        const annotations = data?.annotations ?? {};
+        const trackKeys = this.limitArray(Object.keys(annotations), this.getMaxPlaylistLength());
+        const tracks = trackKeys
+            .map((key) => annotations[key])
+            .filter((item) => item !== undefined)
+            .map((item) => this.buildTrack(item));
         return {
-            loadType: 'playlist',
+            loadType: 'album',
             data: {
                 info: { name, selectedTrack: 0 },
-                tracks
+                tracks,
+                pluginInfo: {}
             }
         };
     }
-    async _resolveArtistDetails(id) {
-        const { body: data, error } = await http1makeRequest('https://www.pandora.com/api/v1/graphql/graphql', {
-            body: {
+    /**
+     * Resolves artist top tracks via GraphQL.
+     * @param id - Artist ID.
+     * @returns Promise resolving to artist tracks.
+     * @internal
+     */
+    async resolveArtistDetails(id) {
+        const graphqlQuery = `query GetArtistDetailsWithCuratorsWeb($pandoraId: String!) {
+      entity(id: $pandoraId) {
+        ... on Artist {
+          name
+          topTracksWithCollaborations {
+            ...TrackFragment
+            __typename
+          }
+          __typename
+        }
+      }
+    }
+    fragment ArtFragment on Art {
+      artId
+      dominantColor
+      artUrl: url(size: WIDTH_500)
+    }
+    fragment TrackFragment on Track {
+      pandoraId: id
+      type
+      name
+      duration
+      shareableUrlPath: urlPath
+      artistName: artist {
+        name
+        __typename
+      }
+      icon: art {
+        ...ArtFragment
+        __typename
+      }
+    }`;
+        const response = await http1makeRequest(`${PANDORA_BASE_URL}/api/v1/graphql/graphql`, {
+            body: JSON.stringify({
                 operationName: 'GetArtistDetailsWithCuratorsWeb',
-                query: `query GetArtistDetailsWithCuratorsWeb($pandoraId: String!) {
-            entity(id: $pandoraId) {
-              ... on Artist {
-                name
-                topTracksWithCollaborations {
-                  ...TrackFragment
-                  __typename
-                }
-                __typename
-              }
-            }
-          }
-          fragment ArtFragment on Art {
-            artId
-            dominantColor
-            artUrl: url(size: WIDTH_500)
-          }
-          fragment TrackFragment on Track {
-            pandoraId: id
-            type
-            name
-            duration
-            shareableUrlPath: urlPath
-            artistName: artist {
-              name
-              __typename
-            }
-            icon: art {
-              ...ArtFragment
-              __typename
-            }
-          }
-          `,
+                query: graphqlQuery,
                 variables: { pandoraId: id }
-            },
-            headers: this._getHeaders(),
+            }),
+            headers: this.getHeaders(),
             method: 'POST',
             disableBodyCompression: true
         });
-        if (error || data.errors) {
-            return this._buildException(error, { message: 'Unknown artist error' });
+        const data = this.parseJsonBody(response.body);
+        if (response.error || data?.errors) {
+            return this.buildException(response.error, {
+                message: 'Unknown artist error'
+            });
         }
-        const topTracks = data.data?.entity?.topTracksWithCollaborations || [];
-        const items = this._limitArray(topTracks, this.config.maxAlbumPlaylistLength);
+        const topTracks = data?.data?.entity?.topTracksWithCollaborations ?? [];
+        const items = this.limitArray(topTracks, this.getMaxPlaylistLength());
         const tracks = items.map((item) => this.buildTrack({
             name: item.name,
-            artistName: item.artistName?.name,
+            artistName: typeof item.artistName === 'object'
+                ? item.artistName?.name
+                : item.artistName,
             shareableUrlPath: item.shareableUrlPath,
             icon: item.icon,
             pandoraId: item.pandoraId,
             duration: item.duration
         }));
+        const artistName = data?.data?.entity?.name ?? 'Unknown Artist';
         return {
-            loadType: 'playlist',
+            loadType: 'artist',
             data: {
                 info: {
-                    name: `${data.data.entity.name}'s Top Tracks`,
+                    name: `${artistName}'s Top Tracks`,
                     selectedTrack: 0
                 },
-                tracks
+                tracks,
+                pluginInfo: {}
             }
         };
     }
-    async _resolvePlaylist(id) {
+    /**
+     * Resolves a playlist by ID.
+     * @param id - Playlist ID.
+     * @returns Promise resolving to playlist tracks.
+     * @internal
+     */
+    async resolvePlaylist(id) {
+        const maxLength = this.getMaxPlaylistLength();
         const body = {
             request: {
                 pandoraId: id,
                 playlistVersion: 0,
                 offset: 0,
-                limit: this.config.maxAlbumPlaylistLength,
-                annotationLimit: this.config.maxAlbumPlaylistLength,
+                limit: maxLength,
+                annotationLimit: maxLength,
                 allowedTypes: ['TR', 'AM'],
                 bypassPrivacyRules: true
             }
         };
-        const { body: data, error } = await makeRequest('https://www.pandora.com/api/v7/playlists/getTracks', {
+        const response = await makeRequest(`${PANDORA_BASE_URL}/api/v7/playlists/getTracks`, {
             method: 'POST',
-            headers: this._getHeaders(),
+            headers: this.getHeaders(),
             body,
             disableBodyCompression: true
         });
-        if (error) {
-            return this._buildException(error);
+        if (response.error) {
+            return this.buildException(response.error);
         }
-        const keys = Object.keys(data.annotations).filter((key) => key.includes('TR:'));
-        const tracks = keys.map((key) => this.buildTrack(data.annotations[key]));
+        const data = response.body;
+        const annotations = data?.annotations ?? {};
+        const keys = Object.keys(annotations).filter((key) => key.includes('TR:'));
+        const tracks = keys
+            .map((key) => annotations[key])
+            .filter((item) => item !== undefined)
+            .map((item) => this.buildTrack(item));
         return {
             loadType: 'playlist',
             data: {
-                info: { name: data.name, selectedTrack: 0 },
-                tracks
+                info: { name: data?.name ?? 'Playlist', selectedTrack: 0 },
+                tracks,
+                pluginInfo: {}
             }
         };
     }
-    async _resolveStation(id) {
-        const { body: stationData, error } = await http1makeRequest('https://www.pandora.com/api/v1/station/getStationDetails', {
-            body: { stationId: id },
-            headers: this._getHeaders(),
+    /**
+     * Resolves a station by ID.
+     * @param id - Station ID.
+     * @returns Promise resolving to station tracks.
+     * @internal
+     */
+    async resolveStation(id) {
+        const response = await http1makeRequest(`${PANDORA_BASE_URL}/api/v1/station/getStationDetails`, {
+            body: JSON.stringify({ stationId: id }),
+            headers: this.getHeaders(),
             method: 'POST',
             disableBodyCompression: true
         });
-        if (error || stationData.message) {
-            return this._buildException(error, stationData);
+        const stationData = this.parseJsonBody(response.body);
+        if (response.error || stationData?.message) {
+            return this.buildException(response.error, stationData);
         }
-        const tracks = await this._fetchStationTracks(id, stationData);
+        const tracks = await this.fetchStationTracks(id, stationData);
         return {
-            loadType: 'playlist',
+            loadType: 'station',
             data: {
-                info: { name: stationData.name, selectedTrack: 0 },
-                tracks
+                info: { name: stationData?.name ?? 'Station', selectedTrack: 0 },
+                tracks,
+                pluginInfo: {}
             }
         };
     }
-    async _fetchStationTracks(id, stationData) {
+    /**
+     * Fetches tracks for a station.
+     * @param id - Station ID.
+     * @param stationData - Station details.
+     * @returns Promise resolving to track array.
+     * @internal
+     */
+    async fetchStationTracks(id, stationData) {
         const tracks = [];
         try {
-            const { body: playlistData } = await http1makeRequest('https://www.pandora.com/api/v1/playlist/getPlaylist', {
-                body: { stationId: id },
-                headers: this._getHeaders(),
+            const response = await http1makeRequest(`${PANDORA_BASE_URL}/api/v1/playlist/getPlaylist`, {
+                body: JSON.stringify({ stationId: id }),
+                headers: this.getHeaders(),
                 method: 'POST',
                 disableBodyCompression: true
             });
-            if (playlistData && Array.isArray(playlistData.items)) {
+            const playlistData = this.parseJsonBody(response.body);
+            if (playlistData?.items && Array.isArray(playlistData.items)) {
                 for (const item of playlistData.items) {
                     if (!item.songName)
                         continue;
@@ -420,118 +680,165 @@ export default class PandoraSource {
             }
         }
         catch (e) {
-            logger('debug', 'Pandora', `Failed to fetch station playlist: ${e.message}`);
+            const message = e instanceof Error ? e.message : String(e);
+            logger('debug', 'Pandora', `Failed to fetch station playlist: ${message}`);
         }
-        if (tracks.length === 0) {
-            const seeds = this._limitArray(stationData.seeds || [], this.config.maxAlbumPlaylistLength);
+        if (tracks.length === 0 && stationData?.seeds) {
+            const seeds = this.limitArray(stationData.seeds, this.getMaxPlaylistLength());
             for (const seed of seeds) {
                 if (!seed.song)
                     continue;
+                const artUrl = seed.art?.[seed.art.length - 1]?.url;
                 tracks.push(this.buildTrack({
                     name: seed.song.songTitle,
                     artistName: seed.song.artistSummary,
                     shareableUrlPath: seed.song.songDetailUrl,
-                    icon: {
-                        artUrl: seed.art?.[seed.art.length - 1]?.url
-                    },
+                    icon: { artUrl },
                     pandoraId: seed.song.songId
                 }));
             }
         }
         return tracks;
     }
-    async _resolvePodcast(id) {
-        const { body: podcastData, error } = await http1makeRequest('https://www.pandora.com/api/v1/aesop/getDetails', {
-            body: { catalogVersion: 4, pandoraId: id },
-            headers: this._getHeaders(),
+    /**
+     * Resolves a podcast by ID.
+     * @param id - Podcast ID.
+     * @returns Promise resolving to podcast content.
+     * @internal
+     */
+    async resolvePodcast(id) {
+        const response = await http1makeRequest(`${PANDORA_BASE_URL}/api/v1/aesop/getDetails`, {
+            body: JSON.stringify({ catalogVersion: 4, pandoraId: id }),
+            headers: this.getHeaders(),
             method: 'POST',
             disableBodyCompression: true
         });
-        if (error || podcastData.message) {
-            return this._buildException(error, podcastData);
+        const podcastData = this.parseJsonBody(response.body);
+        if (response.error || podcastData?.message) {
+            return this.buildException(response.error, podcastData);
         }
-        const details = podcastData.details;
-        const type = details.podcastProgramDetails
-            ? details.podcastProgramDetails.type
-            : details.podcastEpisodeDetails.type;
+        const details = podcastData?.details;
+        const type = details?.podcastProgramDetails?.type ??
+            details?.podcastEpisodeDetails?.type;
         if (type === 'PE') {
-            const epId = details.podcastEpisodeDetails.pandoraId;
-            const ep = details.annotations[epId];
-            const track = this.buildTrack(ep);
-            return { loadType: 'track', data: track };
+            const epId = details?.podcastEpisodeDetails?.pandoraId;
+            if (epId && details?.annotations?.[epId]) {
+                const ep = details.annotations[epId];
+                const track = this.buildTrack(ep);
+                return { loadType: 'track', data: track };
+            }
         }
-        else if (type === 'PC') {
-            return this._resolvePodcastEpisodes(id);
+        if (type === 'PC') {
+            return this.resolvePodcastEpisodes(id);
         }
         return { loadType: 'empty', data: {} };
     }
-    async _resolvePodcastEpisodes(id) {
-        const { body: allEpisodesIdsData, error } = await http1makeRequest('https://www.pandora.com/api/v1/aesop/getAllEpisodesByPodcastProgram', {
-            body: { catalogVersion: 4, pandoraId: id },
-            headers: this._getHeaders(),
+    /**
+     * Resolves podcast episodes.
+     * @param id - Podcast program ID.
+     * @returns Promise resolving to episode tracks.
+     * @internal
+     */
+    async resolvePodcastEpisodes(id) {
+        const idsResponse = await http1makeRequest(`${PANDORA_BASE_URL}/api/v1/aesop/getAllEpisodesByPodcastProgram`, {
+            body: JSON.stringify({ catalogVersion: 4, pandoraId: id }),
+            headers: this.getHeaders(),
             method: 'POST',
             disableBodyCompression: true
         });
-        if (error || allEpisodesIdsData.message) {
-            return this._buildException(error, allEpisodesIdsData);
+        const idsData = this.parseJsonBody(idsResponse.body);
+        if (idsResponse.error || idsData?.message) {
+            return this.buildException(idsResponse.error, idsData);
         }
-        const allEpisodesIds = this._limitArray(allEpisodesIdsData.episodes.episodesWithLabel.flatMap((yearInfo) => yearInfo.episodes), this.config.maxAlbumPlaylistLength);
-        const { body: allEpisodesData, error: epError } = await http1makeRequest('https://www.pandora.com/api/v1/aesop/annotateObjects', {
-            body: { catalogVersion: 4, pandoraIds: allEpisodesIds },
-            headers: this._getHeaders(),
+        const episodeLabels = idsData?.episodes?.episodesWithLabel ?? [];
+        const allEpisodeIds = this.limitArray(episodeLabels.flatMap((yearInfo) => yearInfo.episodes ?? []), this.getMaxPlaylistLength());
+        const episodesResponse = await http1makeRequest(`${PANDORA_BASE_URL}/api/v1/aesop/annotateObjects`, {
+            body: JSON.stringify({ catalogVersion: 4, pandoraIds: allEpisodeIds }),
+            headers: this.getHeaders(),
             method: 'POST',
             disableBodyCompression: true
         });
-        if (epError || allEpisodesData.message) {
-            return this._buildException(epError, allEpisodesData);
+        const episodesData = this.parseJsonBody(episodesResponse.body);
+        if (episodesResponse.error || episodesData?.message) {
+            return this.buildException(episodesResponse.error, episodesData);
         }
-        const episodes = Object.keys(allEpisodesData.annotations);
-        const tracks = episodes.map((epKey) => this.buildTrack(allEpisodesData.annotations[epKey]));
-        const programId = Object.keys(allEpisodesData.annotations).find((key) => allEpisodesData.annotations[key].type === 'PC');
-        const programName = programId
-            ? allEpisodesData.annotations[programId].name
-            : 'Podcast';
+        const annotations = episodesData?.annotations ?? {};
+        const episodeKeys = Object.keys(annotations);
+        const tracks = episodeKeys
+            .map((key) => annotations[key])
+            .filter((item) => item !== undefined)
+            .map((item) => this.buildTrack(item));
+        const programId = episodeKeys.find((key) => annotations[key]?.type === 'PC');
+        const programName = programId ? annotations[programId]?.name : 'Podcast';
         return {
-            loadType: 'playlist',
+            loadType: 'podcast',
             data: {
-                info: { name: programName, selectedTrack: 0 },
-                tracks
+                info: { name: programName ?? 'Podcast', selectedTrack: 0 },
+                tracks,
+                pluginInfo: {}
             }
         };
     }
+    /**
+     * Builds a track data object from annotation.
+     * @param item - Pandora track annotation.
+     * @returns Encoded track data.
+     * @internal
+     */
     buildTrack(item) {
-        const artwork = this._buildArtworkUrl(item.icon?.artUrl);
-        const uri = this._buildUri(item.shareableUrlPath);
-        const duration = item.duration || item.trackLength || item.length || 0;
+        const artwork = this.buildArtworkUrl(item.icon?.artUrl);
+        const uri = this.buildUri(item.shareableUrlPath ?? item.urlPath);
+        const duration = item.duration ?? item.trackLength ?? item.length ?? 0;
+        const artistName = typeof item.artistName === 'object'
+            ? item.artistName?.name
+            : item.artistName;
         const trackInfo = {
-            identifier: item.pandoraId || item.id || 'unknown',
+            identifier: item.pandoraId ?? item.id ?? 'unknown',
             isSeekable: true,
-            author: item.artistName || item.programName || 'Unknown Artist',
+            author: artistName ?? item.programName ?? 'Unknown Artist',
             length: duration * 1000,
             isStream: false,
             position: 0,
-            title: item.name || 'Unknown Title',
+            title: item.name ?? 'Unknown Title',
             uri,
             artworkUrl: artwork,
-            isrc: item.isrc || null,
+            isrc: item.isrc ?? null,
             sourceName: 'pandora'
         };
+        const encodeInput = { ...trackInfo, details: [] };
         return {
-            encoded: encodeTrack(trackInfo),
+            encoded: encodeTrack(encodeInput),
             info: trackInfo,
             pluginInfo: {}
         };
     }
+    /**
+     * Resolves a track URL by searching on default source.
+     * @param decodedTrack - The decoded track to resolve.
+     * @returns Promise resolving to track URL result.
+     * @public
+     */
     async getTrackUrl(decodedTrack) {
         const query = `${decodedTrack.title} ${decodedTrack.author}`;
+        const sources = this.nodelink.sources;
+        if (!sources) {
+            return {
+                exception: {
+                    message: 'Source manager is not available.',
+                    severity: 'fault'
+                }
+            };
+        }
         try {
-            let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
+            let searchResult = await sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
             if (!searchResult ||
                 searchResult.loadType !== 'search' ||
+                !Array.isArray(searchResult.data) ||
                 searchResult.data.length === 0) {
-                searchResult = await this.nodelink.sources.searchWithDefault(query);
+                searchResult = await sources.searchWithDefault(query);
             }
             if (searchResult.loadType !== 'search' ||
+                !Array.isArray(searchResult.data) ||
                 searchResult.data.length === 0) {
                 return {
                     exception: {
@@ -540,7 +847,8 @@ export default class PandoraSource {
                     }
                 };
             }
-            const bestMatch = getBestMatch(searchResult.data, decodedTrack);
+            const candidates = searchResult.data;
+            const bestMatch = getBestMatch(candidates, decodedTrack);
             if (!bestMatch) {
                 return {
                     exception: {
@@ -549,12 +857,56 @@ export default class PandoraSource {
                     }
                 };
             }
-            const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info);
+            const trackInfo = bestMatch.info;
+            const streamInfo = await sources.getTrackUrl(trackInfo);
             return { newTrack: bestMatch, ...streamInfo };
         }
         catch (e) {
-            logger('error', 'Pandora', `Failed to mirror track: ${e.message}`);
-            return { exception: { message: e.message, severity: 'fault' } };
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Pandora', `Failed to mirror track: ${message}`);
+            return { exception: { message, severity: 'fault' } };
         }
+    }
+    /**
+     * Direct stream loading is not supported.
+     * @returns Exception result.
+     * @public
+     */
+    async loadStream() {
+        return {
+            exception: {
+                message: 'Direct stream loading is not supported by Pandora source.',
+                severity: 'common'
+            }
+        };
+    }
+    /**
+     * Parses JSON body safely.
+     * @param body - Response body (string or object).
+     * @returns Parsed object or undefined.
+     * @internal
+     */
+    parseJsonBody(body) {
+        if (typeof body === 'string') {
+            try {
+                return JSON.parse(body);
+            }
+            catch {
+                return undefined;
+            }
+        }
+        return body;
+    }
+    /**
+     * Checks if response has API error.
+     * @param data - Response data.
+     * @returns True if error present.
+     * @internal
+     */
+    hasApiError(data) {
+        if (!data || typeof data !== 'object')
+            return false;
+        return ('message' in data &&
+            typeof data.message === 'string');
     }
 }

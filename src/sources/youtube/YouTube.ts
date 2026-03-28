@@ -577,6 +577,7 @@ export default class YouTubeSource {
       'No search results found from any configured client.'
     )
     return {
+      loadType: 'error',
       exception: {
         message: 'No search results found from any configured client.',
         severity: 'fault',
@@ -599,10 +600,7 @@ export default class YouTubeSource {
     let videoId = query
     if (!/^[a-zA-Z0-9_-]{11}$/.test(query)) {
       const searchRes = await this.search(query, 'ytmsearch')
-      if (
-        searchRes.loadType !== 'search' ||
-        !(searchRes.data as TrackInfo[])?.length
-      ) {
+      if (searchRes.loadType !== 'search' || searchRes.data.length === 0) {
         return { loadType: 'empty', data: {} }
       }
       videoId = (
@@ -670,16 +668,12 @@ export default class YouTubeSource {
         }
       }
 
-      const automixData = automixRes?.data as {
-        tracks?: Array<{ info: TrackInfo }>
-      }
       if (
         automixRes &&
         automixRes.loadType === 'playlist' &&
-        automixData?.tracks &&
-        automixData.tracks.length > 0
+        automixRes.data.tracks.length > 0
       ) {
-        const tracks = automixData.tracks.filter(
+        const tracks = automixRes.data.tracks.filter(
           (t) => t.info.identifier !== videoId
         )
         return {
@@ -700,6 +694,7 @@ export default class YouTubeSource {
         `Recommendations failed: ${(e as Error).message}`
       )
       return {
+        loadType: 'error',
         exception: { message: (e as Error).message, severity: 'fault' }
       }
     }
@@ -863,6 +858,7 @@ export default class YouTubeSource {
       const msg = 'All music clients failed for direct Music URL.'
       logger('error', 'YouTube', msg)
       return {
+        loadType: 'error',
         exception: {
           message: msg,
           severity: 'fault',
@@ -1002,6 +998,7 @@ export default class YouTubeSource {
 
     logger('error', 'YouTube', 'All clients failed to resolve the URL.')
     return {
+      loadType: 'error',
       exception: {
         message: 'All clients failed to resolve the URL.',
         severity: 'fault',
@@ -1063,7 +1060,7 @@ export default class YouTubeSource {
         }
       )
 
-      if (holoTrack) (holoTrack as Record<string, unknown>).userData = userData
+      if (holoTrack) holoTrack.userData = userData
       return holoTrack
     } catch (err) {
       logger(
@@ -1397,6 +1394,7 @@ export default class YouTubeSource {
       'Failed to get a working track URL from any configured client.'
     )
     return {
+      loadType: 'error',
       exception: {
         message: 'Failed to get a working track URL from any client.',
         severity: 'fault',

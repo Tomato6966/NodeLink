@@ -299,18 +299,17 @@ export default class LetrasMusSource {
             }
             const query = `${decodedTrack.title} ${decodedTrack.author}`.trim();
             const searchResult = await sourceManager.searchWithDefault(query);
-            const searchTracks = searchResult.data;
             if (searchResult.loadType !== 'search' ||
-                !this.isTrackDataArray(searchTracks) ||
-                searchTracks.length === 0) {
+                searchResult.data.length === 0) {
                 return {
                     loadType: 'error',
                     exception: {
-                        message: 'No matching track found on default source.',
-                        severity: 'common'
+                        message: 'No suitable alternative found.',
+                        severity: 'fault'
                     }
                 };
             }
+            const searchTracks = searchResult.data;
             const bestMatchCandidate = getBestMatch(searchTracks, decodedTrack);
             const bestMatch = bestMatchCandidate
                 ? this.findTrackDataByCandidate(searchTracks, bestMatchCandidate)
@@ -513,15 +512,17 @@ export default class LetrasMusSource {
      * @returns A usable track entry or `null`.
      */
     extractTrackFromResolveResult(result) {
-        const trackData = result.data;
-        if (result.loadType === 'track' && this.isTrackData(trackData)) {
-            return trackData;
+        if (result.loadType === 'track') {
+            const trackData = result.data;
+            if (this.isTrackData(trackData)) {
+                return trackData;
+            }
         }
-        const playlistData = result.data;
-        if (result.loadType === 'playlist' &&
-            this.isPlaylistData(playlistData) &&
-            playlistData.tracks.length > 0) {
-            return playlistData.tracks[0] ?? null;
+        if (result.loadType === 'playlist') {
+            const playlistData = result.data;
+            if (this.isPlaylistData(playlistData) && playlistData.tracks.length > 0) {
+                return playlistData.tracks[0] ?? null;
+            }
         }
         return null;
     }

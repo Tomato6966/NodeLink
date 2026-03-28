@@ -1,351 +1,8 @@
-import { encodeTrack, getBestMatch, logger, makeRequest } from "../utils.js";
-export default class AnghamiSource {
-    constructor(nodelink) {
-        this.nodelink = nodelink;
-        this.config = nodelink.options;
-        this.searchTerms = ['agsearch'];
-        this.patterns = [
-            /^https?:\/\/(?:play\.|www\.)?anghami\.com\/(?:song|album|playlist|artist)\/(\d+)/
-        ];
-        this.udid = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-        this.cookieHeader = '';
-        if (this.config.sources.anghami?.cookies) {
-            this.cookieHeader = this.config.sources.anghami.cookies;
-            this.parseFingerprintFromCookies();
-        }
-    }
-    parseFingerprintFromCookies() {
-        if (!this.cookieHeader)
-            return;
-        const cookies = this.cookieHeader.split(';');
-        for (const cookie of cookies) {
-            const parts = cookie.trim().split('=');
-            if (parts.length >= 2) {
-                const name = parts[0];
-                const value = parts.slice(1).join('=');
-                if (name === 'fingerprint' && value) {
-                    try {
-                        const decoded = Buffer.from(value, 'base64').toString('utf-8');
-                        const json = JSON.parse(decoded);
-                        if (json.fp) {
-                            this.udid = json.fp;
-                            logger('info', 'Anghami', `Extracted UDID from config cookies: ${this.udid}`);
-                        }
-                    }
-                    catch (err) {
-                        logger('warn', 'Anghami', `Failed to decode fingerprint cookie: ${err.message}`);
-                    }
-                    break;
-                }
-            }
-        }
-    }
-    async setup() {
-        return true;
-    }
-    async search(query, _sourceTerm) {
-        logger('debug', 'Sources', `Searching Anghami for: "${query}"`);
-        const searchUrl = `https://api.anghami.com/gateway.php?type=GETtabsearch&query=${encodeURIComponent(query)}&web2=true&language=en&output=json`;
-        const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'X-ANGH-UDID': this.udid,
-            'X-ANGH-TS': Math.floor(Date.now() / 1000).toString(),
-            Referer: 'https://play.anghami.com/',
-            Origin: 'https://play.anghami.com'
-        };
-        if (this.cookieHeader) {
-            headers.Cookie = this.cookieHeader;
-        }
-        const { body, error } = await makeRequest(searchUrl, {
-            method: 'GET',
-            headers
-        });
-        if (error || !body || !body.sections) {
-            return {
-                exception: {
-                    message: error?.message || 'Failed to fetch search results',
-                    severity: 'common'
-                }
-            };
-        }
-        const songsSection = body.sections.find((s) => s.type === 'genericitem' && s.group === 'songs');
-        if (!songsSection || !songsSection.data || songsSection.data.length === 0) {
-            return { loadType: 'empty', data: {} };
-        }
-        const tracks = songsSection.data.map((item) => this.buildTrack(item));
-        return { loadType: 'search', data: tracks };
-    }
-    async resolve(url) {
-        const match = url.match(this.patterns[0]);
-        if (!match)
-            return { loadType: 'empty', data: {} };
-        const [, id] = match;
-        const type = url.includes('/song/')
-            ? 'song'
-            : url.includes('/album/')
-                ? 'album'
-                : url.includes('/playlist/')
-                    ? 'playlist'
-                    : url.includes('/artist/')
-                        ? 'artist'
-                        : null;
-        if (!type)
-            return { loadType: 'empty', data: {} };
-        logger('debug', 'Sources', `Resolving Anghami URL: ${url} (Type: ${type}, ID: ${id})`);
-        const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'X-ANGH-UDID': this.udid,
-            'X-ANGH-TS': Math.floor(Date.now() / 1000).toString(),
-            Referer: 'https://play.anghami.com/',
-            Origin: 'https://play.anghami.com'
-        };
-        if (this.cookieHeader) {
-            headers.Cookie = this.cookieHeader;
-        }
-        if (type === 'song') {
-            const songDataUrl = `https://api.anghami.com/gateway.php?type=GETsongdata&songId=${id}&output=jsonhp`;
-            const { body, error } = await makeRequest(songDataUrl, {
-                method: 'GET',
-                headers
-            });
-            if (error || !body || body.status !== 'ok') {
-                const searchUrl = `https://api.anghami.com/gateway.php?type=GETtabsearch&query=${id}&web2=true&language=en&output=json`;
-                const { body: searchBody } = await makeRequest(searchUrl, {
-                    method: 'GET',
-                    headers
-                });
-                if (searchBody?.sections) {
-                    for (const sec of searchBody.sections) {
-                        if (sec.data) {
-                            const match = sec.data.find((s) => s.id === id);
-                            if (match)
-                                return { loadType: 'track', data: this.buildTrack(match) };
-                        }
-                    }
-                }
-                return {
-                    exception: {
-                        message: error?.message || 'Failed to resolve song',
-                        severity: 'common'
-                    }
-                };
-            }
-            const track = this.buildTrack(body);
-            return { loadType: 'track', data: track };
-        }
-        else if (type === 'album' || type === 'playlist') {
-            const apiType = type === 'album' ? 'GETalbumdata' : 'GETplaylistdata';
-            const fetchData = async (useBuffered) => {
-                const requestUrl = `https://api.anghami.com/gateway.php?type=${apiType}&${type}Id=${id}&web2=true&language=en&output=json${useBuffered ? '&buffered=1' : ''}`;
-                const { body, error } = await makeRequest(requestUrl, {
-                    method: 'GET',
-                    headers
-                });
-                if (error || !body || body.error)
-                    return null;
-                let tracks = [];
-                const meta = body.playlist || body.album || {};
-                const attributes = meta._attributes || body._attributes || {};
-                const name = body.title ||
-                    body.name ||
-                    meta.title ||
-                    meta.name ||
-                    attributes.title ||
-                    attributes.name ||
-                    'Unknown Playlist';
-                if (body.songbuffers) {
-                    try {
-                        const songMap = new Map();
-                        body.songbuffers.forEach((bufferBase64) => {
-                            const buffer = Buffer.from(bufferBase64, 'base64');
-                            const decoded = SongBatchResponse.decode(buffer);
-                            if (decoded.response) {
-                                Object.keys(decoded.response).forEach((key) => {
-                                    songMap.set(key, decoded.response[key]);
-                                });
-                            }
-                        });
-                        const orderStr = body.songorder || attributes.songorder;
-                        if (orderStr) {
-                            const order = orderStr.split(',');
-                            order.forEach((songId) => {
-                                const song = songMap.get(songId.trim());
-                                if (song)
-                                    tracks.push(this.buildTrack(song));
-                            });
-                            if (tracks.length === 0) {
-                                order.reverse().forEach((songId) => {
-                                    const song = songMap.get(songId.trim());
-                                    if (song)
-                                        tracks.push(this.buildTrack(song));
-                                });
-                            }
-                        }
-                        else {
-                            for (const song of songMap.values()) {
-                                tracks.push(this.buildTrack(song));
-                            }
-                        }
-                    }
-                    catch (e) {
-                        logger('error', 'Anghami', `Failed to decode playlist buffer: ${e.message}`);
-                    }
-                }
-                if (tracks.length === 0 && body.sections) {
-                    const songsSec = body.sections.find((s) => s.type === 'song' ||
-                        s.group === 'songs' ||
-                        s.group === 'album_songs');
-                    if (songsSec?.data) {
-                        tracks = songsSec.data.map((item) => this.buildTrack(item));
-                    }
-                }
-                const songsMapData = body.playlist?.songs || body.songs || body.album?.songs;
-                if (tracks.length === 0 && songsMapData) {
-                    const songsMap = new Map();
-                    Object.keys(songsMapData).forEach((key) => {
-                        const s = songsMapData[key];
-                        if (typeof s !== 'object')
-                            return;
-                        const songObj = s._attributes || s;
-                        if (songObj?.id) {
-                            songsMap.set(songObj.id.toString(), songObj);
-                        }
-                    });
-                    const orderStr = meta.songorder || attributes.songorder || body.songorder;
-                    if (orderStr) {
-                        const order = orderStr.split(',');
-                        order.forEach((songId) => {
-                            const song = songsMap.get(songId.toString().trim());
-                            if (song)
-                                tracks.push(this.buildTrack(song));
-                        });
-                    }
-                    if (tracks.length === 0) {
-                        for (const song of songsMap.values()) {
-                            tracks.push(this.buildTrack(song));
-                        }
-                    }
-                }
-                if (tracks.length === 0 && Array.isArray(body.data)) {
-                    tracks = body.data.map((item) => this.buildTrack(item));
-                }
-                if (tracks.length === 0)
-                    return null;
-                return {
-                    loadType: 'playlist',
-                    data: {
-                        info: { name, selectedTrack: 0 },
-                        pluginInfo: {},
-                        tracks
-                    }
-                };
-            };
-            let result = await fetchData(false);
-            if (!result)
-                result = await fetchData(true);
-            if (!result)
-                return { loadType: 'empty', data: {} };
-            return result;
-        }
-        else if (type === 'artist') {
-            const artistUrl = `https://api.anghami.com/gateway.php?type=GETartistprofile&artistId=${id}&web2=true&language=en&output=json`;
-            const { body, error } = await makeRequest(artistUrl, {
-                method: 'GET',
-                headers
-            });
-            if (error || !body)
-                return { loadType: 'empty', data: {} };
-            let tracksData = [];
-            if (body.sections) {
-                const songsSec = body.sections.find((s) => s.group === 'songs' || s.type === 'song');
-                if (songsSec)
-                    tracksData = songsSec.data;
-            }
-            else if (Array.isArray(body.data)) {
-                tracksData = body.data;
-            }
-            const tracks = tracksData.map((item) => this.buildTrack(item));
-            return {
-                loadType: 'playlist',
-                data: {
-                    info: {
-                        name: body.name || body.title || 'Artist Top Tracks',
-                        selectedTrack: 0
-                    },
-                    pluginInfo: {},
-                    tracks
-                }
-            };
-        }
-        return { loadType: 'empty', data: {} };
-    }
-    async getTrackUrl(decodedTrack) {
-        const searchQuery = `${decodedTrack.title} - ${decodedTrack.author}`;
-        try {
-            const searchResult = await this.nodelink.sources.searchWithDefault(searchQuery);
-            if (!searchResult ||
-                searchResult.loadType !== 'search' ||
-                searchResult.data.length === 0) {
-                return {
-                    exception: {
-                        message: 'No suitable alternative found via default search.',
-                        severity: 'common'
-                    }
-                };
-            }
-            const bestMatch = getBestMatch(searchResult.data, decodedTrack);
-            if (!bestMatch) {
-                return {
-                    exception: {
-                        message: 'No suitable alternative found after filtering.',
-                        severity: 'common'
-                    }
-                };
-            }
-            const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info);
-            return {
-                ...streamInfo,
-                newTrack: bestMatch
-            };
-        }
-        catch (e) {
-            logger('warn', 'Anghami', `Search for "${searchQuery}" failed: ${e.message}`);
-            return {
-                exception: {
-                    message: e.message,
-                    severity: 'fault'
-                }
-            };
-        }
-    }
-    buildTrack(item) {
-        const artworkId = item.coverArt || item.AlbumArt || item.cover;
-        const artworkUrl = artworkId
-            ? `https://artwork.anghcdn.co/?id=${artworkId}&size=640`
-            : null;
-        const trackInfo = {
-            identifier: item.id.toString(),
-            isSeekable: true,
-            author: item.artist || item.artistName || 'Unknown Artist',
-            length: Math.round(parseFloat(item.duration || 0) * 1000),
-            isStream: false,
-            position: 0,
-            title: item.title || item.name,
-            uri: `https://play.anghami.com/song/${item.id}`,
-            artworkUrl: artworkUrl,
-            isrc: null,
-            sourceName: 'anghami'
-        };
-        return {
-            encoded: encodeTrack(trackInfo),
-            info: trackInfo,
-            pluginInfo: {}
-        };
-    }
-}
-const SongBatchResponse = {
+import { encodeTrack, getBestMatch, logger, makeRequest } from '../utils.js';
+const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36';
+const AnghamiSongBatchDecoder = {
     decode(buffer) {
-        const reader = new Reader(buffer);
+        const reader = new ProtoReader(buffer);
         const result = {
             response: {},
             takendownSongIds: [],
@@ -359,32 +16,30 @@ const SongBatchResponse = {
                 case 1:
                     reader.skipType(wireType);
                     break;
-                case 2:
-                    {
-                        const end = reader.uint32() + reader.pos;
-                        let key = '';
-                        let value = null;
-                        while (reader.pos < end) {
-                            const mapTag = reader.uint32();
-                            const mapFieldNo = mapTag >>> 3;
-                            const mapWireType = mapTag & 7;
-                            switch (mapFieldNo) {
-                                case 1:
-                                    key = reader.string();
-                                    break;
-                                case 2:
-                                    value = Song.decode(reader, reader.uint32());
-                                    break;
-                                default:
-                                    reader.skipType(mapWireType);
-                                    break;
-                            }
-                        }
-                        if (key && value) {
-                            result.response[key] = value;
+                case 2: {
+                    const end = reader.uint32() + reader.pos;
+                    let key = '';
+                    let value = null;
+                    while (reader.pos < end) {
+                        const mapTag = reader.uint32();
+                        const mapFieldNo = mapTag >>> 3;
+                        const mapWireType = mapTag & 7;
+                        switch (mapFieldNo) {
+                            case 1:
+                                key = reader.string();
+                                break;
+                            case 2:
+                                value = AnghamiSongDecoder.decode(reader, reader.uint32());
+                                break;
+                            default:
+                                reader.skipType(mapWireType);
+                                break;
                         }
                     }
+                    if (key && value)
+                        result.response[key] = value;
                     break;
+                }
                 case 4:
                     result.takendownSongIds.push(reader.string());
                     break;
@@ -399,9 +54,9 @@ const SongBatchResponse = {
         return result;
     }
 };
-const Song = {
+const AnghamiSongDecoder = {
     decode(reader, len) {
-        const end = void 0 === len ? reader.len : reader.pos + len;
+        const end = len === undefined ? reader.len : reader.pos + len;
         const message = {
             id: '',
             title: '',
@@ -492,7 +147,10 @@ const Song = {
         return message;
     }
 };
-class Reader {
+class ProtoReader {
+    buf;
+    pos;
+    len;
     constructor(buffer) {
         this.buf = buffer;
         this.pos = 0;
@@ -502,7 +160,10 @@ class Reader {
         let value = 0;
         let shift = 0;
         while (this.pos < this.len) {
-            const b = this.buf[this.pos++];
+            const b = this.buf[this.pos];
+            if (b === undefined)
+                break;
+            this.pos++;
             value |= (b & 127) << shift;
             if (b < 128)
                 return value >>> 0;
@@ -520,9 +181,6 @@ class Reader {
         const str = this.buf.toString('utf8', this.pos, this.pos + len);
         this.pos += len;
         return str;
-    }
-    bool() {
-        return this.uint32() !== 0;
     }
     float() {
         const value = this.buf.readFloatLE(this.pos);
@@ -546,5 +204,464 @@ class Reader {
             default:
                 throw new Error(`Unknown wire type: ${wireType}`);
         }
+    }
+}
+export default class AnghamiSource {
+    nodelink;
+    config;
+    sourceConfig;
+    searchTerms = ['agsearch'];
+    patterns = [
+        /^https?:\/\/(?:play\.|www\.)?anghami\.com\/(?:song|album|playlist|artist)\/(\d+)/
+    ];
+    priority = 80;
+    udid;
+    cookieHeader;
+    constructor(nodelink) {
+        this.nodelink = nodelink;
+        this.config = nodelink.options;
+        this.sourceConfig = this.asRecord(this.config.sources?.anghami)
+            ? (this.asRecord(this.config.sources?.anghami) ??
+                {})
+            : {};
+        this.udid = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+        this.cookieHeader = this.sourceConfig.cookies ?? '';
+        if (this.cookieHeader)
+            this.parseFingerprintFromCookies();
+    }
+    async setup() {
+        return true;
+    }
+    async search(query, _sourceTerm) {
+        logger('debug', 'Sources', `Searching Anghami for: "${query}"`);
+        const searchUrl = `https://api.anghami.com/gateway.php?type=GETtabsearch&query=${encodeURIComponent(query)}&web2=true&language=en&output=json`;
+        const { body, error } = await makeRequest(searchUrl, {
+            method: 'GET',
+            headers: this.buildHeaders()
+        });
+        if (error) {
+            return {
+                loadType: 'error',
+                exception: { message: error, severity: 'common' }
+            };
+        }
+        const searchBody = this.asRecord(body);
+        const sections = Array.isArray(searchBody?.sections)
+            ? searchBody.sections
+            : [];
+        const songsSection = sections.find((s) => s.type === 'genericitem' && s.group === 'songs');
+        const data = Array.isArray(songsSection?.data) ? songsSection.data : [];
+        if (data.length === 0)
+            return { loadType: 'empty', data: {} };
+        const tracks = data
+            .map((item) => this.buildTrack(item))
+            .filter((t) => t !== null);
+        return tracks.length > 0
+            ? { loadType: 'search', data: tracks }
+            : { loadType: 'empty', data: {} };
+    }
+    async resolve(url) {
+        const pattern = this.patterns[0];
+        if (!pattern)
+            return { loadType: 'empty', data: {} };
+        const match = url.match(pattern);
+        if (!match?.[1])
+            return { loadType: 'empty', data: {} };
+        const id = match[1];
+        const type = url.includes('/song/')
+            ? 'song'
+            : url.includes('/album/')
+                ? 'album'
+                : url.includes('/playlist/')
+                    ? 'playlist'
+                    : url.includes('/artist/')
+                        ? 'artist'
+                        : null;
+        if (!type)
+            return { loadType: 'empty', data: {} };
+        logger('debug', 'Sources', `Resolving Anghami URL: ${url} (Type: ${type}, ID: ${id})`);
+        if (type === 'song')
+            return this.resolveSong(id);
+        if (type === 'album' || type === 'playlist')
+            return this.resolveCollection(id, type);
+        if (type === 'artist')
+            return this.resolveArtist(id);
+        return { loadType: 'empty', data: {} };
+    }
+    async getTrackUrl(decodedTrack) {
+        const sources = this.nodelink.sources;
+        if (!sources) {
+            return {
+                exception: {
+                    message: 'Source manager is not available.',
+                    severity: 'fault'
+                }
+            };
+        }
+        const searchQuery = `${decodedTrack.title} - ${decodedTrack.author}`;
+        try {
+            const searchResult = await sources.searchWithDefault(searchQuery);
+            if (searchResult.loadType !== 'search' ||
+                !Array.isArray(searchResult.data) ||
+                searchResult.data.length === 0) {
+                return {
+                    exception: {
+                        message: 'No suitable alternative found via default search.',
+                        severity: 'common'
+                    }
+                };
+            }
+            const bestMatch = getBestMatch(searchResult.data, decodedTrack);
+            if (!bestMatch) {
+                return {
+                    exception: {
+                        message: 'No suitable alternative found after filtering.',
+                        severity: 'common'
+                    }
+                };
+            }
+            const streamInfo = await sources.getTrackUrl(bestMatch.info);
+            return { ...streamInfo, newTrack: { info: bestMatch.info } };
+        }
+        catch (e) {
+            const message = e instanceof Error ? e.message : String(e);
+            logger('warn', 'Anghami', `Search for "${searchQuery}" failed: ${message}`);
+            return { exception: { message, severity: 'fault' } };
+        }
+    }
+    async loadStream() {
+        return {
+            exception: {
+                message: 'Direct stream loading is not supported by Anghami source.',
+                severity: 'common'
+            }
+        };
+    }
+    parseFingerprintFromCookies() {
+        const cookies = this.cookieHeader.split(';');
+        for (const cookie of cookies) {
+            const parts = cookie.trim().split('=');
+            const name = parts[0];
+            const value = parts.slice(1).join('=');
+            if (name === 'fingerprint' && value) {
+                try {
+                    const decoded = Buffer.from(value, 'base64').toString('utf-8');
+                    const json = JSON.parse(decoded);
+                    if (typeof json.fp === 'string' && json.fp) {
+                        this.udid = json.fp;
+                        logger('info', 'Anghami', `Extracted UDID from config cookies: ${this.udid}`);
+                    }
+                }
+                catch (err) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    logger('warn', 'Anghami', `Failed to decode fingerprint cookie: ${message}`);
+                }
+                break;
+            }
+        }
+    }
+    async resolveSong(id) {
+        const songDataUrl = `https://api.anghami.com/gateway.php?type=GETsongdata&songId=${id}&output=jsonhp`;
+        const { body, error } = await makeRequest(songDataUrl, {
+            method: 'GET',
+            headers: this.buildHeaders()
+        });
+        const songBody = this.asRecord(body);
+        if (error || !songBody || songBody.status !== 'ok') {
+            const fallback = await this.searchByIdFallback(id);
+            if (fallback)
+                return { loadType: 'track', data: fallback };
+            return {
+                loadType: 'error',
+                exception: {
+                    message: error ?? 'Failed to resolve song',
+                    severity: 'common'
+                }
+            };
+        }
+        const track = this.buildTrack(songBody);
+        if (!track)
+            return { loadType: 'empty', data: {} };
+        return { loadType: 'track', data: track };
+    }
+    async searchByIdFallback(id) {
+        const searchUrl = `https://api.anghami.com/gateway.php?type=GETtabsearch&query=${id}&web2=true&language=en&output=json`;
+        const { body } = await makeRequest(searchUrl, {
+            method: 'GET',
+            headers: this.buildHeaders()
+        });
+        const searchBody = this.asRecord(body);
+        const sections = Array.isArray(searchBody?.sections)
+            ? searchBody.sections
+            : [];
+        for (const section of sections) {
+            const sectionData = Array.isArray(section.data) ? section.data : [];
+            const matched = sectionData.find((s) => String(s.id ?? '') === id);
+            if (matched)
+                return this.buildTrack(matched);
+        }
+        return null;
+    }
+    async resolveCollection(id, type) {
+        const direct = await this.fetchCollectionData(id, type, false);
+        const buffered = direct ?? (await this.fetchCollectionData(id, type, true));
+        if (!buffered)
+            return { loadType: 'empty', data: {} };
+        return buffered;
+    }
+    async fetchCollectionData(id, type, useBuffered) {
+        const apiType = type === 'album' ? 'GETalbumdata' : 'GETplaylistdata';
+        const requestUrl = `https://api.anghami.com/gateway.php?type=${apiType}&${type}Id=${id}&web2=true&language=en&output=json${useBuffered ? '&buffered=1' : ''}`;
+        const { body, error } = await makeRequest(requestUrl, {
+            method: 'GET',
+            headers: this.buildHeaders()
+        });
+        const collectionBody = this.asRecord(body);
+        if (error || !collectionBody || collectionBody.error)
+            return null;
+        const tracks = this.extractCollectionTracks(collectionBody);
+        if (tracks.length === 0)
+            return null;
+        const meta = this.asRecord(collectionBody.playlist) ??
+            this.asRecord(collectionBody.album) ??
+            {};
+        const attributes = this.asRecord(meta._attributes) ??
+            this.asRecord(collectionBody._attributes) ??
+            {};
+        const name = this.asString(collectionBody.title) ??
+            this.asString(collectionBody.name) ??
+            this.asString(meta.title) ??
+            this.asString(meta.name) ??
+            this.asString(attributes.title) ??
+            this.asString(attributes.name) ??
+            'Unknown Playlist';
+        return {
+            loadType: 'playlist',
+            data: { info: { name, selectedTrack: 0 }, pluginInfo: {}, tracks }
+        };
+    }
+    extractCollectionTracks(body) {
+        const bufferedTracks = this.extractBufferedTracks(body);
+        if (bufferedTracks.length > 0)
+            return bufferedTracks;
+        const sectionTracks = this.extractSectionTracks(body.sections);
+        if (sectionTracks.length > 0)
+            return sectionTracks;
+        const mappedTracks = this.extractMappedTracks(body);
+        if (mappedTracks.length > 0)
+            return mappedTracks;
+        if (Array.isArray(body.data)) {
+            return body.data
+                .map((item) => this.buildTrack(item))
+                .filter((t) => t !== null);
+        }
+        return [];
+    }
+    extractBufferedTracks(body) {
+        if (!Array.isArray(body.songbuffers))
+            return [];
+        const songMap = new Map();
+        for (const bufferBase64 of body.songbuffers) {
+            if (typeof bufferBase64 !== 'string')
+                continue;
+            try {
+                const buffer = Buffer.from(bufferBase64, 'base64');
+                const decoded = AnghamiSongBatchDecoder.decode(buffer);
+                for (const key of Object.keys(decoded.response)) {
+                    const song = decoded.response[key];
+                    if (song)
+                        songMap.set(key, song);
+                }
+            }
+            catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                logger('error', 'Anghami', `Failed to decode playlist buffer: ${message}`);
+            }
+        }
+        const meta = this.asRecord(body.playlist) ?? this.asRecord(body.album) ?? {};
+        const attributes = this.asRecord(meta._attributes) ?? this.asRecord(body._attributes) ?? {};
+        const orderStr = this.asString(body.songorder) ?? this.asString(attributes.songorder);
+        const tracks = [];
+        if (orderStr) {
+            const order = orderStr.split(',');
+            for (const songId of order) {
+                const song = songMap.get(songId.trim());
+                const track = song ? this.buildTrack(song) : null;
+                if (track)
+                    tracks.push(track);
+            }
+            if (tracks.length === 0) {
+                for (const songId of order.reverse()) {
+                    const song = songMap.get(songId.trim());
+                    const track = song ? this.buildTrack(song) : null;
+                    if (track)
+                        tracks.push(track);
+                }
+            }
+            return tracks;
+        }
+        for (const song of songMap.values()) {
+            const track = this.buildTrack(song);
+            if (track)
+                tracks.push(track);
+        }
+        return tracks;
+    }
+    extractSectionTracks(sections) {
+        if (!Array.isArray(sections))
+            return [];
+        const songsSection = sections.find((s) => s.type === 'song' || s.group === 'songs' || s.group === 'album_songs');
+        const data = Array.isArray(songsSection?.data) ? songsSection.data : [];
+        return data
+            .map((item) => this.buildTrack(item))
+            .filter((t) => t !== null);
+    }
+    extractMappedTracks(body) {
+        const meta = this.asRecord(body.playlist) ?? this.asRecord(body.album) ?? {};
+        const attributes = this.asRecord(meta._attributes) ?? this.asRecord(body._attributes) ?? {};
+        const songsMapData = this.asRecord(this.asRecord(body.playlist)?.songs) ??
+            this.asRecord(body.songs) ??
+            this.asRecord(this.asRecord(body.album)?.songs);
+        if (!songsMapData)
+            return [];
+        const songsMap = new Map();
+        for (const key of Object.keys(songsMapData)) {
+            const entry = songsMapData[key];
+            const entryRecord = this.asRecord(entry);
+            if (!entryRecord)
+                continue;
+            const songObj = (this.asRecord(entryRecord._attributes) ??
+                entryRecord);
+            const id = this.asString(songObj.id);
+            if (id)
+                songsMap.set(id, songObj);
+        }
+        const orderStr = this.asString(meta.songorder) ??
+            this.asString(attributes.songorder) ??
+            this.asString(body.songorder);
+        const tracks = [];
+        if (orderStr) {
+            for (const songId of orderStr.split(',')) {
+                const song = songsMap.get(songId.trim());
+                const track = song ? this.buildTrack(song) : null;
+                if (track)
+                    tracks.push(track);
+            }
+        }
+        if (tracks.length === 0) {
+            for (const song of songsMap.values()) {
+                const track = this.buildTrack(song);
+                if (track)
+                    tracks.push(track);
+            }
+        }
+        return tracks;
+    }
+    async resolveArtist(id) {
+        const artistUrl = `https://api.anghami.com/gateway.php?type=GETartistprofile&artistId=${id}&web2=true&language=en&output=json`;
+        const { body, error } = await makeRequest(artistUrl, {
+            method: 'GET',
+            headers: this.buildHeaders()
+        });
+        if (error)
+            return { loadType: 'empty', data: {} };
+        const artistBody = this.asRecord(body);
+        if (!artistBody)
+            return { loadType: 'empty', data: {} };
+        let tracksData = [];
+        if (Array.isArray(artistBody.sections)) {
+            const songsSec = artistBody.sections.find((s) => s.group === 'songs' || s.type === 'song');
+            tracksData = Array.isArray(songsSec?.data) ? songsSec.data : [];
+        }
+        else if (Array.isArray(artistBody.data)) {
+            tracksData = artistBody.data;
+        }
+        const tracks = tracksData
+            .map((item) => this.buildTrack(item))
+            .filter((t) => t !== null);
+        if (tracks.length === 0)
+            return { loadType: 'empty', data: {} };
+        return {
+            loadType: 'playlist',
+            data: {
+                info: {
+                    name: this.asString(artistBody.name) ??
+                        this.asString(artistBody.title) ??
+                        'Artist Top Tracks',
+                    selectedTrack: 0
+                },
+                pluginInfo: {},
+                tracks
+            }
+        };
+    }
+    buildHeaders() {
+        const headers = {
+            'User-Agent': USER_AGENT,
+            'X-ANGH-UDID': this.udid,
+            'X-ANGH-TS': Math.floor(Date.now() / 1000).toString(),
+            Referer: 'https://play.anghami.com/',
+            Origin: 'https://play.anghami.com'
+        };
+        if (this.cookieHeader)
+            headers.Cookie = this.cookieHeader;
+        return headers;
+    }
+    buildTrack(item) {
+        const itemRecord = item;
+        const id = this.asString(item.id);
+        if (!id)
+            return null;
+        const artworkId = this.asString(item.coverArt) ??
+            this.asString(itemRecord.AlbumArt) ??
+            this.asString(itemRecord.cover);
+        const artworkUrl = artworkId
+            ? `https://artwork.anghcdn.co/?id=${artworkId}&size=640`
+            : null;
+        const rawDuration = this.asString(item.duration) ?? this.asNumber(item.duration);
+        const durationSeconds = typeof rawDuration === 'string'
+            ? Number.parseFloat(rawDuration)
+            : rawDuration;
+        const lengthMs = Number.isFinite(durationSeconds ?? Number.NaN)
+            ? Math.round((durationSeconds ?? 0) * 1000)
+            : 0;
+        const trackInfo = {
+            identifier: id,
+            isSeekable: true,
+            author: this.asString(item.artist) ??
+                this.asString(itemRecord.artistName) ??
+                'Unknown Artist',
+            length: lengthMs,
+            isStream: false,
+            position: 0,
+            title: this.asString(item.title) ??
+                this.asString(itemRecord.name) ??
+                'Unknown Title',
+            uri: `https://play.anghami.com/song/${id}`,
+            artworkUrl,
+            isrc: null,
+            sourceName: 'anghami'
+        };
+        const encodeInput = { ...trackInfo, details: [] };
+        return {
+            encoded: encodeTrack(encodeInput),
+            info: trackInfo,
+            pluginInfo: {}
+        };
+    }
+    asRecord(value) {
+        if (!value || typeof value !== 'object' || Array.isArray(value))
+            return null;
+        return value;
+    }
+    asString(value) {
+        return typeof value === 'string'
+            ? value
+            : typeof value === 'number'
+                ? String(value)
+                : null;
+    }
+    asNumber(value) {
+        return typeof value === 'number' && Number.isFinite(value) ? value : null;
     }
 }

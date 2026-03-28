@@ -11,6 +11,7 @@
 
 import type {
   SourceResult,
+  TrackData,
   TrackInfo,
   WorkerNodeLink
 } from '../../../typings/sources/source.types.ts'
@@ -128,6 +129,7 @@ export default class Music extends BaseClient {
         `Failed to load results from ${sourceName}. Status: ${statusCode}`
       logger('error', 'YouTube-Music', message)
       return {
+        loadType: 'error',
         exception: { message, severity: 'common', cause: 'Upstream' }
       }
     }
@@ -138,6 +140,7 @@ export default class Music extends BaseClient {
         `Error from ${sourceName} search API: ${searchResult.error.message}`
       )
       return {
+        loadType: 'error',
         exception: {
           message: searchResult.error.message,
           severity: 'fault',
@@ -149,7 +152,7 @@ export default class Music extends BaseClient {
     const tabContent = searchResult.contents?.tabbedSearchResultsRenderer
       ?.tabs?.[0]?.tabRenderer?.content as YouTubeSearchTabContent | undefined
 
-    const tracks: unknown[] = []
+    const tracks: TrackData[] = []
     let videos: unknown[] | null = null
 
     const findShelf = (
@@ -243,6 +246,7 @@ export default class Music extends BaseClient {
             `Could not parse video ID from URL: ${url}`
           )
           return {
+            loadType: 'error',
             exception: {
               message: 'Invalid video URL.',
               severity: 'common',
@@ -259,6 +263,7 @@ export default class Music extends BaseClient {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
           logger('error', 'YouTube-Music', message)
           return {
+            loadType: 'error',
             exception: { message, severity: 'common', cause: 'Upstream' }
           }
         }
@@ -330,6 +335,7 @@ export default class Music extends BaseClient {
     _cipherManager: ICipherManager | null
   ): Promise<Record<string, unknown>> {
     return {
+      loadType: 'error',
       exception: {
         message: 'Music client does not provide direct track URLs.',
         severity: 'common'

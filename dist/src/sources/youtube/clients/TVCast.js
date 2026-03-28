@@ -85,6 +85,7 @@ export default class TVCast extends BaseClient {
                 if (!videoIdMatch?.[1]) {
                     logger('error', 'YouTube-TVCast', `Could not parse video ID from URL: ${url}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Invalid video URL.',
                             severity: 'common',
@@ -99,6 +100,7 @@ export default class TVCast extends BaseClient {
                     const message = `Failed to load video/short player data. Status: ${statusCode}`;
                     logger('error', 'YouTube-TVCast', message);
                     return {
+                        loadType: 'error',
                         exception: { message, severity: 'common', cause: 'Upstream' }
                     };
                 }
@@ -109,6 +111,7 @@ export default class TVCast extends BaseClient {
                 if (!playlistIdMatch?.[1]) {
                     logger('error', 'YouTube-TVCast', `Could not parse playlist ID from URL: ${url}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Invalid playlist URL.',
                             severity: 'common',
@@ -139,6 +142,7 @@ export default class TVCast extends BaseClient {
                     const errMsg = `Failed to fetch playlist. Status: ${statusCode}`;
                     logger('error', 'YouTube-TVCast', `Error loading playlist ${playlistId}: ${errMsg}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: errMsg,
                             severity: 'common',
@@ -170,7 +174,10 @@ export default class TVCast extends BaseClient {
         if (statusCode !== 200) {
             const message = `Failed to get player data for stream. Status: ${statusCode}`;
             logger('error', 'YouTube-TVCast', message);
-            return { exception: { message, severity: 'common', cause: 'Upstream' } };
+            return {
+                loadType: 'error',
+                exception: { message, severity: 'common', cause: 'Upstream' }
+            };
         }
         return await this._extractStreamData(playerResponse, decodedTrack, context, cipherManager, itag);
     }

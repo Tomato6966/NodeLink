@@ -11,8 +11,9 @@ function isYouTubeSourceProxyRuntime(value) {
     if (!value) {
         return false;
     }
-    return (typeof value.getProxy === 'function' ||
-        typeof value.reportProxyStatus === 'function');
+    const maybeProxyRuntime = value;
+    return (typeof maybeProxyRuntime.getProxy === 'function' ||
+        typeof maybeProxyRuntime.reportProxyStatus === 'function');
 }
 /**
  * Cached player script descriptor with a fixed TTL.

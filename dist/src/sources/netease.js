@@ -412,8 +412,8 @@ export default class NeteaseSource {
             }
             const query = `${decodedTrack.title} ${decodedTrack.author}`.trim();
             const searchResult = await this.nodelink.sources.searchWithDefault(query);
-            if (!Array.isArray(searchResult.data) ||
-                searchResult.loadType !== 'search') {
+            if (searchResult.loadType !== 'search' ||
+                searchResult.data.length === 0) {
                 return this.exceptionTrackResult('No matching track found on fallback source.', 'common');
             }
             const candidates = this.toBestMatchCandidates(searchResult.data);

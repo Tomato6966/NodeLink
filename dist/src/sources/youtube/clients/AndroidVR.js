@@ -92,6 +92,7 @@ export default class AndroidVR extends BaseClient {
                     `Failed to load results from ${sourceName}. Status: ${statusCode}`;
                 logger('error', 'YouTube-AndroidVR', message);
                 return {
+                    loadType: 'error',
                     exception: { message, severity: 'common', cause: 'Upstream' }
                 };
             }
@@ -102,6 +103,7 @@ export default class AndroidVR extends BaseClient {
             if (searchResult.error) {
                 logger('error', 'YouTube-AndroidVR', `Error from ${sourceName} search API: ${searchResult.error.message}`);
                 return {
+                    loadType: 'error',
                     exception: {
                         message: searchResult.error.message,
                         severity: 'fault',
@@ -144,6 +146,7 @@ export default class AndroidVR extends BaseClient {
         catch (e) {
             logger('error', 'YouTube-AndroidVR', `Exception during search for '${query}': ${e instanceof Error ? e.message : String(e)}`);
             return {
+                loadType: 'error',
                 exception: {
                     message: e instanceof Error ? e.message : String(e),
                     severity: 'fault',
@@ -175,6 +178,7 @@ export default class AndroidVR extends BaseClient {
                 if (!videoIdMatch?.[1]) {
                     logger('error', 'YouTube-AndroidVR', `Could not parse video ID from URL: ${url}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Invalid video URL.',
                             severity: 'common',
@@ -188,6 +192,7 @@ export default class AndroidVR extends BaseClient {
                     const message = `Failed to load video/short player data. Status: ${statusCode}`;
                     logger('error', 'YouTube-AndroidVR', message);
                     return {
+                        loadType: 'error',
                         exception: { message, severity: 'common', cause: 'Upstream' }
                     };
                 }
@@ -198,6 +203,7 @@ export default class AndroidVR extends BaseClient {
                 if (!playlistIdMatch?.[1]) {
                     logger('error', 'YouTube-AndroidVR', `Could not parse playlist ID from URL: ${url}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Invalid playlist URL.',
                             severity: 'common',
@@ -228,6 +234,7 @@ export default class AndroidVR extends BaseClient {
                     const errMsg = `Failed to fetch playlist. Status: ${statusCode}`;
                     logger('error', 'YouTube-AndroidVR', `Error loading playlist ${playlistId}: ${errMsg}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: errMsg,
                             severity: 'common',
@@ -258,7 +265,10 @@ export default class AndroidVR extends BaseClient {
         if (statusCode !== 200) {
             const message = `Failed to get player data for stream. Status: ${statusCode}`;
             logger('error', 'YouTube-AndroidVR', message);
-            return { exception: { message, severity: 'common', cause: 'Upstream' } };
+            return {
+                loadType: 'error',
+                exception: { message, severity: 'common', cause: 'Upstream' }
+            };
         }
         return await this._extractStreamData(playerResponse, decodedTrack, context, cipherManager, itag);
     }

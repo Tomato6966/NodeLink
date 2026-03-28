@@ -25,6 +25,7 @@ import type {
   LyricsPayload,
   NodeLink,
   PlayerOptions,
+  PlayerPluginInfo,
   PlayerStateJSON,
   PlayerTrack,
   PlayerVoiceState,

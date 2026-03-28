@@ -79,6 +79,7 @@ export default class WebRemix extends BaseClient {
                 `Failed to load results from ${sourceName}. Status: ${statusCode}`;
             logger('error', 'YouTube-Music', message);
             return {
+                loadType: 'error',
                 exception: { message, severity: 'common', cause: 'Upstream' }
             };
         }
@@ -86,6 +87,7 @@ export default class WebRemix extends BaseClient {
         if (searchResult.error) {
             logger('error', 'YouTube-Music', `Error from ${sourceName} search API: ${searchResult.error.message}`);
             return {
+                loadType: 'error',
                 exception: {
                     message: searchResult.error.message,
                     severity: 'fault',
@@ -156,6 +158,7 @@ export default class WebRemix extends BaseClient {
                 if (!videoIdMatch?.[1]) {
                     logger('error', 'YouTube-Music', `Could not parse video ID from URL: ${url}`);
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Invalid video URL.',
                             severity: 'common',
@@ -169,6 +172,7 @@ export default class WebRemix extends BaseClient {
                     const message = `Failed to load video/short player data. Status: ${statusCode}`;
                     logger('error', 'YouTube-Music', message);
                     return {
+                        loadType: 'error',
                         exception: { message, severity: 'common', cause: 'Upstream' }
                     };
                 }
@@ -216,6 +220,7 @@ export default class WebRemix extends BaseClient {
      */
     async getTrackUrl(_decodedTrack, _context, _cipherManager) {
         return {
+            loadType: 'error',
             exception: {
                 message: 'WebRemix client does not provide direct track URLs.',
                 severity: 'common'

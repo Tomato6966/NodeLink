@@ -1,5 +1,6 @@
 import type {
   SourceResult,
+  TrackData,
   TrackInfo,
   WorkerNodeLink
 } from '../../../typings/sources/source.types.ts'
@@ -152,6 +153,7 @@ export default class Android extends BaseClient {
           `Failed to load results from ${sourceName}. Status: ${statusCode}`
         logger('error', 'YouTube-Android', message)
         return {
+          loadType: 'error',
           exception: { message, severity: 'common', cause: 'Upstream' }
         }
       }
@@ -174,6 +176,7 @@ export default class Android extends BaseClient {
           `Error from ${sourceName} search API: ${searchResult.error.message}`
         )
         return {
+          loadType: 'error',
           exception: {
             message: searchResult.error.message,
             severity: 'fault',
@@ -182,7 +185,7 @@ export default class Android extends BaseClient {
         }
       }
 
-      const tracks = []
+      const tracks: TrackData[] = []
       const allSections =
         searchResult.contents?.sectionListRenderer?.contents || []
       const items = []
@@ -271,6 +274,7 @@ export default class Android extends BaseClient {
         `Exception during search for '${query}': ${e instanceof Error ? e.message : String(e)}`
       )
       return {
+        loadType: 'error',
         exception: {
           message: e instanceof Error ? e.message : String(e),
           severity: 'fault',
@@ -321,6 +325,7 @@ export default class Android extends BaseClient {
             `Could not parse video ID from URL: ${url}`
           )
           return {
+            loadType: 'error',
             exception: {
               message: 'Invalid video URL.',
               severity: 'common',
@@ -336,6 +341,7 @@ export default class Android extends BaseClient {
           const message = `Failed to load video/short player data. Status: ${statusCode}`
           logger('error', 'youtube-android', message)
           return {
+            loadType: 'error',
             exception: { message, severity: 'common', cause: 'Upstream' }
           }
         }
@@ -356,6 +362,7 @@ export default class Android extends BaseClient {
             `Could not parse playlist ID from URL: ${url}`
           )
           return {
+            loadType: 'error',
             exception: {
               message: 'Invalid playlist URL.',
               severity: 'common',
@@ -420,6 +427,7 @@ export default class Android extends BaseClient {
             `Error loading playlist ${playlistId}: ${errMsg}`
           )
           return {
+            loadType: 'error',
             exception: {
               message: errMsg,
               severity: 'common',
@@ -481,7 +489,10 @@ export default class Android extends BaseClient {
     if (statusCode !== 200) {
       const message = `Failed to get player data for stream. Status: ${statusCode}`
       logger('error', 'youtube-android', message)
-      return { exception: { message, severity: 'common', cause: 'Upstream' } }
+      return {
+        loadType: 'error',
+        exception: { message, severity: 'common', cause: 'Upstream' }
+      }
     }
 
     const playerData = playerResponse as Record<string, unknown>

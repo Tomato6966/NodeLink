@@ -534,7 +534,9 @@ export default class AppleMusicSource {
             query += this.allowExplicit ? ' official video' : ' clean version';
         const sources = this.nodelink.sources;
         if (!sources) {
-            return { exception: { message: 'Sources not available.', severity: 'fault' } };
+            return {
+                exception: { message: 'Sources not available.', severity: 'fault' }
+            };
         }
         const searchResult = await sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
         const candidates = searchResult.loadType === 'search' ? searchResult.data : [];
@@ -547,7 +549,10 @@ export default class AppleMusicSource {
             };
         }
         const stream = await sources.getTrackUrl(bestMatch.info);
-        return { newTrack: { info: bestMatch.info }, ...stream };
+        return {
+            newTrack: { info: bestMatch.info },
+            ...stream
+        };
     }
     /**
      * This source does not handle direct stream loading.

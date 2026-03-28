@@ -1,5 +1,5 @@
 import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
-const SHAZAM_PATTERN = /https?:\/\/(?:www\.)?shazam\.com\/song\/\d+(?:\/[^/?#]+)?/;
+const SHAZAM_PATTERN = /^https?:\/\/(?:www\.)?shazam\.com\/song\/\d+(?:\/[^/?#]+)?\/?(?:[?#].*)?$/;
 const SHAZAM_SEARCH_BASE = 'https://www.shazam.com/services/amapi/v1/catalog/US/search';
 /**
  * Shazam source implementation.
@@ -81,8 +81,12 @@ export default class ShazamSource {
      */
     async search(query) {
         try {
+            const normalizedQuery = query.trim();
+            if (!normalizedQuery) {
+                return { loadType: 'empty', data: {} };
+            }
             const limit = this.getMaxSearchResults();
-            const url = `${SHAZAM_SEARCH_BASE}?types=songs&term=${encodeURIComponent(query)}` +
+            const url = `${SHAZAM_SEARCH_BASE}?types=songs&term=${encodeURIComponent(normalizedQuery)}` +
                 `&limit=${limit}`;
             const { body, statusCode, error } = await http1makeRequest(url);
             if (error || statusCode !== 200) {
@@ -92,9 +96,13 @@ export default class ShazamSource {
             if (songs.length === 0) {
                 return { loadType: 'empty', data: {} };
             }
-            const tracks = songs
-                .map((item) => this.buildTrack(item))
-                .filter((track) => track !== null);
+            const tracks = [];
+            for (const item of songs) {
+                const track = this.buildTrack(item);
+                if (track) {
+                    tracks.push(track);
+                }
+            }
             return tracks.length > 0
                 ? { loadType: 'search', data: tracks }
                 : { loadType: 'empty', data: {} };
@@ -114,11 +122,14 @@ export default class ShazamSource {
      */
     async resolve(url) {
         try {
-            const response = await http1makeRequest(url);
-            if (response.statusCode !== 200) {
+            if (!this.patterns.some((pattern) => pattern.test(url))) {
                 return { loadType: 'empty', data: {} };
             }
-            const html = this.getTextBody(response);
+            const { body, statusCode, error } = await http1makeRequest(url);
+            if (error || statusCode !== 200) {
+                return { loadType: 'empty', data: {} };
+            }
+            const html = this.getTextBody({ body });
             if (!html) {
                 return { loadType: 'empty', data: {} };
             }
@@ -151,14 +162,18 @@ export default class ShazamSource {
             if (title === 'Unknown' && !appleMusicUrl) {
                 return { loadType: 'empty', data: {} };
             }
-            const cleanUrl = url.endsWith('/') ? url.slice(0, -1) : url;
-            const identifier = cleanUrl.slice(cleanUrl.lastIndexOf('/') + 1);
+            const cleanUrl = url.replace(/[?#].*$/, '').replace(/\/$/, '');
+            const identifierMatch = cleanUrl.match(/\/song\/(\d+)(?:\/[^/?#]+)?$/);
+            if (!identifierMatch) {
+                return { loadType: 'empty', data: {} };
+            }
+            const identifier = identifierMatch[1];
             const track = this.createTrack({
                 identifier,
                 author: artist,
                 length: durationMs || 0,
                 title,
-                uri: url,
+                uri: cleanUrl,
                 artworkUrl,
                 isrc
             }, appleMusicUrl ? { appleMusicUrl } : {});
@@ -293,9 +308,14 @@ export default class ShazamSource {
         const results = this.getRecord(payload, 'results');
         const songs = results ? this.getRecord(results, 'songs') : null;
         const data = songs ? this.getArray(songs, 'data') : [];
-        return data
-            .map((value) => this.toSongItem(value))
-            .filter((item) => item !== null);
+        const songsList = [];
+        for (const value of data) {
+            const item = this.toSongItem(value);
+            if (item) {
+                songsList.push(item);
+            }
+        }
+        return songsList;
     }
     /**
      * Converts a raw API item into the narrowed Shazam song shape.
@@ -421,9 +441,9 @@ export default class ShazamSource {
      * @returns The best artwork URL or `null`.
      */
     extractArtworkFromImgAlt(html) {
-        const ogImageMatch = html.match(/<meta property="og:image" content="([^"]+)"/);
-        if (ogImageMatch?.[1]) {
-            return ogImageMatch[1];
+        const ogImage = this.extractMetaContent(html, 'og:image');
+        if (ogImage) {
+            return ogImage;
         }
         let altIndex = html.indexOf('alt="album cover"');
         if (altIndex === -1) {
@@ -593,9 +613,18 @@ export default class ShazamSource {
      * @returns The meta content or `null`.
      */
     extractMetaContent(html, property) {
-        const regex = new RegExp(`<meta property="${property}" content="([^"]+)"`);
-        const match = html.match(regex);
-        return match?.[1] ?? null;
+        const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const patterns = [
+            new RegExp(`<meta\\s+[^>]*(?:property|name)=["']${escaped}["'][^>]*content=["']([^"']+)["'][^>]*>`, 'i'),
+            new RegExp(`<meta\\s+[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["']${escaped}["'][^>]*>`, 'i')
+        ];
+        for (const pattern of patterns) {
+            const match = pattern.exec(html);
+            if (match?.[1]) {
+                return match[1];
+            }
+        }
+        return null;
     }
     /**
      * Extracts a text body from an HTTP response payload.
@@ -610,9 +639,10 @@ export default class ShazamSource {
         if (Buffer.isBuffer(response.body)) {
             return response.body.toString('utf8');
         }
-        return response.body !== undefined && response.body !== null
-            ? String(response.body)
-            : null;
+        if (response.body instanceof Uint8Array) {
+            return Buffer.from(response.body).toString('utf8');
+        }
+        return null;
     }
     /**
      * Parses a JSON-capable response body into a record.
@@ -624,7 +654,8 @@ export default class ShazamSource {
         if (body &&
             typeof body === 'object' &&
             !Array.isArray(body) &&
-            !Buffer.isBuffer(body)) {
+            !Buffer.isBuffer(body) &&
+            !(body instanceof Uint8Array)) {
             return body;
         }
         const textBody = this.getTextBody({ body });
@@ -727,11 +758,18 @@ export default class ShazamSource {
      * @returns Track array suitable for best-match selection.
      */
     extractTrackArray(result) {
-        const resultData = result.data;
-        if (result.loadType === 'search' &&
-            Array.isArray(resultData) &&
-            resultData.every((item) => this.isTrackData(item))) {
-            return resultData;
+        if (result.loadType === 'search') {
+            const resultData = result.data;
+            if (Array.isArray(resultData) &&
+                resultData.every((item) => this.isTrackData(item))) {
+                return resultData;
+            }
+        }
+        if (result.loadType === 'track') {
+            const singleTrack = result.data;
+            if (this.isTrackData(singleTrack)) {
+                return [singleTrack];
+            }
         }
         return [];
     }
