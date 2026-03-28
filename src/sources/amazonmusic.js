@@ -15,6 +15,9 @@ const FALLBACK_DEVICE_ID = '13580682033287541'
 const FALLBACK_SESSION_ID = '142-4001091-4160417'
 const CONFIG_TTL_MS = 60_000
 
+const META_CACHE_TTL_MS = 300_000
+const META_CACHE_MAX = 200
+
 const parseJson = (v) => {
   if (!v || typeof v !== 'string') return v
   try {
@@ -59,6 +62,14 @@ const extractIdentifier = (deeplink) => {
   return id || null
 }
 
+const extractOrigin = (url) => {
+  try {
+    return new URL(url).origin
+  } catch {
+    return 'https://music.amazon.com'
+  }
+}
+
 const parseColonDurationToMs = (s) => {
   if (!s) return 0
   const parts = String(s).split(':')
@@ -101,6 +112,9 @@ function parseTimeStringToMs(s) {
     if (s.startsWith('HOUR', i)) total += n * 3600
     else if (s.startsWith('MINUTE', i)) total += n * 60
     else if (s.startsWith('SECOND', i)) total += n
+    else if (i < s.length && s[i] === 'H') total += n * 3600
+    else if (i < s.length && s[i] === 'M') total += n * 60
+    else if (i < s.length && s[i] === 'S') total += n
   }
   return total * 1000
 }
@@ -118,6 +132,9 @@ export default class AmazonMusicSource {
 
     this._configCache = null
     this._configPromise = null
+
+    this._metaCache = new Map()
+    this._metaInflight = new Map()
   }
 
   async setup() {
@@ -177,6 +194,33 @@ export default class AmazonMusicSource {
     })
   }
 
+  _buildAmznHeaders(cfg, pageUrl) {
+    return {
+      'x-amzn-authentication': JSON.stringify({
+        interface: 'ClientAuthenticationInterface.v1_0.ClientTokenElement',
+        accessToken: cfg.accessToken
+      }),
+      'x-amzn-device-model': 'WEBPLAYER',
+      'x-amzn-device-width': '1920',
+      'x-amzn-device-height': '1080',
+      'x-amzn-device-family': 'WebPlayer',
+      'x-amzn-device-id': cfg.deviceId,
+      'x-amzn-user-agent': SEARCH_USER_AGENT,
+      'x-amzn-session-id': cfg.sessionId,
+      'x-amzn-request-id': crypto.randomUUID(),
+      'x-amzn-device-language': 'en_US',
+      'x-amzn-currency-of-preference': 'USD',
+      'x-amzn-os-version': '1.0',
+      'x-amzn-application-version': '1.0.9172.0',
+      'x-amzn-device-time-zone': 'America/New_York',
+      'x-amzn-timestamp': String(Date.now()),
+      'x-amzn-csrf': this._buildCsrfHeader(cfg.csrf),
+      'x-amzn-music-domain': 'music.amazon.com',
+      'x-amzn-page-url': pageUrl,
+      'x-amzn-feature-flags': 'hd-supported,uhd-supported'
+    }
+  }
+
   async resolve(url) {
     try {
       const match = url.match(this.patterns[0]) || url.match(this.patterns[1])
@@ -207,40 +251,43 @@ export default class AmazonMusicSource {
     }
   }
 
-  async _fetchTrackDurationFromAPI(trackId) {
+  async _fetchTrackMetaFromAPI(trackId) {
+    const cached = this._metaCache.get(trackId)
+    if (cached && Date.now() - cached.t < META_CACHE_TTL_MS) return cached.v
+
+    if (this._metaInflight.has(trackId)) return this._metaInflight.get(trackId)
+
+    const promise = this._fetchTrackMetaFromAPIUncached(trackId)
+    this._metaInflight.set(trackId, promise)
+
+    try {
+      const result = await promise
+      if (this._metaCache.size >= META_CACHE_MAX) {
+        const oldest = this._metaCache.keys().next().value
+        this._metaCache.delete(oldest)
+      }
+      this._metaCache.set(trackId, { t: Date.now(), v: result })
+      return result
+    } finally {
+      this._metaInflight.delete(trackId)
+    }
+  }
+
+  async _fetchTrackMetaFromAPIUncached(trackId) {
     try {
       const cfg = await this._getAmazonConfig()
-      if (!cfg) return 0
+      if (!cfg) return { duration: 0, isrc: null }
 
-      const now = Date.now()
       const headersObj = {
-        'x-amzn-authentication': JSON.stringify({
-          interface: 'ClientAuthenticationInterface.v1_0.ClientTokenElement',
-          accessToken: cfg.accessToken
-        }),
-        'x-amzn-device-model': 'WEBPLAYER',
-        'x-amzn-device-width': '1920',
-        'x-amzn-device-family': 'WebPlayer',
-        'x-amzn-device-id': cfg.deviceId,
-        'x-amzn-user-agent': SEARCH_USER_AGENT,
-        'x-amzn-session-id': cfg.sessionId,
-        'x-amzn-device-height': '1080',
-        'x-amzn-request-id': crypto.randomUUID(),
-        'x-amzn-device-language': 'en_US',
-        'x-amzn-currency-of-preference': 'USD',
-        'x-amzn-os-version': '1.0',
-        'x-amzn-application-version': '1.0.9172.0',
-        'x-amzn-device-time-zone': 'America/Sao_Paulo',
-        'x-amzn-timestamp': String(now),
-        'x-amzn-csrf': this._buildCsrfHeader(cfg.csrf),
-        'x-amzn-music-domain': 'music.amazon.com',
+        ...this._buildAmznHeaders(
+          cfg,
+          `https://music.amazon.com/tracks/${trackId}`
+        ),
         'x-amzn-referer': '',
         'x-amzn-affiliate-tags': '',
         'x-amzn-ref-marker': '',
-        'x-amzn-page-url': `https://music.amazon.com/tracks/${trackId}`,
         'x-amzn-weblab-id-overrides': '',
         'x-amzn-video-player-token': '',
-        'x-amzn-feature-flags': 'hd-supported,uhd-supported',
         'x-amzn-has-profile-id': '',
         'x-amzn-age-band': ''
       }
@@ -267,29 +314,71 @@ export default class AmazonMusicSource {
         }
       )
 
-      if (response.statusCode !== 200) return 0
+      if (response.statusCode !== 200) return { duration: 0, isrc: null }
       const data = parseJson(response.body) || response.body
-      const t = data?.methods?.[0]?.template?.headerTertiaryText
-      if (!t) return 0
+      logger(
+        'debug',
+        'AmazonMusic',
+        `API response keys: ${JSON.stringify(Object.keys(data || {}))}`
+      )
 
-      const duration = parseTimeStringToMs(t)
-      return duration > 0 ? duration : 0
+      let duration = 0
+      const t = data?.methods?.[0]?.template?.headerTertiaryText
+      if (t) {
+        duration = parseTimeStringToMs(t)
+        if (duration <= 0) duration = 0
+      }
+
+      let isrc = null
+      const findIsrc = (obj, depth = 0) => {
+        if (!obj || typeof obj !== 'object' || isrc || depth > 15) return
+        if (typeof obj.isrcCode === 'string' && obj.isrcCode) {
+          isrc = obj.isrcCode
+          return
+        }
+        if (typeof obj.innerHTML === 'string') {
+          const parsed = parseJson(obj.innerHTML)
+          if (parsed?.isrcCode) {
+            isrc = parsed.isrcCode
+            return
+          }
+        }
+        for (const v of Object.values(obj)) {
+          findIsrc(v, depth + 1)
+          if (isrc) return
+        }
+      }
+      findIsrc(data)
+      logger('debug', 'AmazonMusic', `Extracted ISRC for ${trackId}: ${isrc}`)
+
+      return { duration, isrc }
     } catch (e) {
       logger(
         'warn',
         'AmazonMusic',
-        `Failed to fetch duration for ${trackId}: ${e.message}`
+        `Failed to fetch meta for ${trackId}: ${e.message}`
       )
-      return 0
+      return { duration: 0, isrc: null }
     }
   }
 
   async _resolveTrack(url, id) {
     const data = await this._fetchJsonLd(url, id)
-    if (data?.loadType === 'track') {
-      if (data.data.info.length === 0) {
-        const duration = await this._fetchTrackDurationFromAPI(id)
-        data.data.info.length = duration
+    if (data?.loadType === 'track' && data.data?.info) {
+      if (data.data.info.length === 0 || !data.data.info.isrc) {
+        logger(
+          'debug',
+          'AmazonMusic',
+          `Fetching API meta for ${id} (length=${data.data.info.length}, isrc=${data.data.info.isrc})`
+        )
+        const meta = await this._fetchTrackMetaFromAPI(id)
+        logger(
+          'debug',
+          'AmazonMusic',
+          `API meta result: duration=${meta.duration}, isrc=${meta.isrc}`
+        )
+        if (meta.duration > 0) data.data.info.length = meta.duration
+        if (meta.isrc) data.data.info.isrc = meta.isrc
         data.data.encoded = encodeTrack(data.data.info)
       }
       return data
@@ -316,6 +405,8 @@ export default class AmazonMusicSource {
   }
 
   async _fetchJsonLd(url, targetId) {
+    const origin = extractOrigin(url)
+
     try {
       const { body, statusCode } = await http1makeRequest(url, {
         headers: { 'User-Agent': BOT_USER_AGENT }
@@ -346,17 +437,22 @@ export default class AmazonMusicSource {
             .replaceAll('&quot;', '"')
             .replaceAll('&amp;', '&')
           const parsed = JSON.parse(content)
-          const data = Array.isArray(parsed) ? parsed[0] : parsed
-          if (
-            data['@type'] === 'MusicAlbum' ||
-            data['@type'] === 'MusicGroup' ||
-            data['@type'] === 'Playlist'
-          ) {
-            collection = data
-          } else if (data['@type'] === 'MusicRecording') {
-            trackData = data
+
+          const entries = Array.isArray(parsed) ? parsed : [parsed]
+          for (const data of entries) {
+            if (
+              data['@type'] === 'MusicAlbum' ||
+              data['@type'] === 'MusicGroup' ||
+              data['@type'] === 'Playlist'
+            ) {
+              collection = data
+            } else if (data['@type'] === 'MusicRecording') {
+              trackData = data
+            }
           }
-        } catch {}
+        } catch (e) {
+          logger('debug', 'AmazonMusic', `JSON-LD parse error: ${e.message}`)
+        }
       }
 
       const tracks = []
@@ -420,7 +516,7 @@ export default class AmazonMusicSource {
             isStream: false,
             position: 0,
             title: tTitle,
-            uri: `https://music.amazon.com.br/tracks/${tId}`,
+            uri: `${origin}/tracks/${tId}`,
             artworkUrl: tImage,
             isrc: null,
             sourceName: 'amazonmusic'
@@ -442,7 +538,10 @@ export default class AmazonMusicSource {
       if (tracks.length > 0) {
         if (targetId) {
           const selected = tracks.find(
-            (t) => t.identifier === targetId || t.uri.includes(targetId)
+            (t) =>
+              t.identifier === targetId ||
+              t.uri.endsWith(`/${targetId}`) ||
+              t.uri.endsWith(`=${targetId}`)
           )
           if (selected) {
             return {
@@ -488,7 +587,13 @@ export default class AmazonMusicSource {
           trackData.isrcCode
         )
       }
-    } catch {}
+    } catch (e) {
+      logger(
+        'debug',
+        'AmazonMusic',
+        `_fetchJsonLd failed for ${url}: ${e.message}`
+      )
+    }
     return null
   }
 
@@ -496,10 +601,11 @@ export default class AmazonMusicSource {
     try {
       const apiUrl = `https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(url.split('?')[0])}`
       const { body, statusCode } = await http1makeRequest(apiUrl)
-      if (statusCode === 200 && body?.entitiesByUniqueId) {
-        let entity = body.entitiesByUniqueId[body.entityUniqueId]
+      const parsed = parseJson(body) || body
+      if (statusCode === 200 && parsed?.entitiesByUniqueId) {
+        let entity = parsed.entitiesByUniqueId[parsed.entityUniqueId]
         if (targetId && (!entity || !entity.id.includes(targetId))) {
-          const found = Object.values(body.entitiesByUniqueId).find((e) =>
+          const found = Object.values(parsed.entitiesByUniqueId).find((e) =>
             e.id.includes(targetId)
           )
           if (found) entity = found
@@ -515,7 +621,13 @@ export default class AmazonMusicSource {
             entity.isrc
           )
       }
-    } catch {}
+    } catch (e) {
+      logger(
+        'debug',
+        'AmazonMusic',
+        `Odesli fallback failed for ${url}: ${e.message}`
+      )
+    }
     return { loadType: 'empty', data: {} }
   }
 
@@ -555,9 +667,7 @@ export default class AmazonMusicSource {
       const cfg = await this._getAmazonConfig()
       if (!cfg) throw new Error('Failed to retrieve CSRF token from config')
 
-      const now = Date.now()
       const qEnc = encodeURIComponent(query)
-
       const searchPayload = {
         filter: '{"IsLibrary":["false"]}',
         keyword: JSON.stringify({
@@ -567,30 +677,12 @@ export default class AmazonMusicSource {
         }),
         suggestedKeyword: query,
         userHash: '{"level":"LIBRARY_MEMBER"}',
-        headers: JSON.stringify({
-          'x-amzn-authentication': JSON.stringify({
-            interface: 'ClientAuthenticationInterface.v1_0.ClientTokenElement',
-            accessToken: cfg.accessToken
-          }),
-          'x-amzn-device-model': 'WEBPLAYER',
-          'x-amzn-device-width': '1920',
-          'x-amzn-device-height': '1080',
-          'x-amzn-device-family': 'WebPlayer',
-          'x-amzn-device-id': cfg.deviceId,
-          'x-amzn-user-agent': SEARCH_USER_AGENT,
-          'x-amzn-session-id': cfg.sessionId,
-          'x-amzn-request-id': crypto.randomUUID(),
-          'x-amzn-device-language': 'en_US',
-          'x-amzn-currency-of-preference': 'USD',
-          'x-amzn-os-version': '1.0',
-          'x-amzn-application-version': '1.0.9172.0',
-          'x-amzn-device-time-zone': 'America/New_York',
-          'x-amzn-timestamp': String(now),
-          'x-amzn-csrf': this._buildCsrfHeader(cfg.csrf),
-          'x-amzn-music-domain': 'music.amazon.com',
-          'x-amzn-page-url': `https://music.amazon.com/search/${qEnc}?filter=IsLibrary%7Cfalse&sc=none`,
-          'x-amzn-feature-flags': 'hd-supported,uhd-supported'
-        })
+        headers: JSON.stringify(
+          this._buildAmznHeaders(
+            cfg,
+            `https://music.amazon.com/search/${qEnc}?filter=IsLibrary%7Cfalse&sc=none`
+          )
+        )
       }
 
       const payloadStr = JSON.stringify(searchPayload)
@@ -665,15 +757,17 @@ export default class AmazonMusicSource {
       }
 
       if (tracks.length === 0) return { loadType: 'empty', data: {} }
-
+now
       const fetchLimit = Math.min(tracks.length, 5)
-      const durations = await Promise.all(
+      const metas = await Promise.all(
         tracks
           .slice(0, fetchLimit)
-          .map((t) => this._fetchTrackDurationFromAPI(t.identifier))
+          .map((t) => this._fetchTrackMetaFromAPI(t.identifier))
       )
-      for (let i = 0; i < fetchLimit; i++)
-        if (durations[i] > 0) tracks[i].length = durations[i]
+      for (let i = 0; i < fetchLimit; i++) {
+        if (metas[i].duration > 0) tracks[i].length = metas[i].duration
+        if (metas[i].isrc) tracks[i].isrc = metas[i].isrc
+      }
 
       return {
         loadType: 'search',
