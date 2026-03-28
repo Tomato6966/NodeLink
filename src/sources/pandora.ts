@@ -22,7 +22,7 @@ import type {
   PandoraTrackAnnotation,
   PandoraTrackData,
   PandoraTrackInfo
-} from '../typings/sources/pandora.types.js'
+} from '../typings/sources/pandora.types.ts'
 import type {
   SourceInstance,
   SourceResult,
@@ -30,15 +30,15 @@ import type {
   TrackStreamResult,
   TrackUrlResult,
   WorkerNodeLink
-} from '../typings/sources/source.types.js'
-import type { TrackEncodeInput } from '../typings/utils.types.js'
+} from '../typings/sources/source.types.ts'
+import type { TrackEncodeInput } from '../typings/utils.types.ts'
 import {
   encodeTrack,
   getBestMatch,
   http1makeRequest,
   logger,
   makeRequest
-} from '../utils.js'
+} from '../utils.ts'
 
 /**
  * Default credential cache TTL (24 hours).

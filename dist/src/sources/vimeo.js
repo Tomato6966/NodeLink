@@ -118,7 +118,7 @@ const _functions = {
     selectBestAudioTrack(tracks) {
         if (!Array.isArray(tracks) || tracks.length === 0)
             return null;
-        const validTracks = tracks.filter((t) => t?.segments?.length > 0);
+        const validTracks = tracks.filter((t) => (t?.segments?.length ?? 0) > 0);
         if (validTracks.length === 0)
             return null;
         const mp42Aac = validTracks.filter((t) => {
@@ -128,17 +128,21 @@ const _functions = {
                 (format === 'mp42' || format === 'iso5' || format === 'iso6'));
         });
         if (mp42Aac.length)
-            return _functions.sortTracksByQuality(mp42Aac)[0];
+            return _functions.sortTracksByQuality(mp42Aac)[0] ?? null;
         const aac = validTracks.filter((t) => (t.codecs || '').includes('mp4a'));
         if (aac.length)
-            return _functions.sortTracksByQuality(aac)[0];
-        return validTracks.reduce((best, t) => {
+            return _functions.sortTracksByQuality(aac)[0] ?? null;
+        let best = validTracks[0] ?? null;
+        for (const t of validTracks) {
             const bw = t?.avg_bitrate || t?.bitrate || 0;
-            return bw > (best?.avg_bitrate || best?.bitrate || 0) ? t : best;
-        }, validTracks[0]);
+            if (bw > ((best?.avg_bitrate ?? 0) || (best?.bitrate ?? 0))) {
+                best = t;
+            }
+        }
+        return best;
     },
     playlistDir(playlistUrl) {
-        const urlWithoutQuery = playlistUrl.split('?')[0];
+        const urlWithoutQuery = playlistUrl.split('?')[0] || '';
         return urlWithoutQuery.substring(0, urlWithoutQuery.lastIndexOf('/') + 1);
     },
     buildSegmentUrl(playlistDir, basePath, trackPath, segmentPath) {
@@ -147,7 +151,7 @@ const _functions = {
             return new URL(relativePath, playlistDir).href;
         }
         catch (err) {
-            logger('error', 'Sources', `[vimeo] Failed to build segment URL: ${err.message}`);
+            logger('error', 'Sources', `[vimeo] Failed to build segment URL: ${err instanceof Error ? err.message : String(err)}`);
             return null;
         }
     },
@@ -195,7 +199,8 @@ const _functions = {
                 req.once('timeout', () => req.destroy(new Error('Request timeout')));
                 req.end();
             });
-            if (res.statusCode >= 300 &&
+            if (res.statusCode !== undefined &&
+                res.statusCode >= 300 &&
                 res.statusCode < 400 &&
                 res.headers.location) {
                 res.resume();
@@ -208,7 +213,8 @@ const _functions = {
             const chunks = [];
             let totalSize = 0;
             const maxSize = options.maxSize || 10 * 1024 * 1024;
-            const { statusCode, headers: resHeaders } = res;
+            const statusCode = res.statusCode ?? 0;
+            const resHeaders = res.headers;
             const body = await new Promise((resolve, reject) => {
                 res.on('data', (chunk) => {
                     totalSize += chunk.length;
@@ -265,7 +271,7 @@ const _functions = {
                     ...options.headers
                 });
                 res = await new Promise((resolve, reject) => {
-                    req = httpLib.request({
+                    const newReq = httpLib.request({
                         hostname: urlObj.hostname,
                         port: urlObj.port || (isHttps ? 443 : 80),
                         path: urlObj.pathname + urlObj.search,
@@ -274,11 +280,12 @@ const _functions = {
                         timeout,
                         agent: isHttps ? HTTPS_AGENT : HTTP_AGENT
                     }, resolve);
-                    req.once('error', reject);
-                    req.once('timeout', () => req.destroy(new Error('Request timeout')));
-                    req.end();
+                    req = newReq;
+                    newReq.once('error', reject);
+                    newReq.once('timeout', () => newReq.destroy(new Error('Request timeout')));
+                    newReq.end();
                 });
-                const code = res.statusCode || 0;
+                const code = res.statusCode ?? 0;
                 if (code >= 300 && code < 400 && res.headers.location) {
                     res.resume();
                     const redirectUrl = _functions.resolveRedirectUrl(currentUrl, res.headers.location);
@@ -293,37 +300,37 @@ const _functions = {
                     res.resume();
                     throw new Error(`HTTP ${code}`);
                 }
+                const currentRes = res;
                 const bytes = await new Promise((resolve, reject) => {
                     let total = 0;
                     let draining = false;
                     const cleanup = () => {
-                        res.removeListener('data', onData);
-                        res.removeListener('end', onEnd);
-                        res.removeListener('error', onErr);
-                        res.removeListener('aborted', onAborted);
-                        res.removeListener('close', onClose);
+                        currentRes.removeListener('data', onData);
+                        currentRes.removeListener('end', onEnd);
+                        currentRes.removeListener('error', onErr);
+                        currentRes.removeListener('close', onClose);
                         writable.removeListener('drain', onDrain);
                     };
                     const onDrain = () => {
                         draining = false;
-                        if (!res.destroyed && !writable.destroyed)
-                            res.resume();
+                        if (!currentRes.destroyed && !writable.destroyed)
+                            currentRes.resume();
                     };
                     const onData = (chunk) => {
                         total += chunk.length;
                         if (maxSize && total > maxSize) {
                             cleanup();
-                            res.destroy(new Error('Response too large'));
+                            currentRes.destroy(new Error('Response too large'));
                             return;
                         }
                         if (writable.destroyed) {
                             cleanup();
-                            res.destroy(new Error('Destination destroyed'));
+                            currentRes.destroy(new Error('Destination destroyed'));
                             return;
                         }
                         if (!writable.write(chunk) && !draining) {
                             draining = true;
-                            res.pause();
+                            currentRes.pause();
                             writable.once('drain', onDrain);
                         }
                     };
@@ -335,21 +342,16 @@ const _functions = {
                         cleanup();
                         reject(err);
                     };
-                    const onAborted = () => {
-                        cleanup();
-                        reject(new Error('Response aborted'));
-                    };
                     const onClose = () => {
                         if (done)
                             return;
                         cleanup();
                         reject(new Error('Response closed early'));
                     };
-                    res.on('data', onData);
-                    res.once('end', onEnd);
-                    res.once('error', onErr);
-                    res.once('aborted', onAborted);
-                    res.once('close', onClose);
+                    currentRes.on('data', onData);
+                    currentRes.once('end', onEnd);
+                    currentRes.once('error', onErr);
+                    currentRes.once('close', onClose);
                 });
                 return bytes;
             }
@@ -471,18 +473,20 @@ class SegmentStreamer {
             }
             return;
         }
-        this._playlistDir = _functions.playlistDir(playlistUrl);
+        const outputStream = this.outputStream;
+        const playlistDir = _functions.playlistDir(playlistUrl);
+        this._playlistDir = playlistDir;
         const onClose = () => this.abort();
         const onError = () => this.abort();
-        this.outputStream.once('close', onClose);
-        this.outputStream.once('error', onError);
+        outputStream.once('close', onClose);
+        outputStream.once('error', onError);
         try {
             if (initSegment && !this.aborted) {
                 const initBuffer = Buffer.from(initSegment, 'base64');
                 logger('debug', 'Sources', `[vimeo] Writing init segment: ${initBuffer.length} bytes (dash: ${isDashFormat})`);
-                if (this.outputStream.destroyed || this.aborted)
+                if (outputStream.destroyed || this.aborted)
                     return;
-                if (!this.outputStream.write(initBuffer)) {
+                if (!outputStream.write(initBuffer)) {
                     await new Promise((resolve) => {
                         const onDrain = () => {
                             cleanup();
@@ -493,28 +497,28 @@ class SegmentStreamer {
                             resolve();
                         };
                         const cleanup = () => {
-                            this.outputStream.removeListener('drain', onDrain);
-                            this.outputStream.removeListener('close', onClose2);
+                            outputStream.removeListener('drain', onDrain);
+                            outputStream.removeListener('close', onClose2);
                         };
-                        this.outputStream.once('drain', onDrain);
-                        this.outputStream.once('close', onClose2);
+                        outputStream.once('drain', onDrain);
+                        outputStream.once('close', onClose2);
                     });
                 }
                 this.bytesWritten += initBuffer.length;
             }
             for (let i = 0; i < segments.length; i++) {
-                if (this.aborted || this.outputStream.destroyed)
+                if (this.aborted || outputStream.destroyed)
                     break;
                 const segmentPath = segments[i]?.url;
                 if (!segmentPath)
                     continue;
-                const segmentUrl = _functions.buildSegmentUrl(this._playlistDir, basePath, trackPath, segmentPath);
+                const segmentUrl = _functions.buildSegmentUrl(playlistDir, basePath || '', trackPath || '', segmentPath);
                 if (!segmentUrl) {
                     logger('warn', 'Sources', `[vimeo] Failed to build segment URL: ${segmentPath}`);
                     continue;
                 }
                 try {
-                    const bytes = await _functions.pumpUrlToWritable(segmentUrl, this.outputStream, {
+                    const bytes = await _functions.pumpUrlToWritable(segmentUrl, outputStream, {
                         headers: {
                             Accept: '*/*',
                             Origin: VIMEO_BASE,
@@ -526,7 +530,7 @@ class SegmentStreamer {
                         timeout: REQUEST_TIMEOUT,
                         maxSize: 5 * 1024 * 1024
                     });
-                    if (this.aborted || this.outputStream.destroyed)
+                    if (this.aborted || outputStream.destroyed)
                         break;
                     if (bytes > 0) {
                         this.segmentsFetched++;
@@ -537,28 +541,26 @@ class SegmentStreamer {
                     }
                 }
                 catch (err) {
-                    if (this.aborted || this.outputStream.destroyed)
+                    if (this.aborted || outputStream.destroyed)
                         break;
-                    logger('warn', 'Sources', `[vimeo] Segment fetch error (${i + 1}/${segments.length}): ${err.message}`);
+                    logger('warn', 'Sources', `[vimeo] Segment fetch error (${i + 1}/${segments.length}): ${err instanceof Error ? err.message : String(err)}`);
                 }
             }
             logger('debug', 'Sources', `[vimeo] Streaming complete: ${this.segmentsFetched}/${segments.length} segments, ${this.bytesWritten} bytes`);
-            if (!this.aborted && !this.outputStream.destroyed) {
-                this.outputStream.emit('finishBuffering');
-                this.outputStream.end();
+            if (!this.aborted && !outputStream.destroyed) {
+                outputStream.emit('finishBuffering');
+                outputStream.end();
             }
         }
         catch (error) {
-            logger('error', 'Sources', `[vimeo] Segment streaming error: ${error.message}`);
-            if (this.outputStream && !this.outputStream.destroyed) {
-                this.outputStream.destroy(error);
+            logger('error', 'Sources', `[vimeo] Segment streaming error: ${error instanceof Error ? error.message : String(error)}`);
+            if (!outputStream.destroyed) {
+                outputStream.destroy(error instanceof Error ? error : new Error(String(error)));
             }
         }
         finally {
-            if (this.outputStream) {
-                this.outputStream.removeListener('close', onClose);
-                this.outputStream.removeListener('error', onError);
-            }
+            outputStream.removeListener('close', onClose);
+            outputStream.removeListener('error', onError);
             this.cleanup();
         }
     }
@@ -598,7 +600,8 @@ export default class VimeoSource {
         }
         while (this._handoff.size >= HANDOFF_MAX) {
             const firstKey = this._handoff.keys().next().value;
-            this._handoff.delete(firstKey);
+            if (firstKey !== undefined)
+                this._handoff.delete(firstKey);
         }
         this._handoff.set(key, { value, expiresAt: now + HANDOFF_TTL });
     }
@@ -655,11 +658,16 @@ export default class VimeoSource {
             isrc: null,
             sourceName: 'vimeo',
             position: 0,
+            details: [],
             userData: hashParam ? { vimeo: { h: hashParam } } : undefined
         };
         return {
             loadType: 'track',
-            data: { encoded: encodeTrack(trackInfo), info: trackInfo, pluginInfo: {} }
+            data: {
+                encoded: encodeTrack(trackInfo),
+                info: trackInfo,
+                pluginInfo: {}
+            }
         };
     }
     async getTrackUrl(decodedTrack) {
@@ -675,14 +683,14 @@ export default class VimeoSource {
         }
         try {
             const result = await this._extractFromEmbed(videoId, hashParam);
-            if (result?.playlistData) {
+            if (result && 'playlistData' in result && result.playlistData) {
                 const key = `handoff:${videoId}:${hashParam || ''}`;
                 this._handoffSet(key, result);
             }
             return result;
         }
         catch (err) {
-            logger('warn', 'Sources', `[vimeo] Embed extraction failed for ${videoId}: ${err.message}`);
+            logger('warn', 'Sources', `[vimeo] Embed extraction failed for ${videoId}: ${err instanceof Error ? err.message : String(err)}`);
             return {
                 exception: {
                     message: 'Failed to extract Vimeo stream. Video may be private or require authentication.',
@@ -693,6 +701,21 @@ export default class VimeoSource {
         }
     }
     async loadStream(decodedTrack, url, protocol) {
+        if (protocol === 'hls') {
+            logger('debug', 'Sources', '[vimeo] Loading HLS stream');
+            return {
+                stream: new HLSHandler(url, {
+                    headers: {
+                        'User-Agent': USER_AGENT,
+                        Referer: `${VIMEO_BASE}/`,
+                        Origin: VIMEO_BASE
+                    },
+                    localAddress: this.nodelink.routePlanner?.getIP?.() ?? undefined,
+                    type: 'mpegts'
+                }),
+                type: 'mpegts'
+            };
+        }
         const isProgressive = protocol === 'https' || protocol === 'http';
         const highWaterMark = isProgressive
             ? PROGRESSIVE_HIGH_WATER_MARK
@@ -726,21 +749,6 @@ export default class VimeoSource {
             });
             return { stream };
         }
-        if (protocol === 'hls') {
-            logger('debug', 'Sources', '[vimeo] Loading HLS stream');
-            return {
-                stream: new HLSHandler(url, {
-                    headers: {
-                        'User-Agent': USER_AGENT,
-                        Referer: `${VIMEO_BASE}/`,
-                        Origin: VIMEO_BASE
-                    },
-                    localAddress: this.nodelink.routePlanner?.getIP(),
-                    type: 'mpegts'
-                }),
-                type: 'mpegts'
-            };
-        }
         if (protocol === 'segmented') {
             const videoId = decodedTrack?.identifier;
             const hashParam = decodedTrack?.userData?.vimeo?.h || '';
@@ -761,7 +769,7 @@ export default class VimeoSource {
                 }
                 catch (err) {
                     if (!stream.destroyed)
-                        stream.destroy(err);
+                        stream.destroy(err instanceof Error ? err : new Error(String(err)));
                 }
             });
             return { stream };
@@ -839,7 +847,7 @@ export default class VimeoSource {
                 });
             }
             catch {
-                response = await _functions.httpRequest(playerUrl, {
+                response = (await _functions.httpRequest(playerUrl, {
                     headers: {
                         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                         'Sec-Fetch-Dest': 'iframe',
@@ -849,11 +857,11 @@ export default class VimeoSource {
                         Origin: VIMEO_BASE
                     },
                     maxSize: 5 * 1024 * 1024
-                });
+                }));
             }
         }
         else {
-            response = await _functions.httpRequest(playerUrl, {
+            response = (await _functions.httpRequest(playerUrl, {
                 headers: {
                     Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                     'Sec-Fetch-Dest': 'iframe',
@@ -863,7 +871,7 @@ export default class VimeoSource {
                     Origin: VIMEO_BASE
                 },
                 maxSize: 5 * 1024 * 1024
-            });
+            }));
         }
         if (response.statusCode >= 400)
             throw new Error(`HTTP ${response.statusCode}`);
@@ -903,7 +911,7 @@ export default class VimeoSource {
         }
         for (const pattern of _CONFIG_PATTERNS) {
             const match = html.match(pattern);
-            if (!match)
+            if (!match?.[1])
                 continue;
             const config = this._parseJsonConfig(match[1]);
             if (!config)
@@ -975,7 +983,7 @@ export default class VimeoSource {
                         const num = before
                             .slice(colon + 1)
                             .trim()
-                            .split(',')[0];
+                            .split(',')[0] || '0';
                         height = parseInt(num, 10) || 0;
                     }
                 }
@@ -1053,25 +1061,13 @@ export default class VimeoSource {
             for (const name of CDN_PRIORITY)
                 if (cdns?.[name])
                     return cdns[name];
-            return cdns?.[def] || (cdns ? Object.values(cdns)[0] : null);
+            return cdns?.[def || ''] ?? (cdns ? Object.values(cdns)[0] : null) ?? null;
         };
-        const hls = files.hls;
-        if (hls?.cdns) {
-            const selected = pickCdn(hls.cdns, hls.default_cdn);
-            if (selected?.url) {
-                return {
-                    url: _functions.unescapeString(selected.url),
-                    protocol: 'hls',
-                    format: 'mpegts',
-                    additionalData: { source: 'vimeo.hls' }
-                };
-            }
-        }
         const dash = files.dash;
         if (dash?.cdns) {
             const selected = pickCdn(dash.cdns, dash.default_cdn);
             if (selected) {
-                let playlistUrl = _functions.unescapeString(selected.avc_url || selected.url);
+                let playlistUrl = _functions.unescapeString(selected.avc_url || selected.url || '');
                 if (playlistUrl) {
                     if (!playlistUrl.includes('playlist.json') &&
                         !playlistUrl.includes('master.json')) {
@@ -1085,6 +1081,18 @@ export default class VimeoSource {
                     }
                     catch { }
                 }
+            }
+        }
+        const hls = files.hls;
+        if (hls?.cdns) {
+            const selected = pickCdn(hls.cdns, hls.default_cdn);
+            if (selected?.url) {
+                return {
+                    url: _functions.unescapeString(selected.url),
+                    protocol: 'hls',
+                    format: 'mpegts',
+                    additionalData: { source: 'vimeo.hls' }
+                };
             }
         }
         const progressive = files.progressive;
@@ -1127,7 +1135,7 @@ export default class VimeoSource {
         if (playlist.audio?.length) {
             const audioTrack = _functions.selectBestAudioTrack(playlist.audio);
             if (audioTrack) {
-                const segments = audioTrack.segments.map((seg) => ({
+                const segments = (audioTrack.segments || []).map((seg) => ({
                     url: seg.url,
                     start: seg.start,
                     end: seg.end,

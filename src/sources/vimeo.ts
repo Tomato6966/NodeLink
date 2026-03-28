@@ -1,13 +1,44 @@
 import { Buffer } from 'node:buffer'
 import { spawn } from 'node:child_process'
-import http from 'node:http'
+import http, { type IncomingMessage } from 'node:http'
 import https from 'node:https'
-import { PassThrough } from 'node:stream'
+import { PassThrough, type Writable } from 'node:stream'
 import zlib from 'node:zlib'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
+import type {
+  SourceResult,
+  TrackInfo,
+  TrackStreamResult,
+  TrackUrlResult
+} from '../typings/sources/source.types.ts'
+import type {
+  VimeoApiV2Video,
+  VimeoAudioTrack,
+  VimeoCdnConfig,
+  VimeoConfig,
+  VimeoConfigFiles,
+  VimeoCurlOptions,
+  VimeoDecodedTrack,
+  VimeoHandoffEntry,
+  VimeoHttpRequestOptions,
+  VimeoHttpResponse,
+  VimeoNodeLinkContext,
+  VimeoOembedResponse,
+  VimeoPlaylist,
+  VimeoPlaylistData,
+  VimeoPlaylistSegment,
+  VimeoProgressiveResult,
+  VimeoSegmentedResult,
+  VimeoSourceState,
+  VimeoStreamResult,
+  VimeoUserData,
+  VimeoVideoMetadata,
+  VimeoVideoTrack
+} from '../typings/sources/vimeo.types.ts'
+import type { TrackEncodeInput } from '../typings/utils.types.ts'
 import { encodeTrack, logger } from '../utils.ts'
 
-const VIMEO_PATTERNS = [
+const VIMEO_PATTERNS: RegExp[] = [
   /^https?:\/\/(?:www\.)?vimeo\.com\/(\d+)(?:|[/?#])/i,
   /^https?:\/\/player\.vimeo\.com\/video\/(\d+)(?:|[/?#])/i,
   /^https?:\/\/(?:www\.)?vimeo\.com\/channels\/[^/]+\/(\d+)(?:|[/?#])/i,
@@ -42,14 +73,14 @@ const HTTPS_AGENT = new https.Agent({
   maxFreeSockets: 4
 })
 
-const _CONFIG_PATTERNS = [
+const _CONFIG_PATTERNS: RegExp[] = [
   /window\.playerConfig\s*=\s*(\{[\s\S]*?\});\s*(?:window\.|<\/script>|if\s*\()/i,
   /window\.playerConfig\s*=\s*(\{[\s\S]*?"video"[\s\S]*?\})\s*;/i,
   /"config"\s*:\s*(\{[\s\S]*?"request"[\s\S]*?\})\s*[,}]/i
 ]
 
 const _functions = {
-  parseJson(data) {
+  parseJson(data: Buffer | string): unknown {
     try {
       const str = Buffer.isBuffer(data) ? data.toString('utf8') : data
       return JSON.parse(str)
@@ -58,7 +89,7 @@ const _functions = {
     }
   },
 
-  unescapeString(text) {
+  unescapeString(text: string): string {
     if (!text) return ''
     const s = String(text)
     return s
@@ -71,7 +102,7 @@ const _functions = {
       .replaceAll('&amp;', '&')
   },
 
-  extractVideoId(url) {
+  extractVideoId(url: string): string | null {
     if (!url) return null
     for (const pattern of VIMEO_PATTERNS) {
       const match = url.match(pattern)
@@ -80,7 +111,7 @@ const _functions = {
     return null
   },
 
-  extractHashParam(url) {
+  extractHashParam(url: string): string | null {
     try {
       return new URL(url).searchParams.get('h')
     } catch {
@@ -88,7 +119,10 @@ const _functions = {
     }
   },
 
-  decompressBody(body, encoding) {
+  decompressBody(
+    body: Buffer,
+    encoding: string | string[] | undefined
+  ): Buffer {
     if (!encoding || !body) return body
     const enc = Array.isArray(encoding) ? encoding[0] : encoding
     try {
@@ -107,7 +141,7 @@ const _functions = {
     }
   },
 
-  sortTracksByQuality(tracks) {
+  sortTracksByQuality(tracks: VimeoAudioTrack[]): VimeoAudioTrack[] {
     return [...tracks].sort((a, b) => {
       const aSampleRate = a.sample_rate || a.audio_sample_rate || 0
       const bSampleRate = b.sample_rate || b.audio_sample_rate || 0
@@ -123,10 +157,10 @@ const _functions = {
     })
   },
 
-  selectBestAudioTrack(tracks) {
+  selectBestAudioTrack(tracks: VimeoAudioTrack[]): VimeoAudioTrack | null {
     if (!Array.isArray(tracks) || tracks.length === 0) return null
 
-    const validTracks = tracks.filter((t) => t?.segments?.length > 0)
+    const validTracks = tracks.filter((t) => (t?.segments?.length ?? 0) > 0)
     if (validTracks.length === 0) return null
 
     const mp42Aac = validTracks.filter((t) => {
@@ -138,23 +172,33 @@ const _functions = {
       )
     })
 
-    if (mp42Aac.length) return _functions.sortTracksByQuality(mp42Aac)[0]
+    if (mp42Aac.length)
+      return _functions.sortTracksByQuality(mp42Aac)[0] ?? null
 
     const aac = validTracks.filter((t) => (t.codecs || '').includes('mp4a'))
-    if (aac.length) return _functions.sortTracksByQuality(aac)[0]
+    if (aac.length) return _functions.sortTracksByQuality(aac)[0] ?? null
 
-    return validTracks.reduce((best, t) => {
+    let best: VimeoAudioTrack | null = validTracks[0] ?? null
+    for (const t of validTracks) {
       const bw = t?.avg_bitrate || t?.bitrate || 0
-      return bw > (best?.avg_bitrate || best?.bitrate || 0) ? t : best
-    }, validTracks[0])
+      if (bw > ((best?.avg_bitrate ?? 0) || (best?.bitrate ?? 0))) {
+        best = t
+      }
+    }
+    return best
   },
 
-  playlistDir(playlistUrl) {
-    const urlWithoutQuery = playlistUrl.split('?')[0]
+  playlistDir(playlistUrl: string): string {
+    const urlWithoutQuery = playlistUrl.split('?')[0] || ''
     return urlWithoutQuery.substring(0, urlWithoutQuery.lastIndexOf('/') + 1)
   },
 
-  buildSegmentUrl(playlistDir, basePath, trackPath, segmentPath) {
+  buildSegmentUrl(
+    playlistDir: string,
+    basePath: string,
+    trackPath: string,
+    segmentPath: string
+  ): string | null {
     try {
       const relativePath = (basePath || '') + (trackPath || '') + segmentPath
       return new URL(relativePath, playlistDir).href
@@ -162,13 +206,13 @@ const _functions = {
       logger(
         'error',
         'Sources',
-        `[vimeo] Failed to build segment URL: ${err.message}`
+        `[vimeo] Failed to build segment URL: ${err instanceof Error ? err.message : String(err)}`
       )
       return null
     }
   },
 
-  resolveRedirectUrl(currentUrl, location) {
+  resolveRedirectUrl(currentUrl: string, location: string): string | null {
     if (!location) return null
     if (location.startsWith('/')) {
       const u = new URL(currentUrl)
@@ -177,7 +221,7 @@ const _functions = {
     return location
   },
 
-  makeHeaders(extra) {
+  makeHeaders(extra: Record<string, string>): Record<string, string> {
     return {
       'User-Agent': USER_AGENT,
       Accept: '*/*',
@@ -187,7 +231,10 @@ const _functions = {
     }
   },
 
-  async httpRequest(url, options = {}) {
+  async httpRequest(
+    url: string,
+    options: VimeoHttpRequestOptions = {}
+  ): Promise<VimeoHttpResponse> {
     let currentUrl = url
     const maxRedirects = options.maxRedirects ?? MAX_REDIRECTS
 
@@ -203,7 +250,7 @@ const _functions = {
 
       const { timeout = REQUEST_TIMEOUT } = options
 
-      const res = await new Promise((resolve, reject) => {
+      const res: IncomingMessage = await new Promise((resolve, reject) => {
         const req = httpLib.request(
           {
             hostname: urlObj.hostname,
@@ -223,6 +270,7 @@ const _functions = {
       })
 
       if (
+        res.statusCode !== undefined &&
         res.statusCode >= 300 &&
         res.statusCode < 400 &&
         res.headers.location
@@ -237,13 +285,15 @@ const _functions = {
         continue
       }
 
-      const chunks = []
+      const chunks: Buffer[] = []
       let totalSize = 0
       const maxSize = options.maxSize || 10 * 1024 * 1024
 
-      const { statusCode, headers: resHeaders } = res
-      const body = await new Promise((resolve, reject) => {
-        res.on('data', (chunk) => {
+      const statusCode = res.statusCode ?? 0
+      const resHeaders = res.headers
+
+      const body: Buffer = await new Promise((resolve, reject) => {
+        res.on('data', (chunk: Buffer) => {
           totalSize += chunk.length
           if (totalSize > maxSize) {
             res.destroy(new Error('Response too large'))
@@ -252,7 +302,7 @@ const _functions = {
           chunks.push(chunk)
         })
 
-        res.once('error', (err) => {
+        res.once('error', (err: Error) => {
           chunks.length = 0
           reject(err)
         })
@@ -272,25 +322,29 @@ const _functions = {
     throw new Error('Too many redirects')
   },
 
-  async pumpUrlToWritable(url, writable, options = {}) {
+  async pumpUrlToWritable(
+    url: string,
+    writable: Writable,
+    options: VimeoHttpRequestOptions = {}
+  ): Promise<number> {
     let currentUrl = url
     const maxRedirects = options.maxRedirects ?? MAX_REDIRECTS
     const timeout = options.timeout ?? REQUEST_TIMEOUT
     const maxSize = options.maxSize ?? 0
 
-    let req = null
-    let res = null
+    let req: http.ClientRequest | null = null
+    let res: IncomingMessage | null = null
     let done = false
 
-    const cancel = (err) => {
+    const cancel = (err?: Error): void => {
       if (done) return
       done = true
       if (res && !res.destroyed) res.destroy(err)
       if (req && !req.destroyed) req.destroy(err)
     }
 
-    const onWritableClose = () => cancel(new Error('Destination closed'))
-    const onWritableError = (err) => cancel(err)
+    const onWritableClose = (): void => cancel(new Error('Destination closed'))
+    const onWritableError = (err: Error): void => cancel(err)
 
     writable.once('close', onWritableClose)
     writable.once('error', onWritableError)
@@ -308,8 +362,8 @@ const _functions = {
           ...options.headers
         })
 
-        res = await new Promise((resolve, reject) => {
-          req = httpLib.request(
+        res = await new Promise<IncomingMessage>((resolve, reject) => {
+          const newReq = httpLib.request(
             {
               hostname: urlObj.hostname,
               port: urlObj.port || (isHttps ? 443 : 80),
@@ -322,12 +376,15 @@ const _functions = {
             resolve
           )
 
-          req.once('error', reject)
-          req.once('timeout', () => req.destroy(new Error('Request timeout')))
-          req.end()
+          req = newReq
+          newReq.once('error', reject)
+          newReq.once('timeout', () =>
+            newReq.destroy(new Error('Request timeout'))
+          )
+          newReq.end()
         })
 
-        const code = res.statusCode || 0
+        const code = res.statusCode ?? 0
 
         if (code >= 300 && code < 400 && res.headers.location) {
           res.resume()
@@ -347,71 +404,66 @@ const _functions = {
           throw new Error(`HTTP ${code}`)
         }
 
-        const bytes = await new Promise((resolve, reject) => {
+        const currentRes = res
+        const bytes: number = await new Promise((resolve, reject) => {
           let total = 0
           let draining = false
 
-          const cleanup = () => {
-            res.removeListener('data', onData)
-            res.removeListener('end', onEnd)
-            res.removeListener('error', onErr)
-            res.removeListener('aborted', onAborted)
-            res.removeListener('close', onClose)
+          const cleanup = (): void => {
+            currentRes.removeListener('data', onData)
+            currentRes.removeListener('end', onEnd)
+            currentRes.removeListener('error', onErr)
+            currentRes.removeListener('close', onClose)
             writable.removeListener('drain', onDrain)
           }
 
-          const onDrain = () => {
+          const onDrain = (): void => {
             draining = false
-            if (!res.destroyed && !writable.destroyed) res.resume()
+            if (!currentRes.destroyed && !writable.destroyed)
+              currentRes.resume()
           }
 
-          const onData = (chunk) => {
+          const onData = (chunk: Buffer): void => {
             total += chunk.length
             if (maxSize && total > maxSize) {
               cleanup()
-              res.destroy(new Error('Response too large'))
+              currentRes.destroy(new Error('Response too large'))
               return
             }
 
             if (writable.destroyed) {
               cleanup()
-              res.destroy(new Error('Destination destroyed'))
+              currentRes.destroy(new Error('Destination destroyed'))
               return
             }
 
             if (!writable.write(chunk) && !draining) {
               draining = true
-              res.pause()
+              currentRes.pause()
               writable.once('drain', onDrain)
             }
           }
 
-          const onEnd = () => {
+          const onEnd = (): void => {
             cleanup()
             resolve(total)
           }
 
-          const onErr = (err) => {
+          const onErr = (err: Error): void => {
             cleanup()
             reject(err)
           }
 
-          const onAborted = () => {
-            cleanup()
-            reject(new Error('Response aborted'))
-          }
-
-          const onClose = () => {
+          const onClose = (): void => {
             if (done) return
             cleanup()
             reject(new Error('Response closed early'))
           }
 
-          res.on('data', onData)
-          res.once('end', onEnd)
-          res.once('error', onErr)
-          res.once('aborted', onAborted)
-          res.once('close', onClose)
+          currentRes.on('data', onData)
+          currentRes.once('end', onEnd)
+          currentRes.once('error', onErr)
+          currentRes.once('close', onClose)
         })
 
         return bytes
@@ -428,9 +480,12 @@ const _functions = {
   }
 }
 
-function curlRequest(url, options = {}) {
+function curlRequest(
+  url: string,
+  options: VimeoCurlOptions = {}
+): Promise<VimeoHttpResponse> {
   return new Promise((resolve, reject) => {
-    const args = [
+    const args: string[] = [
       '-s',
       '-L',
       '-A',
@@ -465,10 +520,10 @@ function curlRequest(url, options = {}) {
     args.push(url)
 
     const curlProcess = spawn('curl', args)
-    const outputChunks = []
+    const outputChunks: Buffer[] = []
     let completed = false
 
-    const cleanup = () => {
+    const cleanup = (): void => {
       outputChunks.length = 0
       curlProcess.stdout.removeAllListeners()
       curlProcess.stderr.removeAllListeners()
@@ -484,10 +539,10 @@ function curlRequest(url, options = {}) {
     }, REQUEST_TIMEOUT)
     timeoutId.unref?.()
 
-    curlProcess.stdout.on('data', (chunk) => outputChunks.push(chunk))
+    curlProcess.stdout.on('data', (chunk: Buffer) => outputChunks.push(chunk))
     curlProcess.stderr.resume()
 
-    curlProcess.once('error', (err) => {
+    curlProcess.once('error', (err: Error) => {
       clearTimeout(timeoutId)
       if (completed) return
       completed = true
@@ -495,7 +550,7 @@ function curlRequest(url, options = {}) {
       reject(err)
     })
 
-    curlProcess.once('close', (exitCode) => {
+    curlProcess.once('close', (exitCode: number | null) => {
       clearTimeout(timeoutId)
       if (completed) return
       completed = true
@@ -523,7 +578,14 @@ function curlRequest(url, options = {}) {
 }
 
 class SegmentStreamer {
-  constructor(playlistData, outputStream) {
+  declare playlistData: VimeoPlaylistData | null
+  declare outputStream: PassThrough | null
+  declare aborted: boolean
+  declare segmentsFetched: number
+  declare bytesWritten: number
+  declare _playlistDir: string | null
+
+  constructor(playlistData: VimeoPlaylistData, outputStream: PassThrough) {
     this.playlistData = playlistData
     this.outputStream = outputStream
     this.aborted = false
@@ -532,11 +594,11 @@ class SegmentStreamer {
     this._playlistDir = null
   }
 
-  abort() {
+  abort(): void {
     this.aborted = true
   }
 
-  async start() {
+  async start(): Promise<void> {
     const {
       playlistUrl,
       basePath,
@@ -553,13 +615,15 @@ class SegmentStreamer {
       return
     }
 
-    this._playlistDir = _functions.playlistDir(playlistUrl)
+    const outputStream = this.outputStream
+    const playlistDir = _functions.playlistDir(playlistUrl)
+    this._playlistDir = playlistDir
 
-    const onClose = () => this.abort()
-    const onError = () => this.abort()
+    const onClose = (): void => this.abort()
+    const onError = (): void => this.abort()
 
-    this.outputStream.once('close', onClose)
-    this.outputStream.once('error', onError)
+    outputStream.once('close', onClose)
+    outputStream.once('error', onError)
 
     try {
       if (initSegment && !this.aborted) {
@@ -570,38 +634,38 @@ class SegmentStreamer {
           `[vimeo] Writing init segment: ${initBuffer.length} bytes (dash: ${isDashFormat})`
         )
 
-        if (this.outputStream.destroyed || this.aborted) return
-        if (!this.outputStream.write(initBuffer)) {
-          await new Promise((resolve) => {
-            const onDrain = () => {
+        if (outputStream.destroyed || this.aborted) return
+        if (!outputStream.write(initBuffer)) {
+          await new Promise<void>((resolve) => {
+            const onDrain = (): void => {
               cleanup()
               resolve()
             }
-            const onClose2 = () => {
+            const onClose2 = (): void => {
               cleanup()
               resolve()
             }
-            const cleanup = () => {
-              this.outputStream.removeListener('drain', onDrain)
-              this.outputStream.removeListener('close', onClose2)
+            const cleanup = (): void => {
+              outputStream.removeListener('drain', onDrain)
+              outputStream.removeListener('close', onClose2)
             }
-            this.outputStream.once('drain', onDrain)
-            this.outputStream.once('close', onClose2)
+            outputStream.once('drain', onDrain)
+            outputStream.once('close', onClose2)
           })
         }
         this.bytesWritten += initBuffer.length
       }
 
       for (let i = 0; i < segments.length; i++) {
-        if (this.aborted || this.outputStream.destroyed) break
+        if (this.aborted || outputStream.destroyed) break
 
         const segmentPath = segments[i]?.url
         if (!segmentPath) continue
 
         const segmentUrl = _functions.buildSegmentUrl(
-          this._playlistDir,
-          basePath,
-          trackPath,
+          playlistDir,
+          basePath || '',
+          trackPath || '',
           segmentPath
         )
 
@@ -617,7 +681,7 @@ class SegmentStreamer {
         try {
           const bytes = await _functions.pumpUrlToWritable(
             segmentUrl,
-            this.outputStream,
+            outputStream,
             {
               headers: {
                 Accept: '*/*',
@@ -632,7 +696,7 @@ class SegmentStreamer {
             }
           )
 
-          if (this.aborted || this.outputStream.destroyed) break
+          if (this.aborted || outputStream.destroyed) break
           if (bytes > 0) {
             this.segmentsFetched++
             this.bytesWritten += bytes
@@ -644,11 +708,11 @@ class SegmentStreamer {
             )
           }
         } catch (err) {
-          if (this.aborted || this.outputStream.destroyed) break
+          if (this.aborted || outputStream.destroyed) break
           logger(
             'warn',
             'Sources',
-            `[vimeo] Segment fetch error (${i + 1}/${segments.length}): ${err.message}`
+            `[vimeo] Segment fetch error (${i + 1}/${segments.length}): ${err instanceof Error ? err.message : String(err)}`
           )
         }
       }
@@ -659,29 +723,29 @@ class SegmentStreamer {
         `[vimeo] Streaming complete: ${this.segmentsFetched}/${segments.length} segments, ${this.bytesWritten} bytes`
       )
 
-      if (!this.aborted && !this.outputStream.destroyed) {
-        this.outputStream.emit('finishBuffering')
-        this.outputStream.end()
+      if (!this.aborted && !outputStream.destroyed) {
+        outputStream.emit('finishBuffering')
+        outputStream.end()
       }
     } catch (error) {
       logger(
         'error',
         'Sources',
-        `[vimeo] Segment streaming error: ${error.message}`
+        `[vimeo] Segment streaming error: ${error instanceof Error ? error.message : String(error)}`
       )
-      if (this.outputStream && !this.outputStream.destroyed) {
-        this.outputStream.destroy(error)
+      if (!outputStream.destroyed) {
+        outputStream.destroy(
+          error instanceof Error ? error : new Error(String(error))
+        )
       }
     } finally {
-      if (this.outputStream) {
-        this.outputStream.removeListener('close', onClose)
-        this.outputStream.removeListener('error', onError)
-      }
+      outputStream.removeListener('close', onClose)
+      outputStream.removeListener('error', onError)
       this.cleanup()
     }
   }
 
-  cleanup() {
+  cleanup(): void {
     this.aborted = true
     this.playlistData = null
     this.outputStream = null
@@ -689,8 +753,18 @@ class SegmentStreamer {
   }
 }
 
-export default class VimeoSource {
-  constructor(nodelink) {
+export default class VimeoSource implements VimeoSourceState {
+  declare nodelink: VimeoNodeLinkContext
+  declare config: VimeoNodeLinkContext['options']
+  declare searchTerms: string[]
+  declare patterns: RegExp[]
+  declare priority: number
+
+  declare _curlAvailable: boolean | null
+  declare _activeStreams: Set<PassThrough>
+  declare _handoff: Map<string, VimeoHandoffEntry>
+
+  constructor(nodelink: VimeoNodeLinkContext) {
     this.nodelink = nodelink
     this.config = nodelink.options
     this.searchTerms = []
@@ -699,11 +773,10 @@ export default class VimeoSource {
 
     this._curlAvailable = null
     this._activeStreams = new Set()
-
     this._handoff = new Map()
   }
 
-  _handoffGet(key) {
+  _handoffGet(key: string): VimeoSegmentedResult | null {
     const entry = this._handoff.get(key)
     if (!entry) return null
     if (Date.now() >= entry.expiresAt) {
@@ -713,28 +786,28 @@ export default class VimeoSource {
     return entry.value
   }
 
-  _handoffSet(key, value) {
+  _handoffSet(key: string, value: VimeoSegmentedResult): void {
     const now = Date.now()
     for (const [k, v] of this._handoff) {
       if (now >= v.expiresAt) this._handoff.delete(k)
     }
     while (this._handoff.size >= HANDOFF_MAX) {
       const firstKey = this._handoff.keys().next().value
-      this._handoff.delete(firstKey)
+      if (firstKey !== undefined) this._handoff.delete(firstKey)
     }
     this._handoff.set(key, { value, expiresAt: now + HANDOFF_TTL })
   }
 
-  _handoffTake(key) {
+  _handoffTake(key: string): VimeoSegmentedResult | null {
     const value = this._handoffGet(key)
     if (value) this._handoff.delete(key)
     return value
   }
 
-  async _checkCurlAvailability() {
+  async _checkCurlAvailability(): Promise<boolean> {
     if (this._curlAvailable !== null) return this._curlAvailable
 
-    return new Promise((resolve) => {
+    return new Promise<boolean>((resolve) => {
       const curlProcess = spawn('curl', ['--version'])
 
       curlProcess.once('error', () => {
@@ -742,7 +815,7 @@ export default class VimeoSource {
         resolve(false)
       })
 
-      curlProcess.once('close', (code) => {
+      curlProcess.once('close', (code: number | null) => {
         this._curlAvailable = code === 0
         resolve(this._curlAvailable)
       })
@@ -752,28 +825,30 @@ export default class VimeoSource {
     })
   }
 
-  async setup() {
+  async setup(): Promise<boolean> {
     await this._checkCurlAvailability()
     return true
   }
 
-  match(url) {
+  match(url: string): boolean {
     return _functions.extractVideoId(url) !== null
   }
 
-  async search() {
-    return { loadType: 'empty', data: {} }
+  async search(): Promise<SourceResult> {
+    return { loadType: 'empty', data: {} as Record<string, never> }
   }
 
-  async resolve(url) {
+  async resolve(url: string): Promise<SourceResult> {
     const videoId = _functions.extractVideoId(url)
     const hashParam = _functions.extractHashParam(url)
-    if (!videoId) return { loadType: 'empty', data: {} }
+    if (!videoId)
+      return { loadType: 'empty', data: {} as Record<string, never> }
 
     const metadata = await this._fetchVideoMetadata(videoId, hashParam)
-    if (!metadata?.title) return { loadType: 'empty', data: {} }
+    if (!metadata?.title)
+      return { loadType: 'empty', data: {} as Record<string, never> }
 
-    const trackInfo = {
+    const trackInfo: TrackEncodeInput & { userData?: VimeoUserData } = {
       title: metadata.title,
       author: metadata.author || 'Unknown',
       length: metadata.durationMs || 0,
@@ -785,16 +860,21 @@ export default class VimeoSource {
       isrc: null,
       sourceName: 'vimeo',
       position: 0,
+      details: [],
       userData: hashParam ? { vimeo: { h: hashParam } } : undefined
     }
 
     return {
       loadType: 'track',
-      data: { encoded: encodeTrack(trackInfo), info: trackInfo, pluginInfo: {} }
+      data: {
+        encoded: encodeTrack(trackInfo),
+        info: trackInfo as unknown as TrackInfo,
+        pluginInfo: {}
+      }
     }
   }
 
-  async getTrackUrl(decodedTrack) {
+  async getTrackUrl(decodedTrack: VimeoDecodedTrack): Promise<TrackUrlResult> {
     const videoId = decodedTrack?.identifier
     const hashParam = decodedTrack?.userData?.vimeo?.h || null
 
@@ -809,16 +889,16 @@ export default class VimeoSource {
 
     try {
       const result = await this._extractFromEmbed(videoId, hashParam)
-      if (result?.playlistData) {
+      if (result && 'playlistData' in result && result.playlistData) {
         const key = `handoff:${videoId}:${hashParam || ''}`
-        this._handoffSet(key, result)
+        this._handoffSet(key, result as VimeoSegmentedResult)
       }
-      return result
+      return result as TrackUrlResult
     } catch (err) {
       logger(
         'warn',
         'Sources',
-        `[vimeo] Embed extraction failed for ${videoId}: ${err.message}`
+        `[vimeo] Embed extraction failed for ${videoId}: ${err instanceof Error ? err.message : String(err)}`
       )
       return {
         exception: {
@@ -831,7 +911,27 @@ export default class VimeoSource {
     }
   }
 
-  async loadStream(decodedTrack, url, protocol) {
+  async loadStream(
+    decodedTrack: VimeoDecodedTrack,
+    url: string,
+    protocol?: string
+  ): Promise<TrackStreamResult> {
+    if (protocol === 'hls') {
+      logger('debug', 'Sources', '[vimeo] Loading HLS stream')
+      return {
+        stream: new HLSHandler(url, {
+          headers: {
+            'User-Agent': USER_AGENT,
+            Referer: `${VIMEO_BASE}/`,
+            Origin: VIMEO_BASE
+          },
+          localAddress: this.nodelink.routePlanner?.getIP?.() ?? undefined,
+          type: 'mpegts'
+        }),
+        type: 'mpegts'
+      }
+    }
+
     const isProgressive = protocol === 'https' || protocol === 'http'
     const highWaterMark = isProgressive
       ? PROGRESSIVE_HIGH_WATER_MARK
@@ -845,9 +945,11 @@ export default class VimeoSource {
 
     this._activeStreams.add(stream)
 
-    const cleanup = () => {
+    const cleanup = (): void => {
       this._activeStreams.delete(stream)
-      stream._segmentStreamer = null
+      ;(
+        stream as PassThrough & { _segmentStreamer?: SegmentStreamer | null }
+      )._segmentStreamer = null
     }
 
     stream.once('close', cleanup)
@@ -863,27 +965,11 @@ export default class VimeoSource {
               stream.end()
             }
           })
-          .catch((err) => {
+          .catch((err: Error) => {
             if (!stream.destroyed) stream.destroy(err)
           })
       })
       return { stream }
-    }
-
-    if (protocol === 'hls') {
-      logger('debug', 'Sources', '[vimeo] Loading HLS stream')
-      return {
-        stream: new HLSHandler(url, {
-          headers: {
-            'User-Agent': USER_AGENT,
-            Referer: `${VIMEO_BASE}/`,
-            Origin: VIMEO_BASE
-          },
-          localAddress: this.nodelink.routePlanner?.getIP(),
-          type: 'mpegts'
-        }),
-        type: 'mpegts'
-      }
     }
 
     if (protocol === 'segmented') {
@@ -910,10 +996,15 @@ export default class VimeoSource {
             playlistResult.playlistData,
             stream
           )
-          stream._segmentStreamer = segmentStreamer
+          ;(
+            stream as PassThrough & {
+              _segmentStreamer?: SegmentStreamer | null
+            }
+          )._segmentStreamer = segmentStreamer
           await segmentStreamer.start()
         } catch (err) {
-          if (!stream.destroyed) stream.destroy(err)
+          if (!stream.destroyed)
+            stream.destroy(err instanceof Error ? err : new Error(String(err)))
         }
       })
 
@@ -924,7 +1015,7 @@ export default class VimeoSource {
     return { stream }
   }
 
-  cleanupAllStreams() {
+  cleanupAllStreams(): void {
     for (const stream of this._activeStreams) {
       if (!stream.destroyed) stream.destroy()
     }
@@ -932,7 +1023,10 @@ export default class VimeoSource {
     this._handoff.clear()
   }
 
-  async _fetchVideoMetadata(videoId, hashParam) {
+  async _fetchVideoMetadata(
+    videoId: string,
+    hashParam: string | null
+  ): Promise<VimeoVideoMetadata | null> {
     try {
       const targetUrl = hashParam
         ? `https://vimeo.com/${videoId}?h=${hashParam}`
@@ -947,7 +1041,9 @@ export default class VimeoSource {
       if (response.statusCode >= 400)
         return this._fetchMetadataFromApiV2(videoId)
 
-      const data = _functions.parseJson(response.body)
+      const data = _functions.parseJson(
+        response.body
+      ) as VimeoOembedResponse | null
       if (!data?.title) return this._fetchMetadataFromApiV2(videoId)
 
       return {
@@ -961,7 +1057,9 @@ export default class VimeoSource {
     }
   }
 
-  async _fetchMetadataFromApiV2(videoId) {
+  async _fetchMetadataFromApiV2(
+    videoId: string
+  ): Promise<VimeoVideoMetadata | null> {
     try {
       const response = await _functions.httpRequest(
         `https://vimeo.com/api/v2/video/${videoId}.json`,
@@ -973,7 +1071,9 @@ export default class VimeoSource {
 
       if (response.statusCode >= 400) return null
 
-      const data = _functions.parseJson(response.body)
+      const data = _functions.parseJson(response.body) as
+        | VimeoApiV2Video[]
+        | null
       if (!Array.isArray(data) || !data[0]) return null
 
       const video = data[0]
@@ -988,12 +1088,15 @@ export default class VimeoSource {
     }
   }
 
-  async _extractFromEmbed(videoId, hashParam) {
+  async _extractFromEmbed(
+    videoId: string,
+    hashParam: string | null
+  ): Promise<VimeoStreamResult> {
     const playerUrl = hashParam
       ? `${VIMEO_PLAYER_BASE}/video/${videoId}?h=${hashParam}&app_id=122963`
       : `${VIMEO_PLAYER_BASE}/video/${videoId}?app_id=122963`
 
-    let response
+    let response: VimeoHttpResponse
 
     if (this._curlAvailable) {
       try {
@@ -1002,7 +1105,7 @@ export default class VimeoSource {
           origin: VIMEO_BASE
         })
       } catch {
-        response = await _functions.httpRequest(playerUrl, {
+        response = (await _functions.httpRequest(playerUrl, {
           headers: {
             Accept:
               'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -1013,10 +1116,10 @@ export default class VimeoSource {
             Origin: VIMEO_BASE
           },
           maxSize: 5 * 1024 * 1024
-        })
+        })) as VimeoHttpResponse
       }
     } else {
-      response = await _functions.httpRequest(playerUrl, {
+      response = (await _functions.httpRequest(playerUrl, {
         headers: {
           Accept:
             'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -1027,7 +1130,7 @@ export default class VimeoSource {
           Origin: VIMEO_BASE
         },
         maxSize: 5 * 1024 * 1024
-      })
+      })) as VimeoHttpResponse
     }
 
     if (response.statusCode >= 400)
@@ -1041,7 +1144,11 @@ export default class VimeoSource {
     return this._parsePageForConfig(html, playerUrl, videoId)
   }
 
-  async _parsePageForConfig(html, refererUrl, videoId) {
+  async _parsePageForConfig(
+    html: string,
+    refererUrl: string,
+    videoId: string
+  ): Promise<VimeoStreamResult> {
     const cfgKeyIdx = html.indexOf('"config_url"')
     if (cfgKeyIdx !== -1) {
       const q1 = html.indexOf('"', html.indexOf(':', cfgKeyIdx) + 1)
@@ -1077,7 +1184,7 @@ export default class VimeoSource {
 
     for (const pattern of _CONFIG_PATTERNS) {
       const match = html.match(pattern)
-      if (!match) continue
+      if (!match?.[1]) continue
       const config = this._parseJsonConfig(match[1])
       if (!config) continue
       const result = await this._extractPlaylistFromConfig(
@@ -1097,7 +1204,7 @@ export default class VimeoSource {
           _functions.unescapeString(cdnMatch[1]),
           videoId
         )
-        if (result) return result
+        if (result) return result as VimeoStreamResult
       } catch {}
     }
 
@@ -1110,9 +1217,16 @@ export default class VimeoSource {
     throw new Error('No config found in embed page')
   }
 
-  _handleProgressiveUrls(progressiveJson, videoId) {
+  _handleProgressiveUrls(
+    progressiveJson: string,
+    videoId: string
+  ): VimeoProgressiveResult | null {
     try {
-      const parsed = _functions.parseJson(`[${progressiveJson}]`)
+      const parsed = _functions.parseJson(`[${progressiveJson}]`) as Array<{
+        url?: string
+        quality?: string
+        height?: number
+      }> | null
       if (Array.isArray(parsed) && parsed.length) {
         const sorted = [...parsed].sort(
           (a, b) => (a?.height || 0) - (b?.height || 0)
@@ -1141,7 +1255,7 @@ export default class VimeoSource {
     } catch {}
 
     try {
-      const urls = []
+      const urls: Array<{ url: string; height: number }> = []
       let pos = 0
 
       while (true) {
@@ -1164,10 +1278,11 @@ export default class VimeoSource {
         if (heightKey !== -1) {
           const colon = before.indexOf(':', heightKey)
           if (colon !== -1) {
-            const num = before
-              .slice(colon + 1)
-              .trim()
-              .split(',')[0]
+            const num =
+              before
+                .slice(colon + 1)
+                .trim()
+                .split(',')[0] || '0'
             height = parseInt(num, 10) || 0
           }
         }
@@ -1197,7 +1312,7 @@ export default class VimeoSource {
     return null
   }
 
-  _parseJsonConfig(configString) {
+  _parseJsonConfig(configString: string): VimeoConfig | null {
     try {
       let braceDepth = 0
       let endIndex = 0
@@ -1214,13 +1329,17 @@ export default class VimeoSource {
 
       return _functions.parseJson(
         configString.substring(0, endIndex || configString.length)
-      )
+      ) as VimeoConfig | null
     } catch {
       return null
     }
   }
 
-  async _fetchConfigFromUrl(configUrl, refererUrl, videoId) {
+  async _fetchConfigFromUrl(
+    configUrl: string,
+    refererUrl: string,
+    videoId: string
+  ): Promise<VimeoStreamResult | null> {
     if (configUrl.startsWith('/')) {
       const refUrl = new URL(refererUrl)
       configUrl = `${refUrl.protocol}//${refUrl.host}${configUrl}`
@@ -1238,14 +1357,18 @@ export default class VimeoSource {
     if (response.statusCode >= 400)
       throw new Error(`HTTP ${response.statusCode}`)
 
-    const config = _functions.parseJson(response.body)
+    const config = _functions.parseJson(response.body) as VimeoConfig | null
     if (!config) throw new Error('Invalid config JSON')
 
     return this._extractPlaylistFromConfig(config, configUrl, videoId)
   }
 
-  async _extractPlaylistFromConfig(config, refererUrl, videoId) {
-    let files = config?.request?.files
+  async _extractPlaylistFromConfig(
+    config: VimeoConfig,
+    refererUrl: string,
+    videoId: string
+  ): Promise<VimeoStreamResult | null> {
+    let files: VimeoConfigFiles | undefined = config?.request?.files
     if (!files)
       files = config?.video?.files || config?.files || config?.clip?.files
     if (!files) {
@@ -1256,22 +1379,12 @@ export default class VimeoSource {
     }
     if (!files) throw new Error('No files in config')
 
-    const pickCdn = (cdns, def) => {
+    const pickCdn = (
+      cdns: Record<string, VimeoCdnConfig> | undefined,
+      def: string | undefined
+    ): VimeoCdnConfig | null => {
       for (const name of CDN_PRIORITY) if (cdns?.[name]) return cdns[name]
-      return cdns?.[def] || (cdns ? Object.values(cdns)[0] : null)
-    }
-
-    const hls = files.hls
-    if (hls?.cdns) {
-      const selected = pickCdn(hls.cdns, hls.default_cdn)
-      if (selected?.url) {
-        return {
-          url: _functions.unescapeString(selected.url),
-          protocol: 'hls',
-          format: 'mpegts',
-          additionalData: { source: 'vimeo.hls' }
-        }
-      }
+      return cdns?.[def || ''] ?? (cdns ? Object.values(cdns)[0] : null) ?? null
     }
 
     const dash = files.dash
@@ -1279,7 +1392,7 @@ export default class VimeoSource {
       const selected = pickCdn(dash.cdns, dash.default_cdn)
       if (selected) {
         let playlistUrl = _functions.unescapeString(
-          selected.avc_url || selected.url
+          selected.avc_url || selected.url || ''
         )
         if (playlistUrl) {
           if (
@@ -1297,6 +1410,19 @@ export default class VimeoSource {
           try {
             return await this._fetchPlaylist(playlistUrl, videoId)
           } catch {}
+        }
+      }
+    }
+
+    const hls = files.hls
+    if (hls?.cdns) {
+      const selected = pickCdn(hls.cdns, hls.default_cdn)
+      if (selected?.url) {
+        return {
+          url: _functions.unescapeString(selected.url),
+          protocol: 'hls',
+          format: 'mpegts',
+          additionalData: { source: 'vimeo.hls' }
         }
       }
     }
@@ -1331,7 +1457,10 @@ export default class VimeoSource {
     throw new Error('No playable streams in config')
   }
 
-  async _fetchPlaylist(playlistUrl, _videoId) {
+  async _fetchPlaylist(
+    playlistUrl: string,
+    _videoId: string
+  ): Promise<VimeoSegmentedResult> {
     const response = await _functions.httpRequest(playlistUrl, {
       headers: {
         Accept: '*/*',
@@ -1347,13 +1476,15 @@ export default class VimeoSource {
     if (response.statusCode >= 400)
       throw new Error(`HTTP ${response.statusCode}`)
 
-    const playlist = _functions.parseJson(response.body)
+    const playlist = _functions.parseJson(response.body) as VimeoPlaylist | null
     if (!playlist) throw new Error('Invalid playlist JSON')
 
     if (playlist.audio?.length) {
       const audioTrack = _functions.selectBestAudioTrack(playlist.audio)
       if (audioTrack) {
-        const segments = audioTrack.segments.map((seg) => ({
+        const segments: VimeoPlaylistSegment[] = (
+          audioTrack.segments || []
+        ).map((seg) => ({
           url: seg.url,
           start: seg.start,
           end: seg.end,
@@ -1372,7 +1503,7 @@ export default class VimeoSource {
 
         if (trackPath && !trackPath.endsWith('/')) trackPath += '/'
 
-        const playlistData = {
+        const playlistData: VimeoPlaylistData = {
           playlistUrl,
           basePath,
           trackPath,
@@ -1416,20 +1547,23 @@ export default class VimeoSource {
         `[vimeo] No compatible audio tracks, falling back to video track`
       )
 
-      const video = playlist.video.reduce((best, v) => {
-        const bw = v.avg_bitrate || v.bitrate || 0
-        return bw > (best?.avg_bitrate || best?.bitrate || 0) ? v : best
-      }, null)
+      const video = playlist.video.reduce(
+        (best: VimeoVideoTrack | null, v: VimeoVideoTrack) => {
+          const bw = v.avg_bitrate || v.bitrate || 0
+          return bw > (best?.avg_bitrate || best?.bitrate || 0) ? v : best
+        },
+        null
+      )
 
       if (video?.segments?.length) {
-        const segments = video.segments.map((seg) => ({
+        const segments: VimeoPlaylistSegment[] = video.segments.map((seg) => ({
           url: seg.url,
           start: seg.start,
           end: seg.end,
           size: seg.size
         }))
 
-        const playlistData = {
+        const playlistData: VimeoPlaylistData = {
           playlistUrl,
           basePath: playlist.base_url || '',
           trackPath: video.base_url || '',
