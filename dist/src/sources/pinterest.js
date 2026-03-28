@@ -278,7 +278,8 @@ export default class PinterestSource {
                 loadType: 'track',
                 data: {
                     encoded: encodeTrack(trackInfo),
-                    info: trackInfo
+                    info: trackInfo,
+                    pluginInfo: {}
                 }
             };
         }
@@ -287,7 +288,7 @@ export default class PinterestSource {
             logger('error', 'Pinterest', `Resolution failed: ${message}`);
             return {
                 loadType: 'error',
-                data: { message, severity: 'fault' }
+                exception: { message, severity: 'fault' }
             };
         }
     }

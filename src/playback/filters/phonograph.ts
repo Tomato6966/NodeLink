@@ -252,7 +252,7 @@ export default class Phonograph extends AnimatableFilter {
     super.applyAnimatedUpdate(
       {
         phonograph: {
-          alpha: targetAlpha,
+          alpha: targetAlpha
         }
       },
       'phonograph',

@@ -277,7 +277,9 @@ export default class ConfigValidationManager {
         return rules;
     }
     validateSourceSpotify(spotify) {
-        if (typeof spotify !== 'object' || spotify === null || !spotify.enabled)
+        if (typeof spotify !== 'object' ||
+            spotify === null ||
+            !spotify.enabled)
             return [];
         const s = spotify;
         const rules = [
@@ -290,8 +292,7 @@ export default class ConfigValidationManager {
                 path: 'sources.spotify.clientId',
                 expected: 'non-empty string when sources.spotify.clientSecret is set',
                 value: s.clientId,
-                validate: (v) => !s.clientSecret ||
-                    (typeof v === 'string' && v.trim().length > 0)
+                validate: (v) => !s.clientSecret || (typeof v === 'string' && v.trim().length > 0)
             },
             {
                 path: 'sources.spotify.clientSecret',
@@ -308,7 +309,9 @@ export default class ConfigValidationManager {
         return rules;
     }
     validateSourceAppleMusic(applemusic) {
-        if (typeof applemusic !== 'object' || applemusic === null || !applemusic.enabled)
+        if (typeof applemusic !== 'object' ||
+            applemusic === null ||
+            !applemusic.enabled)
             return [];
         const a = applemusic;
         return [
@@ -320,7 +323,9 @@ export default class ConfigValidationManager {
         ];
     }
     validateSourceTidal(tidal) {
-        if (typeof tidal !== 'object' || tidal === null || !tidal.enabled)
+        if (typeof tidal !== 'object' ||
+            tidal === null ||
+            !tidal.enabled)
             return [];
         const t = tidal;
         const rules = [
@@ -340,7 +345,9 @@ export default class ConfigValidationManager {
         return rules;
     }
     validateSourceAudius(audius) {
-        if (typeof audius !== 'object' || audius === null || !audius.enabled)
+        if (typeof audius !== 'object' ||
+            audius === null ||
+            !audius.enabled)
             return [];
         const au = audius;
         return [
@@ -369,7 +376,9 @@ export default class ConfigValidationManager {
         ];
     }
     validateSourceJiosaavn(jiosaavn) {
-        if (typeof jiosaavn !== 'object' || jiosaavn === null || !jiosaavn.enabled)
+        if (typeof jiosaavn !== 'object' ||
+            jiosaavn === null ||
+            !jiosaavn.enabled)
             return [];
         const j = jiosaavn;
         return [
@@ -378,7 +387,9 @@ export default class ConfigValidationManager {
         ];
     }
     validateSourceEternalbox(eternalbox) {
-        if (typeof eternalbox !== 'object' || eternalbox === null || !eternalbox.enabled)
+        if (typeof eternalbox !== 'object' ||
+            eternalbox === null ||
+            !eternalbox.enabled)
             return [];
         const e = eternalbox;
         return [
@@ -419,7 +430,9 @@ export default class ConfigValidationManager {
         return [this.urlRule('sources.youtube.cipher.url', cipher.url)];
     }
     validateSourcePipertts(pipertts) {
-        if (typeof pipertts !== 'object' || pipertts === null || !pipertts.enabled)
+        if (typeof pipertts !== 'object' ||
+            pipertts === null ||
+            !pipertts.enabled)
             return [];
         const p = pipertts;
         return [this.urlRule('sources.pipertts.url', p.url)];
@@ -430,26 +443,28 @@ export default class ConfigValidationManager {
         const pa = pandora;
         if (!pa.enabled || !pa.remoteTokenUrl)
             return [];
-        return [
-            this.urlRule('sources.pandora.remoteTokenUrl', pa.remoteTokenUrl)
-        ];
+        return [this.urlRule('sources.pandora.remoteTokenUrl', pa.remoteTokenUrl)];
     }
     validateSourceQobuz(qobuz) {
-        if (typeof qobuz !== 'object' || qobuz === null || !qobuz.enabled)
+        if (typeof qobuz !== 'object' ||
+            qobuz === null ||
+            !qobuz.enabled)
             return [];
         const q = qobuz;
-        return [
-            this.placeholderWarningRule('sources.qobuz.userToken', q.userToken)
-        ];
+        return [this.placeholderWarningRule('sources.qobuz.userToken', q.userToken)];
     }
     validateSourceLastfm(lastfm) {
-        if (typeof lastfm !== 'object' || lastfm === null || !lastfm.enabled)
+        if (typeof lastfm !== 'object' ||
+            lastfm === null ||
+            !lastfm.enabled)
             return [];
         const l = lastfm;
         return [this.placeholderWarningRule('sources.lastfm.apiKey', l.apiKey)];
     }
     validateSourceBilibili(bilibili) {
-        if (typeof bilibili !== 'object' || bilibili === null || !bilibili.enabled)
+        if (typeof bilibili !== 'object' ||
+            bilibili === null ||
+            !bilibili.enabled)
             return [];
         const b = bilibili;
         return [
@@ -457,7 +472,9 @@ export default class ConfigValidationManager {
         ];
     }
     validateSourceYandexMusic(yandexmusic) {
-        if (typeof yandexmusic !== 'object' || yandexmusic === null || !yandexmusic.enabled)
+        if (typeof yandexmusic !== 'object' ||
+            yandexmusic === null ||
+            !yandexmusic.enabled)
             return [];
         const ym = yandexmusic;
         return [
@@ -468,7 +485,9 @@ export default class ConfigValidationManager {
         ];
     }
     validateSourceGaana(gaana) {
-        if (typeof gaana !== 'object' || gaana === null || !gaana.enabled)
+        if (typeof gaana !== 'object' ||
+            gaana === null ||
+            !gaana.enabled)
             return [];
         const g = gaana;
         return [
@@ -478,7 +497,9 @@ export default class ConfigValidationManager {
         ];
     }
     validateSourceFlowery(flowery) {
-        if (typeof flowery !== 'object' || flowery === null || !flowery.enabled)
+        if (typeof flowery !== 'object' ||
+            flowery === null ||
+            !flowery.enabled)
             return [];
         const fl = flowery;
         return [
@@ -489,7 +510,9 @@ export default class ConfigValidationManager {
         ];
     }
     validateSourceLazypytts(lazypytts) {
-        if (typeof lazypytts !== 'object' || lazypytts === null || !lazypytts.enabled)
+        if (typeof lazypytts !== 'object' ||
+            lazypytts === null ||
+            !lazypytts.enabled)
             return [];
         const lp = lazypytts;
         return [
@@ -511,11 +534,13 @@ export default class ConfigValidationManager {
                         return false;
                     const sourcesRecord = sources;
                     if (typeof v === 'string')
-                        return sourcesRecord[v]?.enabled === true;
+                        return (sourcesRecord[v]?.enabled === true);
                     if (Array.isArray(v)) {
                         if (v.length === 0)
                             return false;
-                        return v.every((name) => typeof name === 'string' && sourcesRecord[name]?.enabled === true);
+                        return v.every((name) => typeof name === 'string' &&
+                            sourcesRecord[name]?.enabled ===
+                                true);
                     }
                     return false;
                 }
@@ -532,7 +557,8 @@ export default class ConfigValidationManager {
                     if (!sources || !Array.isArray(v) || v.length === 0)
                         return false;
                     const sourcesRecord = sources;
-                    return v.every((name) => typeof name === 'string' && sourcesRecord[name]?.enabled === true);
+                    return v.every((name) => typeof name === 'string' &&
+                        sourcesRecord[name]?.enabled === true);
                 }
             });
         }
@@ -827,7 +853,11 @@ export default class ConfigValidationManager {
             path,
             expected: `integer > ${dependencyPath} (${dependency})`,
             value,
-            validate: (v) => typeof v === 'number' && Number.isInteger(v) && typeof dependency === 'number' && Number.isInteger(dependency) && v > dependency
+            validate: (v) => typeof v === 'number' &&
+                Number.isInteger(v) &&
+                typeof dependency === 'number' &&
+                Number.isInteger(dependency) &&
+                v > dependency
         };
     }
     intMustNotExceed(path, value, dependency, dependencyPath) {
@@ -835,7 +865,11 @@ export default class ConfigValidationManager {
             path,
             expected: `integer <= ${dependencyPath} (${dependency})`,
             value,
-            validate: (v) => typeof v === 'number' && Number.isInteger(v) && typeof dependency === 'number' && Number.isInteger(dependency) && v <= dependency
+            validate: (v) => typeof v === 'number' &&
+                Number.isInteger(v) &&
+                typeof dependency === 'number' &&
+                Number.isInteger(dependency) &&
+                v <= dependency
         };
     }
     floatMustNotExceed(path, value, dependency, dependencyPath) {

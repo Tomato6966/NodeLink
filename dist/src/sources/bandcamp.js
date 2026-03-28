@@ -70,6 +70,7 @@ export default class BandcampSource {
             const request = await makeRequest(`${this.baseUrl}/search?q=${encodeURIComponent(query)}&item_type=t&from=results`, { method: 'GET' });
             if (request.error || request.statusCode !== 200) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: request.error ??
                             `BandCamp returned an invalid status: ${request.statusCode}`,
@@ -191,6 +192,7 @@ export default class BandcampSource {
             });
             if (error || statusCode !== 200) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: `Failed to fetch track page: ${error ?? statusCode}`,
                         severity: 'fault',
@@ -201,6 +203,7 @@ export default class BandcampSource {
             const page = this.getResponseText({ body });
             if (page === null) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: 'BandCamp returned an unreadable track page.',
                         severity: 'fault',
@@ -211,6 +214,7 @@ export default class BandcampSource {
             const streamUrlMatch = page.match(STREAM_URL_REGEX);
             if (!streamUrlMatch) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: 'No stream URL was found in the page content.',
                         severity: 'fault',
@@ -226,6 +230,7 @@ export default class BandcampSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error
                         ? error.message
@@ -252,6 +257,7 @@ export default class BandcampSource {
             });
             if (response.error || response.statusCode !== 200 || !response.stream) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: response.error ??
                             `BandCamp returned an invalid stream status: ${response.statusCode}`,
@@ -267,6 +273,7 @@ export default class BandcampSource {
         catch (error) {
             logger('error', 'Sources', `Failed to load BandCamp stream: ${error instanceof Error ? error.message : 'unknown error'}`);
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error
                         ? error.message
@@ -507,6 +514,7 @@ export default class BandcampSource {
      */
     createSourceException(message, severity, cause) {
         return {
+            loadType: 'error',
             exception: {
                 message,
                 severity,

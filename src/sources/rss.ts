@@ -17,6 +17,7 @@ const PODCAST_RSS_PATTERN = /https?:\/\/.+\/podcast\/rss(\?.*)?$/i
  * Source-specific plugin payload attached to RSS episode tracks.
  */
 interface RssTrackPluginInfo {
+  [x: string]: unknown
   /**
    * MIME type declared by the enclosure tag when available.
    */
@@ -37,6 +38,7 @@ interface RssTrackPluginInfo {
  * Track payload compatible with the shared encoder.
  */
 interface RssTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -112,26 +114,6 @@ interface RssPlaylistData {
    * Episode list extracted from the feed.
    */
   tracks: RssTrackData[]
-}
-
-/**
- * Exception payload returned by RSS operations.
- */
-interface RssExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-  }
 }
 
 /**
@@ -279,10 +261,7 @@ export default class RssSource {
       logger('error', 'RSS', `Resolve failed: ${message}`)
       return {
         loadType: 'error',
-        data: {
-          message,
-          severity: 'fault'
-        }
+        exception: { message, severity: 'fault' }
       }
     }
   }
@@ -296,10 +275,11 @@ export default class RssSource {
    */
   public async getTrackUrl(
     track: TrackInfo
-  ): Promise<TrackUrlResult | RssExceptionResult> {
+  ): Promise<TrackUrlResult | SourceResult> {
     const url = track.uri
     if (!url) {
       return {
+        loadType: 'error',
         exception: {
           message: 'Missing enclosure URL.',
           severity: 'common'

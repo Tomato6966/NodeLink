@@ -354,11 +354,11 @@ export interface TrackInfo {
  */
 export interface TrackUrlResult {
   /** Resolved URL */
-  url: string
+  url?: string
   /** Protocol type */
-  protocol: string
+  protocol?: string
   /** Audio format */
-  format?: string
+  format?: string | { itag?: number; [key: string]: unknown }
   /** Updated track information (if changed) */
   newTrack?: {
     /** Updated track info */
@@ -372,6 +372,8 @@ export interface TrackUrlResult {
     message: string
     /** Error severity level */
     severity: string
+    /** Error cause */
+    cause?: string
   }
 }
 
@@ -381,7 +383,7 @@ export interface TrackUrlResult {
  */
 export interface TrackStreamResult {
   /** Readable stream of audio data */
-  stream: Readable
+  stream?: Readable
   /** MIME type or container format */
   type?: string
   /** Exception if fetch failed */
@@ -390,6 +392,8 @@ export interface TrackStreamResult {
     message: string
     /** Error severity level */
     severity: string
+    /** Error cause */
+    cause?: string
   }
 }
 
@@ -405,26 +409,63 @@ export interface LiveChatPollResult {
 }
 
 /**
+ * Complete track object returned by source methods.
+ * @public
+ */
+export interface TrackData {
+  /** Base64 encoded track. */
+  encoded: string
+  /** Normalized track metadata. */
+  info: TrackInfo
+  /** Source-specific metadata. */
+  pluginInfo: Record<string, unknown>
+}
+
+/**
+ * Complete playlist object returned by source methods.
+ * @public
+ */
+export interface PlaylistData {
+  /** Playlist metadata. */
+  info: {
+    /** Playlist name. */
+    name: string
+    /** Selected track index. */
+    selectedTrack: number
+  }
+  /** Source-specific metadata. */
+  pluginInfo: Record<string, unknown>
+  /** Tracks in the playlist. */
+  tracks: TrackData[]
+}
+
+/**
  * Result returned by search / resolve calls.
  * @public
  */
-export interface SourceResult {
-  /** Type of load (track, playlist, search, empty, error) */
-  loadType?: string
-  /** Data returned (TrackData, PlaylistInfo, etc.) */
-  data?: unknown
-  /** Exception if call failed */
-  exception?: {
-    /** Error message */
-    message: string
-    /** Error severity level */
-    severity?: string
-    /** Error cause */
-    cause?: string
-    /** Detailed error objects */
-    errors?: unknown[]
-  }
-}
+export type SourceResult =
+  | { loadType: 'track' | 'episode'; data: TrackData }
+  | {
+      loadType: 'playlist' | 'album' | 'artist' | 'station' | 'podcast' | 'show'
+      data: PlaylistData
+    }
+  | { loadType: 'search'; data: TrackData[] }
+  | { loadType: 'empty'; data: Record<string, never> | null }
+  | {
+      loadType: 'error'
+      exception: {
+        message: string
+        severity?: string
+        cause?: string
+        errors?: unknown[]
+      }
+    }
+
+/**
+ * Union of SourceResult variants that contain a `data` property.
+ * @public
+ */
+export type SourceResultWithData = Exclude<SourceResult, { loadType: 'error' }>
 
 /**
  * Represents a loaded source instance (e.g. YouTube, SoundCloud, HTTP).
@@ -446,23 +487,14 @@ export interface SourceInstance {
     trackInfo: TrackInfo | TrackInfoExtended,
     itag?: number,
     isRecovering?: boolean
-  ) => Promise<
-    TrackUrlResult & {
-      protocol?: string
-      format?: string | { itag?: number; [key: string]: unknown }
-      trackInfo?: TrackInfoExtended
-      additionalData?: Record<string, unknown>
-    }
-  >
+  ) => Promise<TrackUrlResult>
   /** Fetch an audio stream for a track. */
   loadStream?: (
     track: TrackInfo | TrackInfoExtended,
     url: string,
     protocol?: string,
     additionalData?: Record<string, unknown>
-  ) => Promise<
-    TrackStreamResult & { type?: string; exception?: { message: string } }
-  >
+  ) => Promise<TrackStreamResult>
   /** Get chapters for a track (e.g. YouTube chapters). */
   getChapters?: (trackInfo: TrackInfo | TrackInfoExtended) => Promise<unknown[]>
   /** Additional source names that this source responds to. */
@@ -504,8 +536,6 @@ export interface SourceInstance {
     userData?: unknown
     [key: string]: unknown
   } | null>
-  /** Catch-all for source-specific fields. */
-  [key: string]: unknown
 }
 
 /**

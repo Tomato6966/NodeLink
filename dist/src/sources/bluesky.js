@@ -318,6 +318,7 @@ export default class BlueskySource {
         const reference = this.parsePostReference(decodedTrack.uri);
         if (!reference) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Invalid Bluesky track URI',
                     severity: 'common'
@@ -329,6 +330,7 @@ export default class BlueskySource {
         const post = threadResponse?.thread?.post;
         if (response.error || !post) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Failed to fetch Bluesky post for streaming',
                     severity: 'fault'
@@ -338,6 +340,7 @@ export default class BlueskySource {
         const embed = this.getPlayableEmbed(post);
         if (!embed) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'No media found in Bluesky post',
                     severity: 'common'
@@ -361,6 +364,7 @@ export default class BlueskySource {
             };
         }
         return {
+            loadType: 'error',
             exception: {
                 message: 'This Bluesky post does not contain a direct video or audio stream.',
                 severity: 'common'
@@ -397,6 +401,7 @@ export default class BlueskySource {
         });
         if (response.error || !response.stream) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Failed to load Bluesky stream: ${response.error || 'No stream object returned.'}`,
                     severity: 'fault'
@@ -405,6 +410,7 @@ export default class BlueskySource {
         }
         if (response.statusCode !== 200) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Failed to load Bluesky stream: status ${response.statusCode}`,
                     severity: 'fault'

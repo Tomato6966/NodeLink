@@ -40,7 +40,7 @@ export default class Rotation extends AnimatableFilter {
     super.applyAnimatedUpdate(
       {
         rotation: {
-          alpha: targetAlpha,
+          alpha: targetAlpha
         }
       },
       'rotation',

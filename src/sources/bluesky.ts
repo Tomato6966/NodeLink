@@ -245,6 +245,7 @@ interface BlueskyAdditionalData {
  * Track payload compatible with the shared encoder.
  */
 interface BlueskyTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -283,27 +284,7 @@ interface BlueskyTrackData {
   /**
    * Bluesky does not currently attach extra plugin metadata.
    */
-  pluginInfo: Record<string, never>
-}
-
-/**
- * Exception payload returned by Bluesky operations.
- */
-interface BlueskyExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-  }
+  pluginInfo: Record<string, unknown>
 }
 
 /**
@@ -611,7 +592,7 @@ export default class BlueskySource {
     return {
       encoded: encodeTrack(trackInfo),
       info: trackInfo,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown>
     }
   }
 
@@ -699,10 +680,11 @@ export default class BlueskySource {
    */
   public async getTrackUrl(
     decodedTrack: TrackInfo
-  ): Promise<TrackUrlResult | BlueskyExceptionResult> {
+  ): Promise<TrackUrlResult | SourceResult> {
     const reference = this.parsePostReference(decodedTrack.uri)
     if (!reference) {
       return {
+        loadType: 'error',
         exception: {
           message: 'Invalid Bluesky track URI',
           severity: 'common'
@@ -719,6 +701,7 @@ export default class BlueskySource {
 
     if (response.error || !post) {
       return {
+        loadType: 'error',
         exception: {
           message: 'Failed to fetch Bluesky post for streaming',
           severity: 'fault'
@@ -729,6 +712,7 @@ export default class BlueskySource {
     const embed = this.getPlayableEmbed(post)
     if (!embed) {
       return {
+        loadType: 'error',
         exception: {
           message: 'No media found in Bluesky post',
           severity: 'common'
@@ -755,6 +739,7 @@ export default class BlueskySource {
     }
 
     return {
+      loadType: 'error',
       exception: {
         message:
           'This Bluesky post does not contain a direct video or audio stream.',
@@ -778,7 +763,7 @@ export default class BlueskySource {
     url: string,
     protocol?: string,
     additionalData?: BlueskyAdditionalData
-  ): Promise<TrackStreamResult | BlueskyExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     logger(
       'debug',
       'Bluesky',
@@ -808,6 +793,7 @@ export default class BlueskySource {
 
     if (response.error || !response.stream) {
       return {
+        loadType: 'error',
         exception: {
           message: `Failed to load Bluesky stream: ${
             response.error || 'No stream object returned.'
@@ -819,6 +805,7 @@ export default class BlueskySource {
 
     if (response.statusCode !== 200) {
       return {
+        loadType: 'error',
         exception: {
           message: `Failed to load Bluesky stream: status ${response.statusCode}`,
           severity: 'fault'

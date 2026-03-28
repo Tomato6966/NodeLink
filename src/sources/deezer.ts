@@ -455,6 +455,7 @@ interface DeezerMediaResponse {
  * Deezer track payload accepted by the shared encoder.
  */
 interface DeezerTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the resolved item can be seeked.
    */
@@ -480,6 +481,7 @@ interface DeezerTrackInfo extends TrackEncodeInput {
  * Deezer-specific plugin metadata attached to encoded tracks.
  */
 interface DeezerTrackPluginInfo {
+  [x: string]: unknown
   /**
    * Collection type used by metadata-only search results.
    */
@@ -533,7 +535,7 @@ interface DeezerTrackData extends BestMatchCandidate {
   /**
    * Deezer-specific plugin metadata.
    */
-  pluginInfo: DeezerTrackPluginInfo | Record<string, never>
+  pluginInfo: DeezerTrackPluginInfo | Record<string, unknown>
 }
 
 /**
@@ -558,7 +560,7 @@ interface DeezerPlaylistData {
   /**
    * Source-specific playlist metadata.
    */
-  pluginInfo: DeezerTrackPluginInfo | Record<string, never>
+  pluginInfo: DeezerTrackPluginInfo | Record<string, unknown>
 
   /**
    * Tracks returned for the collection.
@@ -609,31 +611,6 @@ interface DeezerSourceManager {
    * Resolves a playable URL for a delegated track.
    */
   getTrackUrl: (track: TrackInfo) => Promise<TrackUrlResult>
-}
-
-/**
- * Structured exception payload returned by Deezer operations.
- */
-interface DeezerExceptionResult {
-  /**
-   * Source exception metadata returned to the caller.
-   */
-  exception: {
-    /**
-     * Human-readable failure message.
-     */
-    message: string
-
-    /**
-     * Source-defined error severity.
-     */
-    severity: string
-
-    /**
-     * Optional failure origin.
-     */
-    cause?: string
-  }
 }
 
 /**
@@ -976,13 +953,13 @@ export default class DeezerSource {
         if (tracks.length === 0) return { loadType: 'empty', data: {} }
 
         return {
-          loadType: 'playlist',
+          loadType: type as 'album' | 'playlist',
           data: {
             info: {
               name: entity.title ?? 'Unknown Deezer Collection',
               selectedTrack: 0
             },
-            pluginInfo: {},
+            pluginInfo: {} as Record<string, unknown>,
             tracks
           } satisfies DeezerPlaylistData
         }
@@ -1018,7 +995,7 @@ export default class DeezerSource {
               name: `${entity.name ?? 'Unknown Artist'}'s Top Tracks`,
               selectedTrack: 0
             },
-            pluginInfo: {},
+            pluginInfo: {} as Record<string, unknown>,
             tracks
           } satisfies DeezerPlaylistData
         }
@@ -1040,7 +1017,7 @@ export default class DeezerSource {
     decodedTrack: TrackInfo,
     _itag?: number,
     forceRefresh = false
-  ): Promise<TrackUrlResult | DeezerExceptionResult> {
+  ): Promise<TrackUrlResult | SourceResult> {
     const cacheManager = this.nodelink.trackCacheManager
     if (!forceRefresh) {
       const cached = cacheManager?.get<DeezerTrackUrlSuccess>(
@@ -1185,7 +1162,7 @@ export default class DeezerSource {
     url: string,
     _format?: string,
     additionalData?: TrackUrlResult['additionalData']
-  ): Promise<TrackStreamResult | DeezerExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     try {
       const streamData = this.getAdditionalData(additionalData)
       if (!streamData.SNG_ID) {
@@ -1583,7 +1560,11 @@ export default class DeezerSource {
       details: []
     }
 
-    return { encoded: encodeTrack(info), info, pluginInfo: {} }
+    return {
+      encoded: encodeTrack(info),
+      info,
+      pluginInfo: {} as Record<string, unknown>
+    }
   }
 
   /**
@@ -1798,8 +1779,8 @@ export default class DeezerSource {
     message: string,
     severity: string,
     cause?: string
-  ): DeezerExceptionResult {
-    return { exception: { message, severity, cause } }
+  ): SourceResult {
+    return { loadType: 'error', exception: { message, severity, cause } }
   }
 
   /**

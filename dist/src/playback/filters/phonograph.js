@@ -204,7 +204,7 @@ export default class Phonograph extends AnimatableFilter {
         const targetAlpha = isDisabled ? 0.0 : 1.0;
         super.applyAnimatedUpdate({
             phonograph: {
-                alpha: targetAlpha,
+                alpha: targetAlpha
             }
         }, 'phonograph', { alpha: 0.0 });
     }

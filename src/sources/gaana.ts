@@ -194,7 +194,7 @@ export default class GaanaSource {
     } catch (error) {
       const message = this.getErrorMessage(error)
       logger('error', 'Gaana', `Search error: ${message}`)
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
   }
 
@@ -223,7 +223,7 @@ export default class GaanaSource {
     } catch (error) {
       const message = this.getErrorMessage(error)
       logger('error', 'Gaana', `Resolve error: ${message}`)
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
   }
 
@@ -275,7 +275,10 @@ export default class GaanaSource {
     const searchResult = await this.nodelink.sources.searchWithDefault(
       `${decodedTrack.title} ${decodedTrack.author}`
     )
-    const tracks = this.toTrackInfoArray(searchResult.data)
+    const tracks =
+      searchResult.loadType === 'search'
+        ? this.toTrackInfoArray(searchResult.data)
+        : []
     const candidates: BestMatchCandidate[] = tracks.map((track) => ({
       info: {
         title: track.title,
@@ -691,7 +694,11 @@ export default class GaanaSource {
     }
 
     const encodedInput: TrackEncodeInput = { ...info, details: [] }
-    return { encoded: encodeTrack(encodedInput), info, pluginInfo: {} }
+    return {
+      encoded: encodeTrack(encodedInput),
+      info,
+      pluginInfo: {} as Record<string, unknown>
+    }
   }
 
   /**

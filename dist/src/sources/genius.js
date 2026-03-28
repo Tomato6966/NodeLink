@@ -150,7 +150,7 @@ export default class GeniusSource {
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             logger('error', 'Genius', `Error resolving URL: ${message}`);
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
     /**
@@ -165,6 +165,7 @@ export default class GeniusSource {
         const sourceManager = this.getSourceManager();
         if (!sourceManager) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Source manager is not available for Genius resolution.',
                     severity: 'fault'
@@ -191,6 +192,7 @@ export default class GeniusSource {
             const candidates = this.extractSearchCandidates(searchResult);
             if (candidates.length === 0) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: 'No alternative stream found via default search.',
                         severity: 'fault'
@@ -200,6 +202,7 @@ export default class GeniusSource {
             const bestMatch = this.findBestMatch(candidates, decodedTrack);
             if (!bestMatch) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: 'No suitable alternative stream found after filtering.',
                         severity: 'fault'
@@ -212,6 +215,7 @@ export default class GeniusSource {
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             return {
+                loadType: 'error',
                 exception: {
                     message,
                     severity: 'fault'

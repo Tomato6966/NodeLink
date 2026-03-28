@@ -341,7 +341,7 @@ export default class NeteaseSource {
       loadType: 'playlist',
       data: {
         info: { name: `${name} — ${artist}`, selectedTrack: 0 },
-        pluginInfo: {},
+        pluginInfo: {} as Record<string, unknown> as Record<string, unknown>,
         tracks
       }
     }
@@ -388,7 +388,7 @@ export default class NeteaseSource {
       loadType: 'playlist',
       data: {
         info: { name, selectedTrack: 0 },
-        pluginInfo: {},
+        pluginInfo: {} as Record<string, unknown> as Record<string, unknown>,
         tracks
       }
     }
@@ -434,7 +434,7 @@ export default class NeteaseSource {
       loadType: 'playlist',
       data: {
         info: { name: `${name} — Top Tracks`, selectedTrack: 0 },
-        pluginInfo: {},
+        pluginInfo: {} as Record<string, unknown> as Record<string, unknown>,
         tracks
       }
     }
@@ -605,8 +605,8 @@ export default class NeteaseSource {
       const searchResult = await this.nodelink.sources.searchWithDefault(query)
 
       if (
-        !Array.isArray(searchResult.data) ||
-        searchResult.loadType !== 'search'
+        searchResult.loadType !== 'search' ||
+        searchResult.data.length === 0
       ) {
         return this.exceptionTrackResult(
           'No matching track found on fallback source.',

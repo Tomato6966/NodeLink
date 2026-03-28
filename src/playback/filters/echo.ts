@@ -58,7 +58,7 @@ export default class Echo extends AnimatableFilter {
     super.applyAnimatedUpdate(
       {
         echo: {
-          alpha: targetAlpha,
+          alpha: targetAlpha
         }
       },
       'echo',

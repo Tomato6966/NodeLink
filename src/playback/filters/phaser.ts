@@ -68,7 +68,7 @@ export default class Phaser extends AnimatableFilter {
     super.applyAnimatedUpdate(
       {
         phaser: {
-          alpha: targetAlpha,
+          alpha: targetAlpha
         }
       },
       'phaser',

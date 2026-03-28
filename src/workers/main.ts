@@ -21,7 +21,10 @@ import TrackCacheManager from '../managers/trackCacheManager.ts'
 import { getWebmOpusProfilerStats } from '../playback/demuxers/WebmOpus.ts'
 import { bufferPool } from '../playback/structs/BufferPool.ts'
 import type { NodelinkConfig as NodeLinkConfig } from '../typings/config/config.types.ts'
-import type { TrackInfoExtended, NodeLink } from '../typings/playback/player.types.ts'
+import type {
+  NodeLink,
+  TrackInfoExtended
+} from '../typings/playback/player.types.ts'
 import type {
   RoutePlannerManager as RoutePlannerManagerLike,
   SourceInstance,
@@ -1830,8 +1833,8 @@ async function startLoadStream(
 
   const fetched = (await nodelink.sources.getTrackStream(
     urlResult.newTrack?.info || trackInfo,
-    urlResult.url,
-    urlResult.protocol,
+    urlResult.url as string,
+    urlResult.protocol as string,
     additionalData
   )) as TrackStreamResult & { type?: string }
 
@@ -1842,7 +1845,7 @@ async function startLoadStream(
   const createPCMStream = await getCreatePCMStream()
   const pcmStream = createPCMStream(
     payload?.guildId ?? 'worker-stream',
-    fetched.stream,
+    fetched.stream as NonNullable<typeof fetched.stream>,
     fetched.type || (urlResult.format as string) || 'unknown',
     nodelink as unknown as NodeLink,
     (payload?.volume ?? 100) / 100,

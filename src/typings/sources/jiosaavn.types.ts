@@ -318,7 +318,7 @@ export interface JioSaavnTrackData {
   /**
    * JioSaavn plugin metadata (unused).
    */
-  pluginInfo: Record<string, never>
+  pluginInfo: Record<string, unknown>
 }
 
 /**
@@ -382,7 +382,7 @@ export type JioSaavnSourceResult =
   | { loadType: 'search'; data: JioSaavnTrackData[] }
   | { loadType: 'playlist'; data: JioSaavnPlaylistData }
   | { loadType: 'empty'; data: Record<string, never> }
-  | { exception: JioSaavnException }
+  | { loadType: 'error'; exception: JioSaavnException }
 
 /**
  * Decoded track payload accepted by JioSaavn `getTrackUrl`.

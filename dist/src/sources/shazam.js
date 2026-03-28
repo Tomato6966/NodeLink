@@ -102,7 +102,7 @@ export default class ShazamSource {
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             logger('error', 'Shazam', `Search failed for ${query}: ${message}`);
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
     /**
@@ -167,7 +167,7 @@ export default class ShazamSource {
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             logger('error', 'Shazam', `Failed to resolve ${url}: ${message}`);
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
     /**
@@ -182,6 +182,7 @@ export default class ShazamSource {
         const sourceManager = this.getSourceManager();
         if (!sourceManager) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Source manager is not available for Shazam resolution.',
                     severity: 'fault'
@@ -198,6 +199,7 @@ export default class ShazamSource {
             }
             if (searchTracks.length === 0) {
                 return {
+                    loadType: 'error',
                     exception: { message: 'No alternative found.', severity: 'fault' }
                 };
             }
@@ -209,6 +211,7 @@ export default class ShazamSource {
                 : null;
             if (!bestMatch) {
                 return {
+                    loadType: 'error',
                     exception: { message: 'No suitable match.', severity: 'fault' }
                 };
             }
@@ -218,7 +221,7 @@ export default class ShazamSource {
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             logger('error', 'Shazam', `Failed to get track URL: ${message}`);
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
     /**

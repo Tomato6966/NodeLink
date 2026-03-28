@@ -185,6 +185,7 @@ export default class LetrasMusSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error ? error.message : String(error),
                     severity: 'fault'
@@ -210,6 +211,7 @@ export default class LetrasMusSource {
             const html = this.getTextBody({ body });
             if (error || statusCode !== 200 || !html) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: `Failed to fetch Letras page: ${error ?? statusCode}`,
                         severity: 'fault'
@@ -256,6 +258,7 @@ export default class LetrasMusSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error ? error.message : String(error),
                     severity: 'fault'
@@ -274,6 +277,7 @@ export default class LetrasMusSource {
         const sourceManager = this.getSourceManager();
         if (!sourceManager) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Source manager is not available for LetrasMus resolution.',
                     severity: 'fault'
@@ -300,6 +304,7 @@ export default class LetrasMusSource {
                 !this.isTrackDataArray(searchTracks) ||
                 searchTracks.length === 0) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: 'No matching track found on default source.',
                         severity: 'common'
@@ -312,6 +317,7 @@ export default class LetrasMusSource {
                 : null;
             if (!bestMatch) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: 'No suitable alternative found after filtering.',
                         severity: 'common'
@@ -323,6 +329,7 @@ export default class LetrasMusSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error ? error.message : String(error),
                     severity: 'fault'
@@ -420,6 +427,7 @@ export default class LetrasMusSource {
             : null;
         if (error || statusCode !== 200 || !payload) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Letras recommendation failed: ${error ?? statusCode}`,
                     severity: 'fault'

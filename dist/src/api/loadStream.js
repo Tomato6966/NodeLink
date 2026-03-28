@@ -302,12 +302,13 @@ async function handler(nodelink, req, res, _sendResponse, parsedUrl) {
                 startTime: input.position
             };
             const fetched = await runtime.sources.getTrackStream(urlResult.newTrack?.info ?? decodedTrack.info, urlResult.url, urlResult.protocol, additionalData);
-            if (fetched.exception) {
-                sendErrorResponse(req, res, 500, 'Internal Server Error', fetched.exception.message, parsedUrl.pathname);
+            if (fetched.exception || !fetched.stream) {
+                sendErrorResponse(req, res, 500, 'Internal Server Error', fetched.exception?.message || 'Failed to fetch stream', parsedUrl.pathname);
                 return;
             }
             fetchedStream = fetched.stream;
-            const resource = createAudioResource(input.guildId || 'api-stream', fetched.stream, fetched.type ?? urlResult.format ?? 'unknown', streamProcessorRuntime, input.filters, input.volume / 100, null, true, runtime.options.audio?.loudnessNormalizer);
+            const resource = createAudioResource(input.guildId || 'api-stream', fetched.stream, fetched.type ??
+                (typeof urlResult.format === 'string' ? urlResult.format : 'unknown'), streamProcessorRuntime, input.filters, input.volume / 100, null, true, runtime.options.audio?.loudnessNormalizer);
             pcmStream = resource.stream;
         }
         pcmStream.on('error', (error) => {

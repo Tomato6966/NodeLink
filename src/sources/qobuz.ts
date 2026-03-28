@@ -251,7 +251,7 @@ export default class QobuzSource {
     } catch (error) {
       const message = this.getErrorMessage(error)
       logger('error', 'Qobuz', `Error fetching recommendations: ${message}`)
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
   }
 
@@ -371,7 +371,8 @@ export default class QobuzSource {
           name: this.asString(data.title) || 'Unknown Album',
           selectedTrack: 0
         },
-        tracks
+        tracks,
+        pluginInfo: {} as Record<string, unknown>
       }
     }
   }
@@ -407,7 +408,8 @@ export default class QobuzSource {
           name: this.asString(data.name) || 'Unknown Playlist',
           selectedTrack: 0
         },
-        tracks
+        tracks,
+        pluginInfo: {} as Record<string, unknown>
       }
     }
   }
@@ -441,7 +443,8 @@ export default class QobuzSource {
       loadType: 'playlist',
       data: {
         info: { name: `${artistName}'s Top Tracks`, selectedTrack: 0 },
-        tracks
+        tracks,
+        pluginInfo: {} as Record<string, unknown>
       }
     }
   }
@@ -718,7 +721,7 @@ export default class QobuzSource {
     return {
       encoded: encodeTrack(encodedInput),
       info: trackInfo,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown> as Record<string, unknown>
     }
   }
 

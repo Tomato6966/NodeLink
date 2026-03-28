@@ -126,13 +126,15 @@ const getTrackInfoFromResolve = (
   result: SourceResult,
   fallback: TrackInfoLike
 ): TrackInfoLike => {
+  if (result.loadType === 'error') return fallback
+
   const data = result.data
   if (!isTrackInfoLike(data)) return fallback
 
   const maybeInfo = (data as { info?: unknown }).info
   if (isTrackInfoLike(maybeInfo)) return maybeInfo
 
-  return data
+  return data as TrackInfoLike
 }
 
 const isLyricsSourceEnabled = (

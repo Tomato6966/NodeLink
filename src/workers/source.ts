@@ -1321,8 +1321,8 @@ if (isMainThread) {
         fetched =
           (await nodelink.sources?.getTrackStream(
             urlResult.newTrack?.info || trackInfo,
-            urlResult.url,
-            urlResult.protocol,
+            urlResult.url as string,
+            urlResult.protocol as string,
             additionalData
           )) || null
 
@@ -1334,7 +1334,7 @@ if (isMainThread) {
 
         pcmStream = createPCMStream(
           id,
-          fetched.stream,
+          fetched.stream as NonNullable<typeof fetched.stream>,
           fetched.type || (urlResult.format as string) || 'unknown',
           nodelink as unknown as NodeLink,
           (payload?.volume ?? 100) / 100,

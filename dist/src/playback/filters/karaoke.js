@@ -135,7 +135,7 @@ export default class Karaoke extends AnimatableFilter {
         const targetAlpha = isDisabled ? 0.0 : 1.0;
         super.applyAnimatedUpdate({
             karaoke: {
-                alpha: targetAlpha,
+                alpha: targetAlpha
             }
         }, 'karaoke', { alpha: 0.0 });
     }

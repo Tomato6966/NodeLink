@@ -48,6 +48,7 @@ interface LocalSourceConfig {
  * Metadata returned after inspecting a local file.
  */
 interface LocalTrackMetadata {
+  [x: string]: unknown
   /**
    * File extension without the leading dot.
    */
@@ -73,6 +74,7 @@ interface LocalTrackMetadata {
  * Minimal MP3 header data used by the local source.
  */
 interface Mp3HeaderInfo {
+  [x: string]: unknown
   /**
    * Parsed bitrate in kbps.
    */
@@ -83,6 +85,7 @@ interface Mp3HeaderInfo {
  * Track payload compatible with the shared encoder.
  */
 interface LocalTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -551,6 +554,7 @@ export default class LocalSource {
         `Path traversal attempt blocked for local source: "${query}"`
       )
       return {
+        loadType: 'error',
         exception: {
           message: 'Path traversal is not allowed.',
           severity: 'common'

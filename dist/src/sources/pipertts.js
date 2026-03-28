@@ -275,6 +275,7 @@ export default class PiperSource {
             const message = this.getErrorMessage(error instanceof Error ? error : String(error));
             logger('error', 'Sources', `Failed to load Piper TTS stream: ${message}`);
             return {
+                loadType: 'error',
                 exception: {
                     message,
                     severity: 'common',

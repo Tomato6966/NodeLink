@@ -54,7 +54,7 @@ export default class Vibrato extends AnimatableFilter {
     super.applyAnimatedUpdate(
       {
         vibrato: {
-          alpha: targetAlpha,
+          alpha: targetAlpha
         }
       },
       'vibrato',

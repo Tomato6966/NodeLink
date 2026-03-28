@@ -126,27 +126,58 @@ export interface YouTubeSourceConfig extends SourceConfigBase {
  */
 export interface SpotifySourceConfig extends SourceConfigBase {
   /**
-   * Client ID
+   * Client ID for official API access.
    */
-  clientId: string
+  clientId?: string
 
   /**
-   * Client secret
+   * Client secret for official API access.
    */
-  clientSecret: string
+  clientSecret?: string
 
   /**
-   * Playlist load limit
+   * Optional external URL for anonymous token generation.
+   */
+  externalAuthUrl?: string
+
+  /**
+   * Spotify sp_dc cookie for mobile token generation.
+   */
+  sp_dc?: string
+
+  /**
+   * Market code for search and resolution.
+   * @defaultValue "US"
+   */
+  market?: string
+
+  /**
+   * Playlist load limit.
    */
   playlistLoadLimit: number
 
   /**
-   * Album load limit
+   * Album load limit.
    */
   albumLoadLimit: number
 
   /**
-   * Whether Spotify playlist local files should be included
+   * Maximum concurrent requests during playlist loading.
+   */
+  playlistPageLoadConcurrency?: number
+
+  /**
+   * Maximum concurrent requests during album loading.
+   */
+  albumPageLoadConcurrency?: number
+
+  /**
+   * Whether to allow explicit tracks in search/recommendations.
+   */
+  allowExplicit?: boolean
+
+  /**
+   * Whether Spotify playlist local files should be included.
    */
   allowLocalFiles: boolean
 }
@@ -196,6 +227,53 @@ export interface JioSaavnSourceConfig extends SourceConfigBase {
    * Artist load limit
    */
   artistLoadLimit: number
+}
+
+/**
+ * Apple Music source configuration
+ * @public
+ */
+export interface AppleMusicSourceConfig extends SourceConfigBase {
+  /**
+   * Media API token for authentication
+   */
+  mediaApiToken?: string
+
+  /**
+   * Market/country code
+   */
+  market?: string
+
+  /**
+   * Playlist load limit
+   */
+  playlistLoadLimit: number
+
+  /**
+   * Album load limit
+   */
+  albumLoadLimit: number
+
+  /**
+   * Whether to allow explicit content
+   */
+  allowExplicit: boolean
+}
+
+/**
+ * Amazon Music source configuration
+ * @public
+ */
+export interface AmazonMusicSourceConfig extends SourceConfigBase {
+  /**
+   * Playlist load limit
+   */
+  playlistLoadLimit: number
+
+  /**
+   * Album load limit
+   */
+  albumLoadLimit: number
 }
 
 /**

@@ -164,6 +164,7 @@ interface FloweryTrackInput {
  * Flowery track payload compatible with the shared encoder.
  */
 interface FloweryTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -202,7 +203,7 @@ interface FloweryTrackData {
   /**
    * Source-specific plugin metadata.
    */
-  pluginInfo: Record<string, never>
+  pluginInfo: Record<string, unknown>
 }
 
 /**
@@ -223,31 +224,6 @@ interface FloweryTrackUrlResult extends TrackUrlResult {
    * Flowery audio is normalized to MP3 playback.
    */
   format: 'mp3'
-}
-
-/**
- * Exception payload returned by Flowery operations.
- */
-interface FloweryExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-
-    /**
-     * Optional failure origin.
-     */
-    cause?: string
-  }
 }
 
 /**
@@ -611,7 +587,7 @@ export default class FlowerySource {
     return {
       encoded: encodeTrack(track),
       info: track,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown>
     }
   }
 
@@ -766,6 +742,7 @@ export default class FlowerySource {
       return { loadType: 'track', data: track }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message: this.getErrorMessage(
             error instanceof Error ? error : String(error)
@@ -819,6 +796,7 @@ export default class FlowerySource {
       return { loadType: 'track', data: track }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message: this.getErrorMessage(
             error instanceof Error ? error : String(error)
@@ -891,7 +869,7 @@ export default class FlowerySource {
     url: string,
     _protocol?: string,
     _additionalData?: Record<string, object | string | number | boolean | null>
-  ): Promise<TrackStreamResult | FloweryExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     logger(
       'debug',
       'Sources',
@@ -947,6 +925,7 @@ export default class FlowerySource {
       )
 
       return {
+        loadType: 'error',
         exception: {
           message,
           severity: 'common',

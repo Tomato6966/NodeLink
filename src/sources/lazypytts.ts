@@ -568,6 +568,7 @@ export default class LazyPyTtsSource {
       if (lengthCheck) {
         const unit = lengthCheck.countBytes ? 'bytes' : 'characters'
         return {
+          loadType: 'error',
           exception: {
             message: `Text too long for LazyPy TTS (${resolved.serviceName}). Max ${lengthCheck.maxLength} ${unit}.`,
             severity: 'fault',
@@ -581,6 +582,7 @@ export default class LazyPyTtsSource {
     } catch (error) {
       const message = this.getErrorMessage(error)
       return {
+        loadType: 'error',
         exception: { message, severity: 'fault', cause: 'Exception' }
       }
     }
@@ -613,7 +615,7 @@ export default class LazyPyTtsSource {
   }): {
     encoded: string
     info: TrackInfo
-    pluginInfo: Record<string, never>
+    pluginInfo: Record<string, unknown>
   } {
     const query = new URLSearchParams({
       service: String(serviceName),
@@ -640,7 +642,7 @@ export default class LazyPyTtsSource {
     return {
       encoded: encodeTrack(encodedInput),
       info: track,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown>
     }
   }
 

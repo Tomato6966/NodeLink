@@ -168,6 +168,7 @@ interface BandcampTrackBuildInput {
  * Encodable Bandcamp track payload.
  */
 interface BandcampTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the resolved item can be seeked.
    */
@@ -206,7 +207,7 @@ interface BandcampTrackData {
   /**
    * Bandcamp does not currently attach plugin metadata here.
    */
-  pluginInfo: Record<string, never>
+  pluginInfo: Record<string, unknown>
 }
 
 /**
@@ -231,7 +232,7 @@ interface BandcampPlaylistData {
   /**
    * Source-specific playlist metadata.
    */
-  pluginInfo: Record<string, never>
+  pluginInfo: Record<string, unknown>
 
   /**
    * Encoded tracks that belong to the album.
@@ -257,31 +258,6 @@ interface BandcampTrackUrlSuccess extends TrackUrlResult {
    * Bandcamp stream format used by this extractor.
    */
   format: 'mp3'
-}
-
-/**
- * Structured exception payload used by the Bandcamp source.
- */
-interface BandcampExceptionResult {
-  /**
-   * Failure metadata returned to the source manager.
-   */
-  exception: {
-    /**
-     * Human-readable error message.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-
-    /**
-     * Optional failure origin.
-     */
-    cause?: string
-  }
 }
 
 /**
@@ -357,6 +333,7 @@ export default class BandcampSource {
 
       if (request.error || request.statusCode !== 200) {
         return {
+          loadType: 'error',
           exception: {
             message:
               request.error ??
@@ -483,7 +460,7 @@ export default class BandcampSource {
               'BandCamp Playlist',
             selectedTrack: 0
           },
-          pluginInfo: {},
+          pluginInfo: {} as Record<string, unknown>,
           tracks
         }
 
@@ -524,7 +501,7 @@ export default class BandcampSource {
    */
   public async getTrackUrl(
     track: TrackInfo
-  ): Promise<BandcampTrackUrlSuccess | BandcampExceptionResult> {
+  ): Promise<BandcampTrackUrlSuccess | SourceResult> {
     try {
       const { body, error, statusCode } = await makeRequest(track.uri, {
         method: 'GET'
@@ -532,6 +509,7 @@ export default class BandcampSource {
 
       if (error || statusCode !== 200) {
         return {
+          loadType: 'error',
           exception: {
             message: `Failed to fetch track page: ${error ?? statusCode}`,
             severity: 'fault',
@@ -543,6 +521,7 @@ export default class BandcampSource {
       const page = this.getResponseText({ body })
       if (page === null) {
         return {
+          loadType: 'error',
           exception: {
             message: 'BandCamp returned an unreadable track page.',
             severity: 'fault',
@@ -555,6 +534,7 @@ export default class BandcampSource {
 
       if (!streamUrlMatch) {
         return {
+          loadType: 'error',
           exception: {
             message: 'No stream URL was found in the page content.',
             severity: 'fault',
@@ -570,6 +550,7 @@ export default class BandcampSource {
       }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message:
             error instanceof Error
@@ -592,7 +573,7 @@ export default class BandcampSource {
   public async loadStream(
     decodedTrack: TrackInfo,
     url: string
-  ): Promise<TrackStreamResult | BandcampExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     logger(
       'debug',
       'Sources',
@@ -607,6 +588,7 @@ export default class BandcampSource {
 
       if (response.error || response.statusCode !== 200 || !response.stream) {
         return {
+          loadType: 'error',
           exception: {
             message:
               response.error ??
@@ -628,6 +610,7 @@ export default class BandcampSource {
         `Failed to load BandCamp stream: ${error instanceof Error ? error.message : 'unknown error'}`
       )
       return {
+        loadType: 'error',
         exception: {
           message:
             error instanceof Error
@@ -708,7 +691,7 @@ export default class BandcampSource {
     return {
       encoded: encodeTrack(track),
       info: track,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown>
     }
   }
 
@@ -919,6 +902,7 @@ export default class BandcampSource {
     cause?: string
   ): SourceResult {
     return {
+      loadType: 'error',
       exception: {
         message,
         severity,

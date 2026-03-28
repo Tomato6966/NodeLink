@@ -141,7 +141,7 @@ export default class GaanaSource {
         catch (error) {
             const message = this.getErrorMessage(error);
             logger('error', 'Gaana', `Search error: ${message}`);
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
     /**
@@ -174,7 +174,7 @@ export default class GaanaSource {
         catch (error) {
             const message = this.getErrorMessage(error);
             logger('error', 'Gaana', `Resolve error: ${message}`);
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
     /**
@@ -525,7 +525,11 @@ export default class GaanaSource {
             sourceName: 'gaana'
         };
         const encodedInput = { ...info, details: [] };
-        return { encoded: encodeTrack(encodedInput), info, pluginInfo: {} };
+        return {
+            encoded: encodeTrack(encodedInput),
+            info,
+            pluginInfo: {}
+        };
     }
     /**
      * Maps non-track search entries as pseudo-track payloads.

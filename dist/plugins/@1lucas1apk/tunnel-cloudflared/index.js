@@ -1,5 +1,5 @@
-import fs from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 export default async function (nodelink, config, context) {
     if (context.type !== 'master')
         return;
@@ -12,9 +12,9 @@ export default async function (nodelink, config, context) {
     }
     let cloudflared;
     try {
-        cloudflared = await import("cloudflared");
+        cloudflared = await import('cloudflared');
     }
-    catch (e) {
+    catch (_e) {
         logger('Package "cloudflared" not found. Please install it in the plugin folder.', 'error');
         return;
     }
@@ -24,7 +24,7 @@ export default async function (nodelink, config, context) {
         await install(bin);
     }
     logger(`Starting tunnel on port ${port}...`);
-    const tunnel = spawn(bin, ["tunnel", "run", "--token", token, "--url", `http://127.0.0.1:${port}`], { stdio: ["ignore", "pipe", "pipe"], env: process.env });
+    const tunnel = spawn(bin, ['tunnel', 'run', '--token', token, '--url', `http://127.0.0.1:${port}`], { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
     tunnel.stdout.on('data', (data) => {
         const msg = data.toString().trim();
         if (msg)
@@ -47,7 +47,7 @@ export default async function (nodelink, config, context) {
     nodelink.once('shutdown', () => {
         if (tunnel && !tunnel.killed) {
             logger('Closing tunnel...');
-            tunnel.kill("SIGKILL");
+            tunnel.kill('SIGKILL');
         }
     });
 }

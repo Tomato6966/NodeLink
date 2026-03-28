@@ -49,7 +49,7 @@ export default class Echo extends AnimatableFilter {
         const targetAlpha = isDisabled ? 0.0 : isActive ? 1.0 : 0.0;
         super.applyAnimatedUpdate({
             echo: {
-                alpha: targetAlpha,
+                alpha: targetAlpha
             }
         }, 'echo', { alpha: 0.0 });
     }

@@ -1,182 +1,516 @@
-import path from 'node:path';
-import { encodeTrack, getBestMatch, http1makeRequest, logger } from "../utils.js";
-const API_BASE = 'https://amp-api.music.apple.com/v1';
-const MAX_PAGE_ITEMS = 300;
-const BATCH_SIZE_DEFAULT = 5;
-const _CACHE_VALIDITY_DAYS = 7;
+import { encodeTrack, getBestMatch, http1makeRequest } from "../utils.js";
+/**
+ * Apple Music source implementation.
+ * Provides integration with the Apple Music Catalog API for track resolution and searching.
+ * Supports delegated resolution via alternative sources for playback.
+ * @public
+ */
 export default class AppleMusicSource {
+    /**
+     * The global worker NodeLink instance.
+     * @internal
+     */
+    nodelink;
+    /**
+     * The configuration bucket for Apple Music.
+     * @internal
+     */
+    config;
+    /**
+     * Prefixes used to identify search queries targeting this source.
+     * @public
+     */
+    searchTerms = ['amsearch'];
+    /**
+     * Regular expression patterns used to match Apple Music URLs.
+     * @public
+     */
+    patterns = [
+        /https?:\/\/(?:www\.)?music\.apple\.com\/([a-z]{2})?\/?(album|playlist|artist|song)\/[^/]+\/([a-zA-Z0-9\-.]+)(?:\?i=(\d+))?/
+    ];
+    /**
+     * Matching priority for this source.
+     * @public
+     */
+    priority = 95;
+    /**
+     * The currently cached Media API token.
+     * @internal
+     */
+    mediaApiToken = null;
+    /**
+     * Unix timestamp (ms) when the current token expires.
+     * @internal
+     */
+    tokenExpiry = null;
+    /**
+     * The primary market/country code for API requests.
+     * @internal
+     */
+    country = 'US';
+    /**
+     * Maximum number of pages to load for playlists.
+     * @internal
+     */
+    playlistPageLimit = 0;
+    /**
+     * Maximum number of pages to load for albums.
+     * @internal
+     */
+    albumPageLimit = 0;
+    /**
+     * Local preference for allowing explicit content in matches.
+     * @internal
+     */
+    allowExplicit = true;
+    /**
+     * Flag indicating if the token system has been initialized.
+     * @internal
+     */
+    tokenInitialized = false;
+    /**
+     * Flag indicating if a setup operation is currently in progress.
+     * @internal
+     */
+    settingUp = false;
+    /**
+     * Constructs a new AppleMusicSource.
+     * @param nodelink - The worker NodeLink context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        this.config = nodelink.options;
-        this.searchTerms = ['amsearch'];
-        this.patterns = [
-            /https?:\/\/(?:www\.)?music\.apple\.com\/([a-z]{2})?\/?(album|playlist|artist|song)\/[^/]+\/([a-zA-Z0-9\-.]+)(?:\?i=(\d+))?/
-        ];
-        this.priority = 95;
-        this.mediaApiToken = null;
-        this.tokenOrigin = null;
-        this.tokenExpiry = null;
-        this.country = 'US';
-        this.playlistPageLimit = 0;
-        this.albumPageLimit = 0;
-        this.playlistPageLoadConcurrency = BATCH_SIZE_DEFAULT;
-        this.albumPageLoadConcurrency = BATCH_SIZE_DEFAULT;
-        this.allowExplicit = true;
-        this.tokenInitialized = false;
-        this.settingUp = false;
-        this.tokenCachePath = path.join(process.cwd(), '.cache', 'applemusic_token.json');
+        this.config = (nodelink.options.sources?.applemusic || {
+            enabled: false,
+            playlistLoadLimit: 0,
+            albumLoadLimit: 0,
+            allowExplicit: true
+        });
     }
+    /**
+     * Initializes the source by obtaining a valid Media API token.
+     * Attempts to read from CredentialManager, then config, and finally scrapes the web interface.
+     * @returns A promise resolving to true if a token was obtained.
+     * @public
+     */
     async setup() {
         if (this.settingUp)
             return true;
         this.settingUp = true;
         try {
-            const appleMusicConfig = this.config.sources?.applemusic || {};
-            this.country = appleMusicConfig.market || 'US';
-            this.playlistPageLimit = appleMusicConfig.playlistLoadLimit ?? 0;
-            this.albumPageLimit = appleMusicConfig.albumLoadLimit ?? 0;
-            this.playlistPageLoadConcurrency =
-                appleMusicConfig.playlistPageLoadConcurrency ?? BATCH_SIZE_DEFAULT;
-            this.albumPageLoadConcurrency =
-                appleMusicConfig.albumPageLoadConcurrency ?? BATCH_SIZE_DEFAULT;
-            this.allowExplicit = appleMusicConfig.allowExplicit ?? true;
-            if (this.tokenInitialized && this._isTokenValid()) {
+            this.country = this.config.market || 'US';
+            this.playlistPageLimit = this.config.playlistLoadLimit ?? 0;
+            this.albumPageLimit = this.config.albumLoadLimit ?? 0;
+            this.allowExplicit = this.config.allowExplicit ?? true;
+            if (this.tokenInitialized && this.isTokenValid())
                 return true;
-            }
-            const cachedToken = this.nodelink.credentialManager.get('apple_media_api_token');
+            const cachedToken = this.nodelink.credentialManager?.get('apple_media_api_token');
             if (cachedToken) {
                 this.mediaApiToken = cachedToken;
-                this._parseToken(this.mediaApiToken);
-                if (this._isTokenValid()) {
-                    logger('info', 'AppleMusic', 'Loaded valid token from CredentialManager.');
+                this.parseToken(cachedToken);
+                if (this.isTokenValid()) {
                     this.tokenInitialized = true;
                     return true;
                 }
             }
-            const configToken = appleMusicConfig.mediaApiToken;
-            if (configToken && configToken !== 'token_here') {
-                this.mediaApiToken = configToken;
-                this._parseToken(this.mediaApiToken);
-                if (this._isTokenValid()) {
-                    logger('info', 'AppleMusic', 'Loaded valid token from config file.');
-                    this.nodelink.credentialManager.set('apple_media_api_token', this.mediaApiToken, this.tokenExpiry - Date.now());
+            if (this.config.mediaApiToken &&
+                this.config.mediaApiToken !== 'token_here') {
+                this.mediaApiToken = this.config.mediaApiToken;
+                this.parseToken(this.mediaApiToken);
+                if (this.isTokenValid()) {
+                    this.nodelink.credentialManager?.set('apple_media_api_token', this.mediaApiToken, (this.tokenExpiry || 0) - Date.now());
                     this.tokenInitialized = true;
                     return true;
                 }
             }
-            const oldToken = this.mediaApiToken;
-            const newToken = await this._fetchNewToken();
+            const newToken = await this.fetchNewToken();
             if (newToken) {
-                if (oldToken && newToken === oldToken) {
-                    logger('warn', 'AppleMusic', 'Fetched a new token, but it is the same as the old one. The token might be long-lived or the fetching method needs an update.');
-                }
                 this.mediaApiToken = newToken;
-                this._parseToken(this.mediaApiToken);
-                this.nodelink.credentialManager.set('apple_media_api_token', this.mediaApiToken, this.tokenExpiry - Date.now());
+                this.parseToken(newToken);
+                this.nodelink.credentialManager?.set('apple_media_api_token', newToken, (this.tokenExpiry || 0) - Date.now());
                 this.tokenInitialized = true;
                 return true;
             }
-            logger('warn', 'AppleMusic', 'Failed to obtain a valid Media API token. Source will be disabled for this session.');
-            this.tokenInitialized = false;
-            return false;
-        }
-        catch (error) {
-            logger('error', 'AppleMusic', `Critical error during setup: ${error.message}`);
             return false;
         }
         finally {
             this.settingUp = false;
         }
     }
-    async _fetchNewToken() {
+    /**
+     * Scrapes a new Media API token from the Apple Music browse page.
+     * @returns A promise resolving to the token string or null.
+     * @internal
+     */
+    async fetchNewToken() {
         try {
-            logger('info', 'AppleMusic', 'Attempting to fetch a new Media API token...');
             const { body: html, statusCode } = await http1makeRequest('https://music.apple.com/us/browse');
-            if (statusCode !== 200) {
-                throw new Error(`Failed to fetch HTML: ${statusCode}`);
-            }
-            const scriptTagMatch = html.match(/<script\s+type="module"\s+crossorigin\s+src="([^"]+)"/);
-            const scriptTag = scriptTagMatch?.[1];
-            if (!scriptTag) {
-                throw new Error('Module script tag not found in Apple Music HTML.');
-            }
-            const scriptUrl = `https://music.apple.com${scriptTag}`;
-            const { body: jsData, statusCode: jsStatus } = await http1makeRequest(scriptUrl);
-            if (jsStatus !== 200) {
-                throw new Error(`Failed to fetch JS from ${scriptUrl}: ${jsStatus}`);
-            }
+            if (statusCode !== 200 || typeof html !== 'string')
+                return null;
+            const scriptMatch = html.match(/<script\s+type="module"\s+crossorigin\s+src="([^"]+)"/);
+            if (!scriptMatch?.[1])
+                return null;
+            const { body: jsData, statusCode: jsStatus } = await http1makeRequest(`https://music.apple.com${scriptMatch[1]}`);
+            if (jsStatus !== 200 || typeof jsData !== 'string')
+                return null;
             const tokenMatch = jsData.match(/(?<token>(ey[\w-]+)\.([\w-]+)\.([\w-]+))/);
-            const accessToken = tokenMatch?.groups?.token;
-            if (accessToken) {
-                logger('info', 'AppleMusic', 'Successfully fetched a new Media API token.');
-                return accessToken;
-            }
-            else {
-                throw new Error('Access token not found in JS file.');
-            }
+            return tokenMatch?.groups?.token || null;
         }
-        catch (error) {
-            logger('error', 'AppleMusic', `Failed to fetch new token: ${error.message}`);
+        catch {
             return null;
         }
     }
-    _isTokenValid() {
-        if (!this.tokenExpiry)
-            return true;
-        return Date.now() < this.tokenExpiry - 10000;
+    /**
+     * Validates if the current token is set and not expired.
+     * @returns True if the token is valid.
+     * @internal
+     */
+    isTokenValid() {
+        return (!!this.mediaApiToken &&
+            (!this.tokenExpiry || Date.now() < this.tokenExpiry - 10000));
     }
-    _parseToken(token) {
+    /**
+     * Decodes the JWT token to extract the expiration timestamp.
+     * @param token - The Media API token.
+     * @internal
+     */
+    parseToken(token) {
         try {
-            const parts = token.split('.');
-            if (parts.length < 2)
+            const payload = token.split('.')[1];
+            if (!payload) {
+                this.tokenExpiry = null;
                 return;
-            const payloadB64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-            const padded = payloadB64 + '='.repeat((4 - (payloadB64.length % 4)) % 4);
-            const json = JSON.parse(Buffer.from(padded, 'base64').toString('utf-8'));
-            this.tokenOrigin = json.root_https_origin || null;
-            this.tokenExpiry = json.exp ? json.exp * 1000 : null;
+            }
+            const decoded = JSON.parse(Buffer.from(payload, 'base64').toString());
+            this.tokenExpiry = decoded.exp ? decoded.exp * 1000 : null;
         }
         catch {
-            this.tokenOrigin = null;
             this.tokenExpiry = null;
         }
     }
-    async _apiRequest(path) {
-        if (!this.tokenInitialized || !this._isTokenValid()) {
+    /**
+     * Performs an authenticated request to the Apple Music API.
+     * Automatically handles token refresh on 401 errors.
+     * @param path - The API path or full URL.
+     * @returns A promise resolving to the parsed response body or null.
+     * @internal
+     */
+    async apiRequest(path) {
+        if (!this.tokenInitialized || !this.isTokenValid()) {
             const ok = await this.setup();
             if (!ok)
-                throw new Error('AppleMusic token unavailable');
+                throw new Error('Apple Music token unavailable');
         }
-        const url = path.startsWith('http') ? path : `${API_BASE}${path}`;
+        const url = path.startsWith('http')
+            ? path
+            : `https://amp-api.music.apple.com/v1${path}`;
+        const { body, statusCode } = await http1makeRequest(url, {
+            headers: {
+                Authorization: `Bearer ${this.mediaApiToken}`,
+                Accept: 'application/json',
+                Origin: 'https://music.apple.com'
+            }
+        });
+        if (statusCode === 401) {
+            this.tokenInitialized = false;
+            return this.apiRequest(path);
+        }
+        return typeof statusCode === 'number' &&
+            statusCode >= 200 &&
+            statusCode < 300
+            ? body
+            : null;
+    }
+    /**
+     * Executes a catalog search for the given query.
+     * @param query - The search query.
+     * @param _sourceName - Unused source name parameter.
+     * @param searchType - The target resource type ('track', 'album', 'playlist', 'artist').
+     * @returns A promise resolving to a SourceResult.
+     * @public
+     */
+    async search(query, _sourceName, searchType = 'track') {
         try {
-            const { body, statusCode } = await http1makeRequest(url, {
-                headers: {
-                    Authorization: `Bearer ${this.mediaApiToken}`,
-                    Accept: 'application/json',
-                    Origin: 'https://music.apple.com',
-                    Referer: 'https://music.apple.com/'
-                }
-            });
-            if (statusCode === 401) {
-                this.tokenInitialized = false;
-                await this.setup();
-                return this._apiRequest(path);
-            }
-            if (statusCode < 200 || statusCode >= 300) {
-                logger('error', 'AppleMusic', `API error ${statusCode} for ${url}`);
-                return null;
-            }
-            return body;
+            const limit = this.nodelink.options.maxSearchResults || 10;
+            const typeMap = {
+                track: 'songs',
+                album: 'albums',
+                playlist: 'playlists',
+                artist: 'artists'
+            };
+            const apiType = typeMap[searchType] || 'songs';
+            const data = await this.apiRequest(`/catalog/${this.country}/search?term=${encodeURIComponent(query)}&limit=${limit}&types=${apiType}&extend=artistUrl,editorialVideo`);
+            const items = data?.results?.[apiType]?.data || [];
+            if (items.length === 0)
+                return { loadType: 'empty', data: {} };
+            const results = items
+                .map((item) => {
+                if (searchType === 'track')
+                    return this.buildTrack(item);
+                return this.buildMetadataCollection(item, searchType);
+            })
+                .filter((t) => !!t);
+            return { loadType: 'search', data: results };
         }
-        catch (error) {
-            logger('error', 'AppleMusic', `apiRequest error: ${error.message}`);
-            return null;
+        catch (e) {
+            return {
+                loadType: 'error',
+                exception: { message: e.message, severity: 'fault' }
+            };
         }
     }
-    _extractVideoUrl(attributes) {
-        if (!attributes?.editorialVideo)
+    /**
+     * Resolves an Apple Music URL to its corresponding resource.
+     * @param url - The Apple Music URL.
+     * @returns A promise resolving to a SourceResult.
+     * @public
+     */
+    async resolve(url) {
+        const pattern = this.patterns[0];
+        if (!pattern)
+            return { loadType: 'empty', data: {} };
+        const match = pattern.exec(url);
+        if (!match)
+            return { loadType: 'empty', data: {} };
+        const country = match[1]?.toUpperCase() || this.country;
+        const type = match[2];
+        const id = match[3];
+        const altTrackId = match[4];
+        if (!id)
+            return { loadType: 'empty', data: {} };
+        try {
+            if (type === 'song' || (type === 'album' && altTrackId)) {
+                return await this.resolveTrack(altTrackId || id, country);
+            }
+            if (type === 'album')
+                return await this.resolveAlbum(id, country);
+            if (type === 'playlist')
+                return await this.resolvePlaylist(id, country);
+            if (type === 'artist')
+                return await this.resolveArtist(id, country);
+            return { loadType: 'empty', data: {} };
+        }
+        catch (e) {
+            return {
+                loadType: 'error',
+                exception: { message: e.message, severity: 'fault' }
+            };
+        }
+    }
+    /**
+     * Resolves a single track by its ID.
+     * @param id - The Apple Music track ID.
+     * @param country - The market code.
+     * @returns A promise resolving to a SourceResult.
+     * @internal
+     */
+    async resolveTrack(id, country) {
+        const data = await this.apiRequest(`/catalog/${country}/songs/${id}?extend=artistUrl,editorialVideo&include=albums`);
+        const song = data?.data?.[0];
+        if (!song)
+            return { loadType: 'empty', data: {} };
+        const track = this.buildTrack(song);
+        if (!track)
+            return { loadType: 'empty', data: {} };
+        return { loadType: 'track', data: track };
+    }
+    /**
+     * Resolves an album by its ID and paginates through all tracks.
+     * @param id - The Apple Music album ID.
+     * @param country - The market code.
+     * @returns A promise resolving to a SourceResult.
+     * @internal
+     */
+    async resolveAlbum(id, country) {
+        const data = await this.apiRequest(`/catalog/${country}/albums/${id}?extend=artistUrl,editorialVideo`);
+        const album = data?.data?.[0];
+        if (!album)
+            return { loadType: 'empty', data: {} };
+        const tracks = await this.paginate(album, `/catalog/${country}/albums/${id}/tracks`);
+        return {
+            loadType: 'album',
+            data: {
+                info: {
+                    name: album.attributes?.name || 'Unknown Album',
+                    selectedTrack: 0
+                },
+                tracks,
+                pluginInfo: {}
+            }
+        };
+    }
+    /**
+     * Resolves a playlist by its ID and paginates through all tracks.
+     * @param id - The Apple Music playlist ID.
+     * @param country - The market code.
+     * @returns A promise resolving to a SourceResult.
+     * @internal
+     */
+    async resolvePlaylist(id, country) {
+        const data = await this.apiRequest(`/catalog/${country}/playlists/${id}?extend=editorialVideo`);
+        const playlist = data?.data?.[0];
+        if (!playlist)
+            return { loadType: 'empty', data: {} };
+        const tracks = await this.paginate(playlist, `/catalog/${country}/playlists/${id}/tracks?extend=artistUrl`);
+        return {
+            loadType: 'playlist',
+            data: {
+                info: {
+                    name: playlist.attributes?.name || 'Unknown Playlist',
+                    selectedTrack: 0
+                },
+                tracks,
+                pluginInfo: {}
+            }
+        };
+    }
+    /**
+     * Resolves an artist's top tracks by their ID.
+     * @param id - The Apple Music artist ID.
+     * @param country - The market code.
+     * @returns A promise resolving to a SourceResult.
+     * @internal
+     */
+    async resolveArtist(id, country) {
+        const data = await this.apiRequest(`/catalog/${country}/artists/${id}?extend=editorialVideo`);
+        const artist = data?.data?.[0];
+        if (!artist)
+            return { loadType: 'empty', data: {} };
+        const topSongs = await this.apiRequest(`/catalog/${country}/artists/${id}/view/top-songs`);
+        const tracks = (topSongs?.data || [])
+            .map((t) => this.buildTrack(t))
+            .filter((t) => !!t);
+        return {
+            loadType: 'artist',
+            data: {
+                info: {
+                    name: `${artist.attributes?.name}'s Top Tracks`,
+                    selectedTrack: 0
+                },
+                tracks,
+                pluginInfo: {}
+            }
+        };
+    }
+    /**
+     * Paginates through a parent resource's track relationship.
+     * @param parent - The parent AppleMusicResource (album or playlist).
+     * @param path - The API path to fetch tracks from.
+     * @returns A promise resolving to an array of TrackData.
+     * @internal
+     */
+    async paginate(parent, path) {
+        const baseTracks = parent.relationships?.tracks?.data || [];
+        const total = parent.relationships?.tracks?.meta?.total || baseTracks.length;
+        const limit = 300;
+        const pages = Math.ceil(total / limit);
+        const maxPages = parent.type === 'albums' ? this.albumPageLimit : this.playlistPageLimit;
+        const allowed = maxPages > 0 ? Math.min(pages, maxPages) : pages;
+        const artwork = this.parseArtwork(parent.attributes?.artwork);
+        const editorialVideo = this.extractVideoUrl(parent.attributes);
+        const results = baseTracks
+            .map((t) => this.buildTrack(t, artwork, editorialVideo))
+            .filter((t) => !!t);
+        for (let i = 1; i < allowed; i++) {
+            const pageData = await this.apiRequest(`${path}${path.includes('?') ? '&' : '?'}limit=${limit}&offset=${i * limit}`);
+            if (pageData?.data) {
+                results.push(...pageData.data
+                    .map((t) => this.buildTrack(t, artwork, editorialVideo))
+                    .filter((t) => !!t));
+            }
+        }
+        return results;
+    }
+    /**
+     * Normalizes an Apple Music resource into a TrackData object.
+     * @param item - The track resource from the API.
+     * @param artworkOverride - Optional artwork URL to override the resource's own.
+     * @param videoOverride - Optional video URL to override the resource's own.
+     * @returns The normalized TrackData or null if attributes are missing.
+     * @internal
+     */
+    buildTrack(item, artworkOverride, videoOverride) {
+        const attr = item.attributes;
+        if (!attr)
             return null;
-        const ev = attributes.editorialVideo;
+        const artwork = artworkOverride || this.parseArtwork(attr.artwork);
+        const isExplicit = attr.contentRating === 'explicit';
+        const trackUri = attr.url
+            ? `${attr.url}${attr.url.includes('?') ? '&' : '?'}explicit=${isExplicit}`
+            : '';
+        const info = {
+            identifier: item.id,
+            isSeekable: true,
+            author: attr.artistName || 'Unknown',
+            length: attr.durationInMillis || 0,
+            isStream: false,
+            position: 0,
+            title: attr.name || 'Unknown',
+            uri: trackUri,
+            artworkUrl: artwork,
+            isrc: attr.isrc || null,
+            sourceName: 'applemusic'
+        };
+        return {
+            encoded: encodeTrack({ ...info, details: [] }),
+            info,
+            pluginInfo: {
+                albumName: attr.albumName,
+                previewUrl: attr.previews?.[0]?.url,
+                hlsVideoUrl: videoOverride || this.extractVideoUrl(attr)
+            }
+        };
+    }
+    /**
+     * Builds a metadata-only TrackData for collections like artists or empty containers.
+     * @param item - The resource from the API.
+     * @param type - The collection type.
+     * @returns The normalized TrackData.
+     * @internal
+     */
+    buildMetadataCollection(item, type) {
+        const attr = item.attributes;
+        const info = {
+            identifier: item.id,
+            isSeekable: type !== 'artist',
+            author: attr?.artistName || attr?.curatorName || 'Apple Music',
+            length: 0,
+            isStream: false,
+            position: 0,
+            title: attr?.name || 'Unknown',
+            uri: attr?.url || '',
+            artworkUrl: this.parseArtwork(attr?.artwork),
+            isrc: null,
+            sourceName: 'applemusic'
+        };
+        return {
+            encoded: encodeTrack({ ...info, details: [] }),
+            info,
+            pluginInfo: { type, trackCount: attr?.trackCount }
+        };
+    }
+    /**
+     * Processes the artwork object into a usable URL.
+     * @param artwork - The artwork attribute from the API.
+     * @returns The formatted URL or null.
+     * @internal
+     */
+    parseArtwork(artwork) {
+        if (!artwork?.url)
+            return null;
+        return artwork.url
+            .replace('{w}', artwork.width.toString())
+            .replace('{h}', artwork.height.toString());
+    }
+    /**
+     * Extracts the first available motion artwork video URL.
+     * @param attr - The resource attributes.
+     * @returns The video URL or null.
+     * @internal
+     */
+    extractVideoUrl(attr) {
+        const ev = attr?.editorialVideo;
+        if (!ev)
+            return null;
         return (ev.motionDetailSquare?.video ||
             ev.motionDetailTall?.video ||
             ev.motionSquareVideo1x1?.video ||
@@ -186,379 +520,46 @@ export default class AppleMusicSource {
             ev.motionArtistFullscreen?.video ||
             null);
     }
-    _buildTrack(item, artworkOverride = null, videoOverride = null) {
-        if (!item?.id)
-            return null;
-        const attributes = item.attributes || {};
-        const artwork = artworkOverride || this._parseArtwork(attributes.artwork);
-        const isExplicit = attributes.contentRating === 'explicit';
-        let trackUri = attributes.url || '';
-        if (trackUri) {
-            trackUri += `${trackUri.includes('?') ? '&' : '?'}explicit=${isExplicit}`;
+    /**
+     * Resolves a delegated Apple Music track metadata to a playable alternative stream.
+     * Searches for the track on the default configured source using ISRC or metadata.
+     * @param decodedTrack - The track metadata to resolve.
+     * @returns A promise resolving to a result containing the alternative stream.
+     * @public
+     */
+    async getTrackUrl(decodedTrack) {
+        const isExplicit = decodedTrack.uri?.includes('explicit=true');
+        let query = `${decodedTrack.title} ${decodedTrack.author}`;
+        if (isExplicit)
+            query += this.allowExplicit ? ' official video' : ' clean version';
+        const sources = this.nodelink.sources;
+        if (!sources) {
+            return { exception: { message: 'Sources not available.', severity: 'fault' } };
         }
-        const artistUrl = item.artistUrl || null;
-        const albumName = attributes.albumName || null;
-        let albumUrl = null;
-        if (trackUri) {
-            const paramIndex = trackUri.indexOf('?');
-            albumUrl = paramIndex === -1 ? null : trackUri.substring(0, paramIndex);
-        }
-        const previewUrl = attributes.previews?.[0]?.url || null;
-        const hlsVideoUrl = videoOverride || this._extractVideoUrl(attributes);
-        const trackInfo = {
-            identifier: item.id,
-            isSeekable: true,
-            author: attributes.artistName || 'Unknown',
-            length: attributes.durationInMillis ?? 0,
-            isStream: false,
-            position: 0,
-            title: attributes.name || 'Unknown',
-            uri: trackUri,
-            artworkUrl: artwork,
-            isrc: attributes.isrc || null,
-            sourceName: 'applemusic'
-        };
-        const pluginInfo = {};
-        if (albumName)
-            pluginInfo.albumName = albumName;
-        if (albumUrl)
-            pluginInfo.albumUrl = albumUrl;
-        if (artistUrl)
-            pluginInfo.artistUrl = artistUrl;
-        if (previewUrl)
-            pluginInfo.previewUrl = previewUrl;
-        if (hlsVideoUrl)
-            pluginInfo.hlsVideoUrl = hlsVideoUrl;
-        return {
-            encoded: encodeTrack(trackInfo),
-            info: trackInfo,
-            pluginInfo
-        };
-    }
-    _parseArtwork(artworkData) {
-        if (!artworkData?.url)
-            return null;
-        return artworkData.url
-            .replace('{w}', artworkData.width)
-            .replace('{h}', artworkData.height);
-    }
-    async search(query, _sourceName, searchType = 'track') {
-        try {
-            const limit = this.config.maxSearchResults || 10;
-            const encodedQuery = encodeURIComponent(query);
-            const typeMap = {
-                track: 'songs',
-                album: 'albums',
-                playlist: 'playlists',
-                artist: 'artists'
-            };
-            const apiType = typeMap[searchType] || 'songs';
-            const data = await this._apiRequest(`/catalog/${this.country}/search?term=${encodedQuery}&limit=${limit}&types=${apiType}&extend=artistUrl,editorialVideo`);
-            const results = [];
-            if (searchType === 'track') {
-                const songs = data?.results?.songs?.data || [];
-                for (const item of songs) {
-                    const track = this._buildTrack(item);
-                    if (track)
-                        results.push(track);
-                }
-            }
-            else if (searchType === 'album' && data?.results?.albums?.data) {
-                for (const album of data.results.albums.data) {
-                    if (!album?.id)
-                        continue;
-                    const artwork = this._parseArtwork(album.attributes?.artwork);
-                    const video = this._extractVideoUrl(album.attributes);
-                    const info = {
-                        title: album.attributes?.name || 'Unknown Album',
-                        author: album.attributes?.artistName || 'Unknown Artist',
-                        length: 0,
-                        identifier: album.id,
-                        isSeekable: true,
-                        isStream: false,
-                        uri: album.attributes?.url || '',
-                        artworkUrl: artwork,
-                        isrc: null,
-                        sourceName: 'applemusic',
-                        position: 0
-                    };
-                    results.push({
-                        encoded: encodeTrack(info),
-                        info,
-                        pluginInfo: {
-                            type: 'album',
-                            trackCount: album.attributes?.trackCount || null,
-                            hlsVideoUrl: video
-                        }
-                    });
-                }
-            }
-            else if (searchType === 'playlist' && data?.results?.playlists?.data) {
-                for (const playlist of data.results.playlists.data) {
-                    if (!playlist?.id)
-                        continue;
-                    const artwork = this._parseArtwork(playlist.attributes?.artwork);
-                    const video = this._extractVideoUrl(playlist.attributes);
-                    const info = {
-                        title: playlist.attributes?.name || 'Unknown Playlist',
-                        author: playlist.attributes?.curatorName || 'Apple Music',
-                        length: 0,
-                        identifier: playlist.id,
-                        isSeekable: true,
-                        isStream: false,
-                        uri: playlist.attributes?.url || '',
-                        artworkUrl: artwork,
-                        isrc: null,
-                        sourceName: 'applemusic',
-                        position: 0
-                    };
-                    results.push({
-                        encoded: encodeTrack(info),
-                        info,
-                        pluginInfo: {
-                            type: 'playlist',
-                            trackCount: playlist.attributes?.trackCount || null,
-                            hlsVideoUrl: video
-                        }
-                    });
-                }
-            }
-            else if (searchType === 'artist' && data?.results?.artists?.data) {
-                for (const artist of data.results.artists.data) {
-                    if (!artist?.id)
-                        continue;
-                    const artwork = this._parseArtwork(artist.attributes?.artwork);
-                    const video = this._extractVideoUrl(artist.attributes);
-                    const info = {
-                        title: artist.attributes?.name || 'Unknown Artist',
-                        author: 'Apple Music',
-                        length: 0,
-                        identifier: artist.id,
-                        isSeekable: false,
-                        isStream: false,
-                        uri: artist.attributes?.url || '',
-                        artworkUrl: artwork,
-                        isrc: null,
-                        sourceName: 'applemusic',
-                        position: 0
-                    };
-                    results.push({
-                        encoded: encodeTrack(info),
-                        info,
-                        pluginInfo: { type: 'artist', hlsVideoUrl: video }
-                    });
-                }
-            }
-            if (results.length === 0) {
-                return { loadType: 'empty', data: {} };
-            }
-            return { loadType: 'search', data: results };
-        }
-        catch (error) {
-            return { exception: { message: error.message, severity: 'fault' } };
-        }
-    }
-    async resolve(url) {
-        try {
-            const urlMatch = this.patterns[0].exec(url);
-            if (!urlMatch)
-                return { loadType: 'empty', data: {} };
-            const country = urlMatch[1]?.toUpperCase();
-            const type = urlMatch[2];
-            const id = urlMatch[3];
-            const altTrackId = urlMatch[4];
-            switch (type) {
-                case 'song':
-                    return await this._resolveTrack(id, country);
-                case 'album':
-                    return altTrackId
-                        ? await this._resolveTrack(altTrackId, country)
-                        : await this._resolveAlbum(id, country);
-                case 'playlist':
-                    return await this._resolvePlaylist(id, country);
-                case 'artist':
-                    return await this._resolveArtist(id, country);
-            }
-        }
-        catch (error) {
-            return { exception: { message: error.message, severity: 'fault' } };
-        }
-    }
-    async _resolveTrack(id, country = this.country) {
-        const data = await this._apiRequest(`/catalog/${country}/songs/${id}?extend=artistUrl,editorialVideo&include=albums`);
-        if (!data?.data?.[0]) {
-            return { exception: { message: 'Track not found.', severity: 'common' } };
-        }
-        const song = data.data[0];
-        let video = this._extractVideoUrl(song.attributes);
-        if (!video && song.relationships?.albums?.data?.[0]?.id) {
-            const albumId = song.relationships.albums.data[0].id;
-            const albumData = await this._apiRequest(`/catalog/${country}/albums/${albumId}?extend=editorialVideo`);
-            if (albumData?.data?.[0]) {
-                video = this._extractVideoUrl(albumData.data[0].attributes);
-            }
-        }
-        return { loadType: 'track', data: this._buildTrack(song, null, video) };
-    }
-    async _resolveAlbum(id, country = this.country) {
-        const albumData = await this._apiRequest(`/catalog/${country}/albums/${id}?extend=artistUrl,editorialVideo`);
-        if (!albumData?.data?.[0]) {
-            return { exception: { message: 'Album not found.', severity: 'common' } };
-        }
-        const album = albumData.data[0];
-        const editorialVideo = this._extractVideoUrl(album.attributes);
-        const baseTracks = album.relationships?.tracks?.data || [];
-        const total = album.relationships?.tracks?.meta?.total || baseTracks.length;
-        const extra = await this._paginate(`/catalog/${country}/albums/${id}/tracks`, total, this.albumPageLimit);
-        const all = [...baseTracks, ...extra];
-        const artwork = this._parseArtwork(album.attributes?.artwork);
-        const tracks = all
-            .map((item) => this._buildTrack({
-            id: item.id,
-            attributes: {
-                ...item.attributes,
-                artwork: album.attributes.artwork
-            }
-        }, artwork, editorialVideo))
-            .filter(Boolean);
-        return {
-            loadType: 'playlist',
-            data: {
-                info: { name: album.attributes.name, selectedTrack: 0 },
-                tracks
-            }
-        };
-    }
-    async _resolvePlaylist(id, country = this.country) {
-        const playlistResponse = await this._apiRequest(`/catalog/${country}/playlists/${id}?extend=editorialVideo`);
-        if (!playlistResponse?.data?.[0]) {
+        const searchResult = await sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
+        const candidates = searchResult.loadType === 'search' ? searchResult.data : [];
+        const bestMatch = getBestMatch(candidates, decodedTrack, {
+            allowExplicit: this.allowExplicit
+        });
+        if (!bestMatch) {
             return {
-                exception: { message: 'Playlist not found.', severity: 'common' }
+                exception: { message: 'No suitable match found.', severity: 'fault' }
             };
         }
-        const playlist = playlistResponse.data[0];
-        const editorialVideo = this._extractVideoUrl(playlist.attributes);
-        const baseTracks = playlist.relationships?.tracks?.data || [];
-        const total = playlist.relationships?.tracks?.meta?.total || baseTracks.length;
-        const extra = await this._paginate(`/catalog/${country}/playlists/${id}/tracks?extend=artistUrl`, total, this.playlistPageLimit);
-        const all = [...baseTracks, ...extra];
-        const artwork = this._parseArtwork(playlist.attributes.artwork);
-        const tracks = all
-            .map((item) => this._buildTrack(item, artwork, editorialVideo))
-            .filter(Boolean);
+        const stream = await sources.getTrackUrl(bestMatch.info);
+        return { newTrack: { info: bestMatch.info }, ...stream };
+    }
+    /**
+     * This source does not handle direct stream loading.
+     * @returns A promise resolving to an error result as direct streaming is unsupported.
+     * @public
+     */
+    async loadStream() {
         return {
-            loadType: 'playlist',
-            data: {
-                info: { name: playlist.attributes.name, selectedTrack: 0 },
-                tracks
+            exception: {
+                message: 'Direct stream loading is not supported by Apple Music source.',
+                severity: 'common'
             }
         };
-    }
-    async _resolveArtist(id, country = this.country) {
-        const artistInfo = await this._apiRequest(`/catalog/${country}/artists/${id}?extend=editorialVideo`);
-        if (!artistInfo?.data?.[0]) {
-            return { exception: { message: 'Artist not found.', severity: 'common' } };
-        }
-        const artistObj = artistInfo.data[0];
-        const artwork = this._parseArtwork(artistObj.attributes?.artwork);
-        const editorialVideo = this._extractVideoUrl(artistObj.attributes);
-        const topTracksData = await this._apiRequest(`/catalog/${country}/artists/${id}/view/top-songs`);
-        if (!topTracksData?.data) {
-            return {
-                exception: {
-                    message: 'Artist top songs not found.',
-                    severity: 'common'
-                }
-            };
-        }
-        const artistName = artistObj.attributes?.name || 'Artist';
-        const tracks = topTracksData.data
-            .map((trackData) => this._buildTrack(trackData, artwork, editorialVideo))
-            .filter(Boolean);
-        return {
-            loadType: 'playlist',
-            data: {
-                info: { name: `${artistName}'s Top Tracks`, selectedTrack: 0 },
-                tracks
-            }
-        };
-    }
-    async _paginate(basePath, totalItems, maxPages) {
-        const results = [];
-        const pages = Math.ceil(totalItems / MAX_PAGE_ITEMS);
-        let allowed = pages;
-        if (maxPages > 0)
-            allowed = Math.min(pages, maxPages);
-        const promises = [];
-        for (let index = 1; index < allowed; index++) {
-            const offset = index * MAX_PAGE_ITEMS;
-            const path = `${basePath}${basePath.includes('?') ? '&' : '?'}limit=${MAX_PAGE_ITEMS}&offset=${offset}`;
-            promises.push(this._apiRequest(path));
-        }
-        if (promises.length === 0)
-            return results;
-        const batchSize = this.playlistPageLoadConcurrency;
-        for (let i = 0; i < promises.length; i += batchSize) {
-            const batch = promises.slice(i, i + batchSize);
-            try {
-                const pageResults = await Promise.all(batch);
-                for (const page of pageResults) {
-                    if (page?.data)
-                        results.push(...page.data);
-                }
-            }
-            catch (e) {
-                logger('warn', 'AppleMusic', `Failed to fetch a batch of pages: ${e.message}`);
-            }
-        }
-        return results;
-    }
-    async getTrackUrl(decodedTrack, itag, forceRefresh = false) {
-        let isExplicit = false;
-        if (decodedTrack.uri) {
-            try {
-                const url = new URL(decodedTrack.uri);
-                isExplicit = url.searchParams.get('explicit') === 'true';
-            }
-            catch (_error) {
-                // Ignore malformed URI
-            }
-        }
-        const query = this._buildSearchQuery(decodedTrack, isExplicit);
-        try {
-            let searchResult = await this.nodelink.sources.searchWithDefault(decodedTrack.isrc ? `"${decodedTrack.isrc}"` : query);
-            if (!searchResult ||
-                searchResult.loadType !== 'search' ||
-                searchResult.data.length === 0) {
-                searchResult = await this.nodelink.sources.searchWithDefault(query);
-            }
-            if (!searchResult ||
-                searchResult.loadType !== 'search' ||
-                searchResult.data.length === 0) {
-                return {
-                    exception: { message: 'No alternative found.', severity: 'fault' }
-                };
-            }
-            const bestMatch = getBestMatch(searchResult.data, decodedTrack, {
-                allowExplicit: this.allowExplicit
-            });
-            if (!bestMatch) {
-                return {
-                    exception: { message: 'No suitable match.', severity: 'fault' }
-                };
-            }
-            const stream = await this.nodelink.sources.getTrackUrl(bestMatch.info, itag, forceRefresh);
-            return { newTrack: bestMatch, ...stream };
-        }
-        catch (error) {
-            return { exception: { message: error.message, severity: 'fault' } };
-        }
-    }
-    _buildSearchQuery(track, isExplicit) {
-        let searchQuery = `${track.title} ${track.author}`;
-        if (isExplicit) {
-            searchQuery += this.allowExplicit ? ' official video' : ' clean version';
-        }
-        return searchQuery;
     }
 }

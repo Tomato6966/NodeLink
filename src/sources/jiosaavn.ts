@@ -172,7 +172,7 @@ export default class JioSaavnSource {
     if (!IDENTIFIER_REGEX.test(query)) {
       const searchRes = await this.search(query, 'jssearch')
       if (
-        this.isSearchResult(searchRes) &&
+        searchRes.loadType === 'search' &&
         searchRes.data[0]?.info.identifier
       ) {
         id = searchRes.data[0].info.identifier
@@ -338,7 +338,10 @@ export default class JioSaavnSource {
       `${decodedTrack.title} ${decodedTrack.author}`
     )
 
-    if (!Array.isArray(searchResult.data)) {
+    if (
+      searchResult.loadType !== 'search' ||
+      !Array.isArray(searchResult.data)
+    ) {
       return this.exceptionTrackUrlResult('No suitable alternative found.')
     }
 
@@ -645,7 +648,7 @@ export default class JioSaavnSource {
     return {
       encoded: encodeTrack(encodedInput),
       info,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown> as Record<string, unknown>
     }
   }
 
@@ -738,7 +741,7 @@ export default class JioSaavnSource {
     message: string,
     severity = 'fault'
   ): JioSaavnSourceResult {
-    return { exception: { message, severity } }
+    return { loadType: 'error', exception: { message, severity } }
   }
 
   /**

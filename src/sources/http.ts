@@ -8,6 +8,7 @@ import type {
 } from '../typings/sources/http.types.ts'
 import type {
   SourceResult,
+  TrackData,
   TrackInfo,
   TrackStreamResult,
   TrackUrlResult,
@@ -95,14 +96,16 @@ class IcyMetadataTransform extends Transform {
     const fields: Record<string, string> = {}
     const regex = /([A-Za-z0-9]+)='([^']*)'/g
     let match: RegExpExecArray | null
-    while ((match = regex.exec(cleaned))) {
+    while (true) {
+      match = regex.exec(cleaned)
+      if (!match) break
       fields[(match[1] || '').toLowerCase()] = match[2] || ''
     }
 
     const payload: IcyMetadataPayload = {
       raw: cleaned,
-      streamTitle: fields['streamtitle'] || null,
-      streamUrl: fields['streamurl'] || null,
+      streamTitle: fields.streamtitle || null,
+      streamUrl: fields.streamurl || null,
       fields
     }
 
@@ -209,7 +212,7 @@ export default class HttpSource {
    */
   public constructor(nodelink: WorkerNodeLink) {
     this.nodelink = nodelink
-    const rawHttpConfig = nodelink.options.sources?.['http']
+    const rawHttpConfig = nodelink.options.sources?.http
     this.config =
       rawHttpConfig &&
       typeof rawHttpConfig === 'object' &&
@@ -282,12 +285,14 @@ export default class HttpSource {
 
       if (data.error) {
         return {
+          loadType: 'error',
           exception: { message: String(data.error), severity: 'common' }
         }
       }
 
       if ((data.statusCode || 0) >= 400) {
         return {
+          loadType: 'error',
           exception: {
             message: `HTTP error ${data.statusCode} while resolving`,
             severity: 'common'
@@ -301,6 +306,7 @@ export default class HttpSource {
       )
       if (!isValidMediaType(contentType)) {
         return {
+          loadType: 'error',
           exception: {
             message: `Unsupported content type: ${contentType}`,
             severity: 'common'
@@ -316,11 +322,12 @@ export default class HttpSource {
 
       return {
         loadType: 'track',
-        data: this.buildTrack(url, headers, isStream)
+        data: this.buildTrack(url, headers, isStream) as unknown as TrackData
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return {
+        loadType: 'error',
         exception: {
           message: `Failed to resolve URL: ${message}`,
           severity: 'common'
@@ -496,7 +503,7 @@ export default class HttpSource {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       logger('error', 'Sources', `Failed to load http stream: ${message}`)
-      return { exception: { message, severity: 'common' } }
+      return { loadType: 'error', exception: { message, severity: 'common' } }
     }
   }
 }

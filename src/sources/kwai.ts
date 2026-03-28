@@ -43,6 +43,7 @@ interface KwaiVideoData {
  * Track payload compatible with the shared encoder.
  */
 interface KwaiTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -81,32 +82,7 @@ interface KwaiTrackData {
   /**
    * Kwai does not currently attach extra plugin metadata.
    */
-  pluginInfo: Record<string, never>
-}
-
-/**
- * Exception payload returned by Kwai operations.
- */
-interface KwaiExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-
-    /**
-     * Optional failure origin.
-     */
-    cause?: string
-  }
+  pluginInfo: Record<string, unknown>
 }
 
 /**
@@ -159,6 +135,7 @@ export default class KwaiSource {
    */
   public async search(_query: string): Promise<SourceResult> {
     return {
+      loadType: 'error',
       exception: {
         message: 'Search not supported for Kwai',
         severity: 'fault',
@@ -182,6 +159,7 @@ export default class KwaiSource {
       return { loadType: 'track', data: track }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message: error instanceof Error ? error.message : 'Invalid Kwai URL',
           severity: 'fault',
@@ -200,12 +178,13 @@ export default class KwaiSource {
    */
   public async getTrackUrl(
     track: TrackInfo
-  ): Promise<TrackUrlResult | KwaiExceptionResult> {
+  ): Promise<TrackUrlResult | SourceResult> {
     try {
       const videoData = await this.getVideoInfo(track.identifier)
 
       if (!videoData.videoUrl) {
         return {
+          loadType: 'error',
           exception: {
             message: 'Video URL not found',
             severity: 'fault',
@@ -221,6 +200,7 @@ export default class KwaiSource {
       }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message:
             error instanceof Error ? error.message : 'Failed to get video URL',
@@ -242,7 +222,7 @@ export default class KwaiSource {
   public async loadStream(
     _decodedTrack: TrackInfo,
     url: string
-  ): Promise<TrackStreamResult | KwaiExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     try {
       const response = await http1makeRequest(url, {
         method: 'GET',
@@ -282,6 +262,7 @@ export default class KwaiSource {
       return { stream, type: 'mp4' }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message:
             error instanceof Error ? error.message : 'Failed to load stream',
@@ -422,7 +403,7 @@ export default class KwaiSource {
     return {
       encoded: encodeTrack(trackInfo),
       info: trackInfo,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown>
     }
   }
 }

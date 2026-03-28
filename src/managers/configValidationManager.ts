@@ -406,7 +406,8 @@ export default class ConfigValidationManager {
         path: 'trackStuckThresholdMs',
         expected: 'integer >= 1000 (milliseconds)',
         value: trackStuck,
-        validate: (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 1000
+        validate: (v: unknown) =>
+          typeof v === 'number' && Number.isInteger(v) && v >= 1000
       },
       this.intMustExceed(
         'zombieThresholdMs',
@@ -471,7 +472,9 @@ export default class ConfigValidationManager {
     ]
 
     for (const name of allSources) {
-      const sourceConfig = (sources as Record<string, unknown>)[name] as Record<string, unknown> | undefined
+      const sourceConfig = (sources as Record<string, unknown>)[name] as
+        | Record<string, unknown>
+        | undefined
       if (sourceConfig !== undefined) {
         rules.push(
           this.booleanRule(`sources.${name}.enabled`, sourceConfig.enabled)
@@ -502,7 +505,12 @@ export default class ConfigValidationManager {
   }
 
   private validateSourceSpotify(spotify: unknown): ValidationRule[] {
-    if (typeof spotify !== 'object' || spotify === null || !(spotify as Record<string, unknown>).enabled) return []
+    if (
+      typeof spotify !== 'object' ||
+      spotify === null ||
+      !(spotify as Record<string, unknown>).enabled
+    )
+      return []
 
     const s = spotify as Record<string, unknown>
 
@@ -523,17 +531,13 @@ export default class ConfigValidationManager {
         'sources.spotify.albumPageLoadConcurrency',
         s.albumPageLoadConcurrency
       ),
-      this.booleanRule(
-        'sources.spotify.allowLocalFiles',
-        s.allowLocalFiles
-      ),
+      this.booleanRule('sources.spotify.allowLocalFiles', s.allowLocalFiles),
       {
         path: 'sources.spotify.clientId',
         expected: 'non-empty string when sources.spotify.clientSecret is set',
         value: s.clientId,
         validate: (v: unknown) =>
-          !s.clientSecret ||
-          (typeof v === 'string' && v.trim().length > 0)
+          !s.clientSecret || (typeof v === 'string' && v.trim().length > 0)
       },
       {
         path: 'sources.spotify.clientSecret',
@@ -559,7 +563,12 @@ export default class ConfigValidationManager {
   }
 
   private validateSourceAppleMusic(applemusic: unknown): ValidationRule[] {
-    if (typeof applemusic !== 'object' || applemusic === null || !(applemusic as Record<string, unknown>).enabled) return []
+    if (
+      typeof applemusic !== 'object' ||
+      applemusic === null ||
+      !(applemusic as Record<string, unknown>).enabled
+    )
+      return []
 
     const a = applemusic as Record<string, unknown>
 
@@ -589,7 +598,12 @@ export default class ConfigValidationManager {
   }
 
   private validateSourceTidal(tidal: unknown): ValidationRule[] {
-    if (typeof tidal !== 'object' || tidal === null || !(tidal as Record<string, unknown>).enabled) return []
+    if (
+      typeof tidal !== 'object' ||
+      tidal === null ||
+      !(tidal as Record<string, unknown>).enabled
+    )
+      return []
 
     const t = tidal as Record<string, unknown>
 
@@ -623,7 +637,12 @@ export default class ConfigValidationManager {
   }
 
   private validateSourceAudius(audius: unknown): ValidationRule[] {
-    if (typeof audius !== 'object' || audius === null || !(audius as Record<string, unknown>).enabled) return []
+    if (
+      typeof audius !== 'object' ||
+      audius === null ||
+      !(audius as Record<string, unknown>).enabled
+    )
+      return []
 
     const au = audius as Record<string, unknown>
 
@@ -660,7 +679,12 @@ export default class ConfigValidationManager {
   }
 
   private validateSourceJiosaavn(jiosaavn: unknown): ValidationRule[] {
-    if (typeof jiosaavn !== 'object' || jiosaavn === null || !(jiosaavn as Record<string, unknown>).enabled) return []
+    if (
+      typeof jiosaavn !== 'object' ||
+      jiosaavn === null ||
+      !(jiosaavn as Record<string, unknown>).enabled
+    )
+      return []
 
     const j = jiosaavn as Record<string, unknown>
 
@@ -677,40 +701,27 @@ export default class ConfigValidationManager {
   }
 
   private validateSourceEternalbox(eternalbox: unknown): ValidationRule[] {
-    if (typeof eternalbox !== 'object' || eternalbox === null || !(eternalbox as Record<string, unknown>).enabled) return []
+    if (
+      typeof eternalbox !== 'object' ||
+      eternalbox === null ||
+      !(eternalbox as Record<string, unknown>).enabled
+    )
+      return []
 
     const e = eternalbox as Record<string, unknown>
 
     return [
       this.urlRule('sources.eternalbox.baseUrl', e.baseUrl),
-      this.positiveIntRule(
-        'sources.eternalbox.searchResults',
-        e.searchResults
-      ),
-      this.positiveIntRule(
-        'sources.eternalbox.maxBranches',
-        e.maxBranches
-      ),
+      this.positiveIntRule('sources.eternalbox.searchResults', e.searchResults),
+      this.positiveIntRule('sources.eternalbox.maxBranches', e.maxBranches),
       this.nonNegativeIntRule(
         'sources.eternalbox.cacheMaxBytes',
         e.cacheMaxBytes
       ),
-      this.booleanRule(
-        'sources.eternalbox.enrichSpotify',
-        e.enrichSpotify
-      ),
-      this.booleanRule(
-        'sources.eternalbox.includeAnalysis',
-        e.includeAnalysis
-      ),
-      this.booleanRule(
-        'sources.eternalbox.eternalStream',
-        e.eternalStream
-      ),
-      this.booleanRule(
-        'sources.eternalbox.infiniteStream',
-        e.infiniteStream
-      ),
+      this.booleanRule('sources.eternalbox.enrichSpotify', e.enrichSpotify),
+      this.booleanRule('sources.eternalbox.includeAnalysis', e.includeAnalysis),
+      this.booleanRule('sources.eternalbox.eternalStream', e.eternalStream),
+      this.booleanRule('sources.eternalbox.infiniteStream', e.infiniteStream),
       this.nonNegativeIntRule(
         'sources.eternalbox.maxReconnects',
         e.maxReconnects
@@ -751,7 +762,12 @@ export default class ConfigValidationManager {
   }
 
   private validateSourcePipertts(pipertts: unknown): ValidationRule[] {
-    if (typeof pipertts !== 'object' || pipertts === null || !(pipertts as Record<string, unknown>).enabled) return []
+    if (
+      typeof pipertts !== 'object' ||
+      pipertts === null ||
+      !(pipertts as Record<string, unknown>).enabled
+    )
+      return []
 
     const p = pipertts as Record<string, unknown>
 
@@ -763,23 +779,29 @@ export default class ConfigValidationManager {
     const pa = pandora as Record<string, unknown>
     if (!pa.enabled || !pa.remoteTokenUrl) return []
 
-    return [
-      this.urlRule('sources.pandora.remoteTokenUrl', pa.remoteTokenUrl)
-    ]
+    return [this.urlRule('sources.pandora.remoteTokenUrl', pa.remoteTokenUrl)]
   }
 
   private validateSourceQobuz(qobuz: unknown): ValidationRule[] {
-    if (typeof qobuz !== 'object' || qobuz === null || !(qobuz as Record<string, unknown>).enabled) return []
+    if (
+      typeof qobuz !== 'object' ||
+      qobuz === null ||
+      !(qobuz as Record<string, unknown>).enabled
+    )
+      return []
 
     const q = qobuz as Record<string, unknown>
 
-    return [
-      this.placeholderWarningRule('sources.qobuz.userToken', q.userToken)
-    ]
+    return [this.placeholderWarningRule('sources.qobuz.userToken', q.userToken)]
   }
 
   private validateSourceLastfm(lastfm: unknown): ValidationRule[] {
-    if (typeof lastfm !== 'object' || lastfm === null || !(lastfm as Record<string, unknown>).enabled) return []
+    if (
+      typeof lastfm !== 'object' ||
+      lastfm === null ||
+      !(lastfm as Record<string, unknown>).enabled
+    )
+      return []
 
     const l = lastfm as Record<string, unknown>
 
@@ -787,20 +809,27 @@ export default class ConfigValidationManager {
   }
 
   private validateSourceBilibili(bilibili: unknown): ValidationRule[] {
-    if (typeof bilibili !== 'object' || bilibili === null || !(bilibili as Record<string, unknown>).enabled) return []
+    if (
+      typeof bilibili !== 'object' ||
+      bilibili === null ||
+      !(bilibili as Record<string, unknown>).enabled
+    )
+      return []
 
     const b = bilibili as Record<string, unknown>
 
     return [
-      this.placeholderWarningRule(
-        'sources.bilibili.sessdata',
-        b.sessdata
-      )
+      this.placeholderWarningRule('sources.bilibili.sessdata', b.sessdata)
     ]
   }
 
   private validateSourceYandexMusic(yandexmusic: unknown): ValidationRule[] {
-    if (typeof yandexmusic !== 'object' || yandexmusic === null || !(yandexmusic as Record<string, unknown>).enabled) return []
+    if (
+      typeof yandexmusic !== 'object' ||
+      yandexmusic === null ||
+      !(yandexmusic as Record<string, unknown>).enabled
+    )
+      return []
 
     const ym = yandexmusic as Record<string, unknown>
 
@@ -825,7 +854,12 @@ export default class ConfigValidationManager {
   }
 
   private validateSourceGaana(gaana: unknown): ValidationRule[] {
-    if (typeof gaana !== 'object' || gaana === null || !(gaana as Record<string, unknown>).enabled) return []
+    if (
+      typeof gaana !== 'object' ||
+      gaana === null ||
+      !(gaana as Record<string, unknown>).enabled
+    )
+      return []
 
     const g = gaana as Record<string, unknown>
 
@@ -834,10 +868,7 @@ export default class ConfigValidationManager {
         'sources.gaana.playlistLoadLimit',
         g.playlistLoadLimit
       ),
-      this.nonNegativeIntRule(
-        'sources.gaana.albumLoadLimit',
-        g.albumLoadLimit
-      ),
+      this.nonNegativeIntRule('sources.gaana.albumLoadLimit', g.albumLoadLimit),
       this.nonNegativeIntRule(
         'sources.gaana.artistLoadLimit',
         g.artistLoadLimit
@@ -846,7 +877,12 @@ export default class ConfigValidationManager {
   }
 
   private validateSourceFlowery(flowery: unknown): ValidationRule[] {
-    if (typeof flowery !== 'object' || flowery === null || !(flowery as Record<string, unknown>).enabled) return []
+    if (
+      typeof flowery !== 'object' ||
+      flowery === null ||
+      !(flowery as Record<string, unknown>).enabled
+    )
+      return []
 
     const fl = flowery as Record<string, unknown>
 
@@ -859,19 +895,18 @@ export default class ConfigValidationManager {
   }
 
   private validateSourceLazypytts(lazypytts: unknown): ValidationRule[] {
-    if (typeof lazypytts !== 'object' || lazypytts === null || !(lazypytts as Record<string, unknown>).enabled) return []
+    if (
+      typeof lazypytts !== 'object' ||
+      lazypytts === null ||
+      !(lazypytts as Record<string, unknown>).enabled
+    )
+      return []
 
     const lp = lazypytts as Record<string, unknown>
 
     return [
-      this.positiveIntRule(
-        'sources.lazypytts.maxTextLength',
-        lp.maxTextLength
-      ),
-      this.booleanRule(
-        'sources.lazypytts.enforceConfig',
-        lp.enforceConfig
-      )
+      this.positiveIntRule('sources.lazypytts.maxTextLength', lp.maxTextLength),
+      this.booleanRule('sources.lazypytts.enforceConfig', lp.enforceConfig)
     ]
   }
 
@@ -898,12 +933,17 @@ export default class ConfigValidationManager {
           const sources = this.options.sources
           if (!sources) return false
           const sourcesRecord = sources as Record<string, unknown>
-          if (typeof v === 'string') return (sourcesRecord[v] as Record<string, unknown>)?.enabled === true
+          if (typeof v === 'string')
+            return (
+              (sourcesRecord[v] as Record<string, unknown>)?.enabled === true
+            )
           if (Array.isArray(v)) {
             if (v.length === 0) return false
             return v.every(
               (name: unknown) =>
-                typeof name === 'string' && (sourcesRecord[name] as Record<string, unknown>)?.enabled === true
+                typeof name === 'string' &&
+                (sourcesRecord[name] as Record<string, unknown>)?.enabled ===
+                  true
             )
           }
           return false
@@ -924,7 +964,8 @@ export default class ConfigValidationManager {
           const sourcesRecord = sources as Record<string, unknown>
           return v.every(
             (name: unknown) =>
-              typeof name === 'string' && (sourcesRecord[name] as Record<string, unknown>)?.enabled === true
+              typeof name === 'string' &&
+              (sourcesRecord[name] as Record<string, unknown>)?.enabled === true
           )
         }
       })
@@ -1266,15 +1307,13 @@ export default class ConfigValidationManager {
     }
   }
 
-  private nonNegativeIntRule(
-    path: string,
-    value: unknown
-  ): ValidationRule {
+  private nonNegativeIntRule(path: string, value: unknown): ValidationRule {
     return {
       path,
       expected: 'integer >= 0',
       value,
-      validate: (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 0
+      validate: (v: unknown) =>
+        typeof v === 'number' && Number.isInteger(v) && v >= 0
     }
   }
 
@@ -1283,7 +1322,8 @@ export default class ConfigValidationManager {
       path,
       expected: 'integer > 0',
       value,
-      validate: (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v > 0
+      validate: (v: unknown) =>
+        typeof v === 'number' && Number.isInteger(v) && v > 0
     }
   }
 
@@ -1297,7 +1337,8 @@ export default class ConfigValidationManager {
       path,
       expected: `integer between ${min} and ${max}`,
       value,
-      validate: (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max
+      validate: (v: unknown) =>
+        typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max
     }
   }
 
@@ -1310,10 +1351,7 @@ export default class ConfigValidationManager {
     }
   }
 
-  private nonEmptyStringRule(
-    path: string,
-    value: unknown
-  ): ValidationRule {
+  private nonEmptyStringRule(path: string, value: unknown): ValidationRule {
     return {
       path,
       expected: 'non-empty string',
@@ -1370,7 +1408,11 @@ export default class ConfigValidationManager {
       expected: `integer > ${dependencyPath} (${dependency})`,
       value,
       validate: (v: unknown) =>
-        typeof v === 'number' && Number.isInteger(v) && typeof dependency === 'number' && Number.isInteger(dependency) && v > dependency
+        typeof v === 'number' &&
+        Number.isInteger(v) &&
+        typeof dependency === 'number' &&
+        Number.isInteger(dependency) &&
+        v > dependency
     }
   }
 
@@ -1385,7 +1427,11 @@ export default class ConfigValidationManager {
       expected: `integer <= ${dependencyPath} (${dependency})`,
       value,
       validate: (v: unknown) =>
-        typeof v === 'number' && Number.isInteger(v) && typeof dependency === 'number' && Number.isInteger(dependency) && v <= dependency
+        typeof v === 'number' &&
+        Number.isInteger(v) &&
+        typeof dependency === 'number' &&
+        Number.isInteger(dependency) &&
+        v <= dependency
     }
   }
 
@@ -1423,10 +1469,7 @@ export default class ConfigValidationManager {
     }
   }
 
-  private positiveNumberRule(
-    path: string,
-    value: unknown
-  ): ValidationRule {
+  private positiveNumberRule(path: string, value: unknown): ValidationRule {
     return {
       path,
       expected: 'number > 0',
@@ -1435,10 +1478,7 @@ export default class ConfigValidationManager {
     }
   }
 
-  private stringArrayRule(
-    path: string,
-    value: unknown
-  ): ValidationRule {
+  private stringArrayRule(path: string, value: unknown): ValidationRule {
     return {
       path,
       expected: 'array of strings',

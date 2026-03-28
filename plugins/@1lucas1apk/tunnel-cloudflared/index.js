@@ -1,10 +1,11 @@
-import fs from "node:fs"
-import { spawn } from "node:child_process"
+import { spawn } from 'node:child_process'
+import fs from 'node:fs'
 
-export default async function(nodelink, config, context) {
+export default async function (nodelink, config, context) {
   if (context.type !== 'master') return
 
-  const logger = (msg, level = 'info') => nodelink.logger(level, 'Cloudflared', msg)
+  const logger = (msg, level = 'info') =>
+    nodelink.logger(level, 'Cloudflared', msg)
 
   const token = config.token || process.env.CF_TUNNEL_TOKEN
   const port = nodelink.options.server.port || 3000
@@ -16,9 +17,12 @@ export default async function(nodelink, config, context) {
 
   let cloudflared
   try {
-    cloudflared = await import("cloudflared")
-  } catch (e) {
-    logger('Package "cloudflared" not found. Please install it in the plugin folder.', 'error')
+    cloudflared = await import('cloudflared')
+  } catch (_e) {
+    logger(
+      'Package "cloudflared" not found. Please install it in the plugin folder.',
+      'error'
+    )
     return
   }
 
@@ -33,8 +37,8 @@ export default async function(nodelink, config, context) {
 
   const tunnel = spawn(
     bin,
-    ["tunnel", "run", "--token", token, "--url", `http://127.0.0.1:${port}`],
-    { stdio: ["ignore", "pipe", "pipe"], env: process.env }
+    ['tunnel', 'run', '--token', token, '--url', `http://127.0.0.1:${port}`],
+    { stdio: ['ignore', 'pipe', 'pipe'], env: process.env }
   )
 
   tunnel.stdout.on('data', (data) => {
@@ -62,7 +66,7 @@ export default async function(nodelink, config, context) {
   nodelink.once('shutdown', () => {
     if (tunnel && !tunnel.killed) {
       logger('Closing tunnel...')
-      tunnel.kill("SIGKILL")
+      tunnel.kill('SIGKILL')
     }
   })
 }

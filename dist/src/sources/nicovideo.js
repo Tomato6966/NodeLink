@@ -241,6 +241,7 @@ export default class NicoVideoSource {
         const { body, error, statusCode } = await http1makeRequest(`https://api.search.nicovideo.jp/api/v2/snapshot/video/contents/search?${params.toString()}`);
         if (error || statusCode !== 200) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Failed to search: ${this.getRequestFailureMessage(error, statusCode)}`,
                     severity: 'fault'
@@ -289,6 +290,7 @@ export default class NicoVideoSource {
         const { body, error, statusCode } = await http1makeRequest(`https://www.nicovideo.jp/watch/${videoId}?responseType=json`, { headers: this.buildHeaders() });
         if (error || statusCode !== 200) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Failed to resolve URL: ${this.getRequestFailureMessage(error, statusCode)}`,
                     severity: 'fault'
@@ -300,6 +302,7 @@ export default class NicoVideoSource {
         const videoIdFromApi = watchPage?.data?.response?.client?.watchId;
         if (!jsonLd || !videoIdFromApi) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Could not extract video information.',
                     severity: 'common'
@@ -350,6 +353,7 @@ export default class NicoVideoSource {
         });
         if (error || statusCode !== 200) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Failed to get track page: ${this.getRequestFailureMessage(error, statusCode)}`,
                     severity: 'fault'
@@ -359,6 +363,7 @@ export default class NicoVideoSource {
         const response = this.getWatchPageResponse(pageData)?.data?.response;
         if (!response) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Failed to extract response data from page',
                     severity: 'fault'
@@ -370,6 +375,7 @@ export default class NicoVideoSource {
         const accessRightKey = dmcMedia?.accessRightKey;
         if (!dmcMedia || !watchTrackId || !accessRightKey) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Failed to extract required DMC info for stream access',
                     severity: 'fault'
@@ -387,6 +393,7 @@ export default class NicoVideoSource {
         });
         if (streamError || streamStatus !== 201) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Failed to get stream access rights: ${this.getRequestFailureMessage(streamError, streamStatus)}`,
                     severity: 'fault'
@@ -397,6 +404,7 @@ export default class NicoVideoSource {
         const masterPlaylistUrl = this.getAccessRightsResponse(streamData)?.data?.contentUrl;
         if (!masterPlaylistUrl) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Failed to extract master playlist URL',
                     severity: 'fault'
@@ -408,6 +416,7 @@ export default class NicoVideoSource {
         });
         if (masterError || masterStatus !== 200) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Failed to fetch master HLS playlist: ${this.getRequestFailureMessage(masterError, masterStatus)}`,
                     severity: 'fault'
@@ -416,6 +425,7 @@ export default class NicoVideoSource {
         }
         if (typeof masterPlaylistContent !== 'string') {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Master playlist response was not returned as text',
                     severity: 'fault'
@@ -437,6 +447,7 @@ export default class NicoVideoSource {
         const audioUri = audioTag.match(/URI="([^"]+)"/)?.[1];
         if (!audioUri) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Could not parse audio URI from master playlist',
                     severity: 'fault'
@@ -481,6 +492,7 @@ export default class NicoVideoSource {
             return { stream, type: 'fmp4' };
         }
         return {
+            loadType: 'error',
             exception: {
                 message: 'Unsupported protocol',
                 severity: 'common'

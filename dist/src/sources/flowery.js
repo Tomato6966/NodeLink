@@ -410,6 +410,7 @@ export default class FlowerySource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: this.getErrorMessage(error instanceof Error ? error : String(error)),
                     severity: 'fault',
@@ -456,6 +457,7 @@ export default class FlowerySource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: this.getErrorMessage(error instanceof Error ? error : String(error)),
                     severity: 'fault',
@@ -539,6 +541,7 @@ export default class FlowerySource {
             const message = this.getErrorMessage(error instanceof Error ? error : String(error));
             logger('error', 'Sources', `Failed to load Flowery TTS stream: ${message}`);
             return {
+                loadType: 'error',
                 exception: {
                     message,
                     severity: 'common',

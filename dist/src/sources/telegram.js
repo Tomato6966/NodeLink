@@ -78,6 +78,7 @@ export default class TelegramSource {
             });
             if (error || statusCode !== 200 || typeof body !== 'string') {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: error || `Telegram embed request returned status ${statusCode}`,
                         severity: 'fault'
@@ -146,6 +147,7 @@ export default class TelegramSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error
                         ? error.message
@@ -188,6 +190,7 @@ export default class TelegramSource {
             }
         }
         return {
+            loadType: 'error',
             exception: {
                 message: 'Failed to get track URL',
                 severity: 'fault'
@@ -228,6 +231,7 @@ export default class TelegramSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error ? error.message : 'Telegram stream failed.',
                     severity: 'common'

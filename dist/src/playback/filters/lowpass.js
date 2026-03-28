@@ -23,7 +23,7 @@ export default class Lowpass extends AnimatableFilter {
         const targetLogSmoothing = smoothing > 1.0 ? Math.log10(smoothing) : 0;
         super.applyAnimatedUpdate({
             lowpass: {
-                logSmoothing: targetLogSmoothing,
+                logSmoothing: targetLogSmoothing
             }
         }, 'lowpass', { logSmoothing: 0 });
     }

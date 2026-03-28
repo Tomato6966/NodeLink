@@ -39,7 +39,7 @@ export default class Flanger extends AnimatableFilter {
         const targetAlpha = isDisabled ? 0.0 : isActive ? 1.0 : 0.0;
         super.applyAnimatedUpdate({
             flanger: {
-                alpha: targetAlpha,
+                alpha: targetAlpha
             }
         }, 'flanger', { alpha: 0.0 });
     }

@@ -137,7 +137,7 @@ export default class MixcloudSource {
    * @returns Error result payload.
    */
   private errorResult(message: string): MixcloudSourceResult {
-    return { loadType: 'error', data: { message, severity: 'fault' } }
+    return { loadType: 'error', exception: { message, severity: 'fault' } }
   }
 
   /**
@@ -272,7 +272,11 @@ export default class MixcloudSource {
             sourceName: 'mixcloud'
           }
           const encodedInput: TrackEncodeInput = { ...info, details: [] }
-          return { encoded: encodeTrack(encodedInput), info, pluginInfo: {} }
+          return {
+            encoded: encodeTrack(encodedInput),
+            info,
+            pluginInfo: {} as Record<string, unknown>
+          }
         })
         .filter((track) => track.info.uri.length > 0)
         .slice(0, this.config.maxSearchResults || DEFAULT_MAX_RESULTS)

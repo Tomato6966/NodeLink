@@ -207,6 +207,7 @@ export default class TwitterSource {
         const trackData = this.extractTrackFromResult(resolvedTrack);
         if (!trackData) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Failed to extract Twitter media URL',
                     severity: 'fault'
@@ -282,7 +283,7 @@ export default class TwitterSource {
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             logger('error', 'Twitter', `Failed to load stream: ${message}`);
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
     /**

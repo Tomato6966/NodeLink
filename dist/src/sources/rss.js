@@ -122,10 +122,7 @@ export default class RssSource {
             logger('error', 'RSS', `Resolve failed: ${message}`);
             return {
                 loadType: 'error',
-                data: {
-                    message,
-                    severity: 'fault'
-                }
+                exception: { message, severity: 'fault' }
             };
         }
     }
@@ -140,6 +137,7 @@ export default class RssSource {
         const url = track.uri;
         if (!url) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Missing enclosure URL.',
                     severity: 'common'

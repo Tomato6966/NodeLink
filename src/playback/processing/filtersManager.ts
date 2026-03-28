@@ -51,7 +51,6 @@ const FILTER_CLASSES: Record<string, FilterClass> = {
   flanger: Flanger,
   phonograph: Phonograph
 }
-
 const CANONICAL_KEY_MAP: Record<string, string> = {}
 for (const key in FILTER_CLASSES) {
   CANONICAL_KEY_MAP[key.toLowerCase()] = key
@@ -67,10 +66,23 @@ for (const key in FILTER_CLASSES) {
  * @public
  */
 export class FiltersManager extends Transform implements IFiltersManager {
+  /**
+   * NodeLink context containing configuration and extensions.
+   * @internal
+   */
   private readonly nodelink: FiltersManagerContext
+
+  /**
+   * Ordered sequence of filter instances currently processing the audio stream.
+   * @internal
+   */
   private activeFilters: FilterInstance[]
+
+  /**
+   * Map of all available filter instances by their canonical name.
+   * @internal
+   */
   private filterInstances: Record<string, FilterInstance>
-  private _lastRawFilters: FiltersState | FilterSettings = {}
 
   /**
    * When true, _transform passes chunks through without processing.
@@ -111,7 +123,6 @@ export class FiltersManager extends Transform implements IFiltersManager {
    * @param filters - Filter settings (supports `{ filters: {...} }` or direct map).
    */
   update(filters: FiltersState | FilterSettings): void {
-    this._lastRawFilters = filters
     const settings = this._normalizeFilters(filters)
 
     const normalizedSettings: Record<string, unknown> = {}
@@ -242,7 +253,6 @@ export class FiltersManager extends Transform implements IFiltersManager {
         delete this.filterInstances[name]
       }
     }
-    this._lastRawFilters = {}
     this.activeFilters = []
   }
 

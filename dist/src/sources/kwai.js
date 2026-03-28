@@ -45,6 +45,7 @@ export default class KwaiSource {
      */
     async search(_query) {
         return {
+            loadType: 'error',
             exception: {
                 message: 'Search not supported for Kwai',
                 severity: 'fault',
@@ -67,6 +68,7 @@ export default class KwaiSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error ? error.message : 'Invalid Kwai URL',
                     severity: 'fault',
@@ -87,6 +89,7 @@ export default class KwaiSource {
             const videoData = await this.getVideoInfo(track.identifier);
             if (!videoData.videoUrl) {
                 return {
+                    loadType: 'error',
                     exception: {
                         message: 'Video URL not found',
                         severity: 'fault',
@@ -102,6 +105,7 @@ export default class KwaiSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error ? error.message : 'Failed to get video URL',
                     severity: 'fault',
@@ -151,6 +155,7 @@ export default class KwaiSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error ? error.message : 'Failed to load stream',
                     severity: 'fault',

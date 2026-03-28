@@ -594,6 +594,7 @@ export default class AudiomackSource {
      */
     createException(message, severity, cause) {
         return {
+            loadType: 'error',
             exception: {
                 message,
                 severity,

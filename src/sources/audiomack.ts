@@ -138,6 +138,7 @@ interface AudiomackApiEnvelope<T> {
  * Encodable Audiomack track information.
  */
 interface AudiomackTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /** Whether the track can be seeked. */
   isSeekable: boolean
 
@@ -162,7 +163,7 @@ interface AudiomackTrackData {
   info: AudiomackTrackInfo
 
   /** Audiomack does not attach plugin metadata here. */
-  pluginInfo: Record<string, never>
+  pluginInfo: Record<string, unknown>
 }
 
 /**
@@ -177,23 +178,6 @@ interface AudiomackAdditionalData extends Record<string, unknown> {
 
   /** Explicit format provided by the caller. */
   format?: string
-}
-
-/**
- * Structured source exception payload used by the Audiomack source.
- */
-interface AudiomackExceptionResult {
-  /** Exception metadata returned to the source pipeline. */
-  exception: {
-    /** Human-readable failure message. */
-    message: string
-
-    /** Error severity used by the source manager. */
-    severity: string
-
-    /** Optional error origin. */
-    cause?: string
-  }
 }
 
 /**
@@ -623,7 +607,7 @@ export default class AudiomackSource {
    */
   public async getTrackUrl(
     track: TrackInfo
-  ): Promise<TrackUrlResult | AudiomackExceptionResult> {
+  ): Promise<TrackUrlResult | SourceResult> {
     if (!track.identifier) {
       return this.createException(
         'Track identifier (numeric ID) missing',
@@ -738,7 +722,7 @@ export default class AudiomackSource {
     url: string,
     _protocol?: string,
     additionalData?: AudiomackAdditionalData
-  ): Promise<TrackStreamResult | AudiomackExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     try {
       const response = await http1makeRequest(url, {
         method: 'GET',
@@ -913,7 +897,7 @@ export default class AudiomackSource {
     return {
       encoded: encodeTrack(trackInfo),
       info: trackInfo,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown>
     }
   }
 
@@ -986,8 +970,9 @@ export default class AudiomackSource {
     message: string,
     severity: string,
     cause?: string
-  ): AudiomackExceptionResult {
+  ): SourceResult {
     return {
+      loadType: 'error',
       exception: {
         message,
         severity,

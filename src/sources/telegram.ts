@@ -13,6 +13,7 @@ import { encodeTrack, http1makeRequest, logger } from '../utils.ts'
  * Telegram-specific plugin payload attached to resolved tracks.
  */
 interface TelegramTrackPluginInfo {
+  [x: string]: unknown
   /**
    * Direct Telegram media URL extracted from the embed page.
    */
@@ -23,6 +24,7 @@ interface TelegramTrackPluginInfo {
  * Track payload compatible with the shared encoder.
  */
 interface TelegramTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -86,32 +88,12 @@ interface TelegramPlaylistData {
   /**
    * Telegram playlist payload does not currently attach extra metadata.
    */
-  pluginInfo: Record<string, never>
+  pluginInfo: Record<string, unknown>
 
   /**
    * Video tracks extracted from the Telegram message.
    */
   tracks: TelegramTrackData[]
-}
-
-/**
- * Exception payload returned by Telegram operations.
- */
-interface TelegramExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-  }
 }
 
 /**
@@ -206,6 +188,7 @@ export default class TelegramSource {
 
       if (error || statusCode !== 200 || typeof body !== 'string') {
         return {
+          loadType: 'error',
           exception: {
             message:
               error || `Telegram embed request returned status ${statusCode}`,
@@ -281,7 +264,7 @@ export default class TelegramSource {
           name: title,
           selectedTrack: 0
         },
-        pluginInfo: {},
+        pluginInfo: {} as Record<string, unknown>,
         tracks
       }
 
@@ -291,6 +274,7 @@ export default class TelegramSource {
       }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message:
             error instanceof Error
@@ -311,7 +295,7 @@ export default class TelegramSource {
    */
   public async getTrackUrl(
     track: TrackInfo
-  ): Promise<TrackUrlResult | TelegramExceptionResult> {
+  ): Promise<TrackUrlResult | SourceResult> {
     const result = await this.resolve(track.uri)
     const resultData = result as {
       loadType?: string
@@ -344,6 +328,7 @@ export default class TelegramSource {
     }
 
     return {
+      loadType: 'error',
       exception: {
         message: 'Failed to get track URL',
         severity: 'fault'
@@ -362,7 +347,7 @@ export default class TelegramSource {
   public async loadStream(
     _decodedTrack: TrackInfo,
     url: string
-  ): Promise<TrackStreamResult | TelegramExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     try {
       const response = await http1makeRequest(url, {
         method: 'GET',
@@ -392,6 +377,7 @@ export default class TelegramSource {
       return { stream, type: 'video/mp4' }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message:
             error instanceof Error ? error.message : 'Telegram stream failed.',

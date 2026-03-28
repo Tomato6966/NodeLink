@@ -1,24 +1,28 @@
 import { getBestMatch, logger, makeRequest } from "../utils.js";
 /**
- * Deezer lyrics provider backed by Deezer GraphQL endpoint.
+ * Deezer lyrics provider utilizing the Deezer GraphQL internal API.
+ * Supports word-by-word and line-level synchronization.
  * @public
  */
 export default class DeezerLyrics {
     /**
-     * Runtime NodeLink context.
+     * NodeLink service context required for source lookups.
+     * @public
      */
     nodelink;
     /**
-     * Cached Deezer JWT token.
+     * Cached anonymous JWT token for authentication.
+     * @internal
      */
     jwt;
     /**
-     * JWT expiration timestamp in milliseconds.
+     * Unix timestamp (ms) when the current JWT expires.
+     * @internal
      */
     jwtExpiry;
     /**
-     * Creates a new Deezer lyrics provider.
-     * @param nodelink - Runtime NodeLink context.
+     * Constructs a new DeezerLyrics provider.
+     * @param nodelink - The parent service context.
      */
     constructor(nodelink) {
         this.nodelink = nodelink;
@@ -26,15 +30,17 @@ export default class DeezerLyrics {
         this.jwtExpiry = 0;
     }
     /**
-     * Initializes provider resources.
-     * @returns Always true for this provider.
+     * Performs provider-specific resource initialization.
+     * @returns A promise resolving to true.
+     * @public
      */
     async setup() {
         return true;
     }
     /**
-     * Retrieves and caches Deezer JWT used by lyrics endpoint.
-     * @returns JWT token or null when unavailable.
+     * Obtains a valid anonymous JWT from the Deezer authentication service.
+     * Caches results until expiration.
+     * @returns A promise resolving to the JWT string or null.
      * @internal
      */
     async _getJwt() {
@@ -59,9 +65,11 @@ export default class DeezerLyrics {
         }
     }
     /**
-     * Loads lyrics for a track.
-     * @param trackInfo - Track metadata from manager.
-     * @returns Lyrics payload or empty result.
+     * Fetches and parses lyrics for the specified track.
+     * Automatically resolves non-Deezer tracks using metadata matching.
+     * @param trackInfo - Metadata of the track to fetch lyrics for.
+     * @returns A promise resolving to a LyricsResult.
+     * @public
      */
     async getLyrics(trackInfo) {
         const jwt = await this._getJwt();
@@ -71,13 +79,12 @@ export default class DeezerLyrics {
         if (trackInfo.sourceName !== 'deezer') {
             const query = `${trackInfo.title} ${trackInfo.author}`;
             const searchRes = await this.nodelink.sources.search('deezer', query);
-            const searchData = searchRes.data;
             if (searchRes.loadType !== 'search' ||
-                !Array.isArray(searchData) ||
-                searchData.length === 0) {
+                !Array.isArray(searchRes.data) ||
+                searchRes.data.length === 0) {
                 return { loadType: 'empty', data: {} };
             }
-            const candidates = searchData;
+            const candidates = searchRes.data;
             const bestMatch = getBestMatch(candidates, trackInfo);
             if (!bestMatch)
                 return { loadType: 'empty', data: {} };

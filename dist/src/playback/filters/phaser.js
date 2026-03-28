@@ -54,7 +54,7 @@ export default class Phaser extends AnimatableFilter {
         const targetAlpha = isDisabled ? 0.0 : isActive ? 1.0 : 0.0;
         super.applyAnimatedUpdate({
             phaser: {
-                alpha: targetAlpha,
+                alpha: targetAlpha
             }
         }, 'phaser', { alpha: 0.0 });
     }

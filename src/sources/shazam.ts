@@ -1,5 +1,6 @@
 import type {
   SourceResult,
+  TrackData,
   TrackInfo,
   TrackUrlResult,
   WorkerNodeLink
@@ -142,6 +143,7 @@ interface ShazamSongItem {
  * Track plugin metadata attached to Shazam results.
  */
 interface ShazamTrackPluginInfo {
+  [x: string]: unknown
   /**
    * Linked Apple Music page extracted from the Shazam page when available.
    */
@@ -152,6 +154,7 @@ interface ShazamTrackPluginInfo {
  * Track payload accepted by the shared encoder.
  */
 interface ShazamTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -190,7 +193,7 @@ interface ShazamTrackData extends BestMatchCandidate {
   /**
    * Shazam-specific plugin metadata.
    */
-  pluginInfo: ShazamTrackPluginInfo | Record<string, never>
+  pluginInfo: ShazamTrackPluginInfo | Record<string, unknown>
 }
 
 /**
@@ -221,26 +224,6 @@ interface ShazamSourceManager {
    * @returns Track URL metadata.
    */
   getTrackUrl: (track: TrackInfo) => Promise<TrackUrlResult>
-}
-
-/**
- * Exception payload returned by Shazam operations.
- */
-interface ShazamExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-  }
 }
 
 /**
@@ -360,7 +343,7 @@ export default class ShazamSource {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger('error', 'Shazam', `Search failed for ${query}: ${message}`)
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
   }
 
@@ -443,7 +426,7 @@ export default class ShazamSource {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger('error', 'Shazam', `Failed to resolve ${url}: ${message}`)
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
   }
 
@@ -457,10 +440,11 @@ export default class ShazamSource {
    */
   public async getTrackUrl(
     decodedTrack: TrackInfo
-  ): Promise<TrackUrlResult | ShazamExceptionResult> {
+  ): Promise<TrackUrlResult | SourceResult> {
     const sourceManager = this.getSourceManager()
     if (!sourceManager) {
       return {
+        loadType: 'error',
         exception: {
           message: 'Source manager is not available for Shazam resolution.',
           severity: 'fault'
@@ -482,6 +466,7 @@ export default class ShazamSource {
 
       if (searchTracks.length === 0) {
         return {
+          loadType: 'error',
           exception: { message: 'No alternative found.', severity: 'fault' }
         }
       }
@@ -495,6 +480,7 @@ export default class ShazamSource {
 
       if (!bestMatch) {
         return {
+          loadType: 'error',
           exception: { message: 'No suitable match.', severity: 'fault' }
         }
       }
@@ -504,7 +490,7 @@ export default class ShazamSource {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger('error', 'Shazam', `Failed to get track URL: ${message}`)
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
   }
 
@@ -583,7 +569,7 @@ export default class ShazamSource {
        */
       isrc: string | null
     },
-    pluginInfo: ShazamTrackPluginInfo | Record<string, never> = {}
+    pluginInfo: ShazamTrackPluginInfo | Record<string, unknown> = {}
   ): ShazamTrackData {
     const info: ShazamTrackInfo = {
       identifier: input.identifier,
@@ -1131,16 +1117,15 @@ export default class ShazamSource {
    * @returns Track array suitable for best-match selection.
    */
   private extractTrackArray(result: SourceResult): ShazamTrackData[] {
-    const resultData = result.data as JsonValue | ShazamTrackData[] | undefined
-
-    if (
-      result.loadType === 'search' &&
-      Array.isArray(resultData) &&
-      resultData.every((item) => this.isTrackData(item))
-    ) {
-      return resultData
+    if (result.loadType === 'search') {
+      const resultData = result.data
+      if (
+        Array.isArray(resultData) &&
+        resultData.every((item) => this.isTrackData(item))
+      ) {
+        return resultData as ShazamTrackData[]
+      }
     }
-
     return []
   }
 
@@ -1151,7 +1136,7 @@ export default class ShazamSource {
    * @returns `true` when the value is a usable encoded track payload.
    */
   private isTrackData(
-    value: JsonValue | ShazamTrackData | undefined
+    value: JsonValue | ShazamTrackData | TrackData | undefined
   ): value is ShazamTrackData {
     const record = this.getRecordFromValue(value as JsonValue)
     if (!record) {

@@ -49,7 +49,7 @@ export default class Flanger extends AnimatableFilter {
     super.applyAnimatedUpdate(
       {
         flanger: {
-          alpha: targetAlpha,
+          alpha: targetAlpha
         }
       },
       'flanger',

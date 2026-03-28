@@ -3,13 +3,8 @@
     "target": "ESNext",
     "module": "NodeNext",
     "moduleResolution": "nodenext",
-    "lib": [
-      "ESNext"
-    ],
-    "types": [
-      "node",
-      "bun"
-    ],
+    "lib": ["ESNext"],
+    "types": ["node", "bun"],
     "allowJs": true,
     "checkJs": false,
     "noEmit": false,
@@ -27,16 +22,8 @@
     "noPropertyAccessFromIndexSignature": false,
     "incremental": true,
     "tsBuildInfoFile": ".cache/tsconfig.tsbuildinfo",
-    "rootDir": ".",
+    "rootDir": "."
   },
-  "include": [
-    "src/**/*",
-    "plugins/**/*",
-    "scripts/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    ".cache"
-  ]
+  "include": ["src/**/*", "plugins/**/*", "scripts/**/*"],
+  "exclude": ["node_modules", "dist", ".cache"]
 }

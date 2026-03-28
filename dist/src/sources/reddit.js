@@ -79,6 +79,7 @@ export default class RedditSource {
      */
     async search() {
         return {
+            loadType: 'error',
             exception: {
                 message: 'Search not supported for Reddit',
                 severity: 'common'
@@ -97,6 +98,7 @@ export default class RedditSource {
         const result = await this.getRedditTrack(params);
         if ('error' in result) {
             return {
+                loadType: 'error',
                 exception: {
                     message: result.error,
                     severity: 'fault'
@@ -136,7 +138,10 @@ export default class RedditSource {
     async getTrackUrl(track) {
         const result = await this.getRedditTrack(this.parseUrl(track.uri));
         if ('error' in result) {
-            return { exception: { message: result.error, severity: 'fault' } };
+            return {
+                loadType: 'error',
+                exception: { message: result.error, severity: 'fault' }
+            };
         }
         if (result.typeId === 'tunnel') {
             const audioUrl = result.urls[1];
@@ -181,6 +186,7 @@ export default class RedditSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error ? error.message : 'Failed to load stream.',
                     severity: 'common',

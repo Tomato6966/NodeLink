@@ -184,7 +184,7 @@ export default class SongLinkSource {
             }
             return {
                 loadType: 'error',
-                data: {
+                exception: {
                     message: 'No supported platform links found for this Song.link URL.',
                     severity: 'fault'
                 }
@@ -195,7 +195,7 @@ export default class SongLinkSource {
             logger('error', 'SongLink', `Resolution failed: ${message}`);
             return {
                 loadType: 'error',
-                data: { message, severity: 'fault' }
+                exception: { message, severity: 'fault' }
             };
         }
     }
@@ -289,7 +289,7 @@ export default class SongLinkSource {
         catch (error) {
             const message = this.getErrorMessage(error);
             logger('error', 'SongLink', `Search failed: ${message}`);
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
     /**

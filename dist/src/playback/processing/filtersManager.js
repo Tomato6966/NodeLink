@@ -51,10 +51,21 @@ for (const key in FILTER_CLASSES) {
  * @public
  */
 export class FiltersManager extends Transform {
+    /**
+     * NodeLink context containing configuration and extensions.
+     * @internal
+     */
     nodelink;
+    /**
+     * Ordered sequence of filter instances currently processing the audio stream.
+     * @internal
+     */
     activeFilters;
+    /**
+     * Map of all available filter instances by their canonical name.
+     * @internal
+     */
     filterInstances;
-    _lastRawFilters = {};
     /**
      * When true, _transform passes chunks through without processing.
      * Used by transition handling to avoid double-processing: the upstream
@@ -86,7 +97,6 @@ export class FiltersManager extends Transform {
      * @param filters - Filter settings (supports `{ filters: {...} }` or direct map).
      */
     update(filters) {
-        this._lastRawFilters = filters;
         const settings = this._normalizeFilters(filters);
         const normalizedSettings = {};
         for (const name in settings) {
@@ -202,7 +212,6 @@ export class FiltersManager extends Transform {
                 delete this.filterInstances[name];
             }
         }
-        this._lastRawFilters = {};
         this.activeFilters = [];
     }
     _transform(chunk, _encoding, callback) {

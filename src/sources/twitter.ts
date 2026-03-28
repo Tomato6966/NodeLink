@@ -48,6 +48,7 @@ interface TwitterRuntimeOptions {
  * Track-specific plugin metadata attached to Twitter tracks.
  */
 interface TwitterTrackPluginInfo {
+  [x: string]: unknown
   /**
    * Direct media URL extracted from Twitter.
    */
@@ -63,6 +64,7 @@ interface TwitterTrackPluginInfo {
  * Payload accepted by the shared encoder.
  */
 interface TwitterTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -216,26 +218,6 @@ interface TwitterResolvedTrackInput {
    * Direct Twitter media URL.
    */
   directUrl: string
-}
-
-/**
- * Exception payload returned by Twitter operations.
- */
-interface TwitterExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-  }
 }
 
 /**
@@ -476,7 +458,7 @@ export default class TwitterSource {
     track: TrackInfo & { pluginInfo?: Partial<TwitterTrackPluginInfo> },
     _itag?: number,
     forceRefresh: boolean = false
-  ): Promise<TwitterTrackUrlSuccess | TwitterExceptionResult> {
+  ): Promise<TwitterTrackUrlSuccess | SourceResult> {
     const cacheManager = this.nodelink.trackCacheManager as
       | TwitterTrackCacheManager
       | undefined
@@ -510,6 +492,7 @@ export default class TwitterSource {
 
     if (!trackData) {
       return {
+        loadType: 'error',
         exception: {
           message: 'Failed to extract Twitter media URL',
           severity: 'fault'
@@ -545,7 +528,7 @@ export default class TwitterSource {
     url: string,
     _protocol?: string,
     additionalData?: TwitterAdditionalData
-  ): Promise<TrackStreamResult | TwitterExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     try {
       const streamHeaders: Record<string, string> = {
         'User-Agent': TWITTER_USER_AGENT,
@@ -609,7 +592,7 @@ export default class TwitterSource {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger('error', 'Twitter', `Failed to load stream: ${message}`)
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
   }
 
@@ -900,10 +883,11 @@ export default class TwitterSource {
   private extractTrackFromResult(
     result: SourceResult
   ): TwitterTrackData | null {
-    const resultData = result.data as JsonValue | TwitterTrackData | undefined
-
-    if (result.loadType === 'track' && this.isTrackData(resultData)) {
-      return resultData
+    if (result.loadType === 'track') {
+      const resultData = result.data as unknown as TwitterTrackData
+      if (this.isTrackData(resultData)) {
+        return resultData
+      }
     }
 
     return null

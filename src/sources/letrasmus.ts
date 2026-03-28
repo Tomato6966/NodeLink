@@ -130,6 +130,7 @@ interface LetrasRecommendationItem {
  * Track payload accepted by the shared encoder.
  */
 interface LetrasTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -168,7 +169,7 @@ interface LetrasTrackData extends BestMatchCandidate {
   /**
    * LetrasMus does not currently attach plugin metadata here.
    */
-  pluginInfo: Record<string, never>
+  pluginInfo: Record<string, unknown>
 }
 
 /**
@@ -223,26 +224,6 @@ interface LetrasSourceManager {
     protocol?: string,
     additionalData?: Record<string, JsonValue>
   ) => Promise<TrackStreamResult & { type?: string }>
-}
-
-/**
- * Exception payload returned by LetrasMus operations.
- */
-interface LetrasExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-  }
 }
 
 /**
@@ -455,6 +436,7 @@ export default class LetrasMusSource {
         : { loadType: 'empty', data: {} }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message: error instanceof Error ? error.message : String(error),
           severity: 'fault'
@@ -483,6 +465,7 @@ export default class LetrasMusSource {
       const html = this.getTextBody({ body })
       if (error || statusCode !== 200 || !html) {
         return {
+          loadType: 'error',
           exception: {
             message: `Failed to fetch Letras page: ${error ?? statusCode}`,
             severity: 'fault'
@@ -534,6 +517,7 @@ export default class LetrasMusSource {
       }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message: error instanceof Error ? error.message : String(error),
           severity: 'fault'
@@ -551,10 +535,11 @@ export default class LetrasMusSource {
    */
   public async getTrackUrl(
     decodedTrack: TrackInfo
-  ): Promise<TrackUrlResult | LetrasExceptionResult> {
+  ): Promise<TrackUrlResult | SourceResult> {
     const sourceManager = this.getSourceManager()
     if (!sourceManager) {
       return {
+        loadType: 'error',
         exception: {
           message: 'Source manager is not available for LetrasMus resolution.',
           severity: 'fault'
@@ -580,23 +565,21 @@ export default class LetrasMusSource {
 
       const query = `${decodedTrack.title} ${decodedTrack.author}`.trim()
       const searchResult = await sourceManager.searchWithDefault(query)
-      const searchTracks = searchResult.data as
-        | JsonValue
-        | LetrasTrackData[]
-        | undefined
 
       if (
         searchResult.loadType !== 'search' ||
-        !this.isTrackDataArray(searchTracks) ||
-        searchTracks.length === 0
+        searchResult.data.length === 0
       ) {
         return {
+          loadType: 'error',
           exception: {
-            message: 'No matching track found on default source.',
-            severity: 'common'
+            message: 'No suitable alternative found.',
+            severity: 'fault'
           }
         }
       }
+
+      const searchTracks = searchResult.data as unknown as LetrasTrackData[]
 
       const bestMatchCandidate = getBestMatch(searchTracks, decodedTrack)
       const bestMatch = bestMatchCandidate
@@ -605,6 +588,7 @@ export default class LetrasMusSource {
 
       if (!bestMatch) {
         return {
+          loadType: 'error',
           exception: {
             message: 'No suitable alternative found after filtering.',
             severity: 'common'
@@ -616,6 +600,7 @@ export default class LetrasMusSource {
       return { newTrack: bestMatch, ...streamInfo }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message: error instanceof Error ? error.message : String(error),
           severity: 'fault'
@@ -731,6 +716,7 @@ export default class LetrasMusSource {
 
     if (error || statusCode !== 200 || !payload) {
       return {
+        loadType: 'error',
         exception: {
           message: `Letras recommendation failed: ${error ?? statusCode}`,
           severity: 'fault'
@@ -842,7 +828,7 @@ export default class LetrasMusSource {
     return {
       encoded: encodeTrack(info),
       info,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown>
     }
   }
 
@@ -856,21 +842,21 @@ export default class LetrasMusSource {
   private extractTrackFromResolveResult(
     result: SourceResult
   ): LetrasTrackData | null {
-    const trackData = result.data as JsonValue | LetrasTrackData | undefined
-    if (result.loadType === 'track' && this.isTrackData(trackData)) {
-      return trackData
+    if (result.loadType === 'track') {
+      const trackData = result.data as JsonValue | LetrasTrackData | undefined
+      if (this.isTrackData(trackData)) {
+        return trackData
+      }
     }
 
-    const playlistData = result.data as
-      | JsonValue
-      | { tracks: LetrasTrackData[] }
-      | undefined
-    if (
-      result.loadType === 'playlist' &&
-      this.isPlaylistData(playlistData) &&
-      playlistData.tracks.length > 0
-    ) {
-      return playlistData.tracks[0] ?? null
+    if (result.loadType === 'playlist') {
+      const playlistData = result.data as unknown as
+        | JsonValue
+        | { tracks: LetrasTrackData[] }
+        | undefined
+      if (this.isPlaylistData(playlistData) && playlistData.tracks.length > 0) {
+        return playlistData.tracks[0] ?? null
+      }
     }
 
     return null

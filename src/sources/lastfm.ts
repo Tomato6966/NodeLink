@@ -1,13 +1,16 @@
-import type { TrackData } from '../typings/index.types.ts'
 import type {
   SourceManager,
   SourceResult,
   TrackInfo as SourceTrackInfo,
+  TrackData,
   TrackStreamResult,
   TrackUrlResult,
   WorkerNodeLink
 } from '../typings/sources/source.types.ts'
-import type { BestMatchCandidate, BestMatchTrackInfo } from '../typings/utils.types.ts'
+import type {
+  BestMatchCandidate,
+  BestMatchTrackInfo
+} from '../typings/utils.types.ts'
 import {
   encodeTrack,
   getBestMatch,
@@ -94,7 +97,9 @@ export default class LastFMSource {
 
   getConfig(): LastFMConfig {
     const options = this.nodelink.options
-    const config = options.sources?.lastfm as { enabled?: boolean; apiKey?: string } | undefined
+    const config = options.sources?.lastfm as
+      | { enabled?: boolean; apiKey?: string }
+      | undefined
     return {
       apiKey:
         typeof config?.apiKey === 'string' && config.apiKey.length > 0
@@ -129,6 +134,7 @@ export default class LastFMSource {
       if (!this.apiKey) {
         if (searchType !== 'track') {
           return {
+            loadType: 'error',
             exception: {
               message:
                 'Last.fm API key required for album/artist search. Configure sources.lastfm.apiKey.',
@@ -141,6 +147,7 @@ export default class LastFMSource {
       return this.searchApi(query, searchType)
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message: error instanceof Error ? error.message : String(error),
           severity: 'fault'
@@ -215,7 +222,11 @@ export default class LastFMSource {
           const r3 = await this.searchPreferredTracks(`${artist} ${coreTitle}`)
           if (r3[0]) {
             const t = this.rewrapDelegatedTrack(r3[0], url)
-            logger('info', 'LastFM', `Resolved via core title: ${t.info?.title}`)
+            logger(
+              'info',
+              'LastFM',
+              `Resolved via core title: ${t.info?.title}`
+            )
             return { loadType: 'track', data: t }
           }
         }
@@ -238,6 +249,7 @@ export default class LastFMSource {
           `No tracks found for: "${fullTitle}" by "${artist}"`
         )
         return {
+          loadType: 'error',
           exception: {
             message: 'No matching tracks found for this Last.fm track',
             severity: 'fault'
@@ -258,6 +270,7 @@ export default class LastFMSource {
           `Failed to fetch Last.fm page: ${error ?? statusCode}`
         )
         return {
+          loadType: 'error',
           exception: {
             message: `Failed to fetch Last.fm page: ${error ?? statusCode}`,
             severity: 'fault'
@@ -293,7 +306,7 @@ export default class LastFMSource {
           loadType: 'playlist',
           data: {
             info: { name: `${collectionTitle} - ${artist}`, selectedTrack: 0 },
-            pluginInfo: {},
+            pluginInfo: {} as Record<string, unknown>,
             tracks
           }
         }
@@ -305,6 +318,7 @@ export default class LastFMSource {
         'Failed to resolve unknown tracks from Last.fm album/artist'
       )
       return {
+        loadType: 'error',
         exception: {
           message: 'Failed to resolve tracks from Last.fm',
           severity: 'fault'
@@ -313,7 +327,7 @@ export default class LastFMSource {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger('error', 'LastFM', `Exception during resolve: ${message}`)
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
   }
 
@@ -335,9 +349,9 @@ export default class LastFMSource {
     }
 
     try {
-      const youtubeUrl = (trackData?.pluginInfo as Record<string, string | undefined>)?.youtubeUrl as
-        | string
-        | undefined
+      const youtubeUrl = (
+        trackData?.pluginInfo as Record<string, string | undefined>
+      )?.youtubeUrl as string | undefined
       if (youtubeUrl) {
         const youtubeResult = await sourceManager.resolve(youtubeUrl)
         const delegatedTrack = this.extractTrackData(youtubeResult)
@@ -345,7 +359,10 @@ export default class LastFMSource {
           const streamInfo = await sourceManager.getTrackUrl(
             delegatedTrack.info
           )
-          return { ...streamInfo, newTrack: delegatedTrack } as unknown as TrackUrlResult & { newTrack?: TrackData }
+          return {
+            ...streamInfo,
+            newTrack: delegatedTrack
+          } as unknown as TrackUrlResult & { newTrack?: TrackData }
         }
       }
 
@@ -374,7 +391,13 @@ export default class LastFMSource {
         decodedTrack as BestMatchTrackInfo
       )
       const bestMatch = bestMatchCandidate
-        ? searchTracks[searchTracks.findIndex((t) => t.info?.title === bestMatchCandidate.info.title && t.info?.author === bestMatchCandidate.info.author)]
+        ? searchTracks[
+            searchTracks.findIndex(
+              (t) =>
+                t.info?.title === bestMatchCandidate.info.title &&
+                t.info?.author === bestMatchCandidate.info.author
+            )
+          ]
         : null
 
       if (!bestMatch || !bestMatch.info) {
@@ -387,7 +410,10 @@ export default class LastFMSource {
       }
 
       const streamInfo = await sourceManager.getTrackUrl(bestMatch.info)
-      return { ...streamInfo, newTrack: bestMatch } as unknown as TrackUrlResult & { newTrack?: TrackData }
+      return {
+        ...streamInfo,
+        newTrack: bestMatch
+      } as unknown as TrackUrlResult & { newTrack?: TrackData }
     } catch (error) {
       return {
         exception: {
@@ -475,6 +501,7 @@ export default class LastFMSource {
     const selected = typeMap[searchType]
     if (!selected) {
       return {
+        loadType: 'error',
         exception: {
           message: `Unsupported Last.fm search type: ${searchType}`,
           severity: 'common'
@@ -494,6 +521,7 @@ export default class LastFMSource {
 
     if (error || statusCode !== 200 || !payload) {
       return {
+        loadType: 'error',
         exception: {
           message: `Last.fm API error: ${error ?? statusCode}`,
           severity: 'fault'
@@ -503,7 +531,7 @@ export default class LastFMSource {
 
     if (this.getValue(payload, 'error') !== undefined) {
       const message = this.getString(payload, 'message') ?? 'Last.fm API error'
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
 
     const results = this.mapApiResults(payload, searchType)
@@ -592,6 +620,7 @@ export default class LastFMSource {
 
     if (error || statusCode !== 200 || !html) {
       return {
+        loadType: 'error',
         exception: {
           message: `Failed to fetch Last.fm search page: ${error ?? statusCode}`,
           severity: 'fault'
@@ -670,7 +699,11 @@ export default class LastFMSource {
       isrc: null,
       sourceName: 'lastfm'
     }
-    return { encoded: encodeTrack({ ...info, details: [] }), info, pluginInfo: { type: String(type) } }
+    return {
+      encoded: encodeTrack({ ...info, details: [] }),
+      info,
+      pluginInfo: { type: String(type) }
+    }
   }
 
   rewrapDelegatedTrack(
@@ -688,7 +721,8 @@ export default class LastFMSource {
         youtubeUrl ||
         (typeof storedYoutubeUrl === 'string'
           ? storedYoutubeUrl
-          : track.info.uri) || ''
+          : track.info.uri) ||
+        ''
     }
     const info: TrackData['info'] = {
       identifier: track.info.identifier,
@@ -703,33 +737,41 @@ export default class LastFMSource {
       isrc: track.info.isrc ?? null,
       sourceName: 'lastfm'
     }
-    return { encoded: encodeTrack({ ...info, details: [] }), info, pluginInfo: lastFmPluginInfo }
+    return {
+      encoded: encodeTrack({ ...info, details: [] }),
+      info,
+      pluginInfo: lastFmPluginInfo
+    }
   }
 
   extractTrackData(result: SourceResult): TrackData | null {
-    const trackData = result.data as TrackData
-    if (result.loadType === 'track' && this.isTrackData(trackData)) {
-      return trackData
+    if (result.loadType === 'track') {
+      const trackData = result.data
+      if (this.isTrackData(trackData)) {
+        return trackData
+      }
     }
-    const playlistData = result.data as { tracks: TrackData[] }
-    if (
-      result.loadType === 'playlist' &&
-      this.isTrackCollection(playlistData) &&
-      playlistData.tracks.length > 0
-    ) {
-      return playlistData.tracks[0] ?? null
+    if (result.loadType === 'playlist') {
+      const playlistData = result.data
+      if (
+        this.isTrackCollection(playlistData) &&
+        playlistData.tracks.length > 0
+      ) {
+        return playlistData.tracks[0] ?? null
+      }
     }
     return null
   }
 
   extractTrackArray(result: SourceResult): TrackData[] {
-    const resultData = result.data
-    if (
-      result.loadType === 'search' &&
-      Array.isArray(resultData) &&
-      resultData.every((item) => this.isTrackData(item))
-    ) {
-      return resultData as TrackData[]
+    if (result.loadType === 'search') {
+      const resultData = result.data
+      if (
+        Array.isArray(resultData) &&
+        resultData.every((item) => this.isTrackData(item))
+      ) {
+        return resultData
+      }
     }
     return []
   }

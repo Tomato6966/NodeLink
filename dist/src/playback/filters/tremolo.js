@@ -37,7 +37,7 @@ export default class Tremolo extends AnimatableFilter {
                 : 0.0;
         super.applyAnimatedUpdate({
             tremolo: {
-                alpha: targetAlpha,
+                alpha: targetAlpha
             }
         }, 'tremolo', { alpha: 0.0 });
     }

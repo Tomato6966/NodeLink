@@ -98,6 +98,7 @@ interface PiperRequestBody {
  * Track payload compatible with the shared encoder.
  */
 interface PiperTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -136,32 +137,7 @@ interface PiperTrackData {
   /**
    * Source-specific plugin metadata.
    */
-  pluginInfo: Record<string, never>
-}
-
-/**
- * Exception payload returned by Piper source operations.
- */
-interface PiperExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-
-    /**
-     * Optional failure origin.
-     */
-    cause?: string
-  }
+  pluginInfo: Record<string, unknown>
 }
 
 /**
@@ -284,7 +260,7 @@ export default class PiperSource {
     return {
       encoded: encodeTrack(track),
       info: track,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown>
     }
   }
 
@@ -449,7 +425,7 @@ export default class PiperSource {
     url: string,
     _protocol?: string,
     _additionalData?: Record<string, object | string | number | boolean | null>
-  ): Promise<TrackStreamResult | PiperExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     logger(
       'debug',
       'Sources',
@@ -502,6 +478,7 @@ export default class PiperSource {
       logger('error', 'Sources', `Failed to load Piper TTS stream: ${message}`)
 
       return {
+        loadType: 'error',
         exception: {
           message,
           severity: 'common',

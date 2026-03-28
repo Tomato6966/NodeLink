@@ -48,6 +48,7 @@ interface GoogleTtsTrackInput {
  * Google TTS track payload compatible with the shared encoder.
  */
 interface GoogleTtsTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -86,7 +87,7 @@ interface GoogleTtsTrackData {
   /**
    * Source-specific plugin metadata.
    */
-  pluginInfo: Record<string, never>
+  pluginInfo: Record<string, unknown>
 }
 
 /**
@@ -107,31 +108,6 @@ interface GoogleTtsTrackUrlResult extends TrackUrlResult {
    * Google TTS audio is returned as MP3.
    */
   format: 'mp3'
-}
-
-/**
- * Exception payload returned by Google TTS operations.
- */
-interface GoogleTtsExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-
-    /**
-     * Optional failure origin.
-     */
-    cause?: string
-  }
 }
 
 /**
@@ -274,7 +250,7 @@ export default class GoogleTTSSource {
     return {
       encoded: encodeTrack(track),
       info: track,
-      pluginInfo: {}
+      pluginInfo: {} as Record<string, unknown>
     }
   }
 
@@ -314,6 +290,7 @@ export default class GoogleTTSSource {
       }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message: this.getErrorMessage(
             error instanceof Error ? error : String(error)
@@ -407,7 +384,7 @@ export default class GoogleTTSSource {
     url: string,
     _protocol?: string,
     _additionalData?: Record<string, object | string | number | boolean | null>
-  ): Promise<TrackStreamResult | GoogleTtsExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     logger(
       'debug',
       'Sources',
@@ -457,6 +434,7 @@ export default class GoogleTTSSource {
       logger('error', 'Sources', `Failed to load Google TTS stream: ${message}`)
 
       return {
+        loadType: 'error',
         exception: {
           message,
           severity: 'common',

@@ -45,7 +45,7 @@ export default class Compressor extends AnimatableFilter {
     super.applyAnimatedUpdate(
       {
         compressor: {
-          alpha: targetAlpha,
+          alpha: targetAlpha
         }
       },
       'compressor',

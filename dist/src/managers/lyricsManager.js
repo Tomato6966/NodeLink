@@ -14,6 +14,8 @@ import { logger } from "../utils.js";
 const getErrorMessage = (error) => error instanceof Error ? error.message : String(error);
 const isTrackInfoLike = (value) => typeof value === 'object' && value !== null;
 const getTrackInfoFromResolve = (result, fallback) => {
+    if (result.loadType === 'error')
+        return fallback;
     const data = result.data;
     if (!isTrackInfoLike(data))
         return fallback;

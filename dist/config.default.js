@@ -410,8 +410,8 @@ export default {
             countryCode: 'US',
             playlistLoadLimit: 2, // 0 = no limit, 1 = 50 tracks, 2 = 100 tracks, etc.
             playlistPageLoadConcurrency: 5, // How many pages to load simultaneously
-            hifiApis: [""], // optional, but required for direflct streaming, artist resolving host: https://github.com/binimum/hifi-api/
-            hifiQualities: ["HI_RES_LOSSLESS", "LOSSLESS", "HIGH", "LOW"] //tried sequentially until one works (only used if hifiApis is set)
+            hifiApis: [''], // optional, but required for direflct streaming, artist resolving host: https://github.com/binimum/hifi-api/
+            hifiQualities: ['HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'] //tried sequentially until one works (only used if hifiApis is set)
         },
         pandora: {
             enabled: true,
@@ -440,7 +440,7 @@ export default {
         },
         lastfm: {
             enabled: true,
-            apiKey: '', // You can get the api key from: https://www.last.fm/api/account/create
+            apiKey: '' // You can get the api key from: https://www.last.fm/api/account/create
         },
         netease: {
             enabled: true

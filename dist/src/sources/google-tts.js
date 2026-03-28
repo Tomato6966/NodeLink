@@ -160,6 +160,7 @@ export default class GoogleTTSSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: this.getErrorMessage(error instanceof Error ? error : String(error)),
                     severity: 'fault',
@@ -261,6 +262,7 @@ export default class GoogleTTSSource {
             const message = this.getErrorMessage(error instanceof Error ? error : String(error));
             logger('error', 'Sources', `Failed to load Google TTS stream: ${message}`);
             return {
+                loadType: 'error',
                 exception: {
                     message,
                     severity: 'common',

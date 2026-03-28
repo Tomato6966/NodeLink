@@ -222,7 +222,7 @@ export default class IheartradioSource {
         catch (error) {
             const message = error instanceof Error ? error.message : 'iHeart search failed.';
             logger('error', 'iHeart', `Search failed: ${message}`);
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
     /**
@@ -241,6 +241,7 @@ export default class IheartradioSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error ? error.message : 'iHeart resolve failed.',
                     severity: 'fault'
@@ -258,6 +259,7 @@ export default class IheartradioSource {
         const data = await this.requestJson(`${IHEART_API_V2}/content/liveStations/${stationId}`);
         if (!data) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `iHeart station ${stationId} not found.`,
                     severity: 'common'
@@ -267,6 +269,7 @@ export default class IheartradioSource {
         const station = this.extractStation(data);
         if (!station) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `iHeart station ${stationId} returned an unreadable payload.`,
                     severity: 'fault'
@@ -276,6 +279,7 @@ export default class IheartradioSource {
         const track = this.buildTrack(station);
         if (!track) {
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Failed to build track from station data.',
                     severity: 'fault'

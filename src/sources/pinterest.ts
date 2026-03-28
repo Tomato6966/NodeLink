@@ -172,6 +172,7 @@ interface PinterestStreamError {
  * source manager response contract.
  */
 interface PinterestTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -529,7 +530,8 @@ export default class PinterestSource {
         loadType: 'track',
         data: {
           encoded: encodeTrack(trackInfo),
-          info: trackInfo
+          info: trackInfo,
+          pluginInfo: {} as Record<string, unknown>
         }
       }
     } catch (error) {
@@ -538,7 +540,7 @@ export default class PinterestSource {
       logger('error', 'Pinterest', `Resolution failed: ${message}`)
       return {
         loadType: 'error',
-        data: { message, severity: 'fault' }
+        exception: { message, severity: 'fault' }
       }
     }
   }

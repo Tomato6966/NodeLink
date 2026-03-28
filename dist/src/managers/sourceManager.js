@@ -10,12 +10,26 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { logger } from "../utils.js";
+/**
+ * Central manager for audio source providers.
+ * Handles source discovery, dynamic loading, and request routing based on URL patterns or aliases.
+ * @public
+ */
 export default class SourcesManager {
+    /** The parent NodeLink instance context. */
     nodelink;
+    /** Map of primary source instances keyed by their unique identifier. */
     sources;
+    /** Unified map of all source aliases and identifiers. */
     sourceMap;
+    /** Map of search-specific aliases (e.g., 'ytsearch'). */
     searchAliasMap;
+    /** Prioritized list of URL patterns for routing. */
     patternMap;
+    /**
+     * Constructs a new SourcesManager.
+     * @param nodelink - The NodeLink server/worker context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
         this.sources = new Map();
@@ -23,6 +37,12 @@ export default class SourcesManager {
         this.searchAliasMap = new Map();
         this.patternMap = [];
     }
+    /**
+     * Scans the sources directory and dynamically loads all enabled providers.
+     * Clears existing state before loading.
+     * @returns A promise resolving when loading is complete.
+     * @public
+     */
     async loadFolder() {
         const __filename = fileURLToPath(import.meta.url);
         const __dirname = path.dirname(__filename);
@@ -128,6 +148,14 @@ export default class SourcesManager {
         }
         this.patternMap.sort((a, b) => b.priority - a.priority);
     }
+    /**
+     * Executes a source method with metric tracking and error handling.
+     * @param sourceName - The identifier of the source to call.
+     * @param method - The method name.
+     * @param args - Arguments to pass to the method.
+     * @returns A promise resolving to the SourceResult.
+     * @internal
+     */
     async _instrumentedSourceCall(sourceName, method, ...args) {
         const instance = this.sourceMap.get(sourceName);
         if (!instance ||
@@ -154,6 +182,13 @@ export default class SourcesManager {
             throw e;
         }
     }
+    /**
+     * Performs a search using a specific source or alias.
+     * @param sourceTerm - The source name or alias (e.g., 'ytsearch').
+     * @param query - The search query.
+     * @returns A promise resolving to a SourceResult.
+     * @public
+     */
     async search(sourceTerm, query) {
         let instance = this.searchAliasMap.get(sourceTerm);
         const sourceName = sourceTerm;
@@ -178,6 +213,12 @@ export default class SourcesManager {
         logger('debug', 'Sources', `Searching on ${name} (${searchType}) for: "${searchQuery}"`);
         return this._instrumentedSourceCall(name, 'search', searchQuery, sourceName, searchType);
     }
+    /**
+     * Searches using the configured default source(s) until results are found.
+     * @param query - The search query.
+     * @returns A promise resolving to a SourceResult.
+     * @public
+     */
     async searchWithDefault(query) {
         const defaultSources = Array.isArray(this.nodelink.options.defaultSearchSource)
             ? this.nodelink.options.defaultSearchSource
@@ -197,6 +238,12 @@ export default class SourcesManager {
         }
         return { loadType: 'empty', data: {} };
     }
+    /**
+     * Performs a concurrent search across multiple sources and consolidates the results into a playlist.
+     * @param query - The search query.
+     * @returns A promise resolving to a SourceResult.
+     * @public
+     */
     async unifiedSearch(query) {
         const searchSources = (this.nodelink.options.unifiedSearchSources || [
             'youtube'
@@ -204,30 +251,40 @@ export default class SourcesManager {
         logger('debug', 'Sources', `Performing unified search for "${query}" on [${searchSources.join(', ')}]`);
         const searchPromises = searchSources.map((sourceName) => this._instrumentedSourceCall(sourceName, 'search', query).catch((e) => {
             logger('warn', 'Sources', `A source (${sourceName}) failed during unified search: ${e.message}`);
-            return { loadType: 'error', data: { message: e.message } };
+            return {
+                loadType: 'error',
+                exception: { message: e.message, severity: 'common' }
+            };
         }));
         const results = await Promise.all(searchPromises);
         const allTracks = [];
-        results.forEach((result) => {
-            if (result.loadType === 'search') {
+        for (const result of results) {
+            if (result.loadType === 'search' && Array.isArray(result.data)) {
                 allTracks.push(...result.data);
             }
-        });
+        }
         if (allTracks.length === 0) {
             return { loadType: 'empty', data: {} };
         }
+        const playlistData = {
+            info: {
+                name: `Search results for: ${query}`,
+                selectedTrack: -1
+            },
+            pluginInfo: {},
+            tracks: allTracks
+        };
         return {
             loadType: 'playlist',
-            data: {
-                info: {
-                    name: `Search results for: ${query}`,
-                    selectedTrack: -1
-                },
-                pluginInfo: {},
-                tracks: allTracks
-            }
+            data: playlistData
         };
     }
+    /**
+     * Resolves a URL to a resource using the prioritized pattern map.
+     * @param url - The resource URL.
+     * @returns A promise resolving to a SourceResult.
+     * @public
+     */
     async resolve(url) {
         let sourceName = null;
         for (const entry of this.patternMap) {
@@ -244,7 +301,7 @@ export default class SourcesManager {
             logger('warn', 'Sources', `No source found for URL: ${url}`);
             return {
                 loadType: 'error',
-                data: {
+                exception: {
                     message: 'No source found for URL',
                     severity: 'fault',
                     cause: 'Unknown'
@@ -254,23 +311,51 @@ export default class SourcesManager {
         logger('debug', 'Sources', `Resolving with ${sourceName} for: ${url}`);
         return this._instrumentedSourceCall(sourceName, 'resolve', url);
     }
+    /**
+     * Reloads the source definitions from the file system.
+     * @returns A promise resolving when reloading is complete.
+     * @public
+     */
     async reload() {
         await this.loadFolder();
     }
+    /**
+     * Retrieves a playable URL for a specific track.
+     * @param track - The normalized track metadata.
+     * @param itag - Optional YouTube-specific itag override.
+     * @param isRecovering - Whether this is a recovery attempt.
+     * @returns A promise resolving to the URL result.
+     * @public
+     */
     async getTrackUrl(track, itag, isRecovering) {
         const instance = this.sourceMap.get(track.sourceName);
         if (!instance?.getTrackUrl) {
             throw new Error(`Source ${track.sourceName} not found or does not support getTrackUrl`);
         }
-        return await instance.getTrackUrl(track, itag, isRecovering);
+        return (await instance.getTrackUrl(track, itag, isRecovering));
     }
+    /**
+     * Retrieves an audio stream for a resolved track URL.
+     * @param track - The track metadata.
+     * @param url - The resolved stream URL.
+     * @param protocol - The stream protocol.
+     * @param additionalData - Optional metadata for the stream.
+     * @returns A promise resolving to the stream result.
+     * @public
+     */
     async getTrackStream(track, url, protocol, additionalData) {
         const instance = this.sourceMap.get(track.sourceName);
         if (!instance?.loadStream) {
             throw new Error(`Source ${track.sourceName} not found or does not support loadStream`);
         }
-        return await instance.loadStream(track, url, protocol, additionalData);
+        return (await instance.loadStream(track, url, protocol, additionalData));
     }
+    /**
+     * Retrieves chapter metadata for a track.
+     * @param track - Object containing the track metadata.
+     * @returns A promise resolving to an array of chapters.
+     * @public
+     */
     async getChapters(track) {
         const sourceName = track.info?.sourceName;
         if (!sourceName)
@@ -283,12 +368,28 @@ export default class SourcesManager {
         }
         return await instance.getChapters(track.info);
     }
+    /**
+     * Returns a list of all unique source instances.
+     * @returns Array of SourceInstance.
+     * @public
+     */
     getAllSources() {
         return Array.from(this.sources.values());
     }
+    /**
+     * Returns a specific source instance by its name.
+     * @param name - The source identifier.
+     * @returns The instance or null if not found.
+     * @public
+     */
     getSource(name) {
         return this.sourceMap.get(name) || null;
     }
+    /**
+     * Returns the identifiers of all currently enabled sources.
+     * @returns Array of source name strings.
+     * @public
+     */
     getEnabledSourceNames() {
         const enabledNames = [];
         const sources = this.nodelink.options.sources;

@@ -871,13 +871,13 @@ async function handler(
         additionalData
       )
 
-      if (fetched.exception) {
+      if (fetched.exception || !fetched.stream) {
         sendErrorResponse(
           req,
           res,
           500,
           'Internal Server Error',
-          fetched.exception.message,
+          fetched.exception?.message || 'Failed to fetch stream',
           parsedUrl.pathname
         )
         return
@@ -888,7 +888,8 @@ async function handler(
       const resource = createAudioResource(
         input.guildId || 'api-stream',
         fetched.stream,
-        fetched.type ?? urlResult.format ?? 'unknown',
+        fetched.type ??
+          (typeof urlResult.format === 'string' ? urlResult.format : 'unknown'),
         streamProcessorRuntime,
         input.filters,
         input.volume / 100,

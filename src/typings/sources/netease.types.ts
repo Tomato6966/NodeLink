@@ -348,7 +348,7 @@ export interface NeteasePlaylistData {
   /**
    * Optional plugin metadata.
    */
-  pluginInfo: Record<string, never>
+  pluginInfo: Record<string, unknown>
 
   /**
    * Playlist tracks.

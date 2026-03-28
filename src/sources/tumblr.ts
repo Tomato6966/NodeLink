@@ -233,7 +233,7 @@ export default class TumblrSource {
       logger('error', 'Tumblr', `Resolution failed: ${message}`)
       return {
         loadType: 'error',
-        data: { message, severity: 'fault' }
+        exception: { message, severity: 'fault' }
       }
     }
   }

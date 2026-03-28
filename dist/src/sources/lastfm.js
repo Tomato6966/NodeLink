@@ -89,6 +89,7 @@ export default class LastFMSource {
             if (!this.apiKey) {
                 if (searchType !== 'track') {
                     return {
+                        loadType: 'error',
                         exception: {
                             message: 'Last.fm API key required for album/artist search. Configure sources.lastfm.apiKey.',
                             severity: 'common'
@@ -101,6 +102,7 @@ export default class LastFMSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: {
                     message: error instanceof Error ? error.message : String(error),
                     severity: 'fault'
@@ -162,6 +164,7 @@ export default class LastFMSource {
                 }
                 logger('error', 'LastFM', `No tracks found for: "${fullTitle}" by "${artist}"`);
                 return {
+                    loadType: 'error',
                     exception: {
                         message: 'No matching tracks found for this Last.fm track',
                         severity: 'fault'
@@ -176,6 +179,7 @@ export default class LastFMSource {
             if (error || statusCode !== 200 || !html) {
                 logger('error', 'LastFM', `Failed to fetch Last.fm page: ${error ?? statusCode}`);
                 return {
+                    loadType: 'error',
                     exception: {
                         message: `Failed to fetch Last.fm page: ${error ?? statusCode}`,
                         severity: 'fault'
@@ -212,6 +216,7 @@ export default class LastFMSource {
             }
             logger('error', 'LastFM', 'Failed to resolve unknown tracks from Last.fm album/artist');
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Failed to resolve tracks from Last.fm',
                     severity: 'fault'
@@ -221,7 +226,7 @@ export default class LastFMSource {
         catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             logger('error', 'LastFM', `Exception during resolve: ${message}`);
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
     async getTrackUrl(decodedTrack, trackData) {
@@ -241,7 +246,10 @@ export default class LastFMSource {
                 const delegatedTrack = this.extractTrackData(youtubeResult);
                 if (delegatedTrack?.info) {
                     const streamInfo = await sourceManager.getTrackUrl(delegatedTrack.info);
-                    return { ...streamInfo, newTrack: delegatedTrack };
+                    return {
+                        ...streamInfo,
+                        newTrack: delegatedTrack
+                    };
                 }
             }
             const query = `${decodedTrack.title} ${decodedTrack.author}`.trim();
@@ -264,7 +272,8 @@ export default class LastFMSource {
                 }
             })), decodedTrack);
             const bestMatch = bestMatchCandidate
-                ? searchTracks[searchTracks.findIndex((t) => t.info?.title === bestMatchCandidate.info.title && t.info?.author === bestMatchCandidate.info.author)]
+                ? searchTracks[searchTracks.findIndex((t) => t.info?.title === bestMatchCandidate.info.title &&
+                    t.info?.author === bestMatchCandidate.info.author)]
                 : null;
             if (!bestMatch || !bestMatch.info) {
                 return {
@@ -275,7 +284,10 @@ export default class LastFMSource {
                 };
             }
             const streamInfo = await sourceManager.getTrackUrl(bestMatch.info);
-            return { ...streamInfo, newTrack: bestMatch };
+            return {
+                ...streamInfo,
+                newTrack: bestMatch
+            };
         }
         catch (error) {
             return {
@@ -349,6 +361,7 @@ export default class LastFMSource {
         const selected = typeMap[searchType];
         if (!selected) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Unsupported Last.fm search type: ${searchType}`,
                     severity: 'common'
@@ -364,6 +377,7 @@ export default class LastFMSource {
         const payload = this.parseJsonBody(body);
         if (error || statusCode !== 200 || !payload) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Last.fm API error: ${error ?? statusCode}`,
                     severity: 'fault'
@@ -372,7 +386,7 @@ export default class LastFMSource {
         }
         if (this.getValue(payload, 'error') !== undefined) {
             const message = this.getString(payload, 'message') ?? 'Last.fm API error';
-            return { exception: { message, severity: 'fault' } };
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
         const results = this.mapApiResults(payload, searchType);
         return results.length > 0
@@ -425,6 +439,7 @@ export default class LastFMSource {
         const html = this.getTextBody({ body });
         if (error || statusCode !== 200 || !html) {
             return {
+                loadType: 'error',
                 exception: {
                     message: `Failed to fetch Last.fm search page: ${error ?? statusCode}`,
                     severity: 'fault'
@@ -486,7 +501,11 @@ export default class LastFMSource {
             isrc: null,
             sourceName: 'lastfm'
         };
-        return { encoded: encodeTrack({ ...info, details: [] }), info, pluginInfo: { type: String(type) } };
+        return {
+            encoded: encodeTrack({ ...info, details: [] }),
+            info,
+            pluginInfo: { type: String(type) }
+        };
     }
     rewrapDelegatedTrack(track, url, youtubeUrl) {
         if (!track.info) {
@@ -498,7 +517,8 @@ export default class LastFMSource {
             youtubeUrl: youtubeUrl ||
                 (typeof storedYoutubeUrl === 'string'
                     ? storedYoutubeUrl
-                    : track.info.uri) || ''
+                    : track.info.uri) ||
+                ''
         };
         const info = {
             identifier: track.info.identifier,
@@ -513,7 +533,11 @@ export default class LastFMSource {
             isrc: track.info.isrc ?? null,
             sourceName: 'lastfm'
         };
-        return { encoded: encodeTrack({ ...info, details: [] }), info, pluginInfo: lastFmPluginInfo };
+        return {
+            encoded: encodeTrack({ ...info, details: [] }),
+            info,
+            pluginInfo: lastFmPluginInfo
+        };
     }
     extractTrackData(result) {
         const trackData = result.data;

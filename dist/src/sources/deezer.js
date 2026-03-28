@@ -289,7 +289,7 @@ export default class DeezerSource {
                 if (tracks.length === 0)
                     return { loadType: 'empty', data: {} };
                 return {
-                    loadType: 'playlist',
+                    loadType: type,
                     data: {
                         info: {
                             name: entity.title ?? 'Unknown Deezer Collection',
@@ -739,7 +739,11 @@ export default class DeezerSource {
             sourceName: 'deezer',
             details: []
         };
-        return { encoded: encodeTrack(info), info, pluginInfo: {} };
+        return {
+            encoded: encodeTrack(info),
+            info,
+            pluginInfo: {}
+        };
     }
     /**
      * Extracts and normalizes an ISRC from a free-text query.
@@ -908,7 +912,7 @@ export default class DeezerSource {
      * @returns Structured exception payload.
      */
     createException(message, severity, cause) {
-        return { exception: { message, severity, cause } };
+        return { loadType: 'error', exception: { message, severity, cause } };
     }
     /**
      * Converts an unknown thrown value into a readable message string.

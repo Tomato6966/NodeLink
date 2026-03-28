@@ -126,6 +126,7 @@ interface GeniusPreloadedState {
  * Track payload accepted by the shared encoder.
  */
 interface GeniusTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -151,6 +152,7 @@ interface GeniusTrackInfo extends TrackEncodeInput {
  * Plugin metadata attached to Genius track entries.
  */
 interface GeniusTrackPluginInfo {
+  [x: string]: unknown
   /**
    * Provider label returned by Genius when present.
    */
@@ -174,7 +176,7 @@ interface GeniusTrackData {
   /**
    * Genius-specific metadata.
    */
-  pluginInfo: GeniusTrackPluginInfo | Record<string, never>
+  pluginInfo: GeniusTrackPluginInfo | Record<string, unknown>
 }
 
 /**
@@ -199,7 +201,7 @@ interface GeniusPlaylistData {
   /**
    * Source-specific playlist metadata.
    */
-  pluginInfo: Record<string, never>
+  pluginInfo: Record<string, unknown>
 
   /**
    * Media candidates extracted from the Genius page.
@@ -254,26 +256,6 @@ interface GeniusSourceManager {
    * @returns Search result returned by the manager.
    */
   searchWithDefault: (query: string) => Promise<SourceResult>
-}
-
-/**
- * Exception payload returned by Genius operations.
- */
-interface GeniusExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-  }
 }
 
 /**
@@ -429,7 +411,7 @@ export default class GeniusSource {
         tracks.push({
           encoded: encodeTrack(fallbackTrack),
           info: fallbackTrack,
-          pluginInfo: {}
+          pluginInfo: {} as Record<string, unknown>
         })
       }
 
@@ -438,7 +420,7 @@ export default class GeniusSource {
           name: `${title} - ${artist} (Genius)`,
           selectedTrack: 0
         },
-        pluginInfo: {},
+        pluginInfo: {} as Record<string, unknown>,
         tracks
       }
 
@@ -446,7 +428,7 @@ export default class GeniusSource {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       logger('error', 'Genius', `Error resolving URL: ${message}`)
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
   }
 
@@ -460,10 +442,11 @@ export default class GeniusSource {
    */
   public async getTrackUrl(
     decodedTrack: TrackInfo
-  ): Promise<TrackUrlResult | GeniusExceptionResult> {
+  ): Promise<TrackUrlResult | SourceResult> {
     const sourceManager = this.getSourceManager()
     if (!sourceManager) {
       return {
+        loadType: 'error',
         exception: {
           message: 'Source manager is not available for Genius resolution.',
           severity: 'fault'
@@ -497,6 +480,7 @@ export default class GeniusSource {
 
       if (candidates.length === 0) {
         return {
+          loadType: 'error',
           exception: {
             message: 'No alternative stream found via default search.',
             severity: 'fault'
@@ -507,6 +491,7 @@ export default class GeniusSource {
       const bestMatch = this.findBestMatch(candidates, decodedTrack)
       if (!bestMatch) {
         return {
+          loadType: 'error',
           exception: {
             message: 'No suitable alternative stream found after filtering.',
             severity: 'fault'
@@ -519,6 +504,7 @@ export default class GeniusSource {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return {
+        loadType: 'error',
         exception: {
           message,
           severity: 'fault'
@@ -827,31 +813,27 @@ export default class GeniusSource {
   private extractTrackReferenceFromSourceResult(
     result: SourceResult
   ): GeniusTrackReference | null {
-    const resultData = result.data as
-      | GeniusTrackReference
-      | GeniusTrackCollection
-      | JsonValue
-      | undefined
-
-    if (!resultData) {
-      return null
+    if (result.loadType === 'track') {
+      const trackData = result.data as unknown as
+        | JsonValue
+        | GeniusTrackReference
+        | undefined
+      if (this.isTrackReference(trackData)) {
+        return trackData
+      }
     }
 
-    const trackData = resultData as JsonValue | GeniusTrackReference | undefined
-    if (result.loadType === 'track' && this.isTrackReference(trackData)) {
-      return trackData
-    }
-
-    const playlistData = resultData as
-      | JsonValue
-      | GeniusTrackCollection
-      | undefined
-    if (
-      result.loadType === 'playlist' &&
-      this.isTrackCollection(playlistData) &&
-      playlistData.tracks.length > 0
-    ) {
-      return playlistData.tracks[0] ?? null
+    if (result.loadType === 'playlist') {
+      const playlistData = result.data as unknown as
+        | JsonValue
+        | GeniusTrackCollection
+        | undefined
+      if (
+        this.isTrackCollection(playlistData) &&
+        playlistData.tracks.length > 0
+      ) {
+        return playlistData.tracks[0] ?? null
+      }
     }
 
     return null
@@ -866,13 +848,16 @@ export default class GeniusSource {
   private extractSearchCandidates(
     result: SourceResult
   ): GeniusTrackReference[] {
+    if (result.loadType !== 'search') {
+      return []
+    }
+
     const resultData = result.data as
       | GeniusTrackReference[]
       | JsonValue
       | undefined
 
     if (
-      result.loadType === 'search' &&
       Array.isArray(resultData) &&
       resultData.every((item) => this.isTrackReference(item))
     ) {

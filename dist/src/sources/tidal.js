@@ -153,6 +153,7 @@ export default class TidalSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: { message: this.getErrorMessage(error), severity: 'fault' }
             };
         }
@@ -196,6 +197,7 @@ export default class TidalSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: { message: this.getErrorMessage(error), severity: 'fault' }
             };
         }
@@ -227,6 +229,7 @@ export default class TidalSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: { message: this.getErrorMessage(error), severity: 'fault' }
             };
         }
@@ -257,6 +260,7 @@ export default class TidalSource {
         }
         catch (error) {
             return {
+                loadType: 'error',
                 exception: { message: this.getErrorMessage(error), severity: 'fault' }
             };
         }
@@ -420,7 +424,8 @@ export default class TidalSource {
                     name: this.asString(albumData.title) || 'Unknown Album',
                     selectedTrack: 0
                 },
-                tracks
+                tracks,
+                pluginInfo: {}
             }
         };
     }
@@ -479,7 +484,8 @@ export default class TidalSource {
                     name: this.asString(playlistData.title) || 'Unknown Playlist',
                     selectedTrack: 0
                 },
-                tracks
+                tracks,
+                pluginInfo: {}
             }
         };
     }
@@ -518,7 +524,11 @@ export default class TidalSource {
         logger('debug', 'Tidal', `Loaded ${tracks.length} tracks for artist "${name}"`);
         return {
             loadType: 'playlist',
-            data: { info: { name, selectedTrack: 0 }, tracks }
+            data: {
+                info: { name, selectedTrack: 0 },
+                tracks,
+                pluginInfo: {}
+            }
         };
     }
     /**

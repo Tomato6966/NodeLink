@@ -350,6 +350,7 @@ export default class LocalSource {
         if (!isAbsolute && !this.isPathInsideBase(basePath, filePath)) {
             logger('warn', 'Sources', `Path traversal attempt blocked for local source: "${query}"`);
             return {
+                loadType: 'error',
                 exception: {
                     message: 'Path traversal is not allowed.',
                     severity: 'common'

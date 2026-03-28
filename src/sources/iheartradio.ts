@@ -181,6 +181,7 @@ interface IheartStation {
  * Plugin metadata attached to encoded iHeart tracks.
  */
 interface IheartTrackPluginInfo {
+  [x: string]: unknown
   /**
    * Station description returned by the API.
    */
@@ -221,6 +222,7 @@ interface IheartTrackPluginInfo {
  * Track payload accepted by the shared encoder.
  */
 interface IheartTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Live stations are not seekable.
    */
@@ -538,7 +540,7 @@ export default class IheartradioSource {
       const message =
         error instanceof Error ? error.message : 'iHeart search failed.'
       logger('error', 'iHeart', `Search failed: ${message}`)
-      return { exception: { message, severity: 'fault' } }
+      return { loadType: 'error', exception: { message, severity: 'fault' } }
     }
   }
 
@@ -557,6 +559,7 @@ export default class IheartradioSource {
       return this.resolveById(stationId)
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message:
             error instanceof Error ? error.message : 'iHeart resolve failed.',
@@ -579,6 +582,7 @@ export default class IheartradioSource {
 
     if (!data) {
       return {
+        loadType: 'error',
         exception: {
           message: `iHeart station ${stationId} not found.`,
           severity: 'common'
@@ -589,6 +593,7 @@ export default class IheartradioSource {
     const station = this.extractStation(data)
     if (!station) {
       return {
+        loadType: 'error',
         exception: {
           message: `iHeart station ${stationId} returned an unreadable payload.`,
           severity: 'fault'
@@ -599,6 +604,7 @@ export default class IheartradioSource {
     const track = this.buildTrack(station)
     if (!track) {
       return {
+        loadType: 'error',
         exception: {
           message: 'Failed to build track from station data.',
           severity: 'fault'

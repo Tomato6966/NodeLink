@@ -409,6 +409,7 @@ export default class LazyPyTtsSource {
             if (lengthCheck) {
                 const unit = lengthCheck.countBytes ? 'bytes' : 'characters';
                 return {
+                    loadType: 'error',
                     exception: {
                         message: `Text too long for LazyPy TTS (${resolved.serviceName}). Max ${lengthCheck.maxLength} ${unit}.`,
                         severity: 'fault',
@@ -422,6 +423,7 @@ export default class LazyPyTtsSource {
         catch (error) {
             const message = this.getErrorMessage(error);
             return {
+                loadType: 'error',
                 exception: { message, severity: 'fault', cause: 'Exception' }
             };
         }

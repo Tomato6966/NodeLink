@@ -25,7 +25,6 @@ import type {
   LyricsPayload,
   NodeLink,
   PlayerOptions,
-  PlayerPluginInfo,
   PlayerStateJSON,
   PlayerTrack,
   PlayerVoiceState,
@@ -241,9 +240,11 @@ export class Player {
   private _getAudioStream(): ExtendedAudioStream | null {
     return (this.connection?.audioStream as ExtendedAudioStream | null) ?? null
   }
+
   private _getPluginInfo(track: PlayerTrack | null): PlayerPluginInfo {
     return (track?.pluginInfo || {}) as PlayerPluginInfo
   }
+
   /**
    * Initializes the audio mixer instance used for mix layers and fading.
    */
@@ -917,12 +918,12 @@ export class Player {
       : info
     const fetched = await this.nodelink.sources.getTrackStream(
       track,
-      urlData.url,
-      urlData.protocol,
+      urlData.url as string,
+      urlData.protocol as string,
       additionalData
     )
     if (fetched.exception) return fetched as { exception: { message: string } }
-    const fetchedStream = fetched.stream
+    const fetchedStream = fetched.stream as NonNullable<typeof fetched.stream>
     const totalBytesRaw =
       (
         urlData.additionalData as
@@ -2349,8 +2350,8 @@ export class Player {
 
     const fetched = await this.nodelink.sources.getTrackStream(
       (urlData.newTrack?.info as TrackInfoExtended) || trackPayload.info,
-      urlData.url,
-      urlData.protocol,
+      urlData.url as string,
+      urlData.protocol as string,
       urlData.additionalData
     )
 
@@ -2360,7 +2361,7 @@ export class Player {
 
     const pcmResource = createResource(
       this.guildId,
-      fetched.stream,
+      fetched.stream as NonNullable<typeof fetched.stream>,
       fetched.type || (urlData.format as string) || 'unknown',
       this.nodelink,
       {},

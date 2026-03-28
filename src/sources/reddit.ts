@@ -123,6 +123,7 @@ interface RedditPostData {
  * Track plugin payload attached to resolved Reddit tracks.
  */
 interface RedditTrackPluginInfo {
+  [x: string]: unknown
   /**
    * Whether the media uses a direct redirect URL or a video/audio pair.
    */
@@ -153,6 +154,7 @@ interface RedditTrackPluginInfo {
  * Track payload compatible with the shared encoder.
  */
 interface RedditTrackInfo extends TrackEncodeInput {
+  [x: string]: unknown
   /**
    * Whether the generated track can be seeked.
    */
@@ -250,31 +252,6 @@ interface RedditMediaResult {
 }
 
 /**
- * Exception payload returned by Reddit operations.
- */
-interface RedditExceptionResult {
-  /**
-   * Structured source exception metadata.
-   */
-  exception: {
-    /**
-     * Human-readable failure reason.
-     */
-    message: string
-
-    /**
-     * Error severity used by the source pipeline.
-     */
-    severity: string
-
-    /**
-     * Optional failure origin.
-     */
-    cause?: string
-  }
-}
-
-/**
  * Extracts a redirect target from the helper response headers.
  *
  * @param headers - Response headers returned by the request helper.
@@ -362,6 +339,7 @@ export default class RedditSource {
    */
   public async search(): Promise<SourceResult> {
     return {
+      loadType: 'error',
       exception: {
         message: 'Search not supported for Reddit',
         severity: 'common'
@@ -382,6 +360,7 @@ export default class RedditSource {
 
     if ('error' in result) {
       return {
+        loadType: 'error',
         exception: {
           message: result.error,
           severity: 'fault'
@@ -424,11 +403,14 @@ export default class RedditSource {
    */
   public async getTrackUrl(
     track: TrackInfo
-  ): Promise<TrackUrlResult | RedditExceptionResult> {
+  ): Promise<TrackUrlResult | SourceResult> {
     const result = await this.getRedditTrack(this.parseUrl(track.uri))
 
     if ('error' in result) {
-      return { exception: { message: result.error, severity: 'fault' } }
+      return {
+        loadType: 'error',
+        exception: { message: result.error, severity: 'fault' }
+      }
     }
 
     if (result.typeId === 'tunnel') {
@@ -459,7 +441,7 @@ export default class RedditSource {
   public async loadStream(
     decodedTrack: TrackInfo,
     url: string
-  ): Promise<TrackStreamResult | RedditExceptionResult> {
+  ): Promise<TrackStreamResult | SourceResult> {
     logger(
       'debug',
       'Sources',
@@ -489,6 +471,7 @@ export default class RedditSource {
       return { stream, type }
     } catch (error) {
       return {
+        loadType: 'error',
         exception: {
           message:
             error instanceof Error ? error.message : 'Failed to load stream.',
