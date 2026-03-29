@@ -233,6 +233,7 @@ export default class ConfigValidationManager {
             'pipertts',
             'pandora',
             'yandexmusic',
+            'monochrome',
             'gaana',
             'flowery',
             'lazypytts',
@@ -273,7 +274,7 @@ export default class ConfigValidationManager {
                 rules.push(this.booleanRule(`sources.${name}.enabled`, sourceConfig.enabled));
             }
         }
-        rules.push(...this.validateSourceSpotify(sources.spotify), ...this.validateSourceAppleMusic(sources.applemusic), ...this.validateSourceTidal(sources.tidal), ...this.validateSourceAudius(sources.audius), ...this.validateSourceJiosaavn(sources.jiosaavn), ...this.validateSourceEternalbox(sources.eternalbox), ...this.validateSourceYoutube(sources.youtube), ...this.validateSourcePipertts(sources.pipertts), ...this.validateSourcePandora(sources.pandora), ...this.validateSourceQobuz(sources.qobuz), ...this.validateSourceLastfm(sources.lastfm), ...this.validateSourceBilibili(sources.bilibili), ...this.validateSourceYandexMusic(sources.yandexmusic), ...this.validateSourceGaana(sources.gaana), ...this.validateSourceFlowery(sources.flowery), ...this.validateSourceLazypytts(sources.lazypytts));
+        rules.push(...this.validateSourceSpotify(sources.spotify), ...this.validateSourceAppleMusic(sources.applemusic), ...this.validateSourceTidal(sources.tidal), ...this.validateSourceAudius(sources.audius), ...this.validateSourceJiosaavn(sources.jiosaavn), ...this.validateSourceEternalbox(sources.eternalbox), ...this.validateSourceYoutube(sources.youtube), ...this.validateSourcePipertts(sources.pipertts), ...this.validateSourcePandora(sources.pandora), ...this.validateSourceQobuz(sources.qobuz), ...this.validateSourceLastfm(sources.lastfm), ...this.validateSourceBilibili(sources.bilibili), ...this.validateSourceYandexMusic(sources.yandexmusic), ...this.validateSourceGaana(sources.gaana), ...this.validateSourceFlowery(sources.flowery), ...this.validateSourceLazypytts(sources.lazypytts), ...this.validateSourceMonochrome(sources.monochrome));
         return rules;
     }
     validateSourceSpotify(spotify) {
@@ -518,6 +519,23 @@ export default class ConfigValidationManager {
         return [
             this.positiveIntRule('sources.lazypytts.maxTextLength', lp.maxTextLength),
             this.booleanRule('sources.lazypytts.enforceConfig', lp.enforceConfig)
+        ];
+    }
+    validateSourceMonochrome(monochrome) {
+        if (typeof monochrome !== 'object' ||
+            monochrome === null ||
+            !monochrome.enabled)
+            return [];
+        const m = monochrome;
+        return [
+            this.stringArrayRule('sources.monochrome.instances', m.instances),
+            this.stringArrayRule('sources.monochrome.streamingInstances', m.streamingInstances),
+            {
+                path: 'sources.monochrome.quality',
+                expected: 'one of [HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW]',
+                value: m.quality,
+                validate: (v) => ['HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'].includes(v)
+            }
         ];
     }
     validateSearch() {

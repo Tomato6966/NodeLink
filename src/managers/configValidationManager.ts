@@ -436,6 +436,7 @@ export default class ConfigValidationManager {
       'pipertts',
       'pandora',
       'yandexmusic',
+      'monochrome',
       'gaana',
       'flowery',
       'lazypytts',
@@ -498,7 +499,8 @@ export default class ConfigValidationManager {
       ...this.validateSourceYandexMusic(sources.yandexmusic),
       ...this.validateSourceGaana(sources.gaana),
       ...this.validateSourceFlowery(sources.flowery),
-      ...this.validateSourceLazypytts(sources.lazypytts)
+      ...this.validateSourceLazypytts(sources.lazypytts),
+      ...this.validateSourceMonochrome(sources.monochrome)
     )
 
     return rules
@@ -907,6 +909,32 @@ export default class ConfigValidationManager {
     return [
       this.positiveIntRule('sources.lazypytts.maxTextLength', lp.maxTextLength),
       this.booleanRule('sources.lazypytts.enforceConfig', lp.enforceConfig)
+    ]
+  }
+
+  private validateSourceMonochrome(monochrome: unknown): ValidationRule[] {
+    if (
+      typeof monochrome !== 'object' ||
+      monochrome === null ||
+      !(monochrome as Record<string, unknown>).enabled
+    )
+      return []
+
+    const m = monochrome as Record<string, unknown>
+
+    return [
+      this.stringArrayRule('sources.monochrome.instances', m.instances),
+      this.stringArrayRule(
+        'sources.monochrome.streamingInstances',
+        m.streamingInstances
+      ),
+      {
+        path: 'sources.monochrome.quality',
+        expected: 'one of [HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW]',
+        value: m.quality,
+        validate: (v: unknown) =>
+          ['HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'].includes(v as string)
+      }
     ]
   }
 

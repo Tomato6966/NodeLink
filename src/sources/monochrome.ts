@@ -40,7 +40,7 @@ class MonochromeSource implements SourceInstance {
   /** URL regex patterns this source can handle. */
   public readonly patterns: RegExp[]
   /** Source priority for URL matching. */
-  public readonly priority = 90
+  public readonly priority = 100
 
   private apiInstances: InstanceHealth[] = []
   private streamingInstances: InstanceHealth[] = []
@@ -76,15 +76,41 @@ class MonochromeSource implements SourceInstance {
         activeRequests: 0
       }))
 
-    this.apiInstances = initPool(this.config.instances || defaultUrls)
-    this.streamingInstances = initPool(
-      this.config.streamingInstances || this.apiInstances.map((i) => i.url)
-    )
+    const instances = this.config.instances?.length
+      ? this.config.instances
+      : defaultUrls
+    const streamingInstances = this.config.streamingInstances?.length
+      ? this.config.streamingInstances
+      : instances
+
+    this.apiInstances = initPool(instances)
+    this.streamingInstances = initPool(streamingInstances)
 
     this.patterns = [
       /^https?:\/\/monochrome\.tf\/(track|album|playlist|artist|video)\/[\w-]+/,
       /^https?:\/\/(?:www\.)?tidal\.com\/(?:browse\/)?(track|album|playlist|artist|video)\/[\w-]+/
     ]
+  }
+
+  /**
+   * Performs provider-specific resource initialization.
+   * @returns A promise resolving to true if initialized.
+   */
+  public async setup(): Promise<boolean> {
+    const apiCount = this.apiInstances.length
+    const streamCount = this.streamingInstances.length
+
+    if (apiCount > 0) {
+      logger(
+        'info',
+        'Monochrome',
+        `Source is ready with ${apiCount} API and ${streamCount} streaming instances.`
+      )
+      return true
+    }
+
+    logger('warn', 'Monochrome', 'Source failed to initialize: No instances available.')
+    return false
   }
 
   /**
@@ -185,6 +211,7 @@ class MonochromeSource implements SourceInstance {
     _sourceName?: string,
     searchType = 'track'
   ): Promise<SourceResult> {
+    logger('debug', 'Monochrome', `Searching for ${searchType}: "${query}"`)
     const cacheKey = `search:${searchType}:${query}`
     const cached = this.nodelink.trackCacheManager?.get<SourceResult>(
       'monochrome',
@@ -244,6 +271,8 @@ class MonochromeSource implements SourceInstance {
       results.length > 0
         ? { loadType: 'search', data: results }
         : { loadType: 'empty', data: {} }
+
+    logger('debug', 'Monochrome', `Search for "${query}" returned ${results.length} results.`)
     this.nodelink.trackCacheManager?.set(
       'monochrome',
       cacheKey,

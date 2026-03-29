@@ -514,6 +514,34 @@ export interface AmazonMusicSourceConfig extends SourceConfigBase {
 }
 
 /**
+ * Monochrome source configuration
+ * @public
+ */
+export interface MonochromeSourceConfig extends SourceConfigBase {
+  /**
+   * List of API instances to use for metadata and search.
+   * @remarks These instances handle track info, search queries, and collection metadata.
+   */
+  instances?: string[]
+
+  /**
+   * List of streaming instances used for manifest resolution.
+   * @remarks These instances are specifically used to resolve playable stream URIs.
+   */
+  streamingInstances?: string[]
+
+  /**
+   * Preferred audio quality.
+   * @remarks 
+   * - `HI_RES_LOSSLESS`: Highest available quality (FLAC Hi-Res).
+   * - `LOSSLESS`: Standard CD quality (FLAC).
+   * - `HIGH`: High quality compressed (AAC 320kbps).
+   * - `LOW`: Low quality compressed (AAC 96kbps).
+   */
+  quality?: 'HI_RES_LOSSLESS' | 'LOSSLESS' | 'HIGH' | 'LOW'
+}
+
+/**
  * Voice receive configuration for receiving audio from Discord
  * @public
  */
