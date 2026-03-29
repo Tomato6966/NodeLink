@@ -173,17 +173,17 @@ export default class SpotifySource {
         this.anonymousToken = cm.get('spotify_anonymous_token');
         this.mobileToken = cm.get('spotify_mobile_token');
         const hasOfficial = !!(this.config.clientId && this.config.clientSecret);
-        const hasAnonymous = !!(this.config.externalAuthUrl || this.config.sp_dc);
         try {
             // Ensure all possible authentication tiers are initialized
             if (hasOfficial && !this.accessToken)
                 await this._ensureToken('official');
-            if (hasAnonymous && !this.anonymousToken)
+            // Priming anonymous token by default since local generation is now supported standalone
+            if (!this.anonymousToken)
                 await this._ensureToken('anonymous');
             if (this.config.sp_dc && !this.mobileToken)
                 await this._ensureToken('mobile');
             const ok = !!(this.accessToken || this.anonymousToken || this.mobileToken);
-            if (!ok && !hasOfficial && !hasAnonymous) {
+            if (!ok && !hasOfficial) {
                 logger('warn', 'Spotify', 'Spotify source is enabled but missing credentials (clientId/Secret, sp_dc, or externalAuthUrl).');
                 return false;
             }
@@ -357,8 +357,11 @@ export default class SpotifySource {
         };
         if (useInternal) {
             Object.assign(headers, {
+                'Accept': 'application/json',
+                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
                 'App-Platform': 'WebPlayer',
-                'Spotify-App-Version': '1.2.83.284.g147edeea'
+                'Spotify-App-Version': '1.2.87.221.ge160d899',
+                'Referer': 'https://open.spotify.com/'
             });
         }
         try {
@@ -981,10 +984,12 @@ export default class SpotifySource {
      * @internal
      */
     async _resolveArtist(id) {
+        await this._ensureToken('anonymous');
         if (this.anonymousToken) {
             const data = await this._internalApiRequest(QUERIES.getArtist, {
                 uri: `spotify:artist:${id}`,
-                locale: 'en'
+                locale: 'en',
+                includePrerelease: false
             });
             if (data?.artistUnion) {
                 const tracks = (data.artistUnion.discography?.topTracks?.items || [])

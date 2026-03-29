@@ -225,18 +225,19 @@ export default class SpotifySource implements SourceInstance {
     this.mobileToken = cm.get<string>('spotify_mobile_token')
 
     const hasOfficial = !!(this.config.clientId && this.config.clientSecret)
-    const hasAnonymous = !!(this.config.externalAuthUrl || this.config.sp_dc)
 
     try {
       // Ensure all possible authentication tiers are initialized
       if (hasOfficial && !this.accessToken) await this._ensureToken('official')
-      if (hasAnonymous && !this.anonymousToken)
-        await this._ensureToken('anonymous')
+      
+      // Priming anonymous token by default since local generation is now supported standalone
+      if (!this.anonymousToken) await this._ensureToken('anonymous')
+
       if (this.config.sp_dc && !this.mobileToken)
         await this._ensureToken('mobile')
 
       const ok = !!(this.accessToken || this.anonymousToken || this.mobileToken)
-      if (!ok && !hasOfficial && !hasAnonymous) {
+      if (!ok && !hasOfficial) {
         logger(
           'warn',
           'Spotify',
@@ -459,8 +460,11 @@ export default class SpotifySource implements SourceInstance {
 
     if (useInternal) {
       Object.assign(headers, {
+        'Accept': 'application/json',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
         'App-Platform': 'WebPlayer',
-        'Spotify-App-Version': '1.2.83.284.g147edeea'
+        'Spotify-App-Version': '1.2.87.221.ge160d899',
+        'Referer': 'https://open.spotify.com/'
       })
     }
 
@@ -1174,12 +1178,15 @@ export default class SpotifySource implements SourceInstance {
    * @internal
    */
   private async _resolveArtist(id: string): Promise<SourceResult> {
+    await this._ensureToken('anonymous')
+
     if (this.anonymousToken) {
       const data = await this._internalApiRequest<SpotifyGraphQLArtistResponse>(
         QUERIES.getArtist,
         {
           uri: `spotify:artist:${id}`,
-          locale: 'en'
+          locale: 'en',
+          includePrerelease: false
         }
       )
       if (data?.artistUnion) {

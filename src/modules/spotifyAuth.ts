@@ -207,7 +207,8 @@ async function performTokenRequest(
   spDc: string | null | undefined,
   productType: string
 ): Promise<SpotifyLocalTokenResponse> {
-  const serverTimeMs = await getServerTime(spDc)
+  const isWebPlayer = productType === 'web-player'
+  const serverTimeMs = isWebPlayer ? Date.now() : await getServerTime(spDc)
   const serverTimeSec = Math.floor(serverTimeMs / 1000)
   const localTimeSec = Math.floor(Date.now() / 1000)
 

@@ -158,7 +158,8 @@ function generateTOTP(secretHex, timeSec, step = 30) {
  * @internal
  */
 async function performTokenRequest(secret, version, spDc, productType) {
-    const serverTimeMs = await getServerTime(spDc);
+    const isWebPlayer = productType === 'web-player';
+    const serverTimeMs = isWebPlayer ? Date.now() : await getServerTime(spDc);
     const serverTimeSec = Math.floor(serverTimeMs / 1000);
     const localTimeSec = Math.floor(Date.now() / 1000);
     const totpLocal = generateTOTP(secret, localTimeSec, 30);
