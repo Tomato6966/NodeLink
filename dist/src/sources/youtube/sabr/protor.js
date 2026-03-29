@@ -1,15 +1,43 @@
 import { Buffer } from 'node:buffer';
+/**
+ * Text decoder instance for Protobuf string fields.
+ * @internal
+ */
 const TD = new TextDecoder();
+/**
+ * Constant for empty byte arrays.
+ * @internal
+ */
 const EMPTY_U8 = new Uint8Array(0);
+/**
+ * Low-level Protobuf wire-format writer.
+ * @public
+ */
 export class ProtoWriter {
-    constructor() {
-        this.chunks = [];
-        this.length = 0;
-    }
+    /**
+     * Accumulated binary chunks.
+     * @internal
+     */
+    chunks = [];
+    /**
+     * Total length of the written data.
+     * @public
+     */
+    length = 0;
+    /**
+     * Pushes a chunk or single byte to the internal buffer.
+     * @param c - Data to push.
+     * @internal
+     */
     _push(c) {
         this.chunks.push(c);
         this.length += typeof c === 'number' ? 1 : c.length;
     }
+    /**
+     * Writes a varint-encoded 64-bit integer.
+     * @param value - The value to encode.
+     * @public
+     */
     writeVarint(value) {
         let v = BigInt(value);
         while (v > 127n) {
@@ -18,59 +46,110 @@ export class ProtoWriter {
         }
         this._push(Number(v));
     }
+    /**
+     * Writes a Protobuf field tag.
+     * @param fieldNumber - Field index.
+     * @param wireType - Protobuf wire type.
+     * @public
+     */
     writeTag(fieldNumber, wireType) {
         this.writeVarint((fieldNumber << 3) | wireType);
     }
+    /**
+     * Writes a UTF-8 string field.
+     * @param fieldNumber - Field index.
+     * @param str - String value.
+     * @public
+     */
     writeString(fieldNumber, str) {
         if (!str)
-            return; // Canonical: omit "", null, undefined
+            return;
         const buf = Buffer.from(str, 'utf8');
         this.writeTag(fieldNumber, 2);
         this.writeVarint(buf.length);
         this._push(buf);
     }
+    /**
+     * Writes a byte array field.
+     * @param fieldNumber - Field index.
+     * @param buffer - Data or base64 string.
+     * @public
+     */
     writeBytes(fieldNumber, buffer) {
         if (!buffer || buffer.length === 0)
-            return; // Canonical: omit
+            return;
+        let data;
         if (typeof buffer === 'string') {
             try {
-                buffer = base64ToU8(buffer);
+                data = base64ToU8(buffer);
             }
-            catch (_e) {
-                buffer = Buffer.from(buffer, 'utf8');
+            catch {
+                data = Buffer.from(buffer, 'utf8');
             }
         }
+        else {
+            data = buffer;
+        }
         this.writeTag(fieldNumber, 2);
-        this.writeVarint(buffer.length);
-        this._push(buffer);
+        this.writeVarint(data.length);
+        this._push(data);
     }
+    /**
+     * Writes a 32-bit signed integer field.
+     * @param fieldNumber - Field index.
+     * @param value - Integer value.
+     * @public
+     */
     writeInt32(fieldNumber, value) {
-        if (!value)
-            return; // Canonical: omit 0, null, undefined
+        if (value === null || value === undefined || value === 0)
+            return;
         this.writeTag(fieldNumber, 0);
         this.writeVarint(value);
     }
+    /**
+     * Writes a 64-bit signed integer field.
+     * @param fieldNumber - Field index.
+     * @param value - Integer value or string.
+     * @public
+     */
     writeInt64(fieldNumber, value) {
-        // playerTimeMs is often "0" as string or 0 as number
         if (!value || value === '0')
-            return; // Canonical: omit 0
+            return;
         this.writeTag(fieldNumber, 0);
         this.writeVarint(value);
     }
+    /**
+     * Writes a boolean field.
+     * @param fieldNumber - Field index.
+     * @param value - Boolean value.
+     * @public
+     */
     writeBool(fieldNumber, value) {
         if (!value)
-            return; // Canonical: omit false
+            return;
         this.writeTag(fieldNumber, 0);
         this.writeVarint(1);
     }
+    /**
+     * Writes a 32-bit floating point field.
+     * @param fieldNumber - Field index.
+     * @param value - Float value.
+     * @public
+     */
     writeFloat(fieldNumber, value) {
         if (!value)
-            return; // Canonical: omit 0
+            return;
         this.writeTag(fieldNumber, 5);
         const buf = Buffer.alloc(4);
         buf.writeFloatLE(value);
         this._push(buf);
     }
+    /**
+     * Writes a nested message field.
+     * @param fieldNumber - Field index.
+     * @param writer - Sub-writer containing the message.
+     * @public
+     */
     writeMessage(fieldNumber, writer) {
         const buf = writer.finish();
         if (buf.length === 0)
@@ -79,12 +158,18 @@ export class ProtoWriter {
         this.writeVarint(buf.length);
         this._push(buf);
     }
+    /**
+     * Finalizes the writing process and returns the byte array.
+     * @returns Concatenated binary data.
+     * @public
+     */
     finish() {
         const buf = new Uint8Array(this.length);
         let offset = 0;
         for (const c of this.chunks) {
-            if (typeof c === 'number')
+            if (typeof c === 'number') {
                 buf[offset++] = c;
+            }
             else {
                 buf.set(c, offset);
                 offset += c.length;
@@ -93,17 +178,42 @@ export class ProtoWriter {
         return buf;
     }
 }
+/**
+ * Low-level Protobuf wire-format reader.
+ * @public
+ */
 export class ProtoReader {
+    /**
+     * Data buffer to read from.
+     * @public
+     */
+    buffer;
+    /**
+     * Current reading position.
+     * @public
+     */
+    pos = 0;
+    /**
+     * Constructs a new ProtoReader.
+     * @param buffer - Binary data.
+     */
     constructor(buffer) {
         this.buffer = buffer;
-        this.pos = 0;
     }
+    /**
+     * Reads a varint-encoded 64-bit integer.
+     * @returns Decoded bigint.
+     * @public
+     */
     readVarint() {
-        let result = 0n, shift = 0n;
+        let result = 0n;
+        let shift = 0n;
         while (true) {
             if (this.pos >= this.buffer.length)
                 return result;
             const b = this.buffer[this.pos++];
+            if (b === undefined)
+                return result;
             result |= BigInt(b & 0x7f) << shift;
             shift += 7n;
             if ((b & 0x80) === 0)
@@ -111,6 +221,11 @@ export class ProtoReader {
         }
         return result;
     }
+    /**
+     * Reads a UTF-8 string field.
+     * @returns Decoded string.
+     * @public
+     */
     readString() {
         const len = Number(this.readVarint());
         if (this.pos + len > this.buffer.length)
@@ -119,6 +234,11 @@ export class ProtoReader {
         this.pos += len;
         return str;
     }
+    /**
+     * Reads a byte array field.
+     * @returns Field data as Uint8Array.
+     * @public
+     */
     readBytes() {
         const len = Number(this.readVarint());
         if (this.pos + len > this.buffer.length)
@@ -127,6 +247,11 @@ export class ProtoReader {
         this.pos += len;
         return bytes;
     }
+    /**
+     * Skips a field based on its wire type.
+     * @param wireType - Protobuf wire type.
+     * @public
+     */
     skip(wireType) {
         if (this.pos >= this.buffer.length)
             return;
@@ -148,6 +273,10 @@ export class ProtoReader {
         }
     }
 }
+/**
+ * Codec for FormatId Protobuf message.
+ * @public
+ */
 export const FormatId = {
     encode(msg, writer) {
         writer.writeInt32(1, msg.itag);
@@ -157,7 +286,7 @@ export const FormatId = {
     },
     decode(reader, len) {
         const end = reader.pos + len;
-        const msg = {};
+        const msg = { itag: 0 };
         while (reader.pos < end) {
             const tag = Number(reader.readVarint());
             const field = tag >>> 3;
@@ -173,6 +302,10 @@ export const FormatId = {
         return msg;
     }
 };
+/**
+ * Codec for ClientAbrState Protobuf message.
+ * @public
+ */
 export const ClientAbrState = {
     encode(msg, writer) {
         writer.writeInt32(16, msg.lastManualSelectedResolution);
@@ -190,6 +323,10 @@ export const ClientAbrState = {
         return writer;
     }
 };
+/**
+ * Codec for ClientInfo Protobuf message.
+ * @public
+ */
 export const ClientInfo = {
     encode(msg, writer) {
         writer.writeInt32(16, msg.clientName);
@@ -197,6 +334,10 @@ export const ClientInfo = {
         return writer;
     }
 };
+/**
+ * Codec for VideoPlaybackAbrRequest Protobuf message.
+ * @public
+ */
 export const VideoPlaybackAbrRequest = {
     encode(msg) {
         const writer = new ProtoWriter();
@@ -231,6 +372,10 @@ export const VideoPlaybackAbrRequest = {
         return writer.finish();
     }
 };
+/**
+ * Codec for TimeRange Protobuf message.
+ * @public
+ */
 export const TimeRange = {
     encode(msg, writer) {
         writer.writeInt64(1, msg.startTicks);
@@ -240,7 +385,11 @@ export const TimeRange = {
     },
     decode(reader, len) {
         const end = reader.pos + len;
-        const msg = { startTicks: '0', durationTicks: '0', timescale: 0 };
+        const msg = {
+            startTicks: '0',
+            durationTicks: '0',
+            timescale: 0
+        };
         while (reader.pos < end) {
             const tag = Number(reader.readVarint());
             const field = tag >>> 3;
@@ -256,6 +405,10 @@ export const TimeRange = {
         return msg;
     }
 };
+/**
+ * Codec for BufferedRange Protobuf message.
+ * @public
+ */
 export const BufferedRange = {
     encode(msg, writer) {
         if (msg.formatId) {
@@ -271,6 +424,10 @@ export const BufferedRange = {
         return writer;
     }
 };
+/**
+ * Codec for MediaHeader Protobuf message.
+ * @public
+ */
 export const MediaHeader = {
     decode(reader, len) {
         const end = reader.pos + len;
@@ -318,6 +475,10 @@ export const MediaHeader = {
         return msg;
     }
 };
+/**
+ * Codec for FormatInitializationMetadata Protobuf message.
+ * @public
+ */
 export const FormatInitializationMetadata = {
     decode(reader, len) {
         const end = reader.pos + len;
@@ -343,6 +504,10 @@ export const FormatInitializationMetadata = {
         return msg;
     }
 };
+/**
+ * Codec for StreamProtectionStatus Protobuf message.
+ * @public
+ */
 export const StreamProtectionStatus = {
     decode(reader, len) {
         const end = reader.pos + len;
@@ -358,6 +523,10 @@ export const StreamProtectionStatus = {
         return msg;
     }
 };
+/**
+ * Codec for SabrRedirect Protobuf message.
+ * @public
+ */
 export const SabrRedirect = {
     decode(reader, len) {
         const end = reader.pos + len;
@@ -373,6 +542,10 @@ export const SabrRedirect = {
         return msg;
     }
 };
+/**
+ * Codec for SabrError Protobuf message.
+ * @public
+ */
 export const SabrError = {
     decode(reader, len) {
         const end = reader.pos + len;
@@ -390,6 +563,10 @@ export const SabrError = {
         return msg;
     }
 };
+/**
+ * Codec for SnackbarMessage Protobuf message.
+ * @public
+ */
 export const SnackbarMessage = {
     decode(reader, len) {
         const end = reader.pos + len;
@@ -405,6 +582,10 @@ export const SnackbarMessage = {
         return msg;
     }
 };
+/**
+ * Codec for SabrContextUpdate Protobuf message.
+ * @public
+ */
 export const SabrContextUpdate = {
     decode(reader, len) {
         const end = reader.pos + len;
@@ -428,10 +609,18 @@ export const SabrContextUpdate = {
         return msg;
     }
 };
+/**
+ * Codec for SabrContextSendingPolicy Protobuf message.
+ * @public
+ */
 export const SabrContextSendingPolicy = {
     decode(reader, len) {
         const end = reader.pos + len;
-        const msg = { startPolicy: [], stopPolicy: [], discardPolicy: [] };
+        const msg = {
+            startPolicy: [],
+            stopPolicy: [],
+            discardPolicy: []
+        };
         while (reader.pos < end) {
             const tag = Number(reader.readVarint());
             const field = tag >>> 3;
@@ -447,6 +636,10 @@ export const SabrContextSendingPolicy = {
         return msg;
     }
 };
+/**
+ * Codec for NextRequestPolicy Protobuf message.
+ * @public
+ */
 export const NextRequestPolicy = {
     decode(reader, len) {
         const end = reader.pos + len;
@@ -474,6 +667,12 @@ export const NextRequestPolicy = {
         return msg;
     }
 };
+/**
+ * Heuristic to check if a byte array is mostly printable UTF-8.
+ * @param u8 - Input data.
+ * @returns True if mostly printable.
+ * @internal
+ */
 function isMostlyPrintableUtf8(u8) {
     if (!u8?.length)
         return false;
@@ -493,6 +692,14 @@ function isMostlyPrintableUtf8(u8) {
         return false;
     }
 }
+/**
+ * Decodes a generic Protobuf message into a wire-level object.
+ * @param reader - Input reader.
+ * @param len - Message length.
+ * @param depth - Recursion depth for nested messages.
+ * @returns Record of fields.
+ * @internal
+ */
 function decodeProtobufObject(reader, len, depth = 2) {
     const end = reader.pos + len;
     const msg = {};
@@ -524,7 +731,9 @@ function decodeProtobufObject(reader, len, depth = 2) {
                     if (Object.keys(nested).length)
                         entry.pb = nested;
                 }
-                catch { }
+                catch {
+                    // Ignore parse errors for nested objects
+                }
             }
             push(field, entry);
         }
@@ -534,12 +743,19 @@ function decodeProtobufObject(reader, len, depth = 2) {
     }
     return msg;
 }
+/**
+ * Codec for PlaybackStartPolicy Protobuf message.
+ * @public
+ */
 export const PlaybackStartPolicy = {
     decode(reader, len) {
-        // Unknown schema; return a wire-level decoded object (numeric field keys).
         return decodeProtobufObject(reader, len, 2);
     }
 };
+/**
+ * Codec for RequestIdentifier Protobuf message.
+ * @public
+ */
 export const RequestIdentifier = {
     decode(reader, len) {
         const end = reader.pos + len;
@@ -556,18 +772,28 @@ export const RequestIdentifier = {
         return msg;
     }
 };
+/**
+ * Codec for RequestCancellationPolicy Protobuf message.
+ * @public
+ */
 export const RequestCancellationPolicy = {
     decode(reader, len) {
-        // Unknown schema; return a wire-level decoded object (numeric field keys).
         return decodeProtobufObject(reader, len, 2);
     }
 };
+/**
+ * Codec for ReloadPlaybackContext Protobuf message.
+ * @public
+ */
 export const ReloadPlaybackContext = {
     decode(reader, len) {
-        // Unknown schema; return wire-level decoded object like other unknown messages.
         return decodeProtobufObject(reader, len, 2);
     }
 };
+/**
+ * Codec for StreamerContext Protobuf message.
+ * @public
+ */
 export const StreamerContext = {
     encode(msg, writer) {
         if (msg.clientInfo) {
@@ -593,11 +819,19 @@ export const StreamerContext = {
         return writer;
     }
 };
+/**
+ * Enumeration of track types enabled for playback.
+ * @public
+ */
 export const EnabledTrackTypes = {
     VIDEO_AND_AUDIO: 0,
     AUDIO_ONLY: 1,
     VIDEO_ONLY: 2
 };
+/**
+ * Mapping of UMP part identifiers to their numeric codes.
+ * @public
+ */
 export const UMPPartId = {
     FORMAT_INITIALIZATION_METADATA: 42,
     NEXT_REQUEST_POLICY: 35,
@@ -615,6 +849,12 @@ export const UMPPartId = {
     MEDIA_END: 22,
     SNACKBAR_MESSAGE: 67
 };
+/**
+ * Decodes a base64 or base64url string to Uint8Array.
+ * @param base64 - Encoded string.
+ * @returns Byte array.
+ * @public
+ */
 export function base64ToU8(base64) {
     let s = base64;
     if (s.includes('-'))
@@ -626,6 +866,12 @@ export function base64ToU8(base64) {
         s += '='.repeat(4 - mod);
     return new Uint8Array(Buffer.from(s, 'base64'));
 }
+/**
+ * Concatenates multiple Uint8Array chunks into one.
+ * @param chunks - Array of byte arrays.
+ * @returns Merged byte array.
+ * @public
+ */
 export function concatenateChunks(chunks) {
     const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
     const result = new Uint8Array(totalLength);
@@ -636,15 +882,32 @@ export function concatenateChunks(chunks) {
     }
     return result;
 }
+/**
+ * Helper class for writing UMP (Unified Media Protocol) parts.
+ * @public
+ */
 export class UMPWriter {
-    constructor() {
-        this.chunks = [];
-    }
+    /**
+     * Accumulated binary chunks.
+     * @internal
+     */
+    chunks = [];
+    /**
+     * Writes a part to the UMP sequence.
+     * @param partType - Part ID from UMPPartId.
+     * @param partData - Binary data for the part.
+     * @public
+     */
     write(partType, partData) {
         this.writeVarInt(partType);
         this.writeVarInt(partData.length);
         this.chunks.push(partData);
     }
+    /**
+     * Writes a varint value to the internal buffer.
+     * @param value - Value to write.
+     * @public
+     */
     writeVarInt(value) {
         if (value < 0)
             throw new Error('VarInt value cannot be negative.');
@@ -677,6 +940,11 @@ export class UMPWriter {
             this.chunks.push(data);
         }
     }
+    /**
+     * Finalizes the UMP sequence.
+     * @returns Concatenated UMP data.
+     * @public
+     */
     finish() {
         return concatenateChunks(this.chunks);
     }

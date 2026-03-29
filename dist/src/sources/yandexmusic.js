@@ -964,7 +964,8 @@ export default class YandexMusicSource {
             track.info.length = ext.length;
         if (!track.info.isrc && ext.isrc)
             track.info.isrc = ext.isrc;
-        if (!track.info.artworkUrl || track.info.artworkUrl.includes('yandex.net')) {
+        if (!track.info.artworkUrl ||
+            track.info.artworkUrl.includes('yandex.net')) {
             if (ext.artworkUrl)
                 track.info.artworkUrl = ext.artworkUrl;
         }

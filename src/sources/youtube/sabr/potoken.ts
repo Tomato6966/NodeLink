@@ -2,10 +2,18 @@ import { Buffer } from 'node:buffer'
 import { appendFile } from 'node:fs/promises'
 import path from 'node:path'
 import { logger } from '../../../utils.ts'
-import { base64ToU8 } from './protor.js'
+import { base64ToU8 } from './protor.ts'
 
+/**
+ * Path to the log file for PO tokens.
+ * @internal
+ */
 const TOKENS_LOG_PATH = path.join(process.cwd(), 'po_tokens.jsonl')
 
+/**
+ * Configuration for the Proof of Origin (PO) system.
+ * @internal
+ */
 const PO_CONFIG = {
   apiKey: 'AIzaSyDyT5W0Jh49F30Pqqtyfdf7pDLFKLJoAnw',
   userAgent:
@@ -14,23 +22,39 @@ const PO_CONFIG = {
   googBaseUrl: 'https://jnn-pa.googleapis.com'
 }
 
+/**
+ * Text encoder for string to byte array conversions.
+ * @internal
+ */
 const textEncoder = new TextEncoder()
 
-class DeferredPromise {
+/**
+ * Helper class for handling promises that are resolved or rejected externally.
+ * @internal
+ */
+class DeferredPromise<T> {
+  public readonly promise: Promise<T>
+  public resolve!: (value: T | PromiseLike<T>) => void
+  public reject!: (reason?: unknown) => void
+
   constructor() {
-    this.promise = new Promise((resolve, reject) => {
+    this.promise = new Promise<T>((resolve, reject) => {
       this.resolve = resolve
       this.reject = reject
     })
   }
 }
 
-function u8ToBase64(u8, base64url = false) {
+/**
+ * Encodes a byte array to base64 or base64url.
+ * @param u8 - Input bytes.
+ * @param base64url - Whether to use websafe URL encoding.
+ * @returns Encoded string.
+ * @internal
+ */
+function u8ToBase64(u8: Uint8Array, base64url = false): string {
   if (!base64url) return Buffer.from(u8).toString('base64')
 
-  if (Buffer.isEncoding?.('base64url')) {
-    return Buffer.from(u8).toString('base64url')
-  }
   const s = Buffer.from(u8)
     .toString('base64')
     .replaceAll('+', '-')
@@ -39,31 +63,93 @@ function u8ToBase64(u8, base64url = false) {
   return pad === -1 ? s : s.slice(0, pad)
 }
 
-function buildURL(endpointName, useYouTubeAPI) {
+/**
+ * Builds an API URL for PO token generation.
+ * @param endpointName - Target RPC or API endpoint.
+ * @param useYouTubeAPI - Whether to use the YouTube-specific endpoint.
+ * @returns Full URL string.
+ * @internal
+ */
+function buildURL(endpointName: string, useYouTubeAPI: boolean): string {
   return `${useYouTubeAPI ? PO_CONFIG.ytBaseUrl : PO_CONFIG.googBaseUrl}/${useYouTubeAPI ? 'api/jnn/v1' : '$rpc/google.internal.waa.v1.Waa'}/${endpointName}`
 }
 
+/**
+ * Internal interface for BotGuard VM functions.
+ * @internal
+ */
+interface BotGuardVmFunctions {
+  asyncSnapshotFunction: (
+    callback: (response: string) => void,
+    args: [
+      string | undefined,
+      string | undefined,
+      unknown[],
+      boolean | undefined
+    ]
+  ) => void
+  shutdownFunction: () => void
+  passEventFunction: (event: unknown) => void
+  checkCameraFunction: () => void
+}
+
+/**
+ * Internal interface for the BotGuard VM object.
+ * @internal
+ */
+interface BotGuardVm {
+  a: (
+    program: string,
+    cb: (
+      asyncSnapshotFunction: BotGuardVmFunctions['asyncSnapshotFunction'],
+      shutdownFunction: BotGuardVmFunctions['shutdownFunction'],
+      passEventFunction: BotGuardVmFunctions['passEventFunction'],
+      checkCameraFunction: BotGuardVmFunctions['checkCameraFunction']
+    ) => void,
+    flag: boolean,
+    u1: undefined,
+    fn: () => void,
+    arr: unknown[]
+  ) => Promise<[unknown]>
+}
+
+/**
+ * Client for interacting with the BotGuard virtual machine.
+ * @internal
+ */
 class BotGuardClient {
-  constructor(options) {
-    this.deferredVmFunctions = new DeferredPromise()
-    this.defaultTimeout = 3000
-    this.vm = options.globalObj[options.globalName]
+  private readonly deferredVmFunctions =
+    new DeferredPromise<BotGuardVmFunctions>()
+  private readonly defaultTimeout = 3000
+  private readonly vm: BotGuardVm
+  private readonly program: string
+
+  private constructor(options: {
+    globalObj: Record<string, unknown>
+    globalName: string
+    program: string
+  }) {
+    this.vm = options.globalObj[options.globalName] as BotGuardVm
     this.program = options.program
   }
 
-  static async create(options) {
+  public static async create(options: {
+    globalObj: Record<string, unknown>
+    globalName: string
+    program: string
+  }): Promise<BotGuardClient> {
     return await new BotGuardClient(options).load()
   }
 
-  async load() {
+  private async load(): Promise<this> {
     if (!this.vm) throw new Error('VM not found')
     if (!this.vm.a) throw new Error('VM init function not found')
 
     const vmFunctionsCallback = (
-      asyncSnapshotFunction,
-      shutdownFunction,
-      passEventFunction,
-      checkCameraFunction
+      asyncSnapshotFunction: BotGuardVmFunctions['asyncSnapshotFunction'],
+      shutdownFunction: BotGuardVmFunctions['shutdownFunction'],
+      passEventFunction: BotGuardVmFunctions['passEventFunction'],
+      checkCameraFunction: BotGuardVmFunctions['checkCameraFunction']
     ) => {
       this.deferredVmFunctions.resolve({
         asyncSnapshotFunction,
@@ -74,24 +160,31 @@ class BotGuardClient {
     }
 
     try {
-      this.syncSnapshotFunction = (
-        await this.vm.a(
-          this.program,
-          vmFunctionsCallback,
-          true,
-          undefined,
-          () => {},
-          [[], []]
-        )
-      )[0]
+      await this.vm.a(
+        this.program,
+        vmFunctionsCallback,
+        true,
+        undefined,
+        () => {},
+        [[], []]
+      )
     } catch (error) {
-      throw new Error(`Could not load program: ${error.message}`)
+      const message = error instanceof Error ? error.message : String(error)
+      throw new Error(`Could not load program: ${message}`)
     }
 
     return this
   }
 
-  async snapshot(args, timeout = this.defaultTimeout) {
+  public async snapshot(
+    args: {
+      contentBinding?: string
+      signedTimestamp?: string
+      webPoSignalOutput: unknown[]
+      skipPrivacyBuffer?: boolean
+    },
+    timeout = this.defaultTimeout
+  ): Promise<string> {
     const vmFunctions = await this.deferredVmFunctions.promise
     if (!vmFunctions.asyncSnapshotFunction)
       throw new Error('Asynchronous snapshot function not found')
@@ -119,27 +212,42 @@ class BotGuardClient {
   }
 }
 
+/**
+ * Helper class for minting Proof of Origin tokens.
+ * @internal
+ */
 class WebPoMinter {
-  constructor(mintCallback) {
+  private readonly mintCallback: (identifier: Uint8Array) => Promise<Uint8Array>
+
+  private constructor(
+    mintCallback: (identifier: Uint8Array) => Promise<Uint8Array>
+  ) {
     this.mintCallback = mintCallback
   }
 
-  static async create(integrityToken, webPoSignalOutput) {
-    const getMinter = webPoSignalOutput[0]
+  public static async create(
+    integrityToken: string,
+    webPoSignalOutput: unknown[]
+  ): Promise<WebPoMinter> {
+    const getMinter = webPoSignalOutput[0] as
+      | ((token: Uint8Array) => Promise<unknown>)
+      | undefined
     if (!getMinter) throw new Error('PMD:Undefined')
     if (!integrityToken) throw new Error('No integrity token provided')
 
     const mintCallback = await getMinter(base64ToU8(integrityToken))
     if (!(mintCallback instanceof Function)) throw new Error('APF:Failed')
 
-    return new WebPoMinter(mintCallback)
+    return new WebPoMinter(
+      mintCallback as (identifier: Uint8Array) => Promise<Uint8Array>
+    )
   }
 
-  async mintAsWebsafeString(identifier) {
+  public async mintAsWebsafeString(identifier: string): Promise<string> {
     return u8ToBase64(await this.mint(identifier), true)
   }
 
-  async mint(identifier) {
+  public async mint(identifier: string): Promise<Uint8Array> {
     const result = await this.mintCallback(textEncoder.encode(identifier))
     if (!result) throw new Error('YNJ:Undefined')
     if (!(result instanceof Uint8Array)) throw new Error('ODM:Invalid')
@@ -147,19 +255,54 @@ class WebPoMinter {
   }
 }
 
-export class PoTokenManager {
-  constructor() {
-    this.botguard = null
-    this.minter = null
-    this.visitorData = null
-    this.integrityToken = null
-
-    this._dom = null
-    this._prevGlobals = null
-    this._idleTimer = null
+/**
+ * Internal interface for challenge response metadata.
+ * @internal
+ */
+interface AttestationChallenge {
+  bg_challenge: {
+    program: string
+    global_name: string
+    interpreter_url: {
+      private_do_not_access_or_else_trusted_resource_url_wrapped_value: string
+    }
   }
+}
 
-  _refreshIdleTimer() {
+/**
+ * Manager for YouTube Proof of Origin (PO) tokens.
+ * Handles visitor data fetching, attestation challenges, and token minting.
+ * @public
+ */
+export class PoTokenManager {
+  private botguard: BotGuardClient | null = null
+  private minter: WebPoMinter | null = null
+  private visitorData: string | null = null
+  private integrityToken: string | null = null
+
+  private _dom: {
+    window: {
+      close: () => void
+      document: unknown
+      location: unknown
+      origin: string
+      navigator: unknown
+    }
+  } | null = null
+  private _prevGlobals: {
+    window: unknown
+    document: unknown
+    location: unknown
+    origin: string
+    hadNavigator: boolean
+  } | null = null
+  private _idleTimer: NodeJS.Timeout | null = null
+
+  /**
+   * Refreshes the idle timeout for JSDOM resources.
+   * @internal
+   */
+  private _refreshIdleTimer(): void {
     if (this._idleTimer) clearTimeout(this._idleTimer)
     this._idleTimer = setTimeout(
       () => {
@@ -171,18 +314,30 @@ export class PoTokenManager {
         this.reset()
       },
       10 * 60 * 1000
-    ) // 10 minutes
+    )
     if (this._idleTimer.unref) this._idleTimer.unref()
   }
 
-  _applyDomGlobals(dom) {
+  /**
+   * Applies JSDOM environment to globalThis.
+   * @param dom - JSDOM instance.
+   * @internal
+   */
+  private _applyDomGlobals(dom: {
+    window: {
+      document: unknown
+      location: unknown
+      origin: string
+      navigator: unknown
+    }
+  }): void {
     if (!this._prevGlobals) {
-      const g = globalThis
+      const g = globalThis as unknown as Record<string, unknown>
       this._prevGlobals = {
         window: g.window,
         document: g.document,
         location: g.location,
-        origin: g.origin,
+        origin: String(g.origin || ''),
         hadNavigator: Reflect.has(g, 'navigator')
       }
     }
@@ -202,7 +357,11 @@ export class PoTokenManager {
     }
   }
 
-  _cleanupDom() {
+  /**
+   * Cleans up JSDOM and restores previous globals.
+   * @internal
+   */
+  private _cleanupDom(): void {
     if (this._dom) {
       this._dom.window.close()
       this._dom = null
@@ -211,8 +370,8 @@ export class PoTokenManager {
     const p = this._prevGlobals
     if (!p) return
 
-    const g = globalThis
-    for (const k of ['window', 'document', 'location', 'origin']) {
+    const g = globalThis as unknown as Record<string, unknown>
+    for (const k of ['window', 'document', 'location', 'origin'] as const) {
       if (p[k] === undefined) delete g[k]
       else g[k] = p[k]
     }
@@ -221,7 +380,12 @@ export class PoTokenManager {
     this._prevGlobals = null
   }
 
-  async fetchVisitorData() {
+  /**
+   * Fetches fresh VISITOR_DATA from YouTube home page.
+   * @returns Visitor data string or empty if failed.
+   * @public
+   */
+  public async fetchVisitorData(): Promise<string> {
     try {
       const response = await fetch('https://www.youtube.com', {
         headers: { 'user-agent': PO_CONFIG.userAgent }
@@ -238,16 +402,21 @@ export class PoTokenManager {
 
       throw new Error('Could not find visitorData in HTML')
     } catch (error) {
-      logger(
-        'error',
-        'PoToken',
-        `Failed to fetch visitorData: ${error.message}`
-      )
+      const message = error instanceof Error ? error.message : String(error)
+      logger('error', 'PoToken', `Failed to fetch visitorData: ${message}`)
       return ''
     }
   }
 
-  async getAttestationChallenge(visitorData) {
+  /**
+   * Fetches an attestation challenge for specific visitor data.
+   * @param visitorData - User session identifier.
+   * @returns Challenge payload.
+   * @internal
+   */
+  private async getAttestationChallenge(
+    visitorData: string
+  ): Promise<AttestationChallenge> {
     const response = await fetch(
       `${PO_CONFIG.ytBaseUrl}/youtubei/v1/att/get?key=${PO_CONFIG.apiKey}`,
       {
@@ -273,7 +442,15 @@ export class PoTokenManager {
     )
 
     const text = await response.text()
-    let data
+    let data: {
+      bgChallenge?: {
+        program: string
+        globalName: string
+        interpreterUrl: {
+          privateDoNotAccessOrElseTrustedResourceUrlWrappedValue: string
+        }
+      }
+    }
     try {
       data = JSON.parse(text)
     } catch {
@@ -298,7 +475,12 @@ export class PoTokenManager {
     }
   }
 
-  async initialize(existingVisitorData) {
+  /**
+   * Initializes the BotGuard client and PO minter.
+   * @param existingVisitorData - Optional existing visitor data to reuse.
+   * @public
+   */
+  public async initialize(existingVisitorData?: string): Promise<void> {
     if (
       existingVisitorData &&
       this.visitorData &&
@@ -341,7 +523,7 @@ export class PoTokenManager {
 
     logger('debug', 'PoToken', 'Fetching attestation challenge...')
     const challengeResponse = await this.getAttestationChallenge(
-      this.visitorData
+      this.visitorData || ''
     )
     if (!challengeResponse.bg_challenge)
       throw new Error('Could not get challenge')
@@ -361,11 +543,11 @@ export class PoTokenManager {
     this.botguard = await BotGuardClient.create({
       program: challengeResponse.bg_challenge.program,
       globalName: challengeResponse.bg_challenge.global_name,
-      globalObj: globalThis
+      globalObj: globalThis as unknown as Record<string, unknown>
     })
 
     logger('debug', 'PoToken', 'Generating snapshot and creating minter...')
-    const webPoSignalOutput = []
+    const webPoSignalOutput: unknown[] = []
     const botguardResponse = await this.botguard.snapshot({ webPoSignalOutput })
 
     const requestKey = 'O43z0dpjhgX20SCx4KAo'
@@ -380,7 +562,7 @@ export class PoTokenManager {
       body: JSON.stringify([requestKey, botguardResponse])
     })
 
-    const response = await integrityTokenResponse.json()
+    const response = (await integrityTokenResponse.json()) as [string, unknown]
     if (typeof response[0] !== 'string')
       throw new Error('Could not get integrity token')
 
@@ -398,7 +580,21 @@ export class PoTokenManager {
     logger('debug', 'PoToken', 'Initialization complete')
   }
 
-  async generate(videoId, existingVisitorData) {
+  /**
+   * Generates PO tokens for a specific video ID.
+   * @param videoId - Target YouTube video identifier.
+   * @param existingVisitorData - Optional visitor data to use.
+   * @returns Generated tokens.
+   * @public
+   */
+  public async generate(
+    videoId: string,
+    existingVisitorData?: string
+  ): Promise<{
+    poToken: string | null
+    visitorData: string | null
+    legacyPoToken: string | null
+  }> {
     try {
       logger(
         'debug',
@@ -407,6 +603,10 @@ export class PoTokenManager {
       )
 
       await this.initialize(existingVisitorData)
+
+      if (!this.minter || !this.integrityToken || !this.visitorData) {
+        throw new Error('Minter not initialized properly.')
+      }
 
       const contentPoToken = await this.minter.mintAsWebsafeString(videoId)
       logger(
@@ -446,17 +646,19 @@ export class PoTokenManager {
         legacyPoToken
       }
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const stack = error instanceof Error ? error.stack : undefined
       const errEntry = {
         ts: new Date().toISOString(),
         videoId,
-        error: error.message,
-        stack: error.stack
+        error: message,
+        stack
       }
 
       logger(
         'error',
         'PoToken',
-        `Failed to generate token for ${videoId}: ${error.message}`
+        `Failed to generate token for ${videoId}: ${message}`
       )
       await appendFile(TOKENS_LOG_PATH, `${JSON.stringify(errEntry)}\n`).catch(
         () => {}
@@ -468,7 +670,14 @@ export class PoTokenManager {
     }
   }
 
-  bindToken(integrityToken, visitorData) {
+  /**
+   * Binds an integrity token to visitor data for legacy PO tokens.
+   * @param integrityToken - Token from GenerateIT.
+   * @param visitorData - Current visitor data.
+   * @returns Encoded legacy token.
+   * @public
+   */
+  public bindToken(integrityToken: string, visitorData: string): string {
     const itU8 = base64ToU8(integrityToken)
     const it = Buffer.from(itU8.buffer, itU8.byteOffset, itU8.byteLength)
     const vd = Buffer.from(visitorData, 'utf8')
@@ -490,15 +699,26 @@ export class PoTokenManager {
     vd.copy(buf, 10 + it.length)
 
     for (let i = 4; i < len; i++) {
-      buf[i] ^= i & 1 ? 0xb3 : 0x5a
+      const current = buf[i]
+      if (current !== undefined) {
+        buf[i] = current ^ (i & 1 ? 0xb3 : 0x5a)
+      }
     }
 
     return u8ToBase64(buf, true)
   }
 
-  async generateStreamingToken() {
+  /**
+   * Generates a PO token for a streaming session.
+   * @returns Generated token or null if failed.
+   * @public
+   */
+  public async generateStreamingToken(): Promise<string | null> {
     try {
       await this.initialize()
+      if (!this.minter || !this.visitorData)
+        throw new Error('Minter not initialized.')
+
       const sessionPoToken = await this.minter.mintAsWebsafeString(
         this.visitorData
       )
@@ -512,19 +732,29 @@ export class PoTokenManager {
 
       return sessionPoToken
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       logger(
         'error',
         'PoToken',
-        `Failed to generate streaming token: ${error.message}`
+        `Failed to generate streaming token: ${message}`
       )
       this.reset()
       return null
     }
   }
 
-  generateColdStartToken(visitorData) {
+  /**
+   * Generates a lightweight cold start token.
+   * @param visitorData - Optional visitor data.
+   * @returns Encoded token or null if failed.
+   * @public
+   */
+  public generateColdStartToken(visitorData?: string): string | null {
     try {
       const identifier = visitorData || this.visitorData
+      if (!identifier)
+        throw new Error('No visitor data available for cold start token.')
+
       const encodedIdentifier = textEncoder.encode(identifier)
       if (encodedIdentifier.length > 118)
         throw new Error('Content binding is too long.')
@@ -549,20 +779,31 @@ export class PoTokenManager {
       packet.set(encodedIdentifier, 10)
 
       const payload = packet.subarray(2)
-      for (let i = 2; i < payload.length; i++) payload[i] ^= payload[i & 1]
+      for (let i = 2; i < payload.length; i++) {
+        const val = payload[i]
+        const key = payload[i & 1]
+        if (val !== undefined && key !== undefined) {
+          payload[i] = val ^ key
+        }
+      }
 
       return u8ToBase64(packet, true)
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
       logger(
         'error',
         'PoToken',
-        `Failed to generate cold start token: ${error.message}`
+        `Failed to generate cold start token: ${message}`
       )
       return null
     }
   }
 
-  reset() {
+  /**
+   * Resets the manager state and cleans up resources.
+   * @public
+   */
+  public reset(): void {
     logger('debug', 'PoToken', 'Resetting PoTokenManager state')
     if (this._idleTimer) {
       clearTimeout(this._idleTimer)
@@ -576,4 +817,8 @@ export class PoTokenManager {
   }
 }
 
+/**
+ * Global instance of PoTokenManager.
+ * @public
+ */
 export const poTokenManager = new PoTokenManager()
