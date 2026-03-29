@@ -12,6 +12,7 @@ export default async function (nodelink, config, context) {
     }
     let cloudflared;
     try {
+        // @ts-expect-error
         cloudflared = await import('cloudflared');
     }
     catch (_e) {

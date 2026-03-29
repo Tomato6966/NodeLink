@@ -114,7 +114,7 @@ const routesPromise = loadRoutes();
  * @example
  * ```ts
  * import http from 'node:http'
- * import RequestHandler from './api/index.js'
+ * import RequestHandler from './api/index.ts'
  *
  * http.createServer((req, res) => RequestHandler(nodelink, req, res))
  * ```

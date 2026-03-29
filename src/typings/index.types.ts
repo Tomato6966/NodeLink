@@ -9,7 +9,7 @@ import type {
 import type { WorkerMetricsEntry } from './api/stats.types.ts'
 import type { NodelinkConfig } from './config/config.types.ts'
 import type { PlayerVoiceState } from './playback/player.types.ts'
-import type { ClientInfo } from './shared.types.js'
+import type { ClientInfo } from './shared.types.ts'
 
 /**
  * Data associated with a Bun WebSocket connection

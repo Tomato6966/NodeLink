@@ -108,6 +108,9 @@ export default async function (nodelink, _config, context) {
         logger('Running Worker setup...');
         // 1. Registering a Custom Audio Source
         class MyCustomSource {
+            nodelink;
+            sourceName;
+            searchTerms;
             constructor(nodelink) {
                 this.nodelink = nodelink;
                 this.sourceName = 'mysource';
@@ -136,6 +139,7 @@ export default async function (nodelink, _config, context) {
         }
         // 2. Registering a Custom Audio Filter
         class SimpleGainFilter {
+            gain;
             constructor() {
                 this.gain = 1.0;
             }

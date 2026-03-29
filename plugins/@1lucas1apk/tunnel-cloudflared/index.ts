@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process'
 import fs from 'node:fs'
 
-export default async function (nodelink, config, context) {
+export default async function (nodelink: any, config: any, context: any) {
   if (context.type !== 'master') return
 
-  const logger = (msg, level = 'info') =>
+  const logger = (msg: any, level = 'info') =>
     nodelink.logger(level, 'Cloudflared', msg)
 
   const token = config.token || process.env.CF_TUNNEL_TOKEN
@@ -15,8 +15,9 @@ export default async function (nodelink, config, context) {
     return
   }
 
-  let cloudflared
+  let cloudflared: any
   try {
+    // @ts-expect-error
     cloudflared = await import('cloudflared')
   } catch (_e) {
     logger(

@@ -34,7 +34,7 @@ const getRequestHandler = async () => {
 };
 const getProfilerApi = async () => {
     if (!profilerApiPromise) {
-        profilerApiPromise = import('./api/profiler.js');
+        profilerApiPromise = import("./api/profiler.js");
     }
     return profilerApiPromise;
 };

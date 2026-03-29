@@ -52,7 +52,7 @@ export default class SourcesManager {
         this.searchAliasMap.clear();
         this.patternMap = [];
         const processSource = async (name, mod) => {
-            const isYouTube = name === 'youtube' || name.includes('YouTube.js');
+            const isYouTube = name === 'youtube' || name.includes('YouTube.ts');
             const sourceKey = isYouTube ? 'youtube' : name;
             const youtubeKey = 'youtube';
             const sourceConfig = this.nodelink.options.sources;
@@ -110,12 +110,12 @@ export default class SourcesManager {
             const sourceEntries = uniqueEnabled.map((sourceKey) => {
                 const fileCandidates = sourceKey === 'youtube'
                     ? [
-                        path.join(sourcesDir, 'youtube', 'YouTube.js'),
-                        path.join(sourcesDir, 'youtube', 'YouTube.ts')
+                        path.join(sourcesDir, 'youtube', 'YouTube.ts'),
+                        path.join(sourcesDir, 'youtube', 'YouTube.js')
                     ]
                     : [
-                        path.join(sourcesDir, `${sourceKey}.js`),
-                        path.join(sourcesDir, `${sourceKey}.ts`)
+                        path.join(sourcesDir, `${sourceKey}.ts`),
+                        path.join(sourcesDir, `${sourceKey}.js`)
                     ];
                 return { sourceKey, fileCandidates };
             });

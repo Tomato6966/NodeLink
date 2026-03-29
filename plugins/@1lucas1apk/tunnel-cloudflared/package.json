@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Cloudflare Tunnel integration for NodeLink",
   "type": "module",
-  "main": "index.js",
+  "main": "index.ts",
   "author": "1lucas1apk",
   "license": "MIT",
   "dependencies": {

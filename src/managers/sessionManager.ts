@@ -6,7 +6,7 @@ import type {
   Session,
   SessionSocket
 } from '../typings/index.types.ts'
-import type { ClientInfo } from '../typings/shared.types.js'
+import type { ClientInfo } from '../typings/shared.types.ts'
 import { generateRandomLetters, logger } from '../utils.ts'
 
 /**

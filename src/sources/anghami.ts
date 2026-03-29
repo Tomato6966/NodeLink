@@ -12,16 +12,16 @@ import type {
   AnghamiTrackData,
   AnghamiTrackInfo,
   AnghamiTrackPayload
-} from '../typings/sources/anghami.types.js'
+} from '../typings/sources/anghami.types.ts'
 import type {
   SourceResult,
   TrackInfo,
   TrackStreamResult,
   TrackUrlResult,
   WorkerNodeLink
-} from '../typings/sources/source.types.js'
-import type { TrackEncodeInput } from '../typings/utils.types.js'
-import { encodeTrack, getBestMatch, logger, makeRequest } from '../utils.js'
+} from '../typings/sources/source.types.ts'
+import type { TrackEncodeInput } from '../typings/utils.types.ts'
+import { encodeTrack, getBestMatch, logger, makeRequest } from '../utils.ts'
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'

@@ -69,7 +69,7 @@ import { createVoiceRelay } from './voice/voiceRelay.ts'
 
 type RequestHandlerType = typeof import('./api/index.ts').default
 let requestHandlerPromise: Promise<RequestHandlerType> | null = null
-type ProfilerApiModule = typeof import('./api/profiler.js')
+type ProfilerApiModule = typeof import('./api/profiler.ts')
 let profilerApiPromise: Promise<ProfilerApiModule> | null = null
 
 const getRequestHandler = async (): Promise<RequestHandlerType> => {
@@ -83,7 +83,7 @@ const getRequestHandler = async (): Promise<RequestHandlerType> => {
 
 const getProfilerApi = async (): Promise<ProfilerApiModule> => {
   if (!profilerApiPromise) {
-    profilerApiPromise = import('./api/profiler.js')
+    profilerApiPromise = import('./api/profiler.ts')
   }
   return profilerApiPromise
 }

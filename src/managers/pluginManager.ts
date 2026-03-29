@@ -359,10 +359,20 @@ export default class PluginManager {
             if (pkg?.main) {
               entryPoint = path.join(resolvedPath, pkg.main)
             } else {
-              entryPoint = path.join(resolvedPath, 'index.js')
+              try {
+                await fs.access(path.join(resolvedPath, 'index.ts'))
+                entryPoint = path.join(resolvedPath, 'index.ts')
+              } catch {
+                entryPoint = path.join(resolvedPath, 'index.js')
+              }
             }
           } catch {
-            entryPoint = path.join(resolvedPath, 'index.js')
+            try {
+              await fs.access(path.join(resolvedPath, 'index.ts'))
+              entryPoint = path.join(resolvedPath, 'index.ts')
+            } catch {
+              entryPoint = path.join(resolvedPath, 'index.js')
+            }
           }
         } else {
           entryPoint = resolvedPath

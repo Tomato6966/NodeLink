@@ -8,8 +8,8 @@
  * @param {Object} config - The specific configuration for this plugin defined in 'pluginConfig' within config.js.
  * @param {Object} context - Metadata about the execution environment.
  */
-export default async function (nodelink, _config, context) {
-  const logger = (msg, level = 'info') =>
+export default async function (nodelink: any, _config: any, context: any) {
+  const logger = (msg: any, level = 'info') =>
     nodelink.logger(level, `Plugin:${context.pluginName}`, msg)
 
   logger(`Initializing in ${context.type.toUpperCase()} mode.`)
@@ -25,7 +25,7 @@ export default async function (nodelink, _config, context) {
     nodelink.registerRoute(
       'GET',
       '/v4/sample/status',
-      (_nodelink, req, res, sendResponse) => {
+      (_nodelink: any, req: any, res: any, sendResponse: any) => {
         sendResponse(
           req,
           res,
@@ -43,7 +43,7 @@ export default async function (nodelink, _config, context) {
     nodelink.registerRoute(
       'POST',
       '/v4/sample/create-test-player',
-      async (nodelink, req, res, sendResponse) => {
+      async (nodelink: any, req: any, res: any, sendResponse: any) => {
         try {
           const body = req.body || {}
           const sessionId = body.sessionId || 'test-session'
@@ -64,7 +64,7 @@ export default async function (nodelink, _config, context) {
             payload
           )
           sendResponse(req, res, { result }, 200)
-        } catch (e) {
+        } catch (e: any) {
           sendResponse(req, res, { error: e.message }, 500)
         }
       }
@@ -74,7 +74,7 @@ export default async function (nodelink, _config, context) {
     nodelink.registerRoute(
       'POST',
       '/v4/sample/play-mysource',
-      async (nodelink, req, res, sendResponse) => {
+      async (nodelink: any, req: any, res: any, sendResponse: any) => {
         try {
           const body = req.body || {}
           const sessionId = body.sessionId || 'test-session'
@@ -121,7 +121,7 @@ export default async function (nodelink, _config, context) {
           )
 
           sendResponse(req, res, { load, play: playRes }, 200)
-        } catch (e) {
+        } catch (e: any) {
           sendResponse(req, res, { error: e.message }, 500)
         }
       }
@@ -129,22 +129,24 @@ export default async function (nodelink, _config, context) {
 
     // 2. Intercepting Player Commands (Master Side)
     // This allows you to block or modify play/stop/pause/seek/volume commands before they reach the worker.
-    nodelink.registerPlayerInterceptor(async (action, guildId, args) => {
-      // logger(`Intercepted player action '${action}' for guild ${guildId}`, 'debug');
+    nodelink.registerPlayerInterceptor(
+      async (action: any, guildId: any, args: any) => {
+        // logger(`Intercepted player action '${action}' for guild ${guildId}`, 'debug');
 
-      if (action === 'play') {
-        const track = args[0]
-        // Example: Block playing a specific track
-        if (track?.info?.title?.includes('Forbidden Song')) {
-          logger(
-            `Blocked playback of forbidden song for guild ${guildId}`,
-            'warn'
-          )
-          return { error: 'This song is forbidden by plugin.' } // Returns this to the caller immediately
+        if (action === 'play') {
+          const track = args[0]
+          // Example: Block playing a specific track
+          if (track?.info?.title?.includes('Forbidden Song')) {
+            logger(
+              `Blocked playback of forbidden song for guild ${guildId}`,
+              'warn'
+            )
+            return { error: 'This song is forbidden by plugin.' } // Returns this to the caller immediately
+          }
         }
+        return null // Continue execution
       }
-      return null // Continue execution
-    })
+    )
   }
 
   // =================================================================================
@@ -156,18 +158,22 @@ export default async function (nodelink, _config, context) {
 
     // 1. Registering a Custom Audio Source
     class MyCustomSource {
-      constructor(nodelink) {
+      nodelink: any
+      sourceName: string
+      searchTerms: string[]
+
+      constructor(nodelink: any) {
         this.nodelink = nodelink
         this.sourceName = 'mysource'
         this.searchTerms = ['mysource']
       }
-      async search(_query) {
+      async search(_query: any) {
         return { loadType: 'empty', data: {} }
       }
-      async resolve(_url) {
+      async resolve(_url: any) {
         return { loadType: 'empty', data: {} }
       }
-      async getTrackUrl(_trackInfo) {
+      async getTrackUrl(_trackInfo: any) {
         return { exception: { message: 'Not implemented', severity: 'fault' } }
       }
     }
@@ -184,13 +190,14 @@ export default async function (nodelink, _config, context) {
 
     // 2. Registering a Custom Audio Filter
     class SimpleGainFilter {
+      gain: number
       constructor() {
         this.gain = 1.0
       }
-      update(config) {
+      update(config: any) {
         if (config.simpleGain) this.gain = config.simpleGain
       }
-      process(chunk) {
+      process(chunk: any) {
         return chunk
       }
     }
@@ -208,7 +215,7 @@ export default async function (nodelink, _config, context) {
 
     // 4. Intercepting Worker Commands (Worker Side)
     // This intercepts internal IPC commands sent from Master to Worker.
-    nodelink.registerWorkerInterceptor(async (type, _payload) => {
+    nodelink.registerWorkerInterceptor(async (type: any, _payload: any) => {
       // logger(`Worker received command: ${type}`, 'debug');
 
       if (type === 'destroyPlayer') {
