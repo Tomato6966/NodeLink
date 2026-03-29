@@ -65,7 +65,7 @@ export default class HLSHandler extends PassThrough {
    * @param options - Configuration options for the handler.
    */
   constructor(url: string, options: HLSHandlerOptions = {}) {
-    super({ highWaterMark: options.highWaterMark ?? 1024 * 1024 * 5 })
+    super({ highWaterMark: options.highWaterMark ?? 256 * 1024 })
 
     this.masterUrl = url
     this.currentUrl = url
@@ -618,8 +618,15 @@ export default class HLSHandler extends PassThrough {
       !this.isLive &&
       this.segmentQueue.length === 0 &&
       fetchPool.size === 0 &&
-      !this.stop
+      !this.stop &&
+      !this.destroyed
     ) {
+      if (this.writableLength > 0) {
+        await this._waitForDrain()
+      }
+
+      if (this.stop || this.destroyed) return
+
       this.emit('finishBuffering')
       this.end()
     }
