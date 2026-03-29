@@ -22,6 +22,7 @@ export interface InstanceHealth {
   lastFailure: number
   failures: number
   activeRequests: number
+  version?: string
 }
 
 /**

@@ -1,3 +1,5 @@
+import { PassThrough } from 'node:stream';
+import HLSHandler from "../playback/hls/HLSHandler.js";
 import { encodeTrack, logger, makeRequest } from "../utils.js";
 /**
  * NodeLink audio source provider for Monochrome (Tidal proxy).
@@ -8,7 +10,7 @@ import { encodeTrack, logger, makeRequest } from "../utils.js";
  * - Robust pagination for Tidal collections (albums/playlists).
  * - Advanced manifest resolution with quality prioritization (FLAC > Lossless > AAC).
  * - Extraction of ReplayGain and Peak metadata for audio normalization.
- * - Integration with NodeLink's native track cache manager.
+ * - Full support for HLS and Progressive streaming via loadStream.
  *
  * @public
  */
@@ -37,6 +39,7 @@ class MonochromeSource {
                 enabled: false
             };
         const defaultUrls = [
+            'https://hifi.geeked.wtf',
             'https://eu-central.monochrome.tf',
             'https://us-west.monochrome.tf',
             'https://arran.monochrome.tf',
@@ -48,7 +51,8 @@ class MonochromeSource {
             score: 100,
             lastFailure: 0,
             failures: 0,
-            activeRequests: 0
+            activeRequests: 0,
+            version: undefined
         }));
         const instances = this.config.instances?.length
             ? this.config.instances
@@ -80,13 +84,18 @@ class MonochromeSource {
     /**
      * Selects the healthiest instance from the pool using a scored random strategy.
      * @param type - Whether to pick an API or streaming instance.
+     * @param minVersion - Optional minimum API version required.
      * @returns Health-tracked instance metadata.
      * @private
      */
-    getBestInstance(type = 'api') {
+    getBestInstance(type = 'api', minVersion) {
         const pool = type === 'streaming' ? this.streamingInstances : this.apiInstances;
         const now = Date.now();
-        const candidates = pool.filter((i) => i.score > 0 || now - i.lastFailure > 30_000);
+        let candidates = pool.filter((i) => (i.score > 0 || now - i.lastFailure > 30_000) &&
+            (!minVersion || (i.version && i.version >= minVersion)));
+        if (candidates.length === 0 && minVersion) {
+            candidates = pool.filter((i) => i.score > 0 || now - i.lastFailure > 30_000);
+        }
         const activePool = candidates.length > 0 ? candidates : pool;
         const sorted = activePool.sort((a, b) => b.score - a.score || a.activeRequests - b.activeRequests);
         const instance = sorted[Math.floor(Math.random() * Math.min(sorted.length, 3))] || pool[0];
@@ -99,23 +108,34 @@ class MonochromeSource {
      * Executes a request with automatic retries across the instance pool.
      * @param path - API path with parameters.
      * @param type - Instance pool to use.
+     * @param minVersion - Optional minimum API version required.
      * @returns Parsed response or null after all retries fail.
      * @private
      */
-    async fetchWithRetry(path, type = 'api') {
+    async fetchWithRetry(path, type = 'api', minVersion) {
         const pool = type === 'streaming' ? this.streamingInstances : this.apiInstances;
         const maxAttempts = Math.min(pool.length * 2, 5);
         let lastError = null;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            const instance = this.getBestInstance(type);
+            const instance = this.getBestInstance(type, minVersion);
             const url = `${instance.url}${path}`;
             instance.activeRequests++;
             try {
-                const { body, error, statusCode } = await makeRequest(url, {});
+                const { body, error, statusCode } = await makeRequest(url, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
+                        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+                        Referer: 'https://monochrome.tf/'
+                    }
+                });
                 instance.activeRequests--;
                 if (statusCode === 200 && body) {
                     instance.score = Math.min(instance.score + 5, 100);
-                    return body;
+                    const res = body;
+                    if (res.version)
+                        instance.version = res.version;
+                    return res || res.data;
                 }
                 if (statusCode === 429) {
                     instance.score = Math.max(instance.score - 20, 0);
@@ -211,9 +231,11 @@ class MonochromeSource {
      * @returns Resolved data payload.
      */
     async resolve(url) {
+        logger('debug', 'Monochrome', `Resolving URL: ${url}`);
         // 1. Mirror Support (ISRC)
         if (url.startsWith('isrc:')) {
             const isrc = url.substring(5);
+            logger('debug', 'Monochrome', `Resolving ISRC: ${isrc}`);
             const res = await this.fetchWithRetry(`/search/?s=${encodeURIComponent(isrc)}`);
             const best = res?.data?.tracks?.items?.find((t) => t.isrc === isrc) ||
                 res?.data?.tracks?.items?.[0];
@@ -233,7 +255,9 @@ class MonochromeSource {
         const directMatch = url.match(/(track|video)\/(\d+)/);
         if (directMatch) {
             const type = directMatch[1] === 'video' ? 'video' : 'info';
-            const res = await this.fetchWithRetry(`/${type}/?id=${directMatch[2]}`);
+            const id = directMatch[2];
+            logger('debug', 'Monochrome', `Matched direct ${type} resolution for ID: ${id}`);
+            const res = await this.fetchWithRetry(`/${type}/?id=${id}`);
             const data = res?.data;
             if (!data)
                 return { loadType: 'empty', data: {} };
@@ -254,6 +278,7 @@ class MonochromeSource {
         if (collectionMatch) {
             const type = collectionMatch[1] || '';
             const id = collectionMatch[2] || '';
+            logger('debug', 'Monochrome', `Matched ${type} resolution for ID: ${id}`);
             const tracks = [];
             let offset = 0;
             const limit = 100;
@@ -288,6 +313,7 @@ class MonochromeSource {
                     break;
                 offset += items.length;
             }
+            logger('debug', 'Monochrome', `Resolved ${type} "${name}" with ${tracks.length} tracks.`);
             return tracks.length > 0
                 ? {
                     loadType: 'playlist',
@@ -305,12 +331,27 @@ class MonochromeSource {
      */
     async getTrackUrl(track) {
         const isVideo = track.uri.includes('/video/');
-        const formats = 'HEAACV1,AACLC,FLAC,FLAC_HIRES';
-        const params = `adaptive=true&manifestType=MPEG_DASH&uriScheme=HTTPS&usage=PLAYBACK&formats=${formats}`;
+        const quality = this.config.quality || 'LOSSLESS';
+        const params = new URLSearchParams({
+            id: track.identifier,
+            adaptive: 'true',
+            manifestType: 'HLS',
+            uriScheme: 'HTTPS',
+            usage: 'PLAYBACK'
+        });
+        if (isVideo) {
+            params.set('quality', 'HIGH');
+        }
+        else {
+            const formats = ['HEAACV1', 'AACLC', 'FLAC'];
+            if (quality === 'HI_RES_LOSSLESS')
+                formats.push('FLAC_HIRES');
+            formats.forEach((f) => params.append('formats', f));
+        }
         const endpoint = isVideo
-            ? `/video/?id=${track.identifier}&quality=HIGH`
-            : `/trackManifests/?id=${track.identifier}&${params}`;
-        const response = await this.fetchWithRetry(endpoint, 'streaming');
+            ? `/video/?${params.toString()}`
+            : `/trackManifests/?${params.toString()}`;
+        const response = await this.fetchWithRetry(endpoint, 'streaming', '2.7');
         if (!response)
             return {
                 exception: {
@@ -331,6 +372,58 @@ class MonochromeSource {
             logger('debug', 'Monochrome', `Normalization for ${track.identifier}: Gain ${attr.trackAudioNormalizationData.replayGain} dB, Peak ${attr.trackAudioNormalizationData.peakAmplitude}`);
         }
         return { url: uri, protocol: uri.includes('.m3u8') ? 'hls' : 'http' };
+    }
+    /**
+     * Opens a readable audio stream for the given track.
+     * @param decodedTrack - Track metadata.
+     * @param url - Resolved playback URL.
+     * @param protocol - Streaming protocol identifier.
+     * @param additionalData - Optional payload for seeking support.
+     * @returns A promise resolving to the stream result.
+     */
+    async loadStream(decodedTrack, url, protocol, additionalData) {
+        if (protocol === 'hls' || url.includes('.m3u8')) {
+            logger('debug', 'Monochrome', `Loading HLS stream for ${decodedTrack.identifier}`);
+            return {
+                stream: new HLSHandler(url, {
+                    type: 'fmp4',
+                    localAddress: this.nodelink.routePlanner?.getIP?.() || undefined,
+                    startTime: additionalData?.startTime || 0,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        Referer: 'https://tidal.com/'
+                    }
+                }),
+                type: 'fmp4'
+            };
+        }
+        logger('debug', 'Monochrome', `Loading progressive stream for ${decodedTrack.identifier}`);
+        const res = await makeRequest(url, {
+            method: 'GET',
+            streamOnly: true,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+        });
+        if (res.error || !res.stream) {
+            throw new Error(res.error || 'Failed to fetch stream');
+        }
+        const passthrough = new PassThrough();
+        const sourceStream = res.stream;
+        sourceStream.on('data', (chunk) => passthrough.write(chunk));
+        sourceStream.on('end', () => {
+            passthrough.emit('finishBuffering');
+            passthrough.end();
+        });
+        sourceStream.on('error', (err) => passthrough.destroy(err));
+        let type = 'audio/mpeg';
+        if (url.includes('.flac'))
+            type = 'audio/flac';
+        else if (url.includes('.m4a') || url.includes('.mp4'))
+            type = 'audio/mp4';
+        else if (url.includes('.ogg') || url.includes('.opus'))
+            type = 'audio/ogg';
+        return { stream: passthrough, type };
     }
     /**
      * Implements the site's extractStreamUrlFromManifest logic.
