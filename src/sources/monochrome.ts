@@ -535,7 +535,7 @@ class MonochromeSource implements SourceInstance {
       )
       return {
         stream: new HLSHandler(url, {
-          type: 'fmp4',
+          type: 'fmp4-buffered',
           localAddress: this.nodelink.routePlanner?.getIP?.() || undefined,
           startTime: (additionalData?.startTime as number) || 0,
           headers: {
@@ -544,7 +544,7 @@ class MonochromeSource implements SourceInstance {
             Referer: 'https://tidal.com/'
           }
         }),
-        type: 'fmp4'
+        type: 'fmp4-buffered'
       }
     }
 
