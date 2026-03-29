@@ -1159,7 +1159,12 @@ async function _internalHttp1Request(urlString, options = {}) {
                 finalStream.on('error', (err) => reject(new Error(`Decompression error for ${urlString}: ${err.message}`)));
             }
             if (streamOnly) {
-                resolve({ statusCode, headers: respHeaders, stream: finalStream, finalUrl: urlString });
+                resolve({
+                    statusCode,
+                    headers: respHeaders,
+                    stream: finalStream,
+                    finalUrl: urlString
+                });
                 return;
             }
             const chunks = [];
@@ -1177,7 +1182,12 @@ async function _internalHttp1Request(urlString, options = {}) {
                 try {
                     const responseBuffer = Buffer.concat(chunks);
                     if (options.responseType === 'buffer') {
-                        resolve({ statusCode, headers: respHeaders, body: responseBuffer, finalUrl: urlString });
+                        resolve({
+                            statusCode,
+                            headers: respHeaders,
+                            body: responseBuffer,
+                            finalUrl: urlString
+                        });
                         return;
                     }
                     const text = responseBuffer.toString('utf8');
@@ -1189,7 +1199,12 @@ async function _internalHttp1Request(urlString, options = {}) {
                         .toLowerCase()
                         .startsWith('application/json');
                     const responseBody = isJson && text ? JSON.parse(text) : text;
-                    resolve({ statusCode, headers: respHeaders, body: responseBody, finalUrl: urlString });
+                    resolve({
+                        statusCode,
+                        headers: respHeaders,
+                        body: responseBody,
+                        finalUrl: urlString
+                    });
                 }
                 catch (err) {
                     reject(new Error(`Error processing response body for ${urlString}: ${err instanceof Error ? err.message : String(err)}`));

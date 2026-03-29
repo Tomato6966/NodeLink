@@ -214,6 +214,243 @@ export interface AudiusSourceConfig extends SourceConfigBase {
 }
 
 /**
+ * Yandex Music source configuration
+ * @public
+ */
+export interface YandexMusicSourceConfig extends SourceConfigBase {
+  /**
+   * Access token
+   */
+  accessToken: string
+
+  /**
+   * Playlist load limit
+   */
+  playlistLoadLimit: number
+
+  /**
+   * Album load limit
+   */
+  albumLoadLimit: number
+
+  /**
+   * Artist load limit
+   */
+  artistLoadLimit: number
+
+  /**
+   * Whether to include unavailable tracks
+   */
+  allowUnavailable: boolean
+
+  /**
+   * Whether to allow explicit content
+   */
+  allowExplicit: boolean
+
+  /**
+   * Proxy settings for the request.
+   */
+  proxy?: import('../utils.types.ts').HttpProxyConfig
+}
+
+/**
+ * VK Music source configuration
+ * @public
+ */
+export interface VKMusicSourceConfig extends SourceConfigBase {
+  /**
+   * Access token for the user
+   */
+  userToken?: string
+
+  /**
+   * User cookie for authentication fallback
+   */
+  userCookie?: string
+
+  /**
+   * Proxy settings for the request.
+   */
+  proxy?: import('../utils.types.ts').HttpProxyConfig
+}
+
+/**
+ * Bilibili source configuration
+ * @public
+ */
+export interface BilibiliSourceConfig extends SourceConfigBase {
+  /**
+   * SESSDATA cookie for authentication
+   */
+  sessdata?: string
+
+  /**
+   * Proxy settings for the request.
+   */
+  proxy?: import('../utils.types.ts').HttpProxyConfig
+}
+
+/**
+ * Eternalbox source configuration
+ * @public
+ */
+export interface EternalboxSourceConfig extends SourceConfigBase {
+  /**
+   * Base URL for the Eternalbox mirror
+   * @defaultValue 'https://eternalboxmirror.xyz'
+   */
+  baseUrl: string
+
+  /**
+   * Whether to enable the eternal (infinite) stream loop
+   * @defaultValue true
+   */
+  eternalStream: boolean
+
+  /**
+   * Whether to signal the stream as infinite to the client
+   * @defaultValue true
+   */
+  infiniteStream: boolean
+
+  /**
+   * Whether to enrich the track with Spotify metadata if available
+   * @defaultValue false
+   */
+  enrichSpotify: boolean
+
+  /**
+   * Maximum search results to return
+   * @defaultValue 10
+   */
+  searchResults: number
+
+  /**
+   * Maximum size of the internal audio cache in bytes
+   * @defaultValue 20MB
+   */
+  cacheMaxBytes: number
+
+  /**
+   * Whether to include full audio analysis in pluginInfo
+   * @defaultValue true
+   */
+  includeAnalysis: boolean
+
+  /**
+   * Whether to include a summary of audio analysis in pluginInfo
+   * @defaultValue true
+   */
+  includeAnalysisSummary: boolean
+
+  /**
+   * Algorithm parameter: Maximum branches per beat
+   */
+  maxBranches: number
+
+  /**
+   * Algorithm parameter: Maximum branch similarity threshold
+   */
+  maxBranchThreshold: number
+
+  /**
+   * Algorithm parameter: Minimum branch similarity threshold
+   */
+  branchThresholdStart: number
+
+  /**
+   * Algorithm parameter: Branch threshold iteration step
+   */
+  branchThresholdStep: number
+
+  /**
+   * Algorithm parameter: Target divisor for branch count
+   */
+  branchTargetDivisor: number
+
+  /**
+   * Algorithm parameter: Whether to force a branch at the end
+   */
+  addLastEdge: boolean
+
+  /**
+   * Algorithm parameter: Only branch backwards
+   */
+  justBackwards: boolean
+
+  /**
+   * Algorithm parameter: Only branch to distant beats
+   */
+  justLongBranches: boolean
+
+  /**
+   * Algorithm parameter: Remove sequential (duplicate) branches
+   */
+  removeSequentialBranches: boolean
+
+  /**
+   * Algorithm parameter: Filter segments for smoother branching
+   */
+  useFilteredSegments: boolean
+
+  /**
+   * Weight for timbre similarity
+   */
+  timbreWeight: number
+
+  /**
+   * Weight for pitch similarity
+   */
+  pitchWeight: number
+
+  /**
+   * Weight for loudness start similarity
+   */
+  loudStartWeight: number
+
+  /**
+   * Weight for loudness max similarity
+   */
+  loudMaxWeight: number
+
+  /**
+   * Weight for duration similarity
+   */
+  durationWeight: number
+
+  /**
+   * Weight for confidence similarity
+   */
+  confidenceWeight: number
+
+  /**
+   * Minimum random branch probability
+   */
+  minRandomBranchChance: number
+
+  /**
+   * Maximum random branch probability
+   */
+  maxRandomBranchChance: number
+
+  /**
+   * Random branch probability increment per beat
+   */
+  randomBranchChanceDelta: number
+
+  /**
+   * Maximum reconnect attempts for the stream
+   */
+  maxReconnects: number
+
+  /**
+   * Delay between reconnect attempts in ms
+   */
+  reconnectDelayMs: number
+}
+
+/**
  * JioSaavn source configuration
  * @public
  */

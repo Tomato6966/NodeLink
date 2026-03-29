@@ -7,13 +7,11 @@
  */
 import type { Readable } from 'node:stream'
 import type {
-  TrackInfo
-} from './source.types.ts'
-import type {
   HttpRequestOptions,
   HttpRequestResult,
   NodelinkRuntime
 } from '../utils.types.ts'
+import type { TrackInfo } from './source.types.ts'
 
 /**
  * YouTube URL type constants for classification.
@@ -34,7 +32,8 @@ export const YOUTUBE_CONSTANTS = {
 } as const
 
 /** Type representing valid YouTube URL type constants */
-export type YOUTUBE_CONSTANTS_TYPE = typeof YOUTUBE_CONSTANTS[keyof typeof YOUTUBE_CONSTANTS]
+export type YOUTUBE_CONSTANTS_TYPE =
+  (typeof YOUTUBE_CONSTANTS)[keyof typeof YOUTUBE_CONSTANTS]
 
 /**
  * Interface for OAuth authentication manager.

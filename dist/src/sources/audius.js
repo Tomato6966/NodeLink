@@ -1,44 +1,127 @@
 import { encodeTrack, http1makeRequest, logger } from "../utils.js";
+/**
+ * Base URL for Audius discovery nodes.
+ * @internal
+ */
 const AUDIUS_API_BASE = 'https://discoveryprovider.audius.co';
-const TRACK_URL_PATTERN = /^https?:\/\/(?:www\.)?audius\.co\/([^/]+)\/([^/?#]+)(?:\?.*)?$/i;
-const PLAYLIST_URL_PATTERN = /^https?:\/\/(?:www\.)?audius\.co\/([^/]+)\/playlist\/([^/?#]+)(?:\?.*)?$/i;
-const ALBUM_URL_PATTERN = /^https?:\/\/(?:www\.)?audius\.co\/([^/]+)\/album\/([^/?#]+)(?:\?.*)?$/i;
-const USER_URL_PATTERN = /^https?:\/\/(?:www\.)?audius\.co\/([^/?#]+)(?:\?.*)?$/i;
-const ARTWORK_SIZES = ['480x480', '1000x1000', '150x150'];
+/**
+ * Priority order for artwork resolution.
+ * @internal
+ */
+const ARTWORK_SIZES = [
+    '1000x1000',
+    '480x480',
+    '150x150'
+];
+/**
+ * Audius source implementation.
+ * Integrates with the decentralized Audius discovery network for music resolution and search.
+ * @public
+ */
 export default class AudiusSource {
+    /**
+     * The NodeLink worker context.
+     * @internal
+     */
+    nodelink;
+    /**
+     * Audius-specific configuration.
+     * @internal
+     */
+    config;
+    /**
+     * Prefixes that trigger Audius search.
+     * @public
+     */
+    searchTerms = ['ausearch'];
+    /**
+     * Prefix for recommendation (inspired-by) requests.
+     * @public
+     */
+    recommendationTerm = ['sprec'];
+    /**
+     * Regular expression patterns for identifying Audius URLs.
+     * Supports tracks, playlists, albums, and users.
+     * @public
+     */
+    patterns = [
+        /** Track URL pattern */
+        /^https?:\/\/(?:open\.)?audius\.co\/([^/]+)\/([^/?#]+)(?:\?.*)?$/i,
+        /** Playlist URL pattern */
+        /^https?:\/\/(?:open\.)?audius\.co\/([^/]+)\/playlist\/([^/?#]+)(?:\?.*)?$/i,
+        /** Album URL pattern */
+        /^https?:\/\/(?:open\.)?audius\.co\/([^/]+)\/album\/([^/?#]+)(?:\?.*)?$/i,
+        /** User/Artist URL pattern */
+        /^https?:\/\/(?:open\.)?audius\.co\/([^/?#]+)(?:\?.*)?$/i
+    ];
+    /**
+     * Priority score for source selection.
+     * @public
+     */
+    priority = 90;
+    /**
+     * Application name registered with Audius.
+     * @internal
+     */
+    appName = null;
+    /**
+     * Optional API key for Audius services.
+     * @internal
+     */
+    apiKey = null;
+    /**
+     * Maximum tracks to load from a playlist.
+     * @internal
+     */
+    playlistLoadLimit = 100;
+    /**
+     * Maximum tracks to load from an album.
+     * @internal
+     */
+    albumLoadLimit = 100;
+    /**
+     * Constructs a new AudiusSource instance.
+     * @param nodelink - The worker context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        this.config = nodelink.options;
-        this.searchTerms = ['ausearch'];
-        this.patterns = [
-            TRACK_URL_PATTERN,
-            PLAYLIST_URL_PATTERN,
-            ALBUM_URL_PATTERN,
-            USER_URL_PATTERN
-        ];
-        this.priority = 90;
-        this.appName = null;
-        this.apiKey = null;
-        this.apiSecret = null;
-        this.playlistLoadLimit = 100;
-        this.albumLoadLimit = 100;
+        this.config = (nodelink.options.sources?.audius || {
+            enabled: false,
+            appName: '',
+            apiKey: '',
+            apiSecret: '',
+            playlistLoadLimit: 100,
+            albumLoadLimit: 100
+        });
     }
+    /**
+     * Performs source-level initialization.
+     * @returns A promise resolving to true if initialization succeeded.
+     * @public
+     */
     async setup() {
         try {
-            const audiusConfig = this.config.sources.audius || {};
-            this.appName = audiusConfig.appName;
-            this.apiKey = audiusConfig.apiKey;
-            this.apiSecret = audiusConfig.apiSecret;
-            this.playlistLoadLimit = audiusConfig.playlistLoadLimit ?? 100;
-            this.albumLoadLimit = audiusConfig.albumLoadLimit ?? 100;
-            logger('info', 'Audius', 'Source initialized successfully');
+            this.appName = this.config.appName || null;
+            this.apiKey = this.config.apiKey || null;
+            this.playlistLoadLimit = this.config.playlistLoadLimit ?? 100;
+            this.albumLoadLimit = this.config.albumLoadLimit ?? 100;
+            logger('info', 'Audius', 'Audius source initialized successfully.');
             return true;
         }
         catch (e) {
-            logger('error', 'Audius', `Error initializing Audius: ${e.message}`);
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Audius', `Failed to initialize Audius: ${message}`);
             return false;
         }
     }
+    /**
+     * Centralized helper for executing API requests to Audius discovery nodes.
+     * Automatically appends required query parameters.
+     *
+     * @param endpoint - The API endpoint path.
+     * @returns A promise resolving to the response data or null.
+     * @internal
+     */
     async _apiRequest(endpoint) {
         try {
             const url = endpoint.startsWith('http')
@@ -49,23 +132,31 @@ export default class AudiusSource {
                 urlObj.searchParams.set('app_name', this.appName);
             if (this.apiKey)
                 urlObj.searchParams.set('apiKey', this.apiKey);
-            const { body, statusCode } = await http1makeRequest(urlObj.toString(), {
+            const res = await http1makeRequest(urlObj.toString(), {
                 headers: {
                     Accept: 'application/json',
-                    'User-Agent': 'Nodelink'
+                    'User-Agent': 'NodeLink (https://github.com/NodeLink/NodeLink)'
                 }
             });
-            if (statusCode !== 200) {
-                logger('error', 'Audius', `API error: ${statusCode}`);
+            if (res.statusCode !== 200) {
+                logger('error', 'Audius', `Discovery node error: ${res.statusCode}`);
                 return null;
             }
+            const body = res.body;
             return body?.data || body;
         }
         catch (e) {
-            logger('error', 'Audius', `Error in Audius apiRequest: ${e.message}`);
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Audius', `Request to ${endpoint} failed: ${message}`);
             return null;
         }
     }
+    /**
+     * Resolves the most appropriate artwork URL from an Audius artwork object.
+     * @param artwork - The raw artwork data from the API.
+     * @returns Resolves to a full URL or null.
+     * @internal
+     */
     _getArtworkUrl(artwork) {
         if (!artwork)
             return null;
@@ -74,14 +165,20 @@ export default class AudiusSource {
         }
         if (typeof artwork === 'object') {
             for (const size of ARTWORK_SIZES) {
-                if (artwork[size]) {
-                    const url = artwork[size];
+                const url = artwork[size];
+                if (url) {
                     return url.startsWith('/') ? `https://audius.co${url}` : url;
                 }
             }
         }
         return null;
     }
+    /**
+     * Normalizes Audius track data into NodeLink's standard format.
+     * @param trackData - Raw track data from discovery node.
+     * @returns Built TrackData object or null if data is insufficient.
+     * @internal
+     */
     _buildTrack(trackData) {
         if (!trackData?.id || !trackData?.title)
             return null;
@@ -89,7 +186,7 @@ export default class AudiusSource {
             identifier: trackData.id,
             isSeekable: true,
             author: trackData.user?.name || 'Unknown',
-            length: (trackData.duration || 0) * 1000,
+            length: Math.round((trackData.duration || 0) * 1000),
             isStream: false,
             position: 0,
             title: trackData.title,
@@ -101,106 +198,149 @@ export default class AudiusSource {
             sourceName: 'audius'
         };
         return {
-            encoded: encodeTrack(trackInfo),
+            encoded: encodeTrack({ ...trackInfo, details: [] }),
             info: trackInfo,
             pluginInfo: {}
         };
     }
-    _normalizeData(data) {
-        return Array.isArray(data) ? data : [data];
-    }
-    _createEmptyResponse() {
-        return { loadType: 'empty', data: {} };
-    }
-    _createExceptionResponse(message, severity = 'fault') {
-        return { exception: { message, severity } };
-    }
-    async search(query, _sourceTerm, _searchType = 'track') {
+    /**
+     * Executes a search query on the Audius catalog.
+     * @param query - The user search string.
+     * @returns Resolves to a SourceResult containing search results.
+     * @public
+     */
+    async search(query) {
         try {
-            const limit = this.config.maxSearchResults || 10;
+            const limit = this.nodelink.options.maxSearchResults || 10;
             const endpoint = `/v1/tracks/search?query=${encodeURIComponent(query)}&limit=${limit}`;
             const data = await this._apiRequest(endpoint);
-            if (!data || (Array.isArray(data) && data.length === 0)) {
-                return this._createEmptyResponse();
+            if (!data || data.length === 0) {
+                return { loadType: 'empty', data: {} };
             }
-            const tracks = this._normalizeData(data)
+            const tracks = data
                 .map((item) => this._buildTrack(item))
-                .filter(Boolean);
+                .filter((t) => t !== null);
             if (tracks.length === 0) {
-                return this._createEmptyResponse();
+                return { loadType: 'empty', data: {} };
             }
             return { loadType: 'search', data: tracks };
         }
         catch (e) {
-            return this._createExceptionResponse(e.message);
+            const message = e instanceof Error ? e.message : String(e);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Resolves an Audius URL into a track or collection.
+     * @param url - The absolute Audius URL.
+     * @returns Resolution result payload.
+     * @public
+     */
     async resolve(url) {
         try {
-            const resolvers = [
-                {
-                    pattern: PLAYLIST_URL_PATTERN,
-                    method: this._resolvePlaylist.bind(this)
-                },
-                { pattern: ALBUM_URL_PATTERN, method: this._resolveAlbum.bind(this) },
-                { pattern: TRACK_URL_PATTERN, method: this._resolveTrack.bind(this) },
-                { pattern: USER_URL_PATTERN, method: this._resolveArtist.bind(this) }
-            ];
-            for (const { pattern, method } of resolvers) {
-                const match = pattern.exec(url);
-                if (match) {
-                    const params = match.slice(1).map(decodeURIComponent);
-                    return await method(...params);
-                }
+            // 1. Playlist check
+            const playlistPattern = this.patterns[1];
+            const playlistMatch = playlistPattern?.exec(url);
+            if (playlistMatch) {
+                const [, artist, slug] = playlistMatch.map((p) => p ? decodeURIComponent(p) : '');
+                if (artist && slug)
+                    return await this._resolvePlaylist(artist, slug);
             }
-            return this._createEmptyResponse();
+            // 2. Album check
+            const albumPattern = this.patterns[2];
+            const albumMatch = albumPattern?.exec(url);
+            if (albumMatch) {
+                const [, artist, slug] = albumMatch.map((p) => p ? decodeURIComponent(p) : '');
+                if (artist && slug)
+                    return await this._resolveAlbum(artist, slug);
+            }
+            // 3. Track check
+            const trackPattern = this.patterns[0];
+            const trackMatch = trackPattern?.exec(url);
+            if (trackMatch) {
+                const [, artist, slug] = trackMatch.map((p) => p ? decodeURIComponent(p) : '');
+                if (artist && slug)
+                    return await this._resolveTrack(artist, slug);
+            }
+            // 4. User/Artist check
+            const userPattern = this.patterns[3];
+            const userMatch = userPattern?.exec(url);
+            if (userMatch) {
+                const [, handle] = userMatch.map((p) => p ? decodeURIComponent(p) : '');
+                if (handle)
+                    return await this._resolveArtist(handle);
+            }
+            return { loadType: 'empty', data: {} };
         }
         catch (e) {
-            return this._createExceptionResponse(e.message);
+            const message = e instanceof Error ? e.message : String(e);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Resolves a track URL by searching for the artist and track slug.
+     * @internal
+     */
     async _resolveTrack(artist, trackSlug) {
         try {
             const searchEndpoint = `/v1/tracks/search?query=${encodeURIComponent(`${artist} ${trackSlug}`)}&limit=10`;
             const data = await this._apiRequest(searchEndpoint);
-            if (!data || (Array.isArray(data) && data.length === 0)) {
-                return this._createExceptionResponse('Track not found.', 'common');
+            if (!data || data.length === 0) {
+                return {
+                    loadType: 'error',
+                    exception: { message: 'Track not found.', severity: 'common' }
+                };
             }
-            const items = this._normalizeData(data);
             const expectedPath = `/${artist}/${trackSlug}`.toLowerCase();
-            for (const item of items) {
-                const permalink = item.permalink;
-                if (permalink && item.user?.handle) {
-                    const lowerPermalink = permalink.toLowerCase();
-                    if (lowerPermalink === expectedPath ||
-                        lowerPermalink.endsWith(`/${trackSlug.toLowerCase()}`)) {
-                        const track = this._buildTrack(item);
-                        return track
-                            ? { loadType: 'track', data: track }
-                            : this._createEmptyResponse();
-                    }
+            // Exact permalink match prioritized
+            for (const item of data) {
+                const permalink = item.permalink?.toLowerCase();
+                if (permalink === expectedPath ||
+                    permalink?.endsWith(`/${trackSlug.toLowerCase()}`)) {
+                    const track = this._buildTrack(item);
+                    return track
+                        ? { loadType: 'track', data: track }
+                        : { loadType: 'empty', data: {} };
                 }
             }
-            const track = this._buildTrack(items[0]);
+            // Fallback to top result
+            const first = data[0];
+            if (!first)
+                return { loadType: 'empty', data: {} };
+            const track = this._buildTrack(first);
             return track
                 ? { loadType: 'track', data: track }
-                : this._createEmptyResponse();
+                : { loadType: 'empty', data: {} };
         }
         catch (e) {
-            return this._createExceptionResponse(e.message);
+            const message = e instanceof Error ? e.message : String(e);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Resolves a playlist URL.
+     * @internal
+     */
     async _resolvePlaylist(artist, playlistSlug) {
         try {
             const playlistData = await this._findPlaylistBySlug(artist, playlistSlug);
             if (!playlistData?.id) {
-                return this._createExceptionResponse('Playlist not found.', 'common');
+                return {
+                    loadType: 'error',
+                    exception: { message: 'Playlist not found.', severity: 'common' }
+                };
             }
             const tracks = await this._loadPlaylistTracks(playlistData.id, this.playlistLoadLimit);
             if (tracks.length === 0) {
-                return this._createExceptionResponse('Playlist has no valid tracks.', 'common');
+                return {
+                    loadType: 'error',
+                    exception: {
+                        message: 'Playlist contains no valid tracks.',
+                        severity: 'common'
+                    }
+                };
             }
-            logger('info', 'Audius', `Loaded ${tracks.length} tracks from playlist "${playlistData.playlist_name || 'Unknown'}".`);
+            logger('info', 'Audius', `Successfully loaded ${tracks.length} tracks from playlist "${playlistData.playlist_name}".`);
             return {
                 loadType: 'playlist',
                 data: {
@@ -219,20 +359,34 @@ export default class AudiusSource {
             };
         }
         catch (e) {
-            return this._createExceptionResponse(e.message);
+            const message = e instanceof Error ? e.message : String(e);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Resolves an album URL.
+     * @internal
+     */
     async _resolveAlbum(artist, albumSlug) {
         try {
             const albumData = await this._findAlbumBySlug(artist, albumSlug);
             if (!albumData?.id) {
-                return this._createExceptionResponse('Album not found.', 'common');
+                return {
+                    loadType: 'error',
+                    exception: { message: 'Album not found.', severity: 'common' }
+                };
             }
             const tracks = await this._loadPlaylistTracks(albumData.id, this.albumLoadLimit);
             if (tracks.length === 0) {
-                return this._createExceptionResponse('Album has no valid tracks.', 'common');
+                return {
+                    loadType: 'error',
+                    exception: {
+                        message: 'Album contains no valid tracks.',
+                        severity: 'common'
+                    }
+                };
             }
-            logger('info', 'Audius', `Loaded ${tracks.length} tracks from album "${albumData.playlist_name || 'Unknown'}".`);
+            logger('info', 'Audius', `Successfully loaded ${tracks.length} tracks from album "${albumData.playlist_name}".`);
             return {
                 loadType: 'playlist',
                 data: {
@@ -251,38 +405,58 @@ export default class AudiusSource {
             };
         }
         catch (e) {
-            return this._createExceptionResponse(e.message);
+            const message = e instanceof Error ? e.message : String(e);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Resolves a user handle into their top tracks.
+     * @internal
+     */
     async _resolveArtist(artist) {
         try {
-            const userSearchEndpoint = `/v1/users/search?query=${encodeURIComponent(artist)}&limit=1`;
-            const userData = await this._apiRequest(userSearchEndpoint);
-            if (!userData || (Array.isArray(userData) && userData.length === 0)) {
-                return this._createExceptionResponse('Artist not found.', 'common');
+            const userData = await this._apiRequest(`/v1/users/search?query=${encodeURIComponent(artist)}&limit=1`);
+            if (!userData || userData.length === 0) {
+                return {
+                    loadType: 'error',
+                    exception: { message: 'Artist not found.', severity: 'common' }
+                };
             }
-            const user = Array.isArray(userData) ? userData[0] : userData;
-            if (!user.id) {
-                return this._createExceptionResponse('Artist not found.', 'common');
+            const user = userData[0];
+            if (!user) {
+                return {
+                    loadType: 'error',
+                    exception: { message: 'Artist not found.', severity: 'common' }
+                };
             }
-            const tracksEndpoint = `/v1/users/${user.id}/tracks?limit=50`;
-            const tracksData = await this._apiRequest(tracksEndpoint);
-            if (!tracksData ||
-                (Array.isArray(tracksData) && tracksData.length === 0)) {
-                return this._createExceptionResponse('Artist has no tracks.', 'common');
+            const tracksData = await this._apiRequest(`/v1/users/${user.id}/tracks?limit=50`);
+            if (!tracksData || tracksData.length === 0) {
+                return {
+                    loadType: 'error',
+                    exception: {
+                        message: 'Artist has no public tracks.',
+                        severity: 'common'
+                    }
+                };
             }
-            const tracks = this._normalizeData(tracksData)
+            const tracks = tracksData
                 .map((item) => this._buildTrack(item))
-                .filter(Boolean);
+                .filter((t) => t !== null);
             if (tracks.length === 0) {
-                return this._createExceptionResponse('Artist has no valid tracks.', 'common');
+                return {
+                    loadType: 'error',
+                    exception: {
+                        message: 'Artist has no valid playable tracks.',
+                        severity: 'common'
+                    }
+                };
             }
-            logger('info', 'Audius', `Loaded ${tracks.length} tracks from artist "${user.name || artist}".`);
+            logger('info', 'Audius', `Loaded ${tracks.length} tracks for artist "${user.name || artist}".`);
             return {
                 loadType: 'playlist',
                 data: {
                     info: {
-                        name: `${user.name || artist}'s Tracks`,
+                        name: `${user.name || artist}'s Top Tracks`,
                         selectedTrack: 0
                     },
                     pluginInfo: {
@@ -296,80 +470,87 @@ export default class AudiusSource {
             };
         }
         catch (e) {
-            return this._createExceptionResponse(e.message);
+            const message = e instanceof Error ? e.message : String(e);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Searches for a playlist by its owner and slug.
+     * @internal
+     */
     async _findPlaylistBySlug(artist, playlistSlug) {
         const searchEndpoint = `/v1/playlists/search?query=${encodeURIComponent(`${artist} ${playlistSlug}`)}&limit=10`;
-        const searchData = await this._apiRequest(searchEndpoint);
-        if (!searchData || (Array.isArray(searchData) && searchData.length === 0)) {
+        const data = await this._apiRequest(searchEndpoint);
+        if (!data || data.length === 0)
             return null;
-        }
-        const playlists = this._normalizeData(searchData);
         const slugLower = playlistSlug.toLowerCase();
-        for (const playlist of playlists) {
+        for (const playlist of data) {
             if (playlist.permalink?.toLowerCase().includes(slugLower)) {
                 return playlist;
             }
         }
-        return playlists[0] || null;
+        return data[0] || null;
     }
+    /**
+     * Searches for an album by its owner and slug.
+     * @internal
+     */
     async _findAlbumBySlug(artist, albumSlug) {
         const searchEndpoint = `/v1/playlists/search?query=${encodeURIComponent(`${artist} ${albumSlug}`)}&limit=10`;
-        const searchData = await this._apiRequest(searchEndpoint);
-        if (!searchData || (Array.isArray(searchData) && searchData.length === 0)) {
+        const data = await this._apiRequest(searchEndpoint);
+        if (!data || data.length === 0)
             return null;
-        }
-        const playlists = this._normalizeData(searchData);
         const slugLower = albumSlug.toLowerCase();
-        for (const playlist of playlists) {
+        // Prefer nodes explicitly flagged as albums
+        for (const playlist of data) {
             if (playlist.is_album &&
                 playlist.permalink?.toLowerCase().includes(slugLower)) {
                 return playlist;
             }
         }
-        for (const playlist of playlists) {
+        // Generic match fallback
+        for (const playlist of data) {
             if (playlist.permalink?.toLowerCase().includes(slugLower)) {
                 return playlist;
             }
         }
         return null;
     }
+    /**
+     * Loads all tracks for a given playlist identifier.
+     * @internal
+     */
     async _loadPlaylistTracks(playlistId, limit) {
-        const tracksEndpoint = `/v1/playlists/${playlistId}/tracks?limit=${limit}`;
-        const tracksData = await this._apiRequest(tracksEndpoint);
-        if (!tracksData || (Array.isArray(tracksData) && tracksData.length === 0)) {
+        const data = await this._apiRequest(`/v1/playlists/${playlistId}/tracks?limit=${limit}`);
+        if (!data || data.length === 0)
             return [];
-        }
-        return this._normalizeData(tracksData)
+        return data
             .map((item) => this._buildTrack(item))
-            .filter(Boolean);
+            .filter((t) => t !== null);
     }
-    async getTrackUrl(decodedTrack, _itag) {
+    /**
+     * Resolves a playback URL for an Audius track.
+     * @param decodedTrack - Decoded track metadata.
+     * @returns A promise resolving to the playable stream result.
+     * @public
+     */
+    async getTrackUrl(decodedTrack) {
         try {
-            logger('debug', 'Audius', `Getting track URL for track ID: ${decodedTrack.identifier}`);
             if (!decodedTrack.identifier) {
-                logger('error', 'Audius', 'No track identifier provided');
                 return {
-                    exception: {
-                        message: 'No track identifier provided',
-                        severity: 'fault',
-                        cause: 'MISSING_IDENTIFIER'
-                    }
+                    exception: { message: 'Missing track identifier.', severity: 'fault' }
                 };
             }
             const streamUrl = this._getStreamUrl(decodedTrack.identifier);
             if (!streamUrl) {
-                logger('error', 'Audius', `Failed to get stream URL for track ${decodedTrack.identifier}`);
                 return {
                     exception: {
-                        message: 'Failed to get stream URL for Audius track.',
-                        severity: 'fault',
-                        cause: 'Unknown'
+                        message: 'Failed to construct Audius stream URL.',
+                        severity: 'fault'
                     }
                 };
             }
-            logger('info', 'Audius', `Successfully got stream URL for track ${decodedTrack.identifier}`);
+            logger('debug', 'Audius', `Resolved stream URL for ${decodedTrack.identifier}: ${streamUrl}`);
             return {
                 url: streamUrl,
                 protocol: 'http',
@@ -378,16 +559,14 @@ export default class AudiusSource {
             };
         }
         catch (e) {
-            logger('error', 'Audius', `Error in getTrackUrl: ${e.message}`);
-            return {
-                exception: {
-                    message: e.message || 'Unknown error getting track URL',
-                    severity: 'fault',
-                    cause: 'Unknown'
-                }
-            };
+            const message = e instanceof Error ? e.message : String(e);
+            return { exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Constructs an authenticated stream URL for a track ID.
+     * @internal
+     */
     _getStreamUrl(trackId) {
         try {
             const url = new URL(`${AUDIUS_API_BASE}/v1/tracks/${trackId}/stream`);
@@ -395,47 +574,55 @@ export default class AudiusSource {
                 url.searchParams.set('app_name', this.appName);
             if (this.apiKey)
                 url.searchParams.set('apiKey', this.apiKey);
-            const streamUrl = url.toString();
-            logger('debug', 'Audius', `Built stream URL for track ${trackId}: ${streamUrl}`);
-            return streamUrl;
+            return url.toString();
         }
         catch (e) {
-            logger('error', 'Audius', `Error building stream URL: ${e.message}`);
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Audius', `Stream URL construction failed: ${message}`);
             return null;
         }
     }
-    async loadStream(_track, url, _protocol, _additionalData) {
+    /**
+     * Executes the final stream load via NodeLink's HTTP request handler.
+     *
+     * @param _track - Metadata of the track.
+     * @param url - Resolved stream URL.
+     * @returns A promise resolving to the readable stream and type.
+     * @public
+     */
+    async loadStream(_track, url) {
         try {
-            logger('debug', 'Audius', `Loading stream from URL: ${url}`);
-            const response = await http1makeRequest(url, {
+            const res = await http1makeRequest(url, {
                 method: 'GET',
                 streamOnly: true
             });
-            if (response.error)
-                throw response.error;
-            const contentType = response.headers?.['content-type'] || 'audio/mpeg';
-            const httpStream = response.stream;
-            httpStream.on('end', () => {
-                logger('debug', 'Audius', `Stream ended for ${url}, emitting finishBuffering.`);
-                httpStream.emit('finishBuffering');
+            if (res.error)
+                throw new Error(res.error);
+            const contentTypeRaw = res.headers?.['content-type'];
+            const contentType = Array.isArray(contentTypeRaw)
+                ? contentTypeRaw[0]
+                : typeof contentTypeRaw === 'string'
+                    ? contentTypeRaw
+                    : 'audio/mpeg';
+            const stream = res.stream;
+            if (!stream) {
+                throw new Error('Failed to obtain readable stream from discovery node.');
+            }
+            stream.on('end', () => {
+                stream.emit('finishBuffering');
             });
-            httpStream.on('error', (err) => {
-                logger('error', 'Audius', `Stream error: ${err.message}`);
+            stream.on('error', (err) => {
+                logger('error', 'Audius', `Readable stream error: ${err.message}`);
             });
             return {
-                stream: httpStream,
+                stream,
                 type: contentType
             };
         }
         catch (e) {
-            logger('error', 'Audius', `Error loading stream: ${e.message}`);
-            return {
-                exception: {
-                    message: e.message,
-                    severity: 'fault',
-                    cause: 'STREAM_ERROR'
-                }
-            };
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Audius', `Stream fetch failed: ${message}`);
+            return { exception: { message, severity: 'fault' } };
         }
     }
 }

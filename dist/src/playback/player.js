@@ -146,9 +146,6 @@ export class Player {
     _getAudioStream() {
         return this.connection?.audioStream ?? null;
     }
-    _getPluginInfo(track) {
-        return (track?.pluginInfo || {});
-    }
     /**
      * Initializes the audio mixer instance used for mix layers and fading.
      */

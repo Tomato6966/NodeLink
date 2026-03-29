@@ -425,7 +425,10 @@ export default class ShazamSource {
       if (!identifierMatch) {
         return { loadType: 'empty', data: {} }
       }
-      const identifier = identifierMatch[1]!
+      const identifier = identifierMatch[1]
+      if (!identifier) {
+        return { loadType: 'empty', data: {} }
+      }
       const track = this.createTrack(
         {
           identifier,

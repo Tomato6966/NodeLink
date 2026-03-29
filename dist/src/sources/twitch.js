@@ -1,115 +1,174 @@
 import { PassThrough } from 'node:stream';
 import HLSHandler from "../playback/hls/HLSHandler.js";
 import { encodeTrack, http1makeRequest, logger } from "../utils.js";
+/**
+ * Base URL for the Twitch GraphQL API.
+ * @internal
+ */
+const TWITCH_GQL_URL = 'https://gql.twitch.tv/gql';
+/**
+ * Base URL for the Twitch Usher API (HLS playlists).
+ * @internal
+ */
+const TWITCH_USHER_URL = 'https://usher.ttvnw.net';
+/**
+ * Twitch source implementation.
+ * Integrates with Twitch's GraphQL and Usher APIs to resolve streams, VODs, and clips.
+ * @public
+ */
 export default class TwitchSource {
+    /**
+     * The NodeLink worker context.
+     * @internal
+     */
+    nodelink;
+    /**
+     * Regular expression patterns for identifying Twitch URLs.
+     * Matches clips, videos (VODs), and channel URLs.
+     * @public
+     */
+    patterns = [
+        /^https?:\/\/(?:www\.|go\.|m\.)?twitch\.tv\/(?:[\w_]+\/clip\/([\w%-_]+)|videos\/(\d+)|([\w_]+))/i
+    ];
+    /**
+     * Priority score for source selection.
+     * @public
+     */
+    priority = 70;
+    /**
+     * Client ID used for API requests.
+     * Prime Client ID extracted from the public site.
+     * @internal
+     */
+    clientId = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+    /**
+     * Unique device ID for session tracking.
+     * @internal
+     */
+    deviceId = null;
+    /**
+     * Constructs a new TwitchSource instance.
+     * @param nodelink - The worker context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        this.patterns = [
-            /^https?:\/\/(?:www\.|go\.|m\.)?twitch\.tv\/(?:[\w_]+\/clip\/[\w%-_]+|videos\/\d+|[\w_]+)/
-        ];
-        this.priority = 70;
-        this.clientId = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
-        this.deviceId = null;
     }
+    /**
+     * Performs source-level initialization.
+     * Attempts to load cached IDs or extract them from the Twitch landing page.
+     * @returns A promise resolving to true if initialization succeeded.
+     * @public
+     */
     async setup() {
-        const cachedId = this.nodelink.credentialManager.get('twitch_client_id');
-        const cachedDevice = this.nodelink.credentialManager.get('twitch_device_id');
+        const cm = this.nodelink.credentialManager;
+        if (!cm)
+            return false;
+        const cachedId = cm.get('twitch_client_id');
+        const cachedDevice = cm.get('twitch_device_id');
         if (cachedId && cachedDevice) {
             this.clientId = cachedId;
             this.deviceId = cachedDevice;
-            logger('info', 'Sources', 'Loaded Twitch parameters from CredentialManager.');
+            logger('info', 'Twitch', 'Successfully loaded parameters from CredentialManager.');
             return true;
         }
         try {
-            const { body, headers, error, statusCode } = await http1makeRequest('https://www.twitch.tv/', {
+            const res = await http1makeRequest('https://www.twitch.tv/', {
                 method: 'GET',
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:109.0) Gecko/20100101 Firefox/111.0',
-                    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'en-US,en;q=0.5',
-                    Connection: 'keep-alive'
+                    Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
                 }
             });
-            if (error || statusCode !== 200) {
-                throw new Error(`Failed to fetch Twitch page: ${error?.message || statusCode}`);
+            if (res.error || res.statusCode !== 200) {
+                throw new Error(`Twitch page fetch failed: ${res.error || res.statusCode}`);
             }
+            const body = typeof res.body === 'string' ? res.body : JSON.stringify(res.body);
+            // Extract Client ID from script tags
             const clientIdMatch = body.match(/clientId="(\w+)"/);
             if (clientIdMatch?.[1]) {
                 this.clientId = clientIdMatch[1];
             }
             else {
-                logger('warn', 'Twitch', 'Failed to extract client ID from Twitch page, using default.');
+                logger('warn', 'Twitch', 'Could not extract dynamic Client-ID, using fallback.');
             }
-            const setCookieHeader = headers['set-cookie'];
-            if (setCookieHeader) {
-                const deviceIdCookie = Array.isArray(setCookieHeader)
-                    ? setCookieHeader.find((c) => c.includes('unique_id='))
-                    : setCookieHeader;
-                if (deviceIdCookie) {
-                    const deviceIdMatch = deviceIdCookie.match(/unique_id=([^;]+);/);
-                    if (deviceIdMatch?.[1]) {
-                        this.deviceId = deviceIdMatch[1];
-                    }
+            // Extract Device ID from set-cookie
+            const setCookie = res.headers?.['set-cookie'];
+            if (setCookie) {
+                const cookies = (Array.isArray(setCookie) ? setCookie : [setCookie]).map(String);
+                const uniqueId = cookies.find((c) => c.includes('unique_id='));
+                if (uniqueId) {
+                    const match = uniqueId.match(/unique_id=([^;]+);/);
+                    if (match?.[1])
+                        this.deviceId = match[1];
                 }
             }
             if (!this.deviceId) {
-                logger('warn', 'Twitch', 'Failed to extract device ID from Twitch page.');
+                logger('warn', 'Twitch', 'Could not extract unique device ID from cookies.');
             }
+            // Persist identified parameters
+            cm.set('twitch_client_id', this.clientId, 7 * 24 * 60 * 60 * 1000);
             if (this.deviceId) {
-                this.nodelink.credentialManager.set('twitch_device_id', this.deviceId, 7 * 24 * 60 * 60 * 1000);
+                cm.set('twitch_device_id', this.deviceId, 7 * 24 * 60 * 60 * 1000);
             }
-            this.nodelink.credentialManager.set('twitch_client_id', this.clientId, 7 * 24 * 60 * 60 * 1000);
-            logger('info', 'Sources', `Loaded Twitch source. Client ID: ${this.clientId}`);
+            logger('info', 'Twitch', `Twitch source primed. Client ID: ${this.clientId}`);
             return true;
         }
         catch (e) {
-            logger('error', 'Sources', `Failed to setup Twitch source: ${e.message}`);
+            const message = e instanceof Error ? e.message : String(e);
+            logger('error', 'Twitch', `Failed to bootstrap Twitch source: ${message}`);
             return false;
         }
     }
+    /**
+     * Executes a GraphQL request against Twitch's internal API.
+     * @param payload - The GQL operation payload.
+     * @returns A promise resolving to the response body.
+     * @internal
+     */
     async _gqlRequest(payload) {
         const headers = {
             'Client-ID': this.clientId,
             'Content-Type': 'application/json'
         };
-        if (this.deviceId) {
+        if (this.deviceId)
             headers['X-Device-ID'] = this.deviceId;
-        }
-        const { body, error, statusCode } = await http1makeRequest('https://gql.twitch.tv/gql', {
+        const res = await http1makeRequest(TWITCH_GQL_URL, {
             method: 'POST',
             headers,
             body: payload,
             disableBodyCompression: true
         });
-        if (error || statusCode !== 200) {
-            throw new Error(`GQL request failed: ${error?.message || statusCode}`);
+        if (res.error || res.statusCode !== 200) {
+            throw new Error(`Twitch GraphQL request failed: ${res.error || res.statusCode}`);
         }
-        return body;
+        return res.body;
     }
-    _getChannelName(url) {
-        const match = url.match(/twitch\.tv\/([\w_]+)/);
-        return match ? match[1].toLowerCase() : null;
-    }
-    _getClipSlug(url) {
-        const match = url.match(/\/clip\/([\w%-_]+)/);
-        return match ? match[1] : null;
-    }
-    _getVodId(url) {
-        const match = url.match(/\/videos\/(\d+)/);
-        return match ? match[1] : null;
-    }
+    /**
+     * Resolves a Twitch URL into a track.
+     * Detects if the URL is for a clip, VOD, or live channel.
+     *
+     * @param url - The absolute Twitch URL.
+     * @returns Resolution result payload.
+     * @public
+     */
     async resolve(url) {
-        const clipSlug = this._getClipSlug(url);
+        const pattern = this.patterns[0];
+        const match = pattern?.exec(url);
+        if (!match)
+            return { loadType: 'empty', data: {} };
+        const [, clipSlug, vodId, channelName] = match;
         if (clipSlug)
-            return this._loadClip(clipSlug, url);
-        const vodId = this._getVodId(url);
+            return await this._loadClip(clipSlug, url);
         if (vodId)
-            return this._loadVod(vodId, url);
-        const channelName = this._getChannelName(url);
+            return await this._loadVod(vodId, url);
         if (channelName)
-            return this._loadChannel(channelName, url);
+            return await this._loadChannel(channelName, url);
         return { loadType: 'empty', data: {} };
     }
+    /**
+     * Fetches metadata for a Twitch clip.
+     * @internal
+     */
     async _fetchClipMetadata(slug) {
         const payload = {
             operationName: 'ClipsView',
@@ -139,35 +198,43 @@ export default class TwitchSource {
                 }
             }
         };
-        const result = await this._gqlRequest(payload);
-        return result?.data?.clip;
+        const res = (await this._gqlRequest(payload));
+        return res.data?.clip || null;
     }
+    /**
+     * Resolves a Twitch clip by its slug.
+     * @internal
+     */
     async _loadClip(slug, originalUrl) {
         try {
-            const clipData = await this._fetchClipMetadata(slug);
-            if (!clipData) {
+            const data = await this._fetchClipMetadata(slug);
+            if (!data) {
                 return {
-                    exception: { message: 'Clip not found', severity: 'common' }
+                    loadType: 'error',
+                    exception: { message: 'Clip not found.', severity: 'common' }
                 };
             }
-            const track = this.buildTrack({
-                identifier: clipData.slug,
+            const track = this._buildTrack({
+                identifier: data.slug,
                 uri: originalUrl,
-                title: clipData.title || 'Twitch Clip',
-                author: clipData.broadcaster.displayName,
-                length: Math.floor(clipData.durationSeconds * 1000),
+                title: data.title || 'Twitch Clip',
+                author: data.broadcaster?.displayName || 'Unknown',
+                length: Math.floor(data.durationSeconds * 1000),
                 isSeekable: true,
                 isStream: false,
-                artworkUrl: clipData.thumbnailURL
+                artworkUrl: data.thumbnailURL
             });
             return { loadType: 'track', data: track };
         }
         catch (e) {
-            return {
-                exception: { message: e.message, severity: 'fault' }
-            };
+            const message = e instanceof Error ? e.message : String(e);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Fetches metadata for a Twitch VOD.
+     * @internal
+     */
     async _fetchVodMetadata(vodId) {
         const payload = {
             operationName: 'VideoMetadata',
@@ -179,46 +246,51 @@ export default class TwitchSource {
                 }
             }
         };
-        const result = await this._gqlRequest(payload);
-        return result?.data?.video;
+        const res = (await this._gqlRequest(payload));
+        return res.data?.video || null;
     }
+    /**
+     * Resolves a Twitch VOD by its identifier.
+     * @internal
+     */
     async _loadVod(vodId, originalUrl) {
         try {
-            const vodData = await this._fetchVodMetadata(vodId);
-            if (!vodData) {
+            const data = await this._fetchVodMetadata(vodId);
+            if (!data) {
                 return {
-                    exception: { message: 'VOD not found', severity: 'common' }
+                    loadType: 'error',
+                    exception: { message: 'VOD not found.', severity: 'common' }
                 };
             }
-            let thumbnail = vodData.previewThumbnailURL;
-            if (thumbnail) {
-                thumbnail = thumbnail
-                    .replace('{width}', '320')
-                    .replace('{height}', '180');
-            }
-            const track = this.buildTrack({
+            const artworkUrl = data.previewThumbnailURL
+                ?.replace('{width}', '640')
+                .replace('{height}', '360');
+            const track = this._buildTrack({
                 identifier: vodId,
                 uri: originalUrl,
-                title: vodData.title || 'Twitch VOD',
-                author: vodData.owner.displayName,
-                length: Math.floor(vodData.lengthSeconds * 1000),
+                title: data.title || 'Twitch VOD',
+                author: data.owner?.displayName || 'Unknown',
+                length: Math.floor(data.lengthSeconds * 1000),
                 isSeekable: true,
                 isStream: false,
-                artworkUrl: thumbnail
+                artworkUrl
             });
             return { loadType: 'track', data: track };
         }
         catch (e) {
-            return {
-                exception: { message: e.message, severity: 'fault' }
-            };
+            const message = e instanceof Error ? e.message : String(e);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Resolves a Twitch channel into a live stream track.
+     * @internal
+     */
     async _loadChannel(channelName, originalUrl) {
         try {
             const payload = {
                 operationName: 'StreamMetadata',
-                variables: { channelLogin: channelName },
+                variables: { channelLogin: channelName.toLowerCase() },
                 extensions: {
                     persistedQuery: {
                         version: 1,
@@ -226,48 +298,71 @@ export default class TwitchSource {
                     }
                 }
             };
-            const result = await this._gqlRequest(payload);
-            const streamInfo = result?.data?.user?.stream;
-            if (!streamInfo || streamInfo.type !== 'live') {
+            const res = (await this._gqlRequest(payload));
+            const stream = res.data?.user?.stream;
+            if (!stream || stream.type !== 'live') {
                 return {
+                    loadType: 'error',
                     exception: {
-                        message: 'Live stream not found or not live.',
+                        message: 'Channel is not currently live.',
                         severity: 'common'
                     }
                 };
             }
-            const thumbnail = `https://static-cdn.jtvnw.net/previews-ttv/live_user_${channelName}-440x248.jpg`;
-            const track = this.buildTrack({
-                identifier: channelName,
+            const track = this._buildTrack({
+                identifier: channelName.toLowerCase(),
                 uri: originalUrl,
-                title: result.data.user.lastBroadcast.title || 'Live Stream',
+                title: res.data?.user?.lastBroadcast?.title || 'Twitch Live Stream',
                 author: channelName,
                 length: 0,
                 isSeekable: false,
                 isStream: true,
-                artworkUrl: thumbnail
+                artworkUrl: `https://static-cdn.jtvnw.net/previews-ttv/live_user_${channelName.toLowerCase()}-640x360.jpg`
             });
             return { loadType: 'track', data: track };
         }
         catch (e) {
-            return {
-                exception: { message: e.message, severity: 'fault' }
-            };
+            const message = e instanceof Error ? e.message : String(e);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Resolves a playable URL for a Twitch track.
+     * Identifies if the track is a clip, VOD, or live stream and delegates to appropriate stream fetchers.
+     *
+     * @param track - Metadata of the track.
+     * @returns A promise resolving to the playable stream result.
+     * @public
+     */
     async getTrackUrl(track) {
-        const uri = track.uri;
-        const clipSlug = this._getClipSlug(uri);
+        const pattern = this.patterns[0];
+        const match = pattern?.exec(track.uri);
+        if (!match) {
+            return {
+                exception: {
+                    message: 'Invalid Twitch URI provided.',
+                    severity: 'common'
+                }
+            };
+        }
+        const [, clipSlug, vodId, channelName] = match;
         if (clipSlug)
-            return this._getClipStreamUrl(clipSlug);
-        const vodId = this._getVodId(uri);
+            return await this._getClipStreamUrl(clipSlug);
         if (vodId)
-            return this._getVodStreamUrl(vodId);
-        const channelName = this._getChannelName(uri);
+            return await this._getVodStreamUrl(vodId);
         if (channelName)
-            return this._getLiveStreamUrl(channelName);
-        return { exception: { message: 'Invalid Twitch URL', severity: 'common' } };
+            return await this._getLiveStreamUrl(channelName);
+        return {
+            exception: {
+                message: 'Could not identify Twitch resource type.',
+                severity: 'fault'
+            }
+        };
     }
+    /**
+     * Obtains a playback access token for a live channel.
+     * @internal
+     */
     async _fetchLiveAccessToken(channel) {
         const payload = {
             operationName: 'PlaybackAccessToken_Template',
@@ -281,30 +376,28 @@ export default class TwitchSource {
           }
           __typename
         }
-        videoPlaybackAccessToken(id: $vodID, params: {platform: $platform, playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isVod) {
-          value
-          signature
-          __typename
-        }
       }`,
             variables: {
                 isLive: true,
-                login: channel,
+                login: channel.toLowerCase(),
                 isVod: false,
                 vodID: '',
                 playerType: 'site',
                 platform: 'web'
             }
         };
-        const result = await this._gqlRequest(payload);
-        return result?.data?.streamPlaybackAccessToken;
+        const res = (await this._gqlRequest(payload));
+        return res.data?.streamPlaybackAccessToken || null;
     }
+    /**
+     * Resolves the HLS stream URL for a live channel.
+     * @internal
+     */
     async _getLiveStreamUrl(channelName) {
         try {
             const token = await this._fetchLiveAccessToken(channelName);
-            if (!token) {
-                throw new Error('Failed to get access token');
-            }
+            if (!token)
+                throw new Error('Failed to obtain live playback access token.');
             const params = new URLSearchParams({
                 player_type: 'site',
                 token: token.value,
@@ -312,25 +405,29 @@ export default class TwitchSource {
                 allow_source: 'true',
                 allow_audio_only: 'true'
             });
-            const hlsUrl = `https://usher.ttvnw.net/api/channel/hls/${channelName}.m3u8?${params.toString()}`;
-            const { body: m3u8, error, statusCode } = await http1makeRequest(hlsUrl);
-            if (error || statusCode !== 200) {
-                throw new Error(`Failed to fetch HLS playlist: ${error?.message || statusCode}`);
+            const hlsUrl = `${TWITCH_USHER_URL}/api/channel/hls/${channelName.toLowerCase()}.m3u8?${params.toString()}`;
+            const res = await http1makeRequest(hlsUrl);
+            if (res.error || res.statusCode !== 200 || typeof res.body !== 'string') {
+                throw new Error(`Failed to fetch HLS master playlist: ${res.error || res.statusCode}`);
             }
-            const bestQuality = this._parseM3U8(m3u8);
-            if (!bestQuality) {
-                throw new Error('No playable streams found in M3U8 playlist');
-            }
+            const stream = this._parseM3U8(res.body);
+            if (!stream)
+                throw new Error('No compatible variants found in HLS playlist.');
             return {
-                url: bestQuality.url,
+                url: stream.url,
                 protocol: 'hls',
                 format: 'mpegts'
             };
         }
         catch (e) {
-            return { exception: { message: e.message, severity: 'fault' } };
+            const message = e instanceof Error ? e.message : String(e);
+            return { exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Obtains a playback access token for a clip.
+     * @internal
+     */
     async _fetchClipAccessToken(slug) {
         const payload = {
             operationName: 'ClipAccessToken',
@@ -351,41 +448,45 @@ export default class TwitchSource {
                 }
             }
         };
-        const result = await this._gqlRequest(payload);
-        return result?.data?.clip?.playbackAccessToken;
+        const res = (await this._gqlRequest(payload));
+        return res.data?.clip?.playbackAccessToken || null;
     }
+    /**
+     * Resolves the direct MP4 stream URL for a clip.
+     * @internal
+     */
     async _getClipStreamUrl(slug) {
         try {
-            const clipData = await this._fetchClipMetadata(slug);
-            if (!clipData || !clipData.videoQualities) {
-                throw new Error('Failed to load clip metadata or no qualities found');
+            const meta = await this._fetchClipMetadata(slug);
+            if (!meta || !meta.videoQualities?.length) {
+                throw new Error('Clip metadata lookup failed.');
             }
-            let bestQuality = null;
-            for (const quality of clipData.videoQualities) {
-                if (!bestQuality ||
-                    Number.parseInt(quality.quality, 10) >
-                        Number.parseInt(bestQuality.quality, 10)) {
-                    bestQuality = quality;
-                }
-            }
-            if (!bestQuality) {
-                throw new Error('No playable sources found for clip');
-            }
-            const tokenData = await this._fetchClipAccessToken(slug);
-            if (!tokenData) {
-                throw new Error('Failed to fetch clip access token');
-            }
+            // Select highest quality variant
+            const best = meta.videoQualities.sort((a, b) => Number.parseInt(b.quality, 10) - Number.parseInt(a.quality, 10))[0];
+            if (!best)
+                throw new Error('No playable qualities identified for clip.');
+            const token = await this._fetchClipAccessToken(slug);
+            if (!token)
+                throw new Error('Failed to obtain clip playback access token.');
             const params = new URLSearchParams({
-                token: tokenData.value,
-                sig: tokenData.signature
+                token: token.value,
+                sig: token.signature
             });
-            const finalUrl = `${bestQuality.sourceURL}?${params.toString()}`;
-            return { url: finalUrl, protocol: 'https', format: 'mp4' };
+            return {
+                url: `${best.sourceURL}?${params.toString()}`,
+                protocol: 'https',
+                format: 'mp4'
+            };
         }
         catch (e) {
-            return { exception: { message: e.message, severity: 'fault' } };
+            const message = e instanceof Error ? e.message : String(e);
+            return { exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Obtains a playback access token for a VOD.
+     * @internal
+     */
     async _fetchVodAccessToken(vodId) {
         const payload = {
             operationName: 'PlaybackAccessToken_Template',
@@ -402,15 +503,18 @@ export default class TwitchSource {
                 platform: 'web'
             }
         };
-        const result = await this._gqlRequest(payload);
-        return result?.data?.videoPlaybackAccessToken;
+        const res = (await this._gqlRequest(payload));
+        return res.data?.videoPlaybackAccessToken || null;
     }
+    /**
+     * Resolves the HLS stream URL for a VOD.
+     * @internal
+     */
     async _getVodStreamUrl(vodId) {
         try {
             const token = await this._fetchVodAccessToken(vodId);
-            if (!token) {
-                throw new Error('Failed to get VOD access token');
-            }
+            if (!token)
+                throw new Error('Failed to obtain VOD playback access token.');
             const params = new URLSearchParams({
                 player_type: 'html5',
                 token: token.value,
@@ -418,116 +522,147 @@ export default class TwitchSource {
                 allow_source: 'true',
                 allow_audio_only: 'true'
             });
-            const vodUrl = `https://usher.ttvnw.net/vod/${vodId}.m3u8?${params.toString()}`;
-            return { url: vodUrl, protocol: 'hls', format: 'mpegts' };
+            const vodUrl = `${TWITCH_USHER_URL}/vod/${vodId}.m3u8?${params.toString()}`;
+            return {
+                url: vodUrl,
+                protocol: 'hls',
+                format: 'mpegts'
+            };
         }
         catch (e) {
-            return { exception: { message: e.message, severity: 'fault' } };
+            const message = e instanceof Error ? e.message : String(e);
+            return { exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Basic M3U8 parser to select the highest bandwidth variant or audio-only variant.
+     * @param data - Raw M3U8 content.
+     * @returns Selected stream URL or null.
+     * @internal
+     */
     _parseM3U8(data) {
         const lines = data.split('\n');
         let bestBandwidth = 0;
         let bestUrl = null;
         for (let i = 0; i < lines.length; i++) {
-            if (lines[i].startsWith('#EXT-X-STREAM-INF:')) {
-                const bandwidthMatch = lines[i].match(/BANDWIDTH=(\d+)/);
-                if (bandwidthMatch) {
-                    const bandwidth = Number.parseInt(bandwidthMatch[1], 10);
-                    if (bandwidth > bestBandwidth) {
-                        bestBandwidth = bandwidth;
-                        bestUrl = lines[i + 1];
+            const line = lines[i]?.trim();
+            if (line?.startsWith('#EXT-X-STREAM-INF:')) {
+                const match = line.match(/BANDWIDTH=(\d+)/);
+                const bwStr = match?.[1];
+                if (bwStr) {
+                    const bw = Number.parseInt(bwStr, 10);
+                    if (bw > bestBandwidth) {
+                        bestBandwidth = bw;
+                        bestUrl = lines[i + 1] ?? null;
                     }
                 }
             }
         }
         if (bestUrl)
             return { url: bestUrl };
-        bestBandwidth = 0;
-        bestUrl = null;
+        // Fallback to audio-only if no stream-inf found (unlikely for Twitch Usher)
         for (const line of lines) {
             if (line.startsWith('#EXT-X-MEDIA:') && line.includes('TYPE=AUDIO')) {
-                const bandwidthMatch = line.match(/BANDWIDTH=(\d+)/);
-                const bandwidth = bandwidthMatch
-                    ? Number.parseInt(bandwidthMatch[1], 10)
-                    : 0;
-                const uriMatch = line.match(/URI="([^"]+)"/);
-                if (uriMatch && bandwidth >= bestBandwidth) {
-                    bestBandwidth = bandwidth;
-                    bestUrl = uriMatch[1];
-                }
+                const match = line.match(/URI="([^"]+)"/);
+                if (match?.[1])
+                    return { url: match[1] };
             }
         }
-        return bestUrl ? { url: bestUrl } : null;
+        return null;
     }
-    async loadStream(_track, url, protocol) {
+    /**
+     * Finalizes stream loading using either HLSHandler or direct pass-through.
+     *
+     * @param _track - Track metadata.
+     * @param url - Resolved URL.
+     * @param protocol - Resolution protocol ('hls' or other).
+     * @param additionalData - Optional payload containing playback start time.
+     * @returns TrackStreamResult payload.
+     * @public
+     */
+    async loadStream(_track, url, protocol, additionalData) {
         if (protocol === 'hls') {
+            const localAddress = this.nodelink.routePlanner?.getIP
+                ? this.nodelink.routePlanner.getIP()
+                : undefined;
             const stream = new HLSHandler(url, {
                 type: 'mpegts',
-                localAddress: this.nodelink.routePlanner?.getIP(),
+                localAddress: localAddress || undefined,
                 startTime: additionalData?.startTime || 0
             });
             return { stream, type: 'mpegts' };
         }
-        const { stream: resStream, error, statusCode } = await http1makeRequest(url, {
+        const res = await http1makeRequest(url, {
             method: 'GET',
             streamOnly: true
         });
-        if (error || statusCode !== 200 || !resStream) {
+        if (res.error || res.statusCode !== 200 || !res.stream) {
             return {
                 exception: {
-                    message: `Failed to load stream: ${error?.message || statusCode}`,
+                    message: `Direct stream fetch failed: ${res.error || res.statusCode}`,
                     severity: 'fault'
                 }
             };
         }
-        const stream = new PassThrough();
-        resStream.on('data', (chunk) => {
-            if (!stream.write(chunk))
-                resStream.pause();
-        });
-        stream.on('drain', () => {
-            if (!resStream.destroyed)
-                resStream.resume();
-        });
-        resStream.on('end', () => {
-            if (!stream.writableEnded) {
-                stream.emit('finishBuffering');
-                stream.end();
+        const passthrough = new PassThrough();
+        const source = res.stream;
+        source.pipe(passthrough);
+        source.on('end', () => {
+            if (!passthrough.writableEnded) {
+                passthrough.emit('finishBuffering');
+                passthrough.end();
             }
         });
-        resStream.on('error', (err) => {
-            logger('error', 'Twitch', `External stream error: ${err.message}`);
-            if (!stream.destroyed)
-                stream.destroy(err);
+        source.on('error', (err) => {
+            logger('error', 'Twitch', `Underlying stream error: ${err.message}`);
+            if (!passthrough.destroyed)
+                passthrough.destroy(err);
         });
-        return { stream, type: 'mp4' };
+        const contentTypeRaw = res.headers?.['content-type'];
+        const contentType = Array.isArray(contentTypeRaw)
+            ? contentTypeRaw[0]
+            : typeof contentTypeRaw === 'string'
+                ? contentTypeRaw
+                : 'video/mp4';
+        return { stream: passthrough, type: contentType || 'video/mp4' };
     }
-    search(_query) {
+    /**
+     * Search is currently not supported for the Twitch source.
+     * @returns Exception result.
+     * @public
+     */
+    async search(_query) {
         return {
+            loadType: 'error',
             exception: {
-                message: 'Search is not supported for Twitch',
+                message: 'Twitch source does not support catalog search.',
                 severity: 'common'
             }
         };
     }
-    buildTrack(partialInfo) {
-        const track = {
-            identifier: partialInfo.identifier,
-            isSeekable: !partialInfo.isStream,
-            author: partialInfo.author,
-            length: partialInfo.length,
-            isStream: partialInfo.isStream,
+    /**
+     * Normalizes internal Twitch metadata into a standardized NodeLink TrackData object.
+     * @param partial - Intermediate metadata object.
+     * @returns Built TrackData.
+     * @internal
+     */
+    _buildTrack(partial) {
+        const info = {
+            identifier: partial.identifier,
+            isSeekable: partial.isSeekable,
+            author: partial.author,
+            length: partial.length,
+            isStream: partial.isStream,
             position: 0,
-            title: partialInfo.title,
-            uri: partialInfo.uri,
-            artworkUrl: partialInfo.artworkUrl,
+            title: partial.title,
+            uri: partial.uri,
+            artworkUrl: partial.artworkUrl || null,
             isrc: null,
             sourceName: 'twitch'
         };
         return {
-            encoded: encodeTrack(track),
-            info: track,
+            encoded: encodeTrack({ ...info, details: [] }),
+            info,
             pluginInfo: {}
         };
     }

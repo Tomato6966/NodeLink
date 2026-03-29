@@ -394,7 +394,8 @@ export default class InstagramSource {
                 logger('debug', 'Sources', `Rejected low-confidence mirror candidates for "${query}".`);
                 continue;
             }
-            const bestMatch = getBestMatch(acceptableMatches, decodedTrack) || acceptableMatches[0];
+            const bestMatch = getBestMatch(acceptableMatches, decodedTrack) ||
+                acceptableMatches[0];
             if (!bestMatch?.info)
                 continue;
             const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info);
@@ -661,8 +662,7 @@ export default class InstagramSource {
             audioUrl = audioInfo.progressive_download_url || null;
             const igArtist = audioInfo.ig_artist;
             artist = igArtist?.username || 'User Unknown';
-            title =
-                audioInfo.original_audio_title || 'Instagram Audio';
+            title = audioInfo.original_audio_title || 'Instagram Audio';
             duration = audioInfo.duration_in_ms || 0;
             thumbnail = igArtist?.profile_pic_url || '';
         }
@@ -811,7 +811,8 @@ export default class InstagramSource {
         }
         else if (media.__typename === 'XDTGraphSidecar' &&
             media.edge_sidecar_to_children) {
-            const edges = media.edge_sidecar_to_children.edges;
+            const edges = media.edge_sidecar_to_children
+                .edges;
             const videoEdge = edges?.find((edge) => edge.node.is_video);
             if (videoEdge) {
                 videoNode = videoEdge.node;
@@ -1004,7 +1005,8 @@ export default class InstagramSource {
                         length: track.length,
                         uri: track.uri
                     };
-                    preferredQuery = ogMetadata.data.searchQuery || null;
+                    preferredQuery =
+                        ogMetadata.data.searchQuery || null;
                 }
             }
             const mirrorResult = await this._resolveAudioMirrorTrack(mirrorTrack, preferredQuery);

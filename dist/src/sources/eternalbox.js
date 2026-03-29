@@ -1,10 +1,18 @@
 import { PassThrough } from 'node:stream';
 import * as MP4Box from 'mp4box';
 import { encodeTrack, http1makeRequest, logger } from "../utils.js";
+/**
+ * Common sampling rates for AAC audio.
+ * @internal
+ */
 const SAMPLE_RATES = Object.freeze([
     96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025,
     8000, 7350
 ]);
+/**
+ * Creates an ADTS header for a single AAC frame.
+ * @internal
+ */
 const _createAdtsHeader = (sampleLength, profile, samplingIndex, channelCount) => {
     const frameLength = sampleLength + 7;
     const profileIndex = profile - 1;
@@ -20,12 +28,70 @@ const _createAdtsHeader = (sampleLength, profile, samplingIndex, channelCount) =
         0xfc
     ]);
 };
+/**
+ * Eternalbox source implementation.
+ * Integrates with Eternalbox mirrors for "Infinite Loop" playback.
+ * Parses MP4 containers into ADTS frames and applies beat-matching algorithms for seamless jumping.
+ * @public
+ */
 export default class EternalboxSource {
+    /**
+     * The NodeLink worker context.
+     * @internal
+     */
+    nodelink;
+    /**
+     * Eternalbox specific configuration.
+     * @internal
+     */
+    config;
+    /**
+     * Base URL for API requests.
+     * @internal
+     */
+    baseUrl;
+    /**
+     * Search term prefixes recognized by this source.
+     * @public
+     */
+    searchTerms = ['eternalbox', 'ebox', 'jukebox'];
+    /**
+     * Priority score for source selection.
+     * @public
+     */
+    priority = 60;
+    /**
+     * Internal cache for analysis and audio frames.
+     * @internal
+     */
+    cache = new Map();
+    /**
+     * Current cumulative size of the cache in bytes.
+     * @internal
+     */
+    cacheSizeBytes = 0;
+    /**
+     * Maximum allowed size for the cumulative cache.
+     * @internal
+     */
+    cacheMaxBytes;
+    /**
+     * Regular expression patterns for identifying Eternalbox URLs and IDs.
+     * @public
+     */
+    patterns;
+    /**
+     * Constructs a new EternalboxSource instance.
+     * @param nodelink - The worker context.
+     */
     constructor(nodelink) {
         this.nodelink = nodelink;
-        this.config = nodelink.options.sources?.eternalbox || {};
+        this.config = (nodelink.options.sources?.eternalbox || {
+            enabled: false,
+            baseUrl: 'https://eternalboxmirror.xyz'
+        });
         this.baseUrl = this.config.baseUrl || 'https://eternalboxmirror.xyz';
-        this.searchTerms = ['eternalbox', 'ebox', 'jukebox'];
+        this.cacheMaxBytes = this.config.cacheMaxBytes ?? 20 * 1024 * 1024;
         const mirrors = [
             'eternalboxmirror\\.xyz',
             'eternalbox\\.floriegl\\.tech',
@@ -40,44 +106,61 @@ export default class EternalboxSource {
             new RegExp(`https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/audio\\/jukebox\\/([A-Za-z0-9]+)`, 'i'),
             new RegExp(`https?:\\/\\/(?:www\\.)?(?:${mirrors})\\/api\\/audio\\/jukebox\\/([A-Za-z0-9]+)\\/location`, 'i')
         ];
-        this.priority = 60;
-        this.cache = new Map();
-        this.cacheSizeBytes = 0;
-        this.cacheMaxBytes = this.config.cacheMaxBytes ?? 20 * 1024 * 1024;
     }
+    /**
+     * Performs source-level initialization.
+     * @returns A promise resolving to true.
+     * @public
+     */
     async setup() {
         logger('info', 'Sources', 'Loaded Eternalbox source.');
         return true;
     }
+    /**
+     * Executes a search on Eternalbox mirrors.
+     * @param query - The search query or ID.
+     * @returns A promise resolving to the search result payload.
+     * @public
+     */
     async search(query) {
         if (!query)
             return { loadType: 'empty', data: {} };
         if (this._looksLikeId(query)) {
             return this.resolve(this._buildJukeboxUrl(query));
         }
-        const limit = this.config.searchResults || this.nodelink.options.maxSearchResults || 10;
+        const limit = this.config.searchResults ||
+            this.nodelink.options.maxSearchResults ||
+            10;
         const url = `${this.baseUrl}/api/analysis/search?query=${encodeURIComponent(query)}&results=${limit}`;
         try {
-            const { body, statusCode } = await http1makeRequest(url, {
+            const res = await http1makeRequest(url, {
                 headers: this._buildApiHeaders()
             });
-            if (statusCode !== 200)
+            if (res.statusCode !== 200)
                 return { loadType: 'empty', data: {} };
-            const items = this._extractItems(body);
+            const items = this._extractItems(res.body);
             if (!items.length)
                 return { loadType: 'empty', data: {} };
             const tracks = items
                 .map((item) => this._buildTrackFromItem(item))
-                .filter(Boolean);
+                .filter((t) => t !== null);
             if (!tracks.length)
                 return { loadType: 'empty', data: {} };
             return { loadType: 'search', data: tracks };
         }
         catch (err) {
-            logger('error', 'Eternalbox', `Search failed: ${err.message}`);
-            return { exception: { message: err.message, severity: 'fault' } };
+            const message = err instanceof Error ? err.message : String(err);
+            logger('error', 'Eternalbox', `Search failed: ${message}`);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Resolves an Eternalbox URL or identifier into a track.
+     * Fetches analysis data and optional Spotify enrichment.
+     * @param url - The absolute Eternalbox URL.
+     * @returns A promise resolving to the resolution result.
+     * @public
+     */
     async resolve(url) {
         const id = this._extractId(url);
         if (!id)
@@ -90,20 +173,27 @@ export default class EternalboxSource {
             ]);
             if (!analysisPayload?.info)
                 return { loadType: 'empty', data: {} };
-            const spotifyData = analysisPayload.info?.service === 'SPOTIFY'
-                ? await this._fetchSpotifyInfo(analysisPayload.info?.id || id)
+            const spotifyData = analysisPayload.info.service === 'SPOTIFY'
+                ? await this._fetchSpotifyInfo(analysisPayload.info.id || id)
                 : null;
             const trackData = this._buildTrack(analysisPayload, id, ogAudioSource, spotifyData, baseUrl);
-            if (this._isEternalEnabled() && analysisPayload?.analysis) {
+            if (this._isEternalEnabled() && analysisPayload.analysis) {
                 this._primeAnalysisCache(id, analysisPayload.analysis);
             }
             return { loadType: 'track', data: trackData };
         }
         catch (err) {
-            logger('error', 'Eternalbox', `Resolve failed: ${err.message}`);
-            return { exception: { message: err.message, severity: 'fault' } };
+            const message = err instanceof Error ? err.message : String(err);
+            logger('error', 'Eternalbox', `Resolve failed: ${message}`);
+            return { loadType: 'error', exception: { message, severity: 'fault' } };
         }
     }
+    /**
+     * Resolves a playable URL for an Eternalbox track.
+     * @param track - Metadata of the track.
+     * @returns A promise resolving to the playable URL payload.
+     * @public
+     */
     async getTrackUrl(track) {
         const id = track.identifier || this._extractId(track.uri);
         if (!id) {
@@ -119,17 +209,19 @@ export default class EternalboxSource {
             url: this._buildStreamUrl(id, baseUrl),
             protocol: 'https',
             format: 'm4a',
-            additionalData: {
-                headers: this._buildStreamHeaders(id, baseUrl)
-            }
+            additionalData: { headers: this._buildStreamHeaders(id, baseUrl) }
         };
     }
+    /**
+     * Loads the audio stream, optionally applying the "Eternal" algorithm for infinite playback.
+     * @public
+     */
     async loadStream(_decodedTrack, url, _protocol, additionalData) {
         try {
             const id = this._extractId(url);
             const baseUrl = this._extractBaseUrl(url);
             const headers = {
-                ...this._buildStreamHeaders(id, baseUrl),
+                ...this._buildStreamHeaders(id || '', baseUrl),
                 ...(additionalData?.headers || {})
             };
             if (this._isEternalEnabled() && id) {
@@ -147,9 +239,8 @@ export default class EternalboxSource {
             const reconnectDelayMs = this.config.reconnectDelayMs ?? 1000;
             const allowInfinite = maxReconnects === 0;
             const cleanupCurrent = () => {
-                if (currentStream && !currentStream.destroyed) {
+                if (currentStream && !currentStream.destroyed)
                     currentStream.destroy();
-                }
                 currentStream = null;
             };
             const scheduleReconnect = () => {
@@ -175,7 +266,8 @@ export default class EternalboxSource {
                     streamOnly: true,
                     headers
                 });
-                if (!response.stream || response.statusCode >= 400) {
+                if (!response.stream ||
+                    (response.statusCode && response.statusCode >= 400)) {
                     throw new Error(`Stream request failed with status ${response.statusCode}`);
                 }
                 lastHeaders = response.headers || null;
@@ -207,63 +299,87 @@ export default class EternalboxSource {
             return { stream: out, type: contentType };
         }
         catch (err) {
-            logger('error', 'Eternalbox', `Failed to load stream: ${err.message}`);
-            return { exception: { message: err.message, severity: 'common' } };
+            const message = err instanceof Error ? err.message : String(err);
+            logger('error', 'Eternalbox', `Failed to load stream: ${message}`);
+            return { exception: { message, severity: 'common' } };
         }
     }
+    /**
+     * Internal helper to extract result items from various API response formats.
+     * @internal
+     */
     _extractItems(body) {
         if (Array.isArray(body))
             return body;
-        if (Array.isArray(body?.results))
-            return body.results;
-        if (Array.isArray(body?.data))
-            return body.data;
-        if (Array.isArray(body?.tracks))
-            return body.tracks;
-        if (Array.isArray(body?.items))
-            return body.items;
-        if (Array.isArray(body?.results?.items))
-            return body.results.items;
-        if (Array.isArray(body?.results?.data))
-            return body.results.data;
+        const b = body;
+        if (!b)
+            return [];
+        if (Array.isArray(b.results))
+            return b.results;
+        if (Array.isArray(b.data))
+            return b.data;
+        if (Array.isArray(b.tracks))
+            return b.tracks;
+        if (Array.isArray(b.items))
+            return b.items;
+        const resultsObj = b.results;
+        if (Array.isArray(resultsObj?.items))
+            return resultsObj.items;
+        if (Array.isArray(resultsObj?.data))
+            return resultsObj.data;
         return [];
     }
+    /**
+     * Builds standardized TrackData from an API item.
+     * @internal
+     */
     _buildTrackFromItem(item) {
-        const info = item?.info || item?.track || item;
-        const id = info?.id || item?.id;
+        const info = (item.info || item.track || item);
+        const id = (info.id || item.id);
         if (!id)
             return null;
         return this._buildTrack({ info }, id);
     }
+    /**
+     * Fetches full audio analysis for a track.
+     * @internal
+     */
     async _fetchAnalysis(id, baseUrl = this.baseUrl) {
         const url = `${baseUrl}/api/analysis/analyse/${id}`;
-        const { body, statusCode } = await http1makeRequest(url, {
-            headers: this._buildApiHeaders(id)
+        const res = await http1makeRequest(url, {
+            headers: this._buildApiHeaders()
         });
-        if (statusCode !== 200)
+        if (res.statusCode !== 200)
             return null;
-        return body;
+        return res.body;
     }
+    /**
+     * Constructs a TrackData object from multiple sources.
+     * @internal
+     */
     _buildTrack(payload, id, ogAudioSource = null, spotifyData = null, baseUrl = this.baseUrl) {
-        const info = payload?.info || payload || {};
-        const analysis = payload?.analysis || null;
-        const spotifyTitle = spotifyData?.name || null;
-        const spotifyArtists = Array.isArray(spotifyData?.artists)
-            ? spotifyData.artists
+        const info = payload.info || {};
+        const analysis = payload.analysis || null;
+        const spotifyTitle = spotifyData?.name;
+        const spotifyArtistsArr = spotifyData?.artists;
+        const spotifyArtists = Array.isArray(spotifyArtistsArr)
+            ? spotifyArtistsArr
                 .map((a) => a?.name)
                 .filter(Boolean)
                 .join(', ')
             : null;
-        const title = spotifyTitle || info?.title || info?.name || 'Unknown';
-        const author = spotifyArtists || info?.artist || info?.author || 'Unknown';
-        const duration = Number.parseInt(info?.duration ?? info?.length ?? -1, 10);
-        const summarySeconds = Number.parseFloat(analysis?.audio_summary?.duration ?? NaN);
+        const title = spotifyTitle || info.title || info.name || 'Unknown';
+        const author = spotifyArtists || info.artist || info.author || 'Unknown';
+        const duration = Number.parseInt(String(info.duration ?? info.length ?? -1), 10);
+        const summarySeconds = Number.parseFloat(String(analysis?.audio_summary?.duration ?? NaN));
         const summaryMs = Number.isFinite(summarySeconds)
             ? Math.round(summarySeconds * 1000)
             : -1;
         const length = Number.isFinite(duration) && duration > 0 ? duration : summaryMs;
         const infiniteStream = this.config.infiniteStream ?? true;
         const isStream = Boolean(infiniteStream);
+        const spotifyAlbum = spotifyData?.album;
+        const spotifyExternalIds = spotifyData?.external_ids;
         const track = {
             identifier: id,
             isSeekable: !isStream,
@@ -272,46 +388,46 @@ export default class EternalboxSource {
             isStream,
             position: 0,
             title,
-            uri: info?.url || this._buildJukeboxUrl(id, baseUrl),
-            artworkUrl: spotifyData?.album?.images?.[0]?.url ||
-                info?.artwork ||
-                info?.image ||
-                null,
-            isrc: spotifyData?.external_ids?.isrc || info?.isrc || null,
+            uri: info.url || this._buildJukeboxUrl(id, baseUrl),
+            artworkUrl: spotifyAlbum?.images?.[0]?.url || info.artwork || info.image || null,
+            isrc: spotifyExternalIds?.isrc || info.isrc || null,
             sourceName: 'eternalbox'
         };
-        const includeAnalysis = this.config.includeAnalysis ?? true;
-        const includeSummary = this.config.includeAnalysisSummary ?? true;
         const pluginInfo = {
-            service: info?.service || null,
-            sourceUrl: info?.url || null,
+            service: info.service || null,
+            sourceUrl: info.url || null,
             analysisUrl: `${baseUrl}/api/analysis/analyse/${id}`,
             streamUrl: this._buildStreamUrl(id, baseUrl),
             ogAudioSourceUrl: `${baseUrl}/api/audio/jukebox/${id}/location`,
-            ogAudioSource: ogAudioSource
+            ogAudioSource
         };
-        if (includeSummary) {
+        if (this.config.includeAnalysisSummary ?? true) {
             pluginInfo.analysisSummary = this._buildAnalysisSummary(analysis, length);
         }
         if (spotifyData) {
+            const spotifyUrls = spotifyData.external_urls;
             pluginInfo.spotify = {
-                id: spotifyData?.id || id,
-                url: spotifyData?.external_urls?.spotify || info?.url || null,
-                isrc: spotifyData?.external_ids?.isrc || null,
-                artworkUrl: spotifyData?.album?.images?.[0]?.url || null,
-                durationMs: spotifyData?.duration_ms || null,
-                previewUrl: spotifyData?.preview_url || null
+                id: spotifyData.id || id,
+                url: spotifyUrls?.spotify || info.url || null,
+                isrc: spotifyExternalIds?.isrc || null,
+                artworkUrl: spotifyAlbum?.images?.[0]?.url || null,
+                durationMs: spotifyData.duration_ms || null,
+                previewUrl: spotifyData.preview_url || null
             };
         }
-        if (includeAnalysis && analysis) {
+        if ((this.config.includeAnalysis ?? true) && analysis) {
             pluginInfo.analysis = analysis;
         }
         return {
-            encoded: encodeTrack(track),
+            encoded: encodeTrack({ ...track, details: [] }),
             info: track,
             pluginInfo
         };
     }
+    /**
+     * Extracts the Eternalbox ID from a URL or string.
+     * @internal
+     */
     _extractId(input) {
         if (!input || typeof input !== 'string')
             return null;
@@ -326,12 +442,18 @@ export default class EternalboxSource {
                 return idFromQuery;
             const match = url.pathname.match(/\/analyse\/([A-Za-z0-9]+)/i) ||
                 url.pathname.match(/\/jukebox\/([A-Za-z0-9]+)/i);
-            if (match)
+            if (match?.[1])
                 return match[1];
         }
-        catch (_e) { }
+        catch {
+            // ignore
+        }
         return null;
     }
+    /**
+     * Extracts the origin base URL from an input URL.
+     * @internal
+     */
     _extractBaseUrl(input) {
         try {
             if (typeof input !== 'string')
@@ -340,25 +462,43 @@ export default class EternalboxSource {
             if (url.protocol.startsWith('http'))
                 return url.origin;
         }
-        catch (_e) { }
+        catch {
+            // ignore
+        }
         return this.baseUrl;
     }
+    /**
+     * Validates if a string looks like an Eternalbox ID.
+     * @internal
+     */
     _looksLikeId(value) {
-        return typeof value === 'string' && /^[A-Za-z0-9]{10,40}$/.test(value);
+        return /^[A-Za-z0-9]{10,40}$/.test(value);
     }
+    /**
+     * Builds a full Jukebox web URL.
+     * @internal
+     */
     _buildJukeboxUrl(id, baseUrl = this.baseUrl) {
-        if (!id)
-            return baseUrl;
         return `${baseUrl}/jukebox_go.html?id=${id}`;
     }
+    /**
+     * Builds a stream endpoint URL.
+     * @internal
+     */
     _buildStreamUrl(id, baseUrl = this.baseUrl) {
         return `${baseUrl}/api/audio/jukebox/${id}`;
     }
+    /**
+     * Builds default API headers.
+     * @internal
+     */
     _buildApiHeaders() {
-        return {
-            Accept: 'application/json'
-        };
+        return { Accept: 'application/json' };
     }
+    /**
+     * Builds stream request headers.
+     * @internal
+     */
     _buildStreamHeaders(id, baseUrl = this.baseUrl) {
         return {
             Accept: '*/*',
@@ -367,20 +507,28 @@ export default class EternalboxSource {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
         };
     }
+    /**
+     * Fetches the original audio source location if redirected.
+     * @internal
+     */
     async _fetchOgAudioSource(id, baseUrl = this.baseUrl) {
         const url = `${baseUrl}/api/audio/jukebox/${id}/location`;
         try {
-            const { body, statusCode } = await http1makeRequest(url, {
-                headers: this._buildApiHeaders(id)
+            const res = await http1makeRequest(url, {
+                headers: this._buildApiHeaders()
             });
-            if (statusCode !== 200)
+            if (res.statusCode !== 200)
                 return null;
-            return body?.url || null;
+            return res.body?.url || null;
         }
-        catch (_err) {
+        catch {
             return null;
         }
     }
+    /**
+     * Fetches track metadata from Spotify for enrichment.
+     * @internal
+     */
     async _fetchSpotifyInfo(id) {
         if (!this.config.enrichSpotify)
             return null;
@@ -388,19 +536,22 @@ export default class EternalboxSource {
         if (!spotify || typeof spotify._apiRequest !== 'function')
             return null;
         try {
-            if (typeof spotify.setup === 'function') {
+            if (typeof spotify.setup === 'function')
                 await spotify.setup();
-            }
             if (!spotify.accessToken)
                 return null;
             return await spotify._apiRequest(`/tracks/${id}`);
         }
-        catch (_err) {
+        catch {
             return null;
         }
     }
+    /**
+     * Builds a summary of the audio analysis components.
+     * @internal
+     */
     _buildAnalysisSummary(analysis, length) {
-        if (!analysis || typeof analysis !== 'object') {
+        if (!analysis)
             return {
                 durationMs: length > 0 ? length : null,
                 beats: null,
@@ -409,44 +560,58 @@ export default class EternalboxSource {
                 tatums: null,
                 segments: null
             };
-        }
         return {
             durationMs: length > 0 ? length : null,
-            beats: Array.isArray(analysis.beats) ? analysis.beats.length : null,
-            bars: Array.isArray(analysis.bars) ? analysis.bars.length : null,
-            sections: Array.isArray(analysis.sections)
-                ? analysis.sections.length
-                : null,
-            tatums: Array.isArray(analysis.tatums) ? analysis.tatums.length : null,
-            segments: Array.isArray(analysis.segments)
-                ? analysis.segments.length
-                : null
+            beats: analysis.beats?.length || null,
+            bars: analysis.bars?.length || null,
+            sections: analysis.sections?.length || null,
+            tatums: analysis.tatums?.length || null,
+            segments: analysis.segments?.length || null
         };
     }
+    /**
+     * Checks if the Eternal algorithm is enabled in configuration.
+     * @internal
+     */
     _isEternalEnabled() {
         return this.config.eternalStream ?? true;
     }
+    /**
+     * Primes the internal cache with analysis data.
+     * @internal
+     */
     _primeAnalysisCache(id, analysis) {
-        if (!id || !analysis)
-            return;
         const existing = this.cache.get(id);
-        if (existing?.analysis)
+        if (existing && 'analysis' in existing)
             return;
         this.cache.set(id, { analysis });
     }
+    /**
+     * Clears all internal caches.
+     * @internal
+     */
     _clearCache() {
         this.cache.clear();
         this.cacheSizeBytes = 0;
     }
+    /**
+     * Gets or initializes an Eternal cache entry for a track.
+     * Performs audio parsing and algorithmic graph building on first run.
+     * @internal
+     */
     async _getOrCreateEternalCache(id, headers) {
         const cached = this.cache.get(id);
-        if (cached?.streamReady && cached?.frames?.length) {
+        if (cached && 'streamReady' in cached && cached.streamReady) {
             return {
                 stream: this._createEternalStream(cached, id),
                 type: 'audio/aac'
             };
         }
-        const analysis = cached?.analysis || (await this._fetchAnalysis(id))?.analysis;
+        let analysis = cached && 'analysis' in cached ? cached.analysis : null;
+        if (!analysis) {
+            const payload = await this._fetchAnalysis(id);
+            analysis = payload?.analysis || null;
+        }
         if (!analysis?.beats?.length || !analysis?.segments?.length)
             return null;
         const audioBuffer = await this._fetchAudioBufferWithLimit(id, headers);
@@ -468,57 +633,56 @@ export default class EternalboxSource {
             streamReady: true,
             sizeBytes: parsed.totalBytes
         };
-        if (entry.sizeBytes > this.cacheMaxBytes) {
+        if (entry.sizeBytes > this.cacheMaxBytes)
             return null;
-        }
-        if (this.cacheSizeBytes + entry.sizeBytes > this.cacheMaxBytes) {
+        if (this.cacheSizeBytes + entry.sizeBytes > this.cacheMaxBytes)
             this._clearCache();
-        }
         this.cache.set(id, entry);
         this.cacheSizeBytes += entry.sizeBytes;
         return { stream: this._createEternalStream(entry, id), type: 'audio/aac' };
     }
+    /**
+     * Fetches the full audio resource into a buffer, respecting size limits.
+     * @internal
+     */
     async _fetchAudioBufferWithLimit(id, headers) {
         const url = this._buildStreamUrl(id);
         try {
-            const head = await http1makeRequest(url, { method: 'HEAD', headers });
-            const lengthHeader = head?.headers?.['content-length'];
-            const length = lengthHeader ? Number.parseInt(lengthHeader, 10) : null;
-            if (Number.isFinite(length) && length > this.cacheMaxBytes) {
-                logger('warn', 'Eternalbox', `Audio exceeds cache limit (${length} > ${this.cacheMaxBytes}).`);
-                return null;
-            }
-        }
-        catch (_err) {
-            // ignore
-        }
-        const response = await http1makeRequest(url, {
-            method: 'GET',
-            streamOnly: true,
-            headers
-        });
-        if (!response.stream || response.statusCode >= 400)
-            return null;
-        return await new Promise((resolve, reject) => {
-            const chunks = [];
-            let total = 0;
-            const stream = response.stream;
-            stream.on('data', (chunk) => {
-                total += chunk.length;
-                if (total > this.cacheMaxBytes) {
-                    stream.destroy(new Error('Cache limit exceeded'));
-                    reject(new Error('Cache limit exceeded'));
-                    return;
-                }
-                chunks.push(chunk);
+            const res = await http1makeRequest(url, {
+                method: 'GET',
+                streamOnly: true,
+                headers
             });
-            stream.on('end', () => resolve(Buffer.concat(chunks)));
-            stream.on('error', (err) => reject(err));
-        }).catch((err) => {
-            logger('error', 'Eternalbox', `Cache download failed: ${err.message}`);
+            if (!res.stream || (res.statusCode && res.statusCode >= 400))
+                return null;
+            return await new Promise((resolve, reject) => {
+                const chunks = [];
+                let total = 0;
+                const stream = res.stream;
+                stream.on('data', (chunk) => {
+                    total += chunk.length;
+                    if (total > this.cacheMaxBytes) {
+                        stream.destroy(new Error('Cache limit exceeded'));
+                        reject(new Error('Cache limit exceeded'));
+                        return;
+                    }
+                    chunks.push(chunk);
+                });
+                stream.on('end', () => resolve(Buffer.concat(chunks)));
+                stream.on('error', (err) => reject(err));
+            }).catch((err) => {
+                logger('error', 'Eternalbox', `Cache download failed: ${err.message}`);
+                return null;
+            });
+        }
+        catch {
             return null;
-        });
+        }
     }
+    /**
+     * Parses an MP4 buffer into individual ADTS-wrapped AAC frames.
+     * @internal
+     */
     _parseMp4ToAdtsFrames(buffer) {
         const mp4boxFile = MP4Box.createFile();
         const frames = [];
@@ -529,7 +693,7 @@ export default class EternalboxSource {
         let totalBytes = 0;
         mp4boxFile.onReady = (info) => {
             const audioTrack = info.tracks.find((t) => t.codec?.startsWith('mp4a'));
-            if (!audioTrack)
+            if (!audioTrack || !audioTrack.timescale || !audioTrack.audio)
                 return;
             timescale = audioTrack.timescale;
             audioConfig = this._getAudioConfig(audioTrack);
@@ -542,44 +706,41 @@ export default class EternalboxSource {
             for (const sample of samples) {
                 if (!sample?.data)
                     continue;
-                const sampleData = sample.data instanceof ArrayBuffer
-                    ? Buffer.from(sample.data)
-                    : Buffer.from(sample.data.buffer || sample.data);
+                const sampleData = Buffer.from(sample.data);
                 const adts = _createAdtsHeader(sampleData.byteLength, audioConfig.profile, audioConfig.samplingIndex, audioConfig.channelCount);
                 const frame = Buffer.concat([adts, sampleData]);
                 frames.push(frame);
                 totalBytes += frame.length;
-                const start = sample.dts / timescale;
-                const end = (sample.dts + sample.duration) / timescale;
-                frameStarts.push(start);
-                frameEnds.push(end);
+                frameStarts.push(sample.dts / timescale);
+                frameEnds.push((sample.dts + sample.duration) / timescale);
             }
-        };
-        mp4boxFile.onError = (e) => {
-            logger('error', 'Eternalbox', `MP4 parse error: ${e}`);
         };
         const arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
         arrayBuffer.fileStart = 0;
         mp4boxFile.appendBuffer(arrayBuffer);
         mp4boxFile.flush();
-        return {
-            frames,
-            frameStarts,
-            frameEnds,
-            totalBytes
-        };
+        return { frames, frameStarts, frameEnds, totalBytes };
     }
+    /**
+     * Extracts AAC configuration from a track metadata node.
+     * @internal
+     */
     _getAudioConfig(track) {
+        if (!track.audio)
+            throw new Error('Missing audio metadata in track.');
         const samplingIndex = SAMPLE_RATES.indexOf(track.audio.sample_rate);
         if (samplingIndex === -1)
-            throw new Error('Unsupported sample rate for ADTS');
+            throw new Error('Unsupported sample rate for ADTS.');
         let profile = 2;
         if (track.codec) {
-            const codecParts = track.codec.split('.');
-            if (codecParts.length >= 3) {
-                const profileVal = Number.parseInt(codecParts[2], 10);
-                if (Number.isFinite(profileVal) && profileVal > 0)
-                    profile = profileVal;
+            const parts = track.codec.split('.');
+            if (parts.length >= 3) {
+                const valStr = parts[2];
+                if (valStr) {
+                    const val = Number.parseInt(valStr, 10);
+                    if (Number.isFinite(val) && val > 0)
+                        profile = val;
+                }
             }
         }
         return {
@@ -588,72 +749,77 @@ export default class EternalboxSource {
             profile
         };
     }
+    /**
+     * Maps analysis beats to physical audio frame indices.
+     * @internal
+     */
     _buildBeatFrameMap(beats, frameStarts, frameEnds) {
-        const beatFrames = [];
-        for (const beat of beats) {
+        return beats.map((beat) => {
             const startIdx = this._findFrameIndex(frameStarts, beat.start);
             const endIdx = this._findFrameIndex(frameEnds, beat.start + beat.duration);
-            beatFrames.push({
-                startFrame: startIdx,
-                endFrame: Math.max(startIdx, endIdx)
-            });
-        }
-        return beatFrames;
+            return { startFrame: startIdx, endFrame: Math.max(startIdx, endIdx) };
+        });
     }
+    /**
+     * Binary search for the closest frame index for a timestamp.
+     * @internal
+     */
     _findFrameIndex(frameTimes, target) {
         let low = 0;
         let high = frameTimes.length - 1;
         let result = frameTimes.length - 1;
         while (low <= high) {
             const mid = Math.floor((low + high) / 2);
-            if (frameTimes[mid] >= target) {
+            const val = frameTimes[mid];
+            if (val !== undefined && val >= target) {
                 result = mid;
                 high = mid - 1;
             }
-            else {
+            else
                 low = mid + 1;
-            }
         }
         return result;
     }
+    /**
+     * High-level algorithmic entry point for building the beat branching graph.
+     * @internal
+     */
     _buildBeatNeighbors(beats, segments, bars) {
         const maxNeighbors = this.config.maxBranches ?? 4;
         const maxThreshold = this.config.maxBranchThreshold ?? 80;
-        const thresholdStart = this.config.branchThresholdStart ?? 10;
-        const thresholdStep = this.config.branchThresholdStep ?? 5;
-        const targetDivisor = this.config.branchTargetDivisor ?? 6;
-        const addLastEdge = this.config.addLastEdge ?? true;
-        const justBackwards = this.config.justBackwards ?? false;
-        const justLongBranches = this.config.justLongBranches ?? false;
-        const removeSequentialBranches = this.config.removeSequentialBranches ?? true;
-        const useFilteredSegments = this.config.useFilteredSegments ?? true;
-        const rawSegments = Array.isArray(segments) ? segments : [];
-        const segmentsToUse = useFilteredSegments
-            ? this._filterSegments(rawSegments)
-            : rawSegments;
-        const quanta = this._buildBeatQuanta(beats, segmentsToUse, bars, rawSegments);
-        this._precalculateNearestNeighbors(quanta, maxNeighbors, maxThreshold);
-        let threshold = thresholdStart;
-        let count = 0;
-        const targetBranchCount = Math.floor(quanta.length / targetDivisor);
-        for (threshold = thresholdStart; threshold < maxThreshold; threshold += thresholdStep) {
-            count = this._collectNearestNeighbors(quanta, threshold, justBackwards, justLongBranches);
-            if (count >= targetBranchCount)
+        const startT = this.config.branchThresholdStart ?? 10;
+        const stepT = this.config.branchThresholdStep ?? 5;
+        const divisor = this.config.branchTargetDivisor ?? 6;
+        const segmentsToUse = (this.config.useFilteredSegments ?? true)
+            ? this._filterSegments(segments)
+            : segments;
+        const quanta = this._buildBeatQuanta(beats, segmentsToUse, bars, segments);
+        this._precalculateNeighbors(quanta, maxNeighbors, maxThreshold);
+        let threshold = startT;
+        const target = Math.floor(quanta.length / divisor);
+        for (threshold = startT; threshold < maxThreshold; threshold += stepT) {
+            const count = this._collectNeighbors(quanta, threshold);
+            if (count >= target)
                 break;
         }
-        if (addLastEdge) {
+        if (this.config.addLastEdge ?? true) {
             const longest = this._longestBackwardBranch(quanta);
             this._insertBestBackwardBranch(quanta, threshold, longest < 50 ? 65 : 55);
         }
         this._calculateReachability(quanta);
         const lastBranchPoint = this._findBestLastBeat(quanta);
-        this._filterOutBadBranches(quanta, lastBranchPoint);
-        if (removeSequentialBranches) {
-            this._filterOutSequentialBranches(quanta, lastBranchPoint);
-        }
-        const neighbors = quanta.map((q) => q.neighbors.map((n) => n.dest.which));
-        return { neighbors, lastBranchPoint };
+        this._filterBranches(quanta, lastBranchPoint);
+        if (this.config.removeSequentialBranches ?? true)
+            this._filterSequential(quanta, lastBranchPoint);
+        return {
+            neighbors: quanta.map((q) => q.neighbors.map((n) => n.dest.which)),
+            lastBranchPoint
+        };
     }
+    /**
+     * Prepares the graph nodes from analysis components.
+     * @internal
+     */
     _buildBeatQuanta(beats, segments, bars, rawSegments) {
         const quanta = beats.map((beat, index) => ({
             ...beat,
@@ -669,410 +835,414 @@ export default class EternalboxSource {
             reach: 0
         }));
         for (let i = 0; i < quanta.length; i++) {
-            quanta[i].prev = i > 0 ? quanta[i - 1] : null;
-            quanta[i].next = i < quanta.length - 1 ? quanta[i + 1] : null;
+            const q = quanta[i];
+            if (q) {
+                q.prev = i > 0 ? (quanta[i - 1] ?? null) : null;
+                q.next = i < quanta.length - 1 ? (quanta[i + 1] ?? null) : null;
+            }
         }
-        const barQuanta = Array.isArray(bars)
-            ? bars.map((bar, index) => ({
-                ...bar,
-                which: index,
-                prev: null,
-                next: null,
-                children: []
-            }))
-            : [];
-        for (let i = 0; i < barQuanta.length; i++) {
-            barQuanta[i].prev = i > 0 ? barQuanta[i - 1] : null;
-            barQuanta[i].next = i < barQuanta.length - 1 ? barQuanta[i + 1] : null;
+        const barNodes = bars.map((bar, index) => ({
+            ...bar,
+            which: index,
+            children: [],
+            prev: null,
+            next: null
+        }));
+        for (let i = 0; i < barNodes.length; i++) {
+            const b = barNodes[i];
+            if (b) {
+                b.prev = i > 0 ? (barNodes[i - 1] ?? null) : null;
+                b.next = i < barNodes.length - 1 ? (barNodes[i + 1] ?? null) : null;
+            }
         }
-        if (barQuanta.length > 0) {
-            let barIndex = 0;
+        if (barNodes.length > 0) {
+            let bIdx = 0;
             for (const q of quanta) {
-                while (barIndex < barQuanta.length - 1 &&
-                    q.start >= barQuanta[barIndex].start + barQuanta[barIndex].duration) {
-                    barIndex++;
+                while (bIdx < barNodes.length - 1) {
+                    const bar = barNodes[bIdx];
+                    if (bar && q.start >= bar.start + bar.duration)
+                        bIdx++;
+                    else
+                        break;
                 }
-                const parent = barQuanta[barIndex];
-                q.parent = parent;
-                q.indexInParent = parent.children.length;
-                parent.children.push(q);
+                const parent = barNodes[bIdx];
+                if (parent) {
+                    q.parent = parent;
+                    q.indexInParent = parent.children.length;
+                    parent.children.push(q);
+                }
             }
         }
-        const segmentList = Array.isArray(segments) ? segments : [];
-        for (let i = 0; i < segmentList.length; i++) {
-            segmentList[i].which = i;
+        for (let i = 0; i < segments.length; i++) {
+            const s = segments[i];
+            if (s)
+                s.which = i;
         }
-        const rawSegmentList = Array.isArray(rawSegments)
-            ? rawSegments
-            : segmentList;
-        for (let i = 0; i < rawSegmentList.length; i++) {
-            rawSegmentList[i].which = rawSegmentList[i].which ?? i;
+        for (let i = 0; i < rawSegments.length; i++) {
+            const s = rawSegments[i];
+            if (s)
+                s.which = s.which ?? i;
         }
-        let segIdx = 0;
-        let firstSegIdx = 0;
+        let sIdx = 0;
+        let fIdx = 0;
         for (const q of quanta) {
-            const beatEnd = q.start + q.duration;
-            while (firstSegIdx < rawSegmentList.length &&
-                rawSegmentList[firstSegIdx].start < q.start) {
-                firstSegIdx++;
+            while (fIdx < rawSegments.length) {
+                const seg = rawSegments[fIdx];
+                if (seg && seg.start < q.start)
+                    fIdx++;
+                else
+                    break;
             }
-            if (firstSegIdx < rawSegmentList.length) {
-                q.oseg = rawSegmentList[firstSegIdx];
+            if (fIdx < rawSegments.length)
+                q.oseg = rawSegments[fIdx] ?? null;
+            while (sIdx < segments.length) {
+                const seg = segments[sIdx];
+                if (seg && seg.start + seg.duration <= q.start)
+                    sIdx++;
+                else
+                    break;
             }
-            while (segIdx < segmentList.length &&
-                segmentList[segIdx].start + segmentList[segIdx].duration <= q.start) {
-                segIdx++;
-            }
-            let cursor = segIdx;
-            while (cursor < segmentList.length &&
-                segmentList[cursor].start < beatEnd) {
-                q.overlappingSegments.push(segmentList[cursor]);
-                cursor++;
+            let cursor = sIdx;
+            while (cursor < segments.length) {
+                const seg = segments[cursor];
+                if (seg && seg.start < q.start + q.duration) {
+                    q.overlappingSegments.push(seg);
+                    cursor++;
+                }
+                else
+                    break;
             }
         }
         return quanta;
     }
-    _precalculateNearestNeighbors(quanta, maxNeighbors, maxThreshold) {
+    /**
+     * Pre-calculates similarity distances between all beats.
+     * @internal
+     */
+    _precalculateNeighbors(quanta, max, maxT) {
         for (const q of quanta) {
-            this._calculateNearestNeighborsForQuantum(quanta, maxNeighbors, maxThreshold, q);
-        }
-    }
-    _calculateNearestNeighborsForQuantum(quanta, maxNeighbors, maxThreshold, q1) {
-        const edges = [];
-        if (!q1.overlappingSegments.length) {
-            q1.all_neighbors = [];
-            return;
-        }
-        for (const q2 of quanta) {
-            if (q2.which === q1.which)
+            const edges = [];
+            if (!q.overlappingSegments.length)
                 continue;
-            let sum = 0;
-            for (let j = 0; j < q1.overlappingSegments.length; j++) {
-                const seg1 = q1.overlappingSegments[j];
-                let distance = 100;
-                if (j < q2.overlappingSegments.length) {
-                    const seg2 = q2.overlappingSegments[j];
-                    if (seg1.which === seg2.which) {
-                        distance = 100;
+            for (const q2 of quanta) {
+                if (q2.which === q.which)
+                    continue;
+                let sum = 0;
+                for (let j = 0; j < q.overlappingSegments.length; j++) {
+                    const s1 = q.overlappingSegments[j];
+                    if (!s1)
+                        continue;
+                    let dist = 100;
+                    if (j < q2.overlappingSegments.length) {
+                        const s2 = q2.overlappingSegments[j];
+                        if (s2)
+                            dist = s1.which === s2.which ? 100 : this._getSegDistance(s1, s2);
                     }
-                    else {
-                        distance = this._getSegDistance(seg1, seg2);
-                    }
+                    sum += dist;
                 }
-                sum += distance;
+                const pDist = q.indexInParent === q2.indexInParent ? 0 : 100;
+                const total = sum / q.overlappingSegments.length + pDist;
+                if (total < maxT)
+                    edges.push({ src: q, dest: q2, distance: total });
             }
-            const parentDistance = q1.indexInParent === q2.indexInParent ? 0 : 100;
-            const totalDistance = sum / q1.overlappingSegments.length + parentDistance;
-            if (totalDistance < maxThreshold) {
-                edges.push({
-                    src: q1,
-                    dest: q2,
-                    distance: totalDistance,
-                    deleted: false
-                });
-            }
+            edges.sort((a, b) => a.distance - b.distance);
+            q.all_neighbors = edges.slice(0, max);
         }
-        edges.sort((a, b) => a.distance - b.distance);
-        q1.all_neighbors = edges.slice(0, maxNeighbors);
     }
-    _collectNearestNeighbors(quanta, threshold, justBackwards, justLongBranches) {
-        let branchingCount = 0;
-        const minLongBranch = Math.floor(quanta.length / 5);
+    /**
+     * Selects neighbors based on current threshold and algorithmic constraints.
+     * @internal
+     */
+    _collectNeighbors(quanta, threshold) {
+        let count = 0;
+        const minLong = Math.floor(quanta.length / 5);
         for (const q of quanta) {
-            q.neighbors = this._extractNearestNeighbors(q, threshold, justBackwards, justLongBranches, minLongBranch);
+            q.neighbors = q.all_neighbors.filter((n) => {
+                if (this.config.justBackwards && n.dest.which > q.which)
+                    return false;
+                if (this.config.justLongBranches &&
+                    Math.abs(n.dest.which - q.which) < minLong)
+                    return false;
+                return n.distance <= threshold;
+            });
             if (q.neighbors.length > 0)
-                branchingCount++;
+                count++;
         }
-        return branchingCount;
+        return count;
     }
-    _extractNearestNeighbors(q, maxThreshold, justBackwards, justLongBranches, minLongBranch) {
-        const neighbors = [];
-        for (const neighbor of q.all_neighbors) {
-            if (neighbor.deleted)
-                continue;
-            if (justBackwards && neighbor.dest.which > q.which)
-                continue;
-            if (justLongBranches &&
-                Math.abs(neighbor.dest.which - q.which) < minLongBranch) {
-                continue;
-            }
-            if (neighbor.distance <= maxThreshold)
-                neighbors.push(neighbor);
-        }
-        return neighbors;
-    }
-    _getSegDistance(seg1, seg2) {
-        const timbreWeight = this.config.timbreWeight ?? 1;
-        const pitchWeight = this.config.pitchWeight ?? 10;
-        const loudStartWeight = this.config.loudStartWeight ?? 1;
-        const loudMaxWeight = this.config.loudMaxWeight ?? 1;
-        const durationWeight = this.config.durationWeight ?? 100;
-        const confidenceWeight = this.config.confidenceWeight ?? 1;
-        const timbre = this._euclidean(seg1.timbre, seg2.timbre);
-        const pitch = this._euclidean(seg1.pitches, seg2.pitches);
-        const loudStart = Math.abs(seg1.loudness_start - seg2.loudness_start);
-        const loudMax = Math.abs(seg1.loudness_max - seg2.loudness_max);
-        const duration = Math.abs(seg1.duration - seg2.duration);
-        const confidence = Math.abs(seg1.confidence - seg2.confidence);
-        return (timbre * timbreWeight +
-            pitch * pitchWeight +
-            loudStart * loudStartWeight +
-            loudMax * loudMaxWeight +
-            duration * durationWeight +
-            confidence * confidenceWeight);
+    /**
+     * Euclidean distance between two feature vectors.
+     * @internal
+     */
+    _getSegDistance(s1, s2) {
+        const tW = this.config.timbreWeight ?? 1;
+        const pW = this.config.pitchWeight ?? 10;
+        const lSW = this.config.loudStartWeight ?? 1;
+        const lMW = this.config.loudMaxWeight ?? 1;
+        const dW = this.config.durationWeight ?? 100;
+        const cW = this.config.confidenceWeight ?? 1;
+        const timbre = this._euclidean(s1.timbre, s2.timbre);
+        const pitch = this._euclidean(s1.pitches, s2.pitches);
+        const lStart = Math.abs(s1.loudness_start - s2.loudness_start);
+        const lMax = Math.abs(s1.loudness_max - s2.loudness_max);
+        const duration = Math.abs(s1.duration - s2.duration);
+        const confidence = Math.abs(s1.confidence - s2.confidence);
+        return (timbre * tW +
+            pitch * pW +
+            lStart * lSW +
+            lMax * lMW +
+            duration * dW +
+            confidence * cW);
     }
     _euclidean(a, b) {
-        if (!Array.isArray(a) || !Array.isArray(b))
+        if (!a || !b)
             return 100;
         let sum = 0;
         for (let i = 0; i < a.length; i++) {
-            const delta = (b[i] ?? 0) - (a[i] ?? 0);
+            const valA = a[i] ?? 0;
+            const valB = b[i] ?? 0;
+            const delta = valB - valA;
             sum += delta * delta;
         }
         return Math.sqrt(sum);
     }
+    /**
+     * Measures the longest backward branch in the current graph.
+     * @internal
+     */
     _longestBackwardBranch(quanta) {
         let longest = 0;
         for (const q of quanta) {
-            for (const neighbor of q.neighbors) {
-                const delta = q.which - neighbor.dest.which;
+            for (const n of q.neighbors) {
+                const delta = q.which - n.dest.which;
                 if (delta > longest)
                     longest = delta;
             }
         }
         return (longest * 100) / quanta.length;
     }
-    _insertBestBackwardBranch(quanta, threshold, maxThreshold) {
+    /**
+     * Forces the insertion of a high-quality backward branch if none exist.
+     * @internal
+     */
+    _insertBestBackwardBranch(quanta, t, maxT) {
         const branches = [];
         for (const q of quanta) {
-            for (const neighbor of q.all_neighbors) {
-                if (neighbor.deleted)
-                    continue;
-                const delta = q.which - neighbor.dest.which;
-                if (delta > 0 && neighbor.distance < maxThreshold) {
-                    const percent = (delta * 100) / quanta.length;
-                    branches.push({ percent, q, neighbor });
-                }
+            for (const n of q.all_neighbors) {
+                const delta = q.which - n.dest.which;
+                if (delta > 0 && n.distance < maxT)
+                    branches.push({ percent: (delta * 100) / quanta.length, q, n });
             }
         }
-        if (branches.length === 0)
+        if (!branches.length)
             return;
         branches.sort((a, b) => b.percent - a.percent);
         const best = branches[0];
-        if (best.neighbor.distance > threshold) {
-            best.q.neighbors.push(best.neighbor);
-        }
+        if (best && best.n.distance > t)
+            best.q.neighbors.push(best.n);
     }
+    /**
+     * Iteratively calculates reachability for graph nodes.
+     * @internal
+     */
     _calculateReachability(quanta) {
-        const maxIter = 1000;
-        for (const q of quanta) {
+        for (const q of quanta)
             q.reach = quanta.length - q.which;
-        }
-        for (let iter = 0; iter < maxIter; iter++) {
-            let changeCount = 0;
+        for (let iter = 0; iter < 1000; iter++) {
+            let changedTotal = 0;
             for (let i = 0; i < quanta.length; i++) {
                 const q = quanta[i];
-                let changed = false;
-                for (const neighbor of q.neighbors) {
-                    const q2 = neighbor.dest;
-                    if (q2.reach > q.reach) {
-                        q.reach = q2.reach;
-                        changed = true;
-                    }
-                }
+                if (!q)
+                    continue;
+                const old = q.reach;
+                for (const n of q.neighbors)
+                    if (n.dest.reach > q.reach)
+                        q.reach = n.dest.reach;
                 if (i < quanta.length - 1) {
-                    const q2 = quanta[i + 1];
-                    if (q2.reach > q.reach) {
-                        q.reach = q2.reach;
-                        changed = true;
-                    }
+                    const next = quanta[i + 1];
+                    if (next && next.reach > q.reach)
+                        q.reach = next.reach;
                 }
-                if (changed) {
-                    changeCount++;
+                if (q.reach !== old) {
+                    changedTotal++;
                     for (let j = 0; j < q.which; j++) {
-                        const q2 = quanta[j];
-                        if (q2.reach < q.reach)
-                            q2.reach = q.reach;
+                        const prev = quanta[j];
+                        if (prev && prev.reach < q.reach)
+                            prev.reach = q.reach;
                     }
                 }
             }
-            if (changeCount === 0)
+            if (changedTotal === 0)
                 break;
         }
     }
+    /**
+     * Finds the latest beat from which the entire song remains reachable.
+     * @internal
+     */
     _findBestLastBeat(quanta) {
-        const reachThreshold = 50;
         let longest = 0;
         let longestReach = 0;
         for (let i = quanta.length - 1; i >= 0; i--) {
             const q = quanta[i];
-            const distanceToEnd = quanta.length - i;
-            const reach = ((q.reach - distanceToEnd) * 100) / quanta.length;
+            if (!q)
+                continue;
+            const reach = ((q.reach - (quanta.length - i)) * 100) / quanta.length;
             if (reach > longestReach && q.neighbors.length > 0) {
                 longestReach = reach;
                 longest = i;
-                if (reach >= reachThreshold)
+                if (reach >= 50)
                     break;
             }
         }
         return longest;
     }
-    _filterOutBadBranches(quanta, lastIndex) {
-        for (let i = 0; i < lastIndex; i++) {
+    _filterBranches(quanta, last) {
+        for (let i = 0; i < last; i++) {
             const q = quanta[i];
-            q.neighbors = q.neighbors.filter((neighbor) => neighbor.dest.which < lastIndex);
+            if (q)
+                q.neighbors = q.neighbors.filter((n) => n.dest.which < last);
         }
     }
-    _hasSequentialBranch(q, neighbor, lastBranchPoint) {
-        if (q.which === lastBranchPoint)
-            return false;
-        const qp = q.prev;
-        if (!qp)
-            return false;
-        const distance = q.which - neighbor.dest.which;
-        for (const n of qp.neighbors) {
-            const odistance = qp.which - n.dest.which;
-            if (distance === odistance)
-                return true;
-        }
-        return false;
-    }
-    _filterOutSequentialBranches(quanta, lastBranchPoint) {
+    _filterSequential(quanta, last) {
         for (let i = quanta.length - 1; i >= 1; i--) {
             const q = quanta[i];
-            const newList = [];
-            for (const neighbor of q.neighbors) {
-                if (!this._hasSequentialBranch(q, neighbor, lastBranchPoint)) {
-                    newList.push(neighbor);
-                }
-            }
-            q.neighbors = newList;
+            if (!q)
+                continue;
+            q.neighbors = q.neighbors.filter((n) => {
+                if (q.which === last || !q.prev)
+                    return true;
+                const dist = q.which - n.dest.which;
+                const qPrev = q.prev;
+                return !qPrev.neighbors.some((on) => qPrev.which - on.dest.which === dist);
+            });
         }
     }
+    /**
+     * Filters segments to merge similar consecutive ones.
+     * @internal
+     */
     _filterSegments(segments) {
-        if (!Array.isArray(segments) || segments.length === 0)
+        if (!segments.length)
             return [];
-        const threshold = 0.3;
-        const filtered = [segments[0]];
+        const first = segments[0];
+        if (!first)
+            return [];
+        const filtered = [first];
         for (let i = 1; i < segments.length; i++) {
-            const seg = segments[i];
+            const s = segments[i];
             const last = filtered[filtered.length - 1];
-            const similar = this._timbralDistance(seg, last) < 1 &&
-                (seg.confidence ?? 1) < threshold;
-            if (similar) {
+            if (s &&
+                last &&
+                this._timbralDistance(s, last) < 1 &&
+                (s.confidence ?? 1) < 0.3) {
                 filtered[filtered.length - 1] = {
                     ...last,
-                    duration: last.duration + seg.duration
+                    duration: last.duration + s.duration
                 };
             }
-            else {
-                filtered.push(seg);
-            }
+            else if (s)
+                filtered.push(s);
         }
         return filtered;
     }
-    _timbralDistance(seg1, seg2) {
-        const a = seg1?.timbre || [];
-        const b = seg2?.timbre || [];
+    _timbralDistance(s1, s2) {
+        const a = s1.timbre || [];
+        const b = s2.timbre || [];
         let sum = 0;
         for (let i = 0; i < 3; i++) {
-            const delta = (b[i] ?? 0) - (a[i] ?? 0);
+            const valA = a[i] ?? 0;
+            const valB = b[i] ?? 0;
+            const delta = valB - valA;
             sum += delta * delta;
         }
         return Math.sqrt(sum);
     }
+    /**
+     * Creates an active PassThrough stream that pumps frames according to the branching graph.
+     * @internal
+     */
     _createEternalStream(entry, id) {
-        const frames = entry.frames;
-        const beatFrames = entry.beatFrames;
-        const neighbors = entry.beatNeighbors;
-        const minBranchChance = this.config.minRandomBranchChance ?? 0.18;
-        const maxBranchChance = this.config.maxRandomBranchChance ?? 0.5;
-        const branchChanceDelta = this.config.randomBranchChanceDelta ?? 0.018;
-        const lastBranchPoint = entry.lastBranchPoint ?? 0;
-        let currentBeat = 0;
-        let currentFrame = beatFrames[0]?.startFrame ?? 0;
-        let endFrame = beatFrames[0]?.endFrame ?? frames.length - 1;
-        let isStopped = false;
-        let isPaused = false;
-        let curBranchChance = minBranchChance;
-        const neighborOffsets = new Array(neighbors.length).fill(0);
+        const { frames, beatFrames, beatNeighbors: neighbors, lastBranchPoint } = entry;
+        const minC = this.config.minRandomBranchChance ?? 0.18;
+        const maxC = this.config.maxRandomBranchChance ?? 0.5;
+        const deltaC = this.config.randomBranchChanceDelta ?? 0.018;
+        let curBeat = 0;
+        const firstBeat = beatFrames[0];
+        let curFrame = firstBeat?.startFrame ?? 0;
+        let endFrame = firstBeat?.endFrame ?? frames.length - 1;
+        let stopped = false;
+        let paused = false;
+        let chance = minC;
+        const offsets = new Array(neighbors.length).fill(0);
         const stream = new PassThrough();
-        const chooseNextBeat = () => {
-            let nextSequential = currentBeat + 1;
-            if (nextSequential >= beatFrames.length) {
+        const chooseNext = () => {
+            let next = curBeat + 1;
+            if (next >= beatFrames.length) {
                 stream.emit('eternalboxJump', {
                     id,
-                    fromBeat: currentBeat,
+                    fromBeat: curBeat,
                     toBeat: 0,
                     type: 'loop'
                 });
-                nextSequential = 0;
+                next = 0;
             }
-            const seedBeat = nextSequential;
-            const neighborList = neighbors[seedBeat] || [];
-            if (neighborList.length === 0) {
-                return seedBeat;
+            const list = neighbors[next] || [];
+            if (!list.length)
+                return next;
+            if (next === lastBranchPoint) {
+                chance = minC;
+                return this._selectNext(list, offsets, next, id, stream);
             }
-            if (seedBeat === lastBranchPoint) {
-                curBranchChance = minBranchChance;
-                return this._selectNextNeighbor(neighborList, neighborOffsets, seedBeat, id, stream);
+            chance = Math.min(maxC, chance + deltaC);
+            if (Math.random() < chance) {
+                chance = minC;
+                return this._selectNext(list, offsets, next, id, stream);
             }
-            curBranchChance += branchChanceDelta;
-            if (curBranchChance > maxBranchChance)
-                curBranchChance = maxBranchChance;
-            const shouldJump = Math.random() < curBranchChance;
-            if (shouldJump) {
-                curBranchChance = minBranchChance;
-                return this._selectNextNeighbor(neighborList, neighborOffsets, seedBeat, id, stream);
-            }
-            return seedBeat;
-        };
-        const schedulePump = () => {
-            if (isStopped)
-                return;
-            setImmediate(pump);
+            return next;
         };
         const pump = () => {
-            if (isStopped || isPaused)
+            if (stopped || paused)
                 return;
             while (true) {
-                while (currentFrame <= endFrame) {
-                    const ok = stream.write(frames[currentFrame]);
-                    if (!ok) {
-                        isPaused = true;
+                while (curFrame <= endFrame) {
+                    const frame = frames[curFrame];
+                    if (frame && !stream.write(frame)) {
+                        paused = true;
                         stream.once('drain', () => {
-                            isPaused = false;
-                            schedulePump();
+                            paused = false;
+                            setImmediate(pump);
                         });
                         return;
                     }
-                    currentFrame++;
+                    curFrame++;
                 }
-                const nextBeat = chooseNextBeat();
-                currentBeat = nextBeat ?? 0;
-                currentFrame = beatFrames[currentBeat]?.startFrame ?? 0;
-                endFrame = beatFrames[currentBeat]?.endFrame ?? frames.length - 1;
+                const next = chooseNext();
+                curBeat = next;
+                const nextBeat = beatFrames[curBeat];
+                curFrame = nextBeat?.startFrame ?? 0;
+                endFrame = nextBeat?.endFrame ?? frames.length - 1;
             }
         };
         stream.on('close', () => {
-            isStopped = true;
+            stopped = true;
         });
         stream.on('finish', () => {
-            isStopped = true;
+            stopped = true;
         });
-        schedulePump();
+        setImmediate(pump);
         return stream;
     }
-    _selectNextNeighbor(neighborList, neighborOffsets, currentBeat, id, stream) {
-        const offset = neighborOffsets[currentBeat] || 0;
-        const nextBeat = neighborList[offset % neighborList.length];
-        neighborOffsets[currentBeat] = (offset + 1) % neighborList.length;
+    _selectNext(list, offsets, beat, id, stream) {
+        const off = (offsets[beat] ?? 0);
+        const next = list[off % list.length] ?? beat;
+        offsets[beat] = (off + 1) % list.length;
         stream.emit('eternalboxJump', {
             id,
-            fromBeat: currentBeat,
-            toBeat: nextBeat,
+            fromBeat: beat,
+            toBeat: next,
             type: 'jump'
         });
-        return nextBeat;
+        return next;
     }
 }

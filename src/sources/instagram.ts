@@ -221,10 +221,7 @@ export default class InstagramSource {
    * @param property - OG/meta property name (e.g., `'og:title'`).
    * @returns Decoded content value, or `null` when the tag is not found.
    */
-  private _extractMetaContent(
-    html: string,
-    property: string
-  ): string | null {
+  private _extractMetaContent(html: string, property: string): string | null {
     if (!html || !property) return null
 
     const patterns = [
@@ -542,14 +539,14 @@ export default class InstagramSource {
       }
 
       const bestMatch =
-        getBestMatch(
-          acceptableMatches as BestMatchCandidate[],
-          decodedTrack
-        ) || acceptableMatches[0]
+        getBestMatch(acceptableMatches as BestMatchCandidate[], decodedTrack) ||
+        acceptableMatches[0]
 
       if (!bestMatch?.info) continue
 
-      const streamInfo = await this.nodelink.sources.getTrackUrl(bestMatch.info as TrackInfo)
+      const streamInfo = await this.nodelink.sources.getTrackUrl(
+        bestMatch.info as TrackInfo
+      )
       if (!streamInfo?.exception) {
         return {
           newTrack: bestMatch as BestMatchCandidate & { info: TrackInfo },
@@ -847,8 +844,7 @@ export default class InstagramSource {
         | Record<string, unknown>
         | undefined
       artist = (igArtist?.username as string) || 'User Unknown'
-      title =
-        (audioInfo.original_audio_title as string) || 'Instagram Audio'
+      title = (audioInfo.original_audio_title as string) || 'Instagram Audio'
       duration = (audioInfo.duration_in_ms as number) || 0
       thumbnail = (igArtist?.profile_pic_url as string) || ''
     } else {
@@ -1027,9 +1023,8 @@ export default class InstagramSource {
       media.__typename === 'XDTGraphSidecar' &&
       media.edge_sidecar_to_children
     ) {
-      const edges = (
-        media.edge_sidecar_to_children as Record<string, unknown>
-      ).edges as Array<{ node: Record<string, unknown> }> | undefined
+      const edges = (media.edge_sidecar_to_children as Record<string, unknown>)
+        .edges as Array<{ node: Record<string, unknown> }> | undefined
       const videoEdge = edges?.find((edge) => edge.node.is_video)
       if (videoEdge) {
         videoNode = videoEdge.node
@@ -1060,8 +1055,7 @@ export default class InstagramSource {
     const captionEdges = (
       media.edge_media_to_caption as Record<string, unknown> | undefined
     )?.edges as Array<{ node: Record<string, unknown> }> | undefined
-    const title =
-      (captionEdges?.[0]?.node?.text as string) || 'Instagram Video'
+    const title = (captionEdges?.[0]?.node?.text as string) || 'Instagram Video'
     const owner = media.owner as Record<string, unknown> | undefined
 
     return {
@@ -1251,7 +1245,12 @@ export default class InstagramSource {
             length: track.length,
             uri: track.uri
           }
-          preferredQuery = (ogMetadata.data as InstagramRawTrackData & { searchQuery?: string }).searchQuery || null
+          preferredQuery =
+            (
+              ogMetadata.data as InstagramRawTrackData & {
+                searchQuery?: string
+              }
+            ).searchQuery || null
         }
       }
 
@@ -1366,10 +1365,7 @@ export default class InstagramSource {
    * @param _type - Unused search type parameter.
    * @returns Track result, or error when no results are found.
    */
-  public async search(
-    query: string,
-    _type?: string
-  ): Promise<SourceResult> {
+  public async search(query: string, _type?: string): Promise<SourceResult> {
     if (this.isLinkMatch(query)) {
       return this.resolve(query)
     }

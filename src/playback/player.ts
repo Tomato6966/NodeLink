@@ -25,7 +25,6 @@ import type {
   LyricsPayload,
   NodeLink,
   PlayerOptions,
-  PlayerPluginInfo,
   PlayerStateJSON,
   PlayerTrack,
   PlayerVoiceState,
@@ -240,10 +239,6 @@ export class Player {
 
   private _getAudioStream(): ExtendedAudioStream | null {
     return (this.connection?.audioStream as ExtendedAudioStream | null) ?? null
-  }
-
-  private _getPluginInfo(track: PlayerTrack | null): PlayerPluginInfo {
-    return (track?.pluginInfo || {}) as PlayerPluginInfo
   }
 
   /**

@@ -6,9 +6,7 @@
  * @module typings/sources/instagram.types
  */
 
-import type {
-  BestMatchCandidate
-} from '../utils.types.ts'
+import type { BestMatchCandidate } from '../utils.types.ts'
 import type {
   CredentialManager,
   SourceManager,

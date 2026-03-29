@@ -1397,7 +1397,12 @@ async function _internalHttp1Request(
       }
 
       if (streamOnly) {
-        resolve({ statusCode, headers: respHeaders, stream: finalStream, finalUrl: urlString })
+        resolve({
+          statusCode,
+          headers: respHeaders,
+          stream: finalStream,
+          finalUrl: urlString
+        })
         return
       }
 
@@ -1424,7 +1429,12 @@ async function _internalHttp1Request(
           const responseBuffer = Buffer.concat(chunks)
 
           if (options.responseType === 'buffer') {
-            resolve({ statusCode, headers: respHeaders, body: responseBuffer, finalUrl: urlString })
+            resolve({
+              statusCode,
+              headers: respHeaders,
+              body: responseBuffer,
+              finalUrl: urlString
+            })
             return
           }
 
@@ -1437,7 +1447,12 @@ async function _internalHttp1Request(
             .toLowerCase()
             .startsWith('application/json')
           const responseBody = isJson && text ? JSON.parse(text) : text
-          resolve({ statusCode, headers: respHeaders, body: responseBody, finalUrl: urlString })
+          resolve({
+            statusCode,
+            headers: respHeaders,
+            body: responseBody,
+            finalUrl: urlString
+          })
         } catch (err) {
           reject(
             new Error(
