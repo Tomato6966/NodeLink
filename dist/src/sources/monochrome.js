@@ -386,7 +386,7 @@ class MonochromeSource {
             logger('debug', 'Monochrome', `Loading HLS stream for ${decodedTrack.identifier}`);
             return {
                 stream: new HLSHandler(url, {
-                    type: 'fmp4-buffered',
+                    type: 'fmp4',
                     localAddress: this.nodelink.routePlanner?.getIP?.() || undefined,
                     startTime: additionalData?.startTime || 0,
                     headers: {
@@ -394,7 +394,7 @@ class MonochromeSource {
                         Referer: 'https://tidal.com/'
                     }
                 }),
-                type: 'fmp4-buffered'
+                type: 'fmp4'
             };
         }
         logger('debug', 'Monochrome', `Loading progressive stream for ${decodedTrack.identifier}`);
