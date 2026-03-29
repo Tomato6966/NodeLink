@@ -9,7 +9,7 @@ import { logger } from '../utils.ts'
  * Minimal decoded track payload accepted by {@link LyricsManager.loadLyrics}.
  * @public
  */
-interface DecodedTrack {
+export interface DecodedTrack {
   /** Parsed track info block. */
   info?: TrackInfoLike
 }
@@ -18,7 +18,7 @@ interface DecodedTrack {
  * Minimal track information required by lyrics providers.
  * @public
  */
-interface TrackInfoLike {
+export interface TrackInfoLike {
   /** Track source key (e.g. youtube, spotify). */
   sourceName?: string
   /** Track URL used for source re-resolution. */
@@ -31,7 +31,7 @@ interface TrackInfoLike {
  * Unified line structure used by lyrics payloads.
  * @public
  */
-interface LyricsLine {
+export interface LyricsLine {
   /** Line text. */
   text: string
   /** Line start time in milliseconds. */
@@ -46,7 +46,7 @@ interface LyricsLine {
  * Success payload for lyrics responses.
  * @public
  */
-interface LyricsData {
+export interface LyricsData {
   /** Display name for the lyrics source/variant. */
   name?: string
   /** Whether lines include timing information. */
@@ -61,7 +61,7 @@ interface LyricsData {
  * Error payload for lyrics responses.
  * @public
  */
-interface LyricsErrorData {
+export interface LyricsErrorData {
   /** Human-readable error message. */
   message: string
   /** Error severity bucket. */
@@ -72,7 +72,7 @@ interface LyricsErrorData {
  * Result returned by lyrics providers and manager operations.
  * @public
  */
-type LyricsLoadResult =
+export type LyricsLoadResult =
   | { loadType: 'lyrics'; data: LyricsData }
   | { loadType: 'empty'; data: Record<string, never> }
   | { loadType: 'error'; data: LyricsErrorData }
@@ -81,7 +81,7 @@ type LyricsLoadResult =
  * Minimal NodeLink context required by this manager.
  * @public
  */
-interface LyricsManagerContext {
+export interface LyricsManagerContext {
   /** Server options. */
   options?: Record<string, unknown> & {
     /** Lyrics source configuration bucket. */
@@ -98,7 +98,7 @@ interface LyricsManagerContext {
  * Runtime instance shape for a lyrics provider.
  * @public
  */
-interface LyricsSourceInstance {
+export interface LyricsSourceInstance {
   /** Initializes the source instance. */
   setup: () => Promise<boolean>
   /** Fetches lyrics for a track. */

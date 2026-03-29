@@ -461,6 +461,12 @@ export default {
         username: '',
         password: ''
       }
+    },
+    monochrome: {
+      enabled: true,
+      instances: [], // (optional) list of API instances
+      streamingInstances: [], // (optional) list of streaming instances
+      quality: 'HI_RES_LOSSLESS' // HI_RES_LOSSLESS, LOSSLESS, HIGH, LOW
     }
   },
   lyrics: {
@@ -488,6 +494,9 @@ export default {
       enabled: true
     },
     yandexmusic: {
+      enabled: true
+    },
+    monochrome: {
       enabled: true
     }
   },

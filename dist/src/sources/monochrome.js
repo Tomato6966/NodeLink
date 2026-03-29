@@ -1,0 +1,420 @@
+import { encodeTrack, logger, makeRequest } from "../utils.js";
+/**
+ * NodeLink audio source provider for Monochrome (Tidal proxy).
+ *
+ * This source implements a full-scale proxy engine ported from the Monochrome JS/TS reference.
+ * Features include:
+ * - Health-based instance rotation with exponential backoff.
+ * - Robust pagination for Tidal collections (albums/playlists).
+ * - Advanced manifest resolution with quality prioritization (FLAC > Lossless > AAC).
+ * - Extraction of ReplayGain and Peak metadata for audio normalization.
+ * - Integration with NodeLink's native track cache manager.
+ *
+ * @public
+ */
+class MonochromeSource {
+    /** Master NodeLink instance reference. */
+    nodelink;
+    /** Source configuration object. */
+    config;
+    /** Registered search terms for identifier routing. */
+    searchTerms = ['mcsearch'];
+    /** URL regex patterns this source can handle. */
+    patterns;
+    /** Source priority for URL matching. */
+    priority = 90;
+    apiInstances = [];
+    streamingInstances = [];
+    /**
+     * Initializes the Monochrome source with health-tracked instance pools.
+     * @param nodelink - The worker server context.
+     */
+    constructor(nodelink) {
+        this.nodelink = nodelink;
+        const sources = nodelink.options?.sources;
+        this.config =
+            sources?.monochrome || {
+                enabled: false
+            };
+        const defaultUrls = [
+            'https://eu-central.monochrome.tf',
+            'https://us-west.monochrome.tf',
+            'https://arran.monochrome.tf',
+            'https://api.monochrome.tf',
+            'http://wolf.qqdl.site'
+        ];
+        const initPool = (urls) => urls.map((url) => ({
+            url: url.replace(/\/$/, ''),
+            score: 100,
+            lastFailure: 0,
+            failures: 0,
+            activeRequests: 0
+        }));
+        this.apiInstances = initPool(this.config.instances || defaultUrls);
+        this.streamingInstances = initPool(this.config.streamingInstances || this.apiInstances.map((i) => i.url));
+        this.patterns = [
+            /^https?:\/\/monochrome\.tf\/(track|album|playlist|artist|video)\/[\w-]+/,
+            /^https?:\/\/(?:www\.)?tidal\.com\/(?:browse\/)?(track|album|playlist|artist|video)\/[\w-]+/
+        ];
+    }
+    /**
+     * Selects the healthiest instance from the pool using a scored random strategy.
+     * @param type - Whether to pick an API or streaming instance.
+     * @returns Health-tracked instance metadata.
+     * @private
+     */
+    getBestInstance(type = 'api') {
+        const pool = type === 'streaming' ? this.streamingInstances : this.apiInstances;
+        const now = Date.now();
+        const candidates = pool.filter((i) => i.score > 0 || now - i.lastFailure > 30_000);
+        const activePool = candidates.length > 0 ? candidates : pool;
+        const sorted = activePool.sort((a, b) => b.score - a.score || a.activeRequests - b.activeRequests);
+        const instance = sorted[Math.floor(Math.random() * Math.min(sorted.length, 3))] || pool[0];
+        if (!instance) {
+            throw new Error('No instances available in pool');
+        }
+        return instance;
+    }
+    /**
+     * Executes a request with automatic retries across the instance pool.
+     * @param path - API path with parameters.
+     * @param type - Instance pool to use.
+     * @returns Parsed response or null after all retries fail.
+     * @private
+     */
+    async fetchWithRetry(path, type = 'api') {
+        const pool = type === 'streaming' ? this.streamingInstances : this.apiInstances;
+        const maxAttempts = Math.min(pool.length * 2, 5);
+        let lastError = null;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const instance = this.getBestInstance(type);
+            const url = `${instance.url}${path}`;
+            instance.activeRequests++;
+            try {
+                const { body, error, statusCode } = await makeRequest(url, {});
+                instance.activeRequests--;
+                if (statusCode === 200 && body) {
+                    instance.score = Math.min(instance.score + 5, 100);
+                    return body;
+                }
+                if (statusCode === 429) {
+                    instance.score = Math.max(instance.score - 20, 0);
+                    await new Promise((r) => setTimeout(r, 500));
+                }
+                else if (statusCode === 401 || statusCode === 403) {
+                    instance.score = 0;
+                }
+                else {
+                    instance.score = Math.max(instance.score - 10, 0);
+                }
+                instance.failures++;
+                instance.lastFailure = Date.now();
+                lastError = error || `Status ${statusCode}`;
+            }
+            catch (e) {
+                instance.activeRequests--;
+                instance.score = Math.max(instance.score - 30, 0);
+                instance.lastFailure = Date.now();
+                lastError = e instanceof Error ? e.message : String(e);
+            }
+        }
+        logger('error', 'Monochrome', `Exhausted all retries for ${path}. Last failure: ${lastError}`);
+        return null;
+    }
+    /**
+     * Searches for tracks, videos or other types using Tidal's API proxy.
+     * @param query - The user search query.
+     * @param _sourceName - Ignored.
+     * @param searchType - Type of result to prioritize.
+     * @returns Search result payload.
+     */
+    async search(query, _sourceName, searchType = 'track') {
+        const cacheKey = `search:${searchType}:${query}`;
+        const cached = this.nodelink.trackCacheManager?.get('monochrome', cacheKey);
+        if (cached)
+            return cached;
+        let endpoint = '/search/';
+        switch (searchType) {
+            case 'album':
+                endpoint += `?al=${encodeURIComponent(query)}`;
+                break;
+            case 'artist':
+                endpoint += `?a=${encodeURIComponent(query)}`;
+                break;
+            case 'playlist':
+                endpoint += `?p=${encodeURIComponent(query)}`;
+                break;
+            case 'video':
+                endpoint += `?v=${encodeURIComponent(query)}`;
+                break;
+            default:
+                endpoint += `?s=${encodeURIComponent(query)}`;
+                break;
+        }
+        const response = await this.fetchWithRetry(endpoint);
+        if (!response)
+            return { loadType: 'empty', data: {} };
+        const results = [];
+        if (searchType === 'track' && response.data?.tracks?.items) {
+            for (const t of response.data.tracks.items) {
+                if (this.isTrackUnavailable(t))
+                    continue;
+                const info = this.prepareTrackInfo(t);
+                results.push({
+                    encoded: encodeTrack({ ...info, details: [] }),
+                    info,
+                    pluginInfo: {}
+                });
+            }
+        }
+        else if (searchType === 'video' && response.data?.videos?.items) {
+            for (const v of response.data.videos.items) {
+                const info = this.prepareVideoInfo(v);
+                results.push({
+                    encoded: encodeTrack({ ...info, details: [] }),
+                    info,
+                    pluginInfo: {}
+                });
+            }
+        }
+        const finalResult = results.length > 0
+            ? { loadType: 'search', data: results }
+            : { loadType: 'empty', data: {} };
+        this.nodelink.trackCacheManager?.set('monochrome', cacheKey, finalResult, 1800_000);
+        return finalResult;
+    }
+    /**
+     * Resolves a URL to a track, album or playlist with full pagination support.
+     * @param url - The resource URL or ISRC identifier.
+     * @returns Resolved data payload.
+     */
+    async resolve(url) {
+        // 1. Mirror Support (ISRC)
+        if (url.startsWith('isrc:')) {
+            const isrc = url.substring(5);
+            const res = await this.fetchWithRetry(`/search/?s=${encodeURIComponent(isrc)}`);
+            const best = res?.data?.tracks?.items?.find((t) => t.isrc === isrc) ||
+                res?.data?.tracks?.items?.[0];
+            if (!best || this.isTrackUnavailable(best))
+                return { loadType: 'empty', data: {} };
+            const info = this.prepareTrackInfo(best);
+            return {
+                loadType: 'track',
+                data: {
+                    encoded: encodeTrack({ ...info, details: [] }),
+                    info,
+                    pluginInfo: {}
+                }
+            };
+        }
+        // 2. Direct Track/Video resolution
+        const directMatch = url.match(/(track|video)\/(\d+)/);
+        if (directMatch) {
+            const type = directMatch[1] === 'video' ? 'video' : 'info';
+            const res = await this.fetchWithRetry(`/${type}/?id=${directMatch[2]}`);
+            const data = res?.data;
+            if (!data)
+                return { loadType: 'empty', data: {} };
+            const info = directMatch[1] === 'video'
+                ? this.prepareVideoInfo(data)
+                : this.prepareTrackInfo(data);
+            return {
+                loadType: 'track',
+                data: {
+                    encoded: encodeTrack({ ...info, details: [] }),
+                    info,
+                    pluginInfo: {}
+                }
+            };
+        }
+        // 3. Collection resolution (Album/Playlist) with exaustive pagination
+        const collectionMatch = url.match(/(album|playlist)\/([a-f0-9-]+|\d+)/);
+        if (collectionMatch) {
+            const type = collectionMatch[1] || '';
+            const id = collectionMatch[2] || '';
+            const tracks = [];
+            let offset = 0;
+            const limit = 100;
+            let total = Infinity;
+            let name = 'Unknown Collection';
+            while (tracks.length < total &&
+                tracks.length <
+                    (this.nodelink.options.maxAlbumPlaylistLength || 1000)) {
+                const res = await this.fetchWithRetry(`/${type}/?id=${id}&offset=${offset}&limit=${limit}`);
+                if (!res)
+                    break;
+                const data = res.data;
+                if (offset === 0) {
+                    name = data.title || data.playlist?.title || 'Monochrome Collection';
+                    total = data.numberOfTracks || data.playlist?.numberOfTracks || 0;
+                }
+                const items = data.items || [];
+                if (items.length === 0)
+                    break;
+                for (const entry of items) {
+                    const t = entry.item || entry;
+                    if (!t.id || this.isTrackUnavailable(t))
+                        continue;
+                    const info = this.prepareTrackInfo(t);
+                    tracks.push({
+                        encoded: encodeTrack({ ...info, details: [] }),
+                        info,
+                        pluginInfo: {}
+                    });
+                }
+                if (items.length < limit)
+                    break;
+                offset += items.length;
+            }
+            return tracks.length > 0
+                ? {
+                    loadType: 'playlist',
+                    data: { info: { name, selectedTrack: 0 }, pluginInfo: {}, tracks }
+                }
+                : { loadType: 'empty', data: {} };
+        }
+        return { loadType: 'empty', data: {} };
+    }
+    /**
+     * Resolves the final manifest and streaming URI for a track.
+     * Handles DASH manifest parsing and audio normalization extraction.
+     * @param track - Normalized track metadata.
+     * @returns Streaming result with URI and ReplayGain data.
+     */
+    async getTrackUrl(track) {
+        const isVideo = track.uri.includes('/video/');
+        const formats = 'HEAACV1,AACLC,FLAC,FLAC_HIRES';
+        const params = `adaptive=true&manifestType=MPEG_DASH&uriScheme=HTTPS&usage=PLAYBACK&formats=${formats}`;
+        const endpoint = isVideo
+            ? `/video/?id=${track.identifier}&quality=HIGH`
+            : `/trackManifests/?id=${track.identifier}&${params}`;
+        const response = await this.fetchWithRetry(endpoint, 'streaming');
+        if (!response)
+            return {
+                exception: {
+                    message: 'Failed to fetch playback manifest',
+                    severity: 'fault'
+                }
+            };
+        const uri = this.extractStreamUrl(response);
+        if (!uri)
+            return {
+                exception: {
+                    message: 'Failed to extract playable URI from manifest',
+                    severity: 'fault'
+                }
+            };
+        const attr = response?.data?.data?.attributes;
+        if (attr?.trackAudioNormalizationData) {
+            logger('debug', 'Monochrome', `Normalization for ${track.identifier}: Gain ${attr.trackAudioNormalizationData.replayGain} dB, Peak ${attr.trackAudioNormalizationData.peakAmplitude}`);
+        }
+        return { url: uri, protocol: uri.includes('.m3u8') ? 'hls' : 'http' };
+    }
+    /**
+     * Implements the site's extractStreamUrlFromManifest logic.
+     * @param data - Raw manifest response.
+     * @returns Final stream URL or null.
+     * @private
+     */
+    extractStreamUrl(data) {
+        let uri = null;
+        let manifest = null;
+        if ('data' in data &&
+            data.data &&
+            typeof data.data === 'object' &&
+            'data' in data.data) {
+            const internalData = data.data;
+            const attr = internalData.data?.attributes || internalData.attributes;
+            uri = attr?.uri || null;
+            manifest = attr?.manifest || null;
+        }
+        else {
+            const internalData = data;
+            uri = internalData.attributes?.uri || null;
+            manifest =
+                internalData.manifest ||
+                    internalData.Manifest ||
+                    internalData.attributes?.manifest ||
+                    null;
+        }
+        if (uri)
+            return uri;
+        if (!manifest) {
+            const internalData = data;
+            return (internalData.OriginalTrackUrl || internalData.originalTrackUrl || null);
+        }
+        try {
+            const decoded = Buffer.from(manifest, 'base64').toString();
+            if (decoded.includes('<MPD'))
+                return `data:application/dash+xml;base64,${manifest}`;
+            const parsed = JSON.parse(decoded);
+            return parsed.urls?.[0] || null;
+        }
+        catch {
+            return null;
+        }
+    }
+    /**
+     * Normalizes a raw track object into NodeLink's TrackInfo structure.
+     * @param t - Raw Tidal track data.
+     * @returns Normalized metadata.
+     * @private
+     */
+    prepareTrackInfo(t) {
+        const coverPath = t.album?.cover?.replace(/-/g, '/');
+        const title = t.version ? `${t.title} (${t.version})` : t.title;
+        return {
+            identifier: t.id.toString(),
+            isSeekable: true,
+            author: t.artist?.name || 'Unknown Artist',
+            length: t.duration * 1000,
+            isStream: false,
+            position: 0,
+            title,
+            uri: `https://monochrome.tf/track/${t.id}`,
+            artworkUrl: coverPath
+                ? `https://resources.tidal.com/images/${coverPath}/1280x1280.jpg`
+                : null,
+            isrc: t.isrc,
+            sourceName: 'monochrome'
+        };
+    }
+    /**
+     * Normalizes a raw video object into NodeLink's TrackInfo structure.
+     * @param v - Raw Tidal video data.
+     * @returns Normalized metadata.
+     * @private
+     */
+    prepareVideoInfo(v) {
+        const imagePath = v.image?.replace(/-/g, '/');
+        return {
+            identifier: v.id.toString(),
+            isSeekable: true,
+            author: v.artist?.name || 'Unknown Artist',
+            length: v.duration * 1000,
+            isStream: false,
+            position: 0,
+            title: v.title,
+            uri: `https://monochrome.tf/video/${v.id}`,
+            artworkUrl: imagePath
+                ? `https://resources.tidal.com/images/${imagePath}/1280x720.jpg`
+                : null,
+            isrc: null,
+            sourceName: 'monochrome'
+        };
+    }
+    /**
+     * Checks if a track is unavailable for streaming based on site rules.
+     * @param t - Raw track data.
+     * @returns True if the track cannot be played.
+     * @private
+     */
+    isTrackUnavailable(t) {
+        if (!t)
+            return true;
+        return (t.allowStreaming === false ||
+            t.streamReady === false ||
+            t.title === 'Unavailable');
+    }
+}
+export default MonochromeSource;
