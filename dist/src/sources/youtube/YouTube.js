@@ -14,7 +14,7 @@ import WebEmbedded from "./clients/WebEmbedded.js";
 import { checkURLType, YOUTUBE_CONSTANTS } from "./common.js";
 import YouTubeLiveChat from "./LiveChat.js";
 import OAuth from "./OAuth.js";
-import { SabrStream } from './sabr/sabr.js';
+import { SabrStream } from "./sabr/sabr.js";
 /** Size in bytes of each range-request chunk for direct HTTP streaming. */
 const CHUNK_SIZE = 64 * 1024;
 /** Maximum consecutive errors before triggering URL recovery. */
@@ -1100,7 +1100,7 @@ export default class YouTubeSource {
      * @returns Promise resolving to a {@link StreamResult} with the PassThrough stream and media type.
      */
     async _loadSabrStream(decodedTrack, additionalData, _cancelSignal, streamKey) {
-        const sabr = new SabrStream({
+        const sabrConfig = {
             videoId: decodedTrack.identifier,
             accessToken: additionalData.accessToken,
             visitorData: additionalData.visitorData,
@@ -1109,10 +1109,11 @@ export default class YouTubeSource {
             poToken: additionalData.poToken,
             clientInfo: additionalData.clientInfo,
             formats: additionalData.formats,
-            startTime: additionalData.startTime || 0,
+            startTime: additionalData.startTime ?? 0,
             positionCallback: additionalData.positionCallback,
             previousSession: additionalData.previousSession
-        });
+        };
+        const sabr = new SabrStream(sabrConfig);
         const stream = new PassThrough();
         let readyResolved = false;
         let readyResolve;
@@ -1158,7 +1159,7 @@ export default class YouTubeSource {
                 const ad = (newUrlData.additionalData || {});
                 sabr.clearBuffers();
                 sabr.updateSession({
-                    serverAbrStreamingUrl: ad.serverAbrStreamingUrl || newUrlData.url,
+                    serverAbrStreamingUrl: (ad.serverAbrStreamingUrl || newUrlData.url),
                     videoPlaybackUstreamerConfig: ad.videoPlaybackUstreamerConfig,
                     poToken: ad.poToken,
                     visitorData: ad.visitorData,

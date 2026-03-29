@@ -40,7 +40,7 @@ import {
   checkURLType,
   YOUTUBE_CONSTANTS
 } from '../common.ts'
-import { poTokenManager } from '../sabr/potoken.js'
+import { poTokenManager } from '../sabr/potoken.ts'
 
 /**
  * YouTube WEB innertube client.
@@ -442,9 +442,14 @@ export default class Web extends BaseClient {
         const serverAbrUrl =
           streamingData?.serverAbrStreamingUrl ||
           streamingData?.server_abr_streaming_url
-        const ustreamerConfig = (
+        const mediaCommonConfig = (
           playerResponse.playerConfig as Record<string, unknown> | undefined
         )?.mediaCommonConfig as Record<string, unknown> | undefined
+        const ustreamerConfig = (
+          mediaCommonConfig?.mediaUstreamerRequestConfig as
+            | Record<string, unknown>
+            | undefined
+        )?.videoPlaybackUstreamerConfig as string | undefined
 
         if (serverAbrUrl) {
           const playerScript = await cipherManager?.getCachedPlayerScript()

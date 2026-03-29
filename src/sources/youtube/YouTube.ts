@@ -44,7 +44,8 @@ import {
 } from './common.ts'
 import YouTubeLiveChat from './LiveChat.ts'
 import OAuth from './OAuth.ts'
-import { SabrStream } from './sabr/sabr.js'
+import { SabrStream } from './sabr/sabr.ts'
+import type { PreviousSessionState, SabrStreamConfig } from '../../typings/sources/sabr.types.ts'
 
 /** Size in bytes of each range-request chunk for direct HTTP streaming. */
 const CHUNK_SIZE = 64 * 1024
@@ -1710,19 +1711,29 @@ export default class YouTubeSource {
     _cancelSignal: CancelSignal,
     streamKey: string | symbol
   ): Promise<StreamResult> {
-    const sabr = new SabrStream({
+    const sabrConfig: SabrStreamConfig = {
       videoId: decodedTrack.identifier,
-      accessToken: additionalData.accessToken,
-      visitorData: additionalData.visitorData,
-      serverAbrStreamingUrl: additionalData.serverAbrStreamingUrl,
-      videoPlaybackUstreamerConfig: additionalData.videoPlaybackUstreamerConfig,
-      poToken: additionalData.poToken,
-      clientInfo: additionalData.clientInfo,
-      formats: additionalData.formats,
-      startTime: additionalData.startTime || 0,
-      positionCallback: additionalData.positionCallback,
-      previousSession: additionalData.previousSession
-    })
+      accessToken: additionalData.accessToken as string | undefined,
+      visitorData: additionalData.visitorData as string | undefined,
+      serverAbrStreamingUrl: additionalData.serverAbrStreamingUrl as string | undefined,
+      videoPlaybackUstreamerConfig: additionalData.videoPlaybackUstreamerConfig as
+        | string
+        | Uint8Array
+        | undefined,
+      poToken: additionalData.poToken as string | Uint8Array | undefined,
+      clientInfo: additionalData.clientInfo as
+        | { clientName: number; clientVersion: string }
+        | undefined,
+      formats: additionalData.formats as
+        | Array<{ itag: number; mimeType?: string; bitrate?: number; audioTrackId?: string }>
+        | undefined,
+      startTime: (additionalData.startTime as number | undefined) ?? 0,
+      positionCallback: additionalData.positionCallback as
+        | ((positionMs: number) => void)
+        | undefined,
+      previousSession: additionalData.previousSession as PreviousSessionState | undefined
+    }
+    const sabr = new SabrStream(sabrConfig)
 
     const stream = new PassThrough()
     let readyResolved = false
@@ -1773,18 +1784,23 @@ export default class YouTubeSource {
           throw new Error('No SABR session available for recovery')
         }
 
-        const ad = (newUrlData.additionalData || {}) as TrackUrlAdditionalData
-        sabr.clearBuffers()
-        sabr.updateSession({
-          serverAbrStreamingUrl: ad.serverAbrStreamingUrl || newUrlData.url,
-          videoPlaybackUstreamerConfig: ad.videoPlaybackUstreamerConfig,
-          poToken: ad.poToken,
-          visitorData: ad.visitorData,
-          clientInfo: ad.clientInfo,
-          formats: ad.formats,
-          userAgent: ad.userAgent,
-          playbackCookie: ad.playbackCookie
-        })
+    const ad = (newUrlData.additionalData || {}) as TrackUrlAdditionalData
+    sabr.clearBuffers()
+    sabr.updateSession({
+      serverAbrStreamingUrl: (ad.serverAbrStreamingUrl || newUrlData.url) as string | undefined,
+      videoPlaybackUstreamerConfig: ad.videoPlaybackUstreamerConfig as
+        | string
+        | Uint8Array
+        | undefined,
+      poToken: ad.poToken as string | Uint8Array | undefined,
+      visitorData: ad.visitorData as string | undefined,
+      clientInfo: ad.clientInfo as { clientName: number; clientVersion: string } | undefined,
+      formats: ad.formats as
+        | Array<{ itag: number; mimeType?: string; bitrate?: number; audioTrackId?: string }>
+        | undefined,
+      userAgent: ad.userAgent as string | undefined,
+      playbackCookie: ad.playbackCookie as string | Uint8Array | undefined
+    })
       } catch (err) {
         logger(
           'warn',

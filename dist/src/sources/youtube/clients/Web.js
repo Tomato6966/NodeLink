@@ -13,7 +13,7 @@
  */
 import { logger, makeRequest } from "../../../utils.js";
 import { BaseClient, buildTrack, checkURLType, YOUTUBE_CONSTANTS } from "../common.js";
-import { poTokenManager } from '../sabr/potoken.js';
+import { poTokenManager } from "../sabr/potoken.js";
 /**
  * YouTube WEB innertube client.
  *
@@ -304,7 +304,8 @@ export default class Web extends BaseClient {
                     playerResponse.streaming_data);
                 const serverAbrUrl = streamingData?.serverAbrStreamingUrl ||
                     streamingData?.server_abr_streaming_url;
-                const ustreamerConfig = playerResponse.playerConfig?.mediaCommonConfig;
+                const mediaCommonConfig = playerResponse.playerConfig?.mediaCommonConfig;
+                const ustreamerConfig = mediaCommonConfig?.mediaUstreamerRequestConfig?.videoPlaybackUstreamerConfig;
                 if (serverAbrUrl) {
                     const playerScript = await cipherManager?.getCachedPlayerScript();
                     let resolvedUrl = serverAbrUrl;
