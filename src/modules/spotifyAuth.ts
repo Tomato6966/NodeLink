@@ -217,6 +217,7 @@ async function performTokenRequest(
   const url = new URL('https://open.spotify.com/api/token')
   url.searchParams.append('reason', 'init')
   url.searchParams.append('productType', productType)
+  url.searchParams.append('platform', 'web')
   url.searchParams.append('totp', totpLocal)
   url.searchParams.append('totpVer', version)
   url.searchParams.append('totpServer', totpServer)
@@ -224,7 +225,8 @@ async function performTokenRequest(
   const headers: Record<string, string> = {
     'User-Agent': USER_AGENT_MOBILE,
     Origin: 'https://open.spotify.com/',
-    Referer: 'https://open.spotify.com/'
+    Referer: 'https://open.spotify.com/',
+    Accept: 'application/json'
   }
 
   if (spDc) headers.Cookie = `sp_dc=${spDc}`

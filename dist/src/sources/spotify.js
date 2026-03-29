@@ -802,43 +802,83 @@ export default class SpotifySource {
      * @internal
      */
     async _resolveAlbum(id) {
+        const maxTracks = this.nodelink.options.maxAlbumPlaylistLength || 1000;
+        const tracks = [];
+        let name = 'Unknown Album';
         if (this.anonymousToken || this.config.sp_dc) {
-            const data = await this._internalApiRequest(QUERIES.getAlbum, {
-                uri: `spotify:album:${id}`,
-                locale: 'en',
-                offset: 0,
-                limit: 300
-            });
-            if (data?.albumUnion && data.albumUnion.__typename !== 'NotFound') {
-                const items = [...(data.albumUnion.tracksV2?.items || [])];
-                const artwork = data.albumUnion.coverArt?.sources?.[0]?.url;
-                const tracks = items
-                    .map((it) => this._buildTrackFromInternal(it.track, artwork || null))
-                    .filter(Boolean);
+            let offset = 0;
+            const limit = 300;
+            let total = Infinity;
+            while (tracks.length < total && tracks.length < maxTracks) {
+                const data = await this._internalApiRequest(QUERIES.getAlbum, {
+                    uri: `spotify:album:${id}`,
+                    locale: 'en',
+                    offset,
+                    limit
+                });
+                if (!data?.albumUnion || data.albumUnion.__typename === 'NotFound')
+                    break;
+                if (offset === 0) {
+                    name = data.albumUnion.name;
+                    total = data.albumUnion.tracksV2?.totalCount || 0;
+                }
+                const items = data.albumUnion.tracksV2?.items || [];
+                if (items.length === 0)
+                    break;
+                const artwork = data.albumUnion.coverArt?.sources?.[0]?.url || null;
+                for (const it of items) {
+                    const track = this._buildTrackFromInternal(it.track, artwork);
+                    if (track)
+                        tracks.push(track);
+                    if (tracks.length >= maxTracks)
+                        break;
+                }
+                offset += items.length;
+                if (items.length < limit || tracks.length >= maxTracks)
+                    break;
+            }
+            if (tracks.length > 0) {
                 return {
                     loadType: 'playlist',
                     data: {
-                        info: { name: data.albumUnion.name, selectedTrack: 0 },
+                        info: { name, selectedTrack: 0 },
                         tracks,
                         pluginInfo: {}
                     }
                 };
             }
         }
-        const res = await this._apiRequest(`/albums/${id}?market=${this.market}`);
-        if (!res)
-            return { loadType: 'empty', data: {} };
-        const tracks = (res.tracks?.items || [])
-            .map((it) => this._buildTrack({ ...it, album: { images: res.images, name: res.name } }, res.images?.[0]?.url || null))
-            .filter(Boolean);
-        return {
-            loadType: 'playlist',
-            data: {
-                info: { name: res.name, selectedTrack: 0 },
-                tracks,
-                pluginInfo: {}
+        let nextUrl = `/albums/${id}?market=${this.market}`;
+        while (nextUrl && tracks.length < maxTracks) {
+            const res = await this._apiRequest(nextUrl);
+            if (!res)
+                break;
+            if (tracks.length === 0)
+                name = res.name;
+            const items = res.tracks?.items || [];
+            if (items.length === 0)
+                break;
+            for (const it of items) {
+                const track = this._buildTrack({ ...it, album: { images: res.images, name: res.name } }, res.images?.[0]?.url || null);
+                if (track)
+                    tracks.push(track);
+                if (tracks.length >= maxTracks)
+                    break;
             }
-        };
+            nextUrl = res.tracks?.next
+                ? res.tracks.next.split('/v1')[1] || null
+                : null;
+        }
+        return tracks.length > 0
+            ? {
+                loadType: 'playlist',
+                data: {
+                    info: { name, selectedTrack: 0 },
+                    tracks,
+                    pluginInfo: {}
+                }
+            }
+            : { loadType: 'empty', data: {} };
     }
     /**
      * Resolves a playlist collection and its wrapped tracks.
@@ -848,16 +888,29 @@ export default class SpotifySource {
      * @internal
      */
     async _resolvePlaylist(id) {
+        const maxTracks = this.nodelink.options.maxAlbumPlaylistLength || 1000;
+        const tracks = [];
+        let name = 'Unknown Playlist';
         if (this.anonymousToken || id.startsWith('37i9dQZ')) {
-            const data = await this._internalApiRequest(QUERIES.getPlaylist, {
-                uri: `spotify:playlist:${id}`,
-                offset: 0,
-                limit: 100,
-                enableWatchFeedEntrypoint: false
-            });
-            if (data?.playlistV2 && data.playlistV2.__typename !== 'NotFound') {
-                const items = [...(data.playlistV2.content?.items || [])];
-                const tracks = [];
+            let offset = 0;
+            const limit = 100;
+            let total = Infinity;
+            while (tracks.length < total && tracks.length < maxTracks) {
+                const data = await this._internalApiRequest(QUERIES.getPlaylist, {
+                    uri: `spotify:playlist:${id}`,
+                    offset,
+                    limit,
+                    enableWatchFeedEntrypoint: false
+                });
+                if (!data?.playlistV2 || data.playlistV2.__typename === 'NotFound')
+                    break;
+                if (offset === 0) {
+                    name = data.playlistV2.name;
+                    total = data.playlistV2.content?.totalCount || 0;
+                }
+                const items = data.playlistV2.content?.items || [];
+                if (items.length === 0)
+                    break;
                 for (const it of items) {
                     const node = it.itemV2?.data;
                     if (!node)
@@ -867,39 +920,58 @@ export default class SpotifySource {
                         : this._buildTrackFromInternal(node);
                     if (track)
                         tracks.push(track);
+                    if (tracks.length >= maxTracks)
+                        break;
                 }
+                offset += items.length;
+                if (items.length < limit || tracks.length >= maxTracks)
+                    break;
+            }
+            if (tracks.length > 0) {
                 return {
                     loadType: 'playlist',
                     data: {
-                        info: { name: data.playlistV2.name, selectedTrack: 0 },
+                        info: { name, selectedTrack: 0 },
                         tracks,
                         pluginInfo: {}
                     }
                 };
             }
         }
-        const res = await this._apiRequest(`/playlists/${id}?market=${this.market}`);
-        if (!res)
-            return { loadType: 'empty', data: {} };
-        const tracks = [];
-        if (res.tracks?.items) {
-            for (const it of res.tracks.items) {
+        let nextUrl = `/playlists/${id}?market=${this.market}`;
+        while (nextUrl && tracks.length < maxTracks) {
+            const res = await this._apiRequest(nextUrl);
+            if (!res)
+                break;
+            if (tracks.length === 0)
+                name = res.name;
+            const items = res.tracks?.items || [];
+            if (items.length === 0)
+                break;
+            for (const it of items) {
                 const node = it.track;
                 const track = this._isLocalTrack(node, it)
                     ? await this._buildLocalTrack(node)
                     : this._buildTrack(node);
                 if (track)
                     tracks.push(track);
+                if (tracks.length >= maxTracks)
+                    break;
             }
+            nextUrl = res.tracks?.next
+                ? res.tracks.next.split('/v1')[1] || null
+                : null;
         }
-        return {
-            loadType: 'playlist',
-            data: {
-                info: { name: res.name, selectedTrack: 0 },
-                tracks,
-                pluginInfo: {}
+        return tracks.length > 0
+            ? {
+                loadType: 'playlist',
+                data: {
+                    info: { name, selectedTrack: 0 },
+                    tracks,
+                    pluginInfo: {}
+                }
             }
-        };
+            : { loadType: 'empty', data: {} };
     }
     /**
      * Resolves an artist's top tracks.
@@ -938,6 +1010,7 @@ export default class SpotifySource {
                 data: {
                     info: { name: 'Top Tracks', selectedTrack: 0 },
                     tracks: (res.tracks || [])
+                        .filter((t) => t !== null)
                         .map((t) => this._buildTrack(t))
                         .filter(Boolean),
                     pluginInfo: {}
@@ -1074,6 +1147,8 @@ export default class SpotifySource {
      * @internal
      */
     _isLocalTrack(it, wrapper = null) {
+        if (!it)
+            return false;
         return (it?.is_local === true ||
             wrapper?.is_local === true ||
             !!it.uri?.startsWith('spotify:local:'));

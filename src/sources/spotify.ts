@@ -974,26 +974,53 @@ export default class SpotifySource implements SourceInstance {
    * @internal
    */
   private async _resolveAlbum(id: string): Promise<SourceResult> {
+    const maxTracks =
+      (this.nodelink.options.maxAlbumPlaylistLength as number) || 1000
+    const tracks: TrackData[] = []
+    let name = 'Unknown Album'
+
     if (this.anonymousToken || this.config.sp_dc) {
-      const data = await this._internalApiRequest<SpotifyGraphQLAlbumResponse>(
-        QUERIES.getAlbum,
-        {
-          uri: `spotify:album:${id}`,
-          locale: 'en',
-          offset: 0,
-          limit: 300
+      let offset = 0
+      const limit = 300
+      let total = Infinity
+
+      while (tracks.length < total && tracks.length < maxTracks) {
+        const data = await this._internalApiRequest<SpotifyGraphQLAlbumResponse>(
+          QUERIES.getAlbum,
+          {
+            uri: `spotify:album:${id}`,
+            locale: 'en',
+            offset,
+            limit
+          }
+        )
+
+        if (!data?.albumUnion || data.albumUnion.__typename === 'NotFound') break
+
+        if (offset === 0) {
+          name = data.albumUnion.name
+          total = data.albumUnion.tracksV2?.totalCount || 0
         }
-      )
-      if (data?.albumUnion && data.albumUnion.__typename !== 'NotFound') {
-        const items = [...(data.albumUnion.tracksV2?.items || [])]
-        const artwork = data.albumUnion.coverArt?.sources?.[0]?.url
-        const tracks = items
-          .map((it) => this._buildTrackFromInternal(it.track, artwork || null))
-          .filter(Boolean) as TrackData[]
+
+        const items = data.albumUnion.tracksV2?.items || []
+        if (items.length === 0) break
+
+        const artwork = data.albumUnion.coverArt?.sources?.[0]?.url || null
+        for (const it of items) {
+          const track = this._buildTrackFromInternal(it.track, artwork)
+          if (track) tracks.push(track)
+          if (tracks.length >= maxTracks) break
+        }
+
+        offset += items.length
+        if (items.length < limit || tracks.length >= maxTracks) break
+      }
+
+      if (tracks.length > 0) {
         return {
           loadType: 'playlist',
           data: {
-            info: { name: data.albumUnion.name, selectedTrack: 0 },
+            info: { name, selectedTrack: 0 },
             tracks,
             pluginInfo: {}
           }
@@ -1001,26 +1028,40 @@ export default class SpotifySource implements SourceInstance {
       }
     }
 
-    const res = await this._apiRequest<SpotifyAlbum>(
-      `/albums/${id}?market=${this.market}`
-    )
-    if (!res) return { loadType: 'empty', data: {} }
-    const tracks = (res.tracks?.items || [])
-      .map((it) =>
-        this._buildTrack(
+    let nextUrl: string | null = `/albums/${id}?market=${this.market}`
+    while (nextUrl && tracks.length < maxTracks) {
+      const res: SpotifyAlbum | null = await this._apiRequest<SpotifyAlbum>(nextUrl)
+      if (!res) break
+
+      if (tracks.length === 0) name = res.name
+
+      const items = res.tracks?.items || []
+      if (items.length === 0) break
+
+      for (const it of items) {
+        const track = this._buildTrack(
           { ...it, album: { images: res.images, name: res.name } },
           res.images?.[0]?.url || null
         )
-      )
-      .filter(Boolean) as TrackData[]
-    return {
-      loadType: 'playlist',
-      data: {
-        info: { name: res.name, selectedTrack: 0 },
-        tracks,
-        pluginInfo: {}
+        if (track) tracks.push(track)
+        if (tracks.length >= maxTracks) break
       }
+
+      nextUrl = res.tracks?.next
+        ? res.tracks.next.split('/v1')[1] || null
+        : null
     }
+
+    return tracks.length > 0
+      ? {
+          loadType: 'playlist',
+          data: {
+            info: { name, selectedTrack: 0 },
+            tracks,
+            pluginInfo: {}
+          }
+        }
+      : { loadType: 'empty', data: {} }
   }
 
   /**
@@ -1031,20 +1072,38 @@ export default class SpotifySource implements SourceInstance {
    * @internal
    */
   private async _resolvePlaylist(id: string): Promise<SourceResult> {
+    const maxTracks =
+      (this.nodelink.options.maxAlbumPlaylistLength as number) || 1000
+    const tracks: TrackData[] = []
+    let name = 'Unknown Playlist'
+
     if (this.anonymousToken || id.startsWith('37i9dQZ')) {
-      const data =
-        await this._internalApiRequest<SpotifyGraphQLPlaylistResponse>(
-          QUERIES.getPlaylist,
-          {
-            uri: `spotify:playlist:${id}`,
-            offset: 0,
-            limit: 100,
-            enableWatchFeedEntrypoint: false
-          }
-        )
-      if (data?.playlistV2 && data.playlistV2.__typename !== 'NotFound') {
-        const items = [...(data.playlistV2.content?.items || [])]
-        const tracks: TrackData[] = []
+      let offset = 0
+      const limit = 100
+      let total = Infinity
+
+      while (tracks.length < total && tracks.length < maxTracks) {
+        const data =
+          await this._internalApiRequest<SpotifyGraphQLPlaylistResponse>(
+            QUERIES.getPlaylist,
+            {
+              uri: `spotify:playlist:${id}`,
+              offset,
+              limit,
+              enableWatchFeedEntrypoint: false
+            }
+          )
+
+        if (!data?.playlistV2 || data.playlistV2.__typename === 'NotFound') break
+
+        if (offset === 0) {
+          name = data.playlistV2.name
+          total = data.playlistV2.content?.totalCount || 0
+        }
+
+        const items = data.playlistV2.content?.items || []
+        if (items.length === 0) break
+
         for (const it of items) {
           const node = it.itemV2?.data
           if (!node) continue
@@ -1052,11 +1111,18 @@ export default class SpotifySource implements SourceInstance {
             ? await this._buildLocalTrack(node)
             : this._buildTrackFromInternal(node)
           if (track) tracks.push(track)
+          if (tracks.length >= maxTracks) break
         }
+
+        offset += items.length
+        if (items.length < limit || tracks.length >= maxTracks) break
+      }
+
+      if (tracks.length > 0) {
         return {
           loadType: 'playlist',
           data: {
-            info: { name: data.playlistV2.name, selectedTrack: 0 },
+            info: { name, selectedTrack: 0 },
             tracks,
             pluginInfo: {}
           }
@@ -1064,28 +1130,40 @@ export default class SpotifySource implements SourceInstance {
       }
     }
 
-    const res = await this._apiRequest<SpotifyPlaylist>(
-      `/playlists/${id}?market=${this.market}`
-    )
-    if (!res) return { loadType: 'empty', data: {} }
-    const tracks: TrackData[] = []
-    if (res.tracks?.items) {
-      for (const it of res.tracks.items) {
+    let nextUrl: string | null = `/playlists/${id}?market=${this.market}`
+    while (nextUrl && tracks.length < maxTracks) {
+      const res: SpotifyPlaylist | null = await this._apiRequest<SpotifyPlaylist>(nextUrl)
+      if (!res) break
+
+      if (tracks.length === 0) name = res.name
+
+      const items = res.tracks?.items || []
+      if (items.length === 0) break
+
+      for (const it of items) {
         const node = it.track
         const track = this._isLocalTrack(node, it)
           ? await this._buildLocalTrack(node)
           : this._buildTrack(node)
         if (track) tracks.push(track)
+        if (tracks.length >= maxTracks) break
       }
+
+      nextUrl = res.tracks?.next
+        ? res.tracks.next.split('/v1')[1] || null
+        : null
     }
-    return {
-      loadType: 'playlist',
-      data: {
-        info: { name: res.name, selectedTrack: 0 },
-        tracks,
-        pluginInfo: {}
-      }
-    }
+
+    return tracks.length > 0
+      ? {
+          loadType: 'playlist',
+          data: {
+            info: { name, selectedTrack: 0 },
+            tracks,
+            pluginInfo: {}
+          }
+        }
+      : { loadType: 'empty', data: {} }
   }
 
   /**
@@ -1131,6 +1209,7 @@ export default class SpotifySource implements SourceInstance {
           data: {
             info: { name: 'Top Tracks', selectedTrack: 0 },
             tracks: (res.tracks || [])
+              .filter((t) => t !== null)
               .map((t) => this._buildTrack(t))
               .filter(Boolean) as TrackData[],
             pluginInfo: {}
@@ -1281,6 +1360,7 @@ export default class SpotifySource implements SourceInstance {
       | (SpotifyTrack & { is_local?: boolean }),
     wrapper: { is_local?: boolean } | null = null
   ): boolean {
+    if (!it) return false
     return (
       (it as { is_local?: boolean })?.is_local === true ||
       wrapper?.is_local === true ||
