@@ -621,13 +621,6 @@ export default class HLSHandler extends PassThrough {
       !this.stop &&
       !this.destroyed
     ) {
-      if (this.writableLength > 0) {
-        await this._waitForDrain()
-      }
-
-      if (this.stop || this.destroyed) return
-
-      this.emit('finishBuffering')
       this.end()
     }
   }

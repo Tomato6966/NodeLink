@@ -2643,8 +2643,6 @@ class StreamAudioResource extends BaseAudioResource {
     pipeline(streams as unknown as Readable[], (err: Error | null): void => {
       if (err && !this._destroyed) {
         opusEncoder.emit('error', err)
-      } else if (!this._destroyed) {
-        this.stream?.emit('finishBuffering')
       }
     })
 
@@ -2741,7 +2739,20 @@ class StreamAudioResource extends BaseAudioResource {
   }
 
   _setupEventHandlers(inputStream: Readable): void {
-    inputStream.on('finishBuffering', () => {})
+    const forwardFinishBuffering = (): void => {
+      if (!this._destroyed) {
+        this.stream?.emit('finishBuffering')
+      }
+    }
+
+    inputStream.on('finishBuffering', forwardFinishBuffering)
+
+    const wrappedSource = (
+      inputStream as Readable & {
+        _sourceStream?: Readable
+      }
+    )._sourceStream
+    wrappedSource?.on?.('finishBuffering', forwardFinishBuffering)
 
     inputStream.on('error', (err: Error) => {
       this.stream?.emit('error', err)

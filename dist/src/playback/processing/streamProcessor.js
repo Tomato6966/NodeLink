@@ -2007,9 +2007,6 @@ class StreamAudioResource extends BaseAudioResource {
             if (err && !this._destroyed) {
                 opusEncoder.emit('error', err);
             }
-            else if (!this._destroyed) {
-                this.stream?.emit('finishBuffering');
-            }
         });
         this._assignStream(opusEncoder);
     }
@@ -2073,7 +2070,14 @@ class StreamAudioResource extends BaseAudioResource {
         }
     }
     _setupEventHandlers(inputStream) {
-        inputStream.on('finishBuffering', () => { });
+        const forwardFinishBuffering = () => {
+            if (!this._destroyed) {
+                this.stream?.emit('finishBuffering');
+            }
+        };
+        inputStream.on('finishBuffering', forwardFinishBuffering);
+        const wrappedSource = inputStream._sourceStream;
+        wrappedSource?.on?.('finishBuffering', forwardFinishBuffering);
         inputStream.on('error', (err) => {
             this.stream?.emit('error', err);
         });

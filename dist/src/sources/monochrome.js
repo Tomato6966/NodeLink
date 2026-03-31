@@ -384,17 +384,40 @@ class MonochromeSource {
     async loadStream(decodedTrack, url, protocol, additionalData) {
         if (protocol === 'hls' || url.includes('.m3u8')) {
             logger('debug', 'Monochrome', `Loading HLS stream for ${decodedTrack.identifier}`);
+            const type = 'fmp4-buffered';
+            const hls = new HLSHandler(url, {
+                type,
+                localAddress: this.nodelink.routePlanner?.getIP?.() || undefined,
+                startTime: additionalData?.startTime || 0,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    Referer: 'https://tidal.com/'
+                }
+            });
+            const passthrough = new PassThrough({ highWaterMark: 256 * 1024 });
+            let finishBufferingEmitted = false;
+            hls.pipe(passthrough);
+            const emitFinishBuffering = () => {
+                if (finishBufferingEmitted)
+                    return;
+                finishBufferingEmitted = true;
+                passthrough.emit('finishBuffering');
+            };
+            hls.once('end', emitFinishBuffering);
+            passthrough.once('end', emitFinishBuffering);
+            hls.on('error', (err) => {
+                if (!passthrough.destroyed)
+                    passthrough.destroy(err);
+            });
+            passthrough.on('error', () => {
+                if (!hls.destroyed)
+                    hls.destroy();
+            });
+            // @ts-expect-error - Internal property for cleanup
+            passthrough._sourceStream = hls;
             return {
-                stream: new HLSHandler(url, {
-                    type: 'fmp4',
-                    localAddress: this.nodelink.routePlanner?.getIP?.() || undefined,
-                    startTime: additionalData?.startTime || 0,
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                        Referer: 'https://tidal.com/'
-                    }
-                }),
-                type: 'fmp4'
+                stream: passthrough,
+                type
             };
         }
         logger('debug', 'Monochrome', `Loading progressive stream for ${decodedTrack.identifier}`);
