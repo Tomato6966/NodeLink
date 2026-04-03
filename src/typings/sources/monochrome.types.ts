@@ -150,6 +150,8 @@ export interface MonochromeManifestAttributes {
   uri: string
   formats: string[]
   manifest?: string
+  previewReason?: string
+  trackPresentation?: string
   trackAudioNormalizationData?: MonochromeNormalization
   albumAudioNormalizationData?: MonochromeNormalization
 }

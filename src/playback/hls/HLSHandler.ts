@@ -260,8 +260,7 @@ export default class HLSHandler extends PassThrough {
 
     if (
       bestVariant.audio &&
-      parsed.audioGroups &&
-      parsed.audioGroups[bestVariant.audio]
+      parsed.audioGroups?.[bestVariant.audio]
     ) {
       const group = parsed.audioGroups[bestVariant.audio] as Array<{
         default?: string

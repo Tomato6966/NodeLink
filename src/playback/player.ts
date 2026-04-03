@@ -1052,6 +1052,21 @@ export class Player {
             this.stop()
             return false
           }
+          // reason for this special check:
+          // monochrome does not send 200ms of the final segment (or tidal, idk) so the player thinks its gonna be a recovery
+          // this fixes it by treating as a natural "trackEnd"
+          // for example: an audio is 200000ms long, it will only play until 199800ms before triggering a recovery
+          const trackLength = this.track.info.length
+          if (trackLength > 0 && position >= trackLength - 2000) {
+            logger(
+              'debug',
+              'Player',
+              `Player for guild ${this.guildId} is near track end (${position}/${trackLength}ms). Treating as natural finish instead of stuck.`
+            )
+            this._emitTrackEnd(EndReasons.FINISHED)
+            this._resetTrack()
+            return false
+          }
 
           logger(
             'warn',
@@ -1436,7 +1451,8 @@ export class Player {
       } else if (
         !unsupportedSources.includes(sourceName) &&
         this.streamInfo?.url &&
-        this.streamInfo.protocol !== 'hls'
+        this.streamInfo.protocol !== 'hls' &&
+        this.streamInfo.protocol !== 'dash'
       ) {
         seekPromise = this._seekeableSeek(
           seekPosition,

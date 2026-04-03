@@ -1,4 +1,5 @@
 import { PassThrough, type Readable } from 'node:stream'
+import { DASHHandler } from '../playback/dash/DASHHandler.ts'
 import HLSHandler from '../playback/hls/HLSHandler.ts'
 import type {
   InstanceHealth,
@@ -63,10 +64,12 @@ class MonochromeSource implements SourceInstance {
       }
 
     const defaultUrls = [
+      'https://singapore-1.monochrome.tf',
+      'https://ohio-1.monochrome.tf',
+      'https://frankfurt-1.monochrome.tf',
       'https://hifi.geeked.wtf',
       'https://eu-central.monochrome.tf',
       'https://us-west.monochrome.tf',
-      'https://arran.monochrome.tf',
       'https://api.monochrome.tf',
       'http://wolf.qqdl.site'
     ]
@@ -462,7 +465,7 @@ class MonochromeSource implements SourceInstance {
     const params = new URLSearchParams({
       id: track.identifier,
       adaptive: 'true',
-      manifestType: 'HLS',
+      manifestType: 'MPEG_DASH',
       uriScheme: 'HTTPS',
       usage: 'PLAYBACK'
     })
@@ -472,7 +475,7 @@ class MonochromeSource implements SourceInstance {
     } else {
       const formats = ['HEAACV1', 'AACLC', 'FLAC']
       if (quality === 'HI_RES_LOSSLESS') formats.push('FLAC_HIRES')
-      formats.forEach((f) => params.append('formats', f))
+      for (const f of formats) params.append('formats', f)
     }
 
     const endpoint = isVideo
@@ -484,6 +487,7 @@ class MonochromeSource implements SourceInstance {
       'streaming',
       '2.7'
     )
+
     if (!response)
       return {
         exception: {
@@ -510,7 +514,14 @@ class MonochromeSource implements SourceInstance {
       )
     }
 
-    return { url: uri, protocol: uri.includes('.m3u8') ? 'hls' : 'http' }
+    return {
+      url: uri,
+      protocol: uri.includes('.mpd')
+        ? 'dash'
+        : uri.includes('.m3u8')
+          ? 'hls'
+          : 'http'
+    }
   }
 
   /**
@@ -527,6 +538,58 @@ class MonochromeSource implements SourceInstance {
     protocol?: string,
     additionalData?: Record<string, unknown>
   ): Promise<TrackStreamResult> {
+    if (protocol === 'dash' || url.includes('.mpd')) {
+      logger(
+        'debug',
+        'Monochrome',
+        `Loading DASH stream for ${decodedTrack.identifier}`
+      )
+      const dash = new DASHHandler(url, {
+        localAddress: this.nodelink.routePlanner?.getIP?.() || undefined,
+        startTime: (additionalData?.startTime as number) || 0,
+        expectedDuration: decodedTrack.length,
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+          Referer: 'https://monochrome.tf/',
+          Origin: 'https://monochrome.tf'
+        }
+      })
+
+      const passthrough = new PassThrough({ highWaterMark: 256 * 1024 })
+      let finishBufferingEmitted = false
+
+      dash.pipe(passthrough)
+
+      const emitFinishBuffering = (): void => {
+        if (finishBufferingEmitted) return
+        finishBufferingEmitted = true
+        passthrough.emit('finishBuffering')
+      }
+
+      dash.on('data', () => emitFinishBuffering())
+      dash.once('end', emitFinishBuffering)
+      passthrough.once('end', emitFinishBuffering)
+
+      dash.on('error', (err) => {
+        if (!passthrough.destroyed) passthrough.destroy(err)
+      })
+
+      passthrough.on('error', () => {
+        if (!dash.destroyed) dash.destroy()
+      })
+
+      dash.start().catch((err) => {
+        logger('error', 'Monochrome', `DASH stream error: ${err.message}`)
+        passthrough.destroy(err)
+      })
+
+      return {
+        stream: passthrough as Readable,
+        type: 'fmp4-buffered'
+      }
+    }
+
     if (protocol === 'hls' || url.includes('.m3u8')) {
       logger(
         'debug',
