@@ -1,4 +1,5 @@
 import { PassThrough } from 'node:stream';
+import { DASHHandler } from "../playback/dash/DASHHandler.js";
 import HLSHandler from "../playback/hls/HLSHandler.js";
 import { encodeTrack, logger, makeRequest } from "../utils.js";
 /**
@@ -39,10 +40,12 @@ class MonochromeSource {
                 enabled: false
             };
         const defaultUrls = [
+            'https://singapore-1.monochrome.tf',
+            'https://ohio-1.monochrome.tf',
+            'https://frankfurt-1.monochrome.tf',
             'https://hifi.geeked.wtf',
             'https://eu-central.monochrome.tf',
             'https://us-west.monochrome.tf',
-            'https://arran.monochrome.tf',
             'https://api.monochrome.tf',
             'http://wolf.qqdl.site'
         ];
@@ -335,7 +338,7 @@ class MonochromeSource {
         const params = new URLSearchParams({
             id: track.identifier,
             adaptive: 'true',
-            manifestType: 'HLS',
+            manifestType: 'MPEG_DASH',
             uriScheme: 'HTTPS',
             usage: 'PLAYBACK'
         });
@@ -346,7 +349,8 @@ class MonochromeSource {
             const formats = ['HEAACV1', 'AACLC', 'FLAC'];
             if (quality === 'HI_RES_LOSSLESS')
                 formats.push('FLAC_HIRES');
-            formats.forEach((f) => params.append('formats', f));
+            for (const f of formats)
+                params.append('formats', f);
         }
         const endpoint = isVideo
             ? `/video/?${params.toString()}`
@@ -371,7 +375,14 @@ class MonochromeSource {
         if (attr?.trackAudioNormalizationData) {
             logger('debug', 'Monochrome', `Normalization for ${track.identifier}: Gain ${attr.trackAudioNormalizationData.replayGain} dB, Peak ${attr.trackAudioNormalizationData.peakAmplitude}`);
         }
-        return { url: uri, protocol: uri.includes('.m3u8') ? 'hls' : 'http' };
+        return {
+            url: uri,
+            protocol: uri.includes('.mpd')
+                ? 'dash'
+                : uri.includes('.m3u8')
+                    ? 'hls'
+                    : 'http'
+        };
     }
     /**
      * Opens a readable audio stream for the given track.
@@ -382,6 +393,47 @@ class MonochromeSource {
      * @returns A promise resolving to the stream result.
      */
     async loadStream(decodedTrack, url, protocol, additionalData) {
+        if (protocol === 'dash' || url.includes('.mpd')) {
+            logger('debug', 'Monochrome', `Loading DASH stream for ${decodedTrack.identifier}`);
+            const dash = new DASHHandler(url, {
+                localAddress: this.nodelink.routePlanner?.getIP?.() || undefined,
+                startTime: additionalData?.startTime || 0,
+                expectedDuration: decodedTrack.length,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36',
+                    Referer: 'https://monochrome.tf/',
+                    Origin: 'https://monochrome.tf'
+                }
+            });
+            const passthrough = new PassThrough({ highWaterMark: 256 * 1024 });
+            let finishBufferingEmitted = false;
+            dash.pipe(passthrough);
+            const emitFinishBuffering = () => {
+                if (finishBufferingEmitted)
+                    return;
+                finishBufferingEmitted = true;
+                passthrough.emit('finishBuffering');
+            };
+            dash.on('data', () => emitFinishBuffering());
+            dash.once('end', emitFinishBuffering);
+            passthrough.once('end', emitFinishBuffering);
+            dash.on('error', (err) => {
+                if (!passthrough.destroyed)
+                    passthrough.destroy(err);
+            });
+            passthrough.on('error', () => {
+                if (!dash.destroyed)
+                    dash.destroy();
+            });
+            dash.start().catch((err) => {
+                logger('error', 'Monochrome', `DASH stream error: ${err.message}`);
+                passthrough.destroy(err);
+            });
+            return {
+                stream: passthrough,
+                type: 'fmp4-buffered'
+            };
+        }
         if (protocol === 'hls' || url.includes('.m3u8')) {
             logger('debug', 'Monochrome', `Loading HLS stream for ${decodedTrack.identifier}`);
             const type = 'fmp4-buffered';

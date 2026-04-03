@@ -273,8 +273,8 @@ export default class SpotifySource {
                     return true;
                 }
             }
-            // Flow 2: Anonymous Web Player (Local or External Auth Proxy)
-            if (type === 'anonymous') {
+            // Flow 2: Web Player (anonymous, no cookie)
+            if (type === 'anonymous' || type === 'mobile') {
                 try {
                     const data = await getLocalToken(null, 'web-player');
                     if (data?.accessToken) {
@@ -288,35 +288,55 @@ export default class SpotifySource {
                     }
                 }
                 catch (e) {
-                    logger('debug', 'Spotify', `Local anonymous refresh failed: ${e instanceof Error ? e.message : String(e)}`);
+                    logger('debug', 'Spotify', `Web-player token request failed: ${e instanceof Error ? e.message : String(e)}`);
                 }
+                // Flow 3: External auth URL fallback
                 if (this.config.externalAuthUrl) {
-                    const res = await http1makeRequest(this.config.externalAuthUrl, {
-                        disableBodyCompression: true
-                    });
-                    const body = res.body;
-                    if (res.statusCode === 200 && body.accessToken) {
-                        this.anonymousToken = body.accessToken;
-                        const ttl = body.accessTokenExpirationTimestampMs
-                            ? body.accessTokenExpirationTimestampMs - Date.now()
-                            : 3600000;
-                        this.anonymousTokenExpiry = Date.now() + Math.max(ttl, 60000);
-                        cm.set('spotify_anonymous_token', this.anonymousToken, Math.max(ttl, 60000));
+                    try {
+                        const res = await http1makeRequest(this.config.externalAuthUrl, {
+                            disableBodyCompression: true
+                        });
+                        const body = res.body;
+                        if (res.statusCode === 200 && body.accessToken) {
+                            this.anonymousToken = body.accessToken;
+                            const ttl = body.accessTokenExpirationTimestampMs
+                                ? body.accessTokenExpirationTimestampMs - Date.now()
+                                : 3600000;
+                            this.anonymousTokenExpiry = Date.now() + Math.max(ttl, 60000);
+                            cm.set('spotify_anonymous_token', this.anonymousToken, Math.max(ttl, 60000));
+                            return true;
+                        }
+                    }
+                    catch (e) {
+                        logger('debug', 'Spotify', `External auth refresh failed: ${e instanceof Error ? e.message : String(e)}`);
+                    }
+                }
+                // Flow 4: Mobile Web Player (with sp_dc if available)
+                try {
+                    const spDc = type === 'mobile' ? this.config.sp_dc : null;
+                    const data = await getLocalToken(spDc, 'mobile-web-player');
+                    if (data?.accessToken) {
+                        if (spDc) {
+                            this.mobileToken = data.accessToken;
+                            const ttl = data.accessTokenExpirationTimestampMs
+                                ? data.accessTokenExpirationTimestampMs - Date.now()
+                                : 3600000;
+                            this.mobileTokenExpiry = Date.now() + Math.max(ttl, 60000);
+                            cm.set('spotify_mobile_token', this.mobileToken, Math.max(ttl, 60000));
+                        }
+                        else {
+                            this.anonymousToken = data.accessToken;
+                            const ttl = data.accessTokenExpirationTimestampMs
+                                ? data.accessTokenExpirationTimestampMs - Date.now()
+                                : 3600000;
+                            this.anonymousTokenExpiry = Date.now() + Math.max(ttl, 60000);
+                            cm.set('spotify_anonymous_token', this.anonymousToken, Math.max(ttl, 60000));
+                        }
                         return true;
                     }
                 }
-            }
-            // Flow 3: Mobile (sp_dc session cookie)
-            if (type === 'mobile' && this.config.sp_dc) {
-                const data = await getLocalToken(this.config.sp_dc, 'mobile-web-player');
-                if (data?.accessToken) {
-                    this.mobileToken = data.accessToken;
-                    const ttl = data.accessTokenExpirationTimestampMs
-                        ? data.accessTokenExpirationTimestampMs - Date.now()
-                        : 3600000;
-                    this.mobileTokenExpiry = Date.now() + Math.max(ttl, 60000);
-                    cm.set('spotify_mobile_token', this.mobileToken, Math.max(ttl, 60000));
-                    return true;
+                catch (e) {
+                    logger('debug', 'Spotify', `Mobile-web-player token request failed: ${e instanceof Error ? e.message : String(e)}`);
                 }
             }
             return false;
@@ -357,11 +377,11 @@ export default class SpotifySource {
         };
         if (useInternal) {
             Object.assign(headers, {
-                'Accept': 'application/json',
+                Accept: 'application/json',
                 'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
                 'App-Platform': 'WebPlayer',
                 'Spotify-App-Version': '1.2.87.221.ge160d899',
-                'Referer': 'https://open.spotify.com/'
+                Referer: 'https://open.spotify.com/'
             });
         }
         try {

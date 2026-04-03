@@ -229,7 +229,7 @@ export default class SpotifySource implements SourceInstance {
     try {
       // Ensure all possible authentication tiers are initialized
       if (hasOfficial && !this.accessToken) await this._ensureToken('official')
-      
+
       // Priming anonymous token by default since local generation is now supported standalone
       if (!this.anonymousToken) await this._ensureToken('anonymous')
 
@@ -348,8 +348,8 @@ export default class SpotifySource implements SourceInstance {
         }
       }
 
-      // Flow 2: Anonymous Web Player (Local or External Auth Proxy)
-      if (type === 'anonymous') {
+      // Flow 2: Web Player (anonymous, no cookie)
+      if (type === 'anonymous' || type === 'mobile') {
         try {
           const data = await getLocalToken(null, 'web-player')
           if (data?.accessToken) {
@@ -369,45 +369,78 @@ export default class SpotifySource implements SourceInstance {
           logger(
             'debug',
             'Spotify',
-            `Local anonymous refresh failed: ${e instanceof Error ? e.message : String(e)}`
+            `Web-player token request failed: ${e instanceof Error ? e.message : String(e)}`
           )
         }
 
+        // Flow 3: External auth URL fallback
         if (this.config.externalAuthUrl) {
-          const res = await http1makeRequest(this.config.externalAuthUrl, {
-            disableBodyCompression: true
-          })
-          const body = res.body as {
-            accessToken?: string
-            accessTokenExpirationTimestampMs?: number
-          }
-          if (res.statusCode === 200 && body.accessToken) {
-            this.anonymousToken = body.accessToken
-            const ttl = body.accessTokenExpirationTimestampMs
-              ? body.accessTokenExpirationTimestampMs - Date.now()
-              : 3600000
-            this.anonymousTokenExpiry = Date.now() + Math.max(ttl, 60000)
-            cm.set(
-              'spotify_anonymous_token',
-              this.anonymousToken,
-              Math.max(ttl, 60000)
+          try {
+            const res = await http1makeRequest(this.config.externalAuthUrl, {
+              disableBodyCompression: true
+            })
+            const body = res.body as {
+              accessToken?: string
+              accessTokenExpirationTimestampMs?: number
+            }
+            if (res.statusCode === 200 && body.accessToken) {
+              this.anonymousToken = body.accessToken
+              const ttl = body.accessTokenExpirationTimestampMs
+                ? body.accessTokenExpirationTimestampMs - Date.now()
+                : 3600000
+              this.anonymousTokenExpiry = Date.now() + Math.max(ttl, 60000)
+              cm.set(
+                'spotify_anonymous_token',
+                this.anonymousToken,
+                Math.max(ttl, 60000)
+              )
+              return true
+            }
+          } catch (e) {
+            logger(
+              'debug',
+              'Spotify',
+              `External auth refresh failed: ${e instanceof Error ? e.message : String(e)}`
             )
-            return true
           }
         }
-      }
 
-      // Flow 3: Mobile (sp_dc session cookie)
-      if (type === 'mobile' && this.config.sp_dc) {
-        const data = await getLocalToken(this.config.sp_dc, 'mobile-web-player')
-        if (data?.accessToken) {
-          this.mobileToken = data.accessToken
-          const ttl = data.accessTokenExpirationTimestampMs
-            ? data.accessTokenExpirationTimestampMs - Date.now()
-            : 3600000
-          this.mobileTokenExpiry = Date.now() + Math.max(ttl, 60000)
-          cm.set('spotify_mobile_token', this.mobileToken, Math.max(ttl, 60000))
-          return true
+        // Flow 4: Mobile Web Player (with sp_dc if available)
+        try {
+          const spDc = type === 'mobile' ? this.config.sp_dc : null
+          const data = await getLocalToken(spDc, 'mobile-web-player')
+          if (data?.accessToken) {
+            if (spDc) {
+              this.mobileToken = data.accessToken
+              const ttl = data.accessTokenExpirationTimestampMs
+                ? data.accessTokenExpirationTimestampMs - Date.now()
+                : 3600000
+              this.mobileTokenExpiry = Date.now() + Math.max(ttl, 60000)
+              cm.set(
+                'spotify_mobile_token',
+                this.mobileToken,
+                Math.max(ttl, 60000)
+              )
+            } else {
+              this.anonymousToken = data.accessToken
+              const ttl = data.accessTokenExpirationTimestampMs
+                ? data.accessTokenExpirationTimestampMs - Date.now()
+                : 3600000
+              this.anonymousTokenExpiry = Date.now() + Math.max(ttl, 60000)
+              cm.set(
+                'spotify_anonymous_token',
+                this.anonymousToken,
+                Math.max(ttl, 60000)
+              )
+            }
+            return true
+          }
+        } catch (e) {
+          logger(
+            'debug',
+            'Spotify',
+            `Mobile-web-player token request failed: ${e instanceof Error ? e.message : String(e)}`
+          )
         }
       }
 
@@ -460,11 +493,11 @@ export default class SpotifySource implements SourceInstance {
 
     if (useInternal) {
       Object.assign(headers, {
-        'Accept': 'application/json',
+        Accept: 'application/json',
         'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
         'App-Platform': 'WebPlayer',
         'Spotify-App-Version': '1.2.87.221.ge160d899',
-        'Referer': 'https://open.spotify.com/'
+        Referer: 'https://open.spotify.com/'
       })
     }
 
@@ -989,17 +1022,19 @@ export default class SpotifySource implements SourceInstance {
       let total = Infinity
 
       while (tracks.length < total && tracks.length < maxTracks) {
-        const data = await this._internalApiRequest<SpotifyGraphQLAlbumResponse>(
-          QUERIES.getAlbum,
-          {
-            uri: `spotify:album:${id}`,
-            locale: 'en',
-            offset,
-            limit
-          }
-        )
+        const data =
+          await this._internalApiRequest<SpotifyGraphQLAlbumResponse>(
+            QUERIES.getAlbum,
+            {
+              uri: `spotify:album:${id}`,
+              locale: 'en',
+              offset,
+              limit
+            }
+          )
 
-        if (!data?.albumUnion || data.albumUnion.__typename === 'NotFound') break
+        if (!data?.albumUnion || data.albumUnion.__typename === 'NotFound')
+          break
 
         if (offset === 0) {
           name = data.albumUnion.name
@@ -1034,7 +1069,8 @@ export default class SpotifySource implements SourceInstance {
 
     let nextUrl: string | null = `/albums/${id}?market=${this.market}`
     while (nextUrl && tracks.length < maxTracks) {
-      const res: SpotifyAlbum | null = await this._apiRequest<SpotifyAlbum>(nextUrl)
+      const res: SpotifyAlbum | null =
+        await this._apiRequest<SpotifyAlbum>(nextUrl)
       if (!res) break
 
       if (tracks.length === 0) name = res.name
@@ -1098,7 +1134,8 @@ export default class SpotifySource implements SourceInstance {
             }
           )
 
-        if (!data?.playlistV2 || data.playlistV2.__typename === 'NotFound') break
+        if (!data?.playlistV2 || data.playlistV2.__typename === 'NotFound')
+          break
 
         if (offset === 0) {
           name = data.playlistV2.name
@@ -1136,7 +1173,8 @@ export default class SpotifySource implements SourceInstance {
 
     let nextUrl: string | null = `/playlists/${id}?market=${this.market}`
     while (nextUrl && tracks.length < maxTracks) {
-      const res: SpotifyPlaylist | null = await this._apiRequest<SpotifyPlaylist>(nextUrl)
+      const res: SpotifyPlaylist | null =
+        await this._apiRequest<SpotifyPlaylist>(nextUrl)
       if (!res) break
 
       if (tracks.length === 0) name = res.name

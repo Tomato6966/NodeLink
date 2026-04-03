@@ -52,7 +52,7 @@ const SECRETS_URL =
  * @internal
  */
 const USER_AGENT_MOBILE =
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36'
 
 /**
  * Decodes an obfuscated secret string into raw bytes.
@@ -167,13 +167,17 @@ async function getServerTime(spDc?: string | null): Promise<number> {
 /**
  * Generates a TOTP code for a given secret and timestamp.
  * @param secretHex - Secret in hexadecimal format.
- * @param timeSec - Timestamp in seconds.
+ * @param timestampMs - Timestamp in milliseconds.
  * @param step - TOTP step in seconds.
  * @returns Six-digit TOTP code.
  * @internal
  */
-function generateTOTP(secretHex: string, timeSec: number, step = 30): string {
-  const counter = Math.floor(timeSec / step)
+function generateTOTP(
+  secretHex: string,
+  timestampMs: number,
+  step = 30
+): string {
+  const counter = Math.floor(timestampMs / 1000 / step)
   const buf = Buffer.alloc(8)
   buf.writeBigInt64BE(BigInt(counter))
 
@@ -183,10 +187,10 @@ function generateTOTP(secretHex: string, timeSec: number, step = 30): string {
 
   const offset = (digest[digest.length - 1] ?? 0) & 0xf
   const code =
-    (((digest[offset] ?? 0 & 0x7f) << 24) |
-      ((digest[offset + 1] ?? 0 & 0xff) << 16) |
-      ((digest[offset + 2] ?? 0 & 0xff) << 8) |
-      (digest[offset + 3] ?? 0 & 0xff)) %
+    ((((digest[offset] ?? 0) & 0x7f) << 24) |
+      (((digest[offset + 1] ?? 0) & 0xff) << 16) |
+      (((digest[offset + 2] ?? 0) & 0xff) << 8) |
+      ((digest[offset + 3] ?? 0) & 0xff)) %
     1000000
 
   return code.toString().padStart(6, '0')
@@ -209,19 +213,19 @@ async function performTokenRequest(
 ): Promise<SpotifyLocalTokenResponse> {
   const isWebPlayer = productType === 'web-player'
   const serverTimeMs = isWebPlayer ? Date.now() : await getServerTime(spDc)
-  const serverTimeSec = Math.floor(serverTimeMs / 1000)
-  const localTimeSec = Math.floor(Date.now() / 1000)
+  const localTimeMs = Date.now()
 
-  const totpLocal = generateTOTP(secret, localTimeSec, 30)
-  const totpServer = generateTOTP(secret, serverTimeSec, 900)
+  const totpLocal = generateTOTP(secret, localTimeMs, 30)
+  const totpServer = generateTOTP(secret, serverTimeMs, 900)
 
   const url = new URL('https://open.spotify.com/api/token')
   url.searchParams.append('reason', 'init')
   url.searchParams.append('productType', productType)
-  url.searchParams.append('platform', 'web')
+  if (!isWebPlayer) url.searchParams.append('platform', 'web')
   url.searchParams.append('totp', totpLocal)
+  if (isWebPlayer) url.searchParams.append('totpServer', totpLocal)
+  else url.searchParams.append('totpServer', totpServer)
   url.searchParams.append('totpVer', version)
-  url.searchParams.append('totpServer', totpServer)
 
   const headers: Record<string, string> = {
     'User-Agent': USER_AGENT_MOBILE,
@@ -230,7 +234,7 @@ async function performTokenRequest(
     Accept: 'application/json'
   }
 
-  if (spDc) headers.Cookie = `sp_dc=${spDc}`
+  if (spDc && !isWebPlayer) headers.Cookie = `sp_dc=${spDc}`
 
   const res = await http1makeRequest(url.toString(), {
     method: 'GET',
