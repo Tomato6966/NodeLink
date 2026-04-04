@@ -100,7 +100,11 @@ export class ScratchTransformer extends Transform {
    * Returns true if a scratch effect is currently being applied.
    */
   public isActive(): boolean {
-    return this.state !== null || Math.abs(this.currentRate - 1.0) > 0.001
+    return (
+      this.state !== null ||
+      Math.abs(this.currentRate - 1.0) > 0.001 ||
+      this.inputWritePos > this.inputReadPos + this.channels
+    )
   }
 
   /**
@@ -188,6 +192,12 @@ export class ScratchTransformer extends Transform {
 
     if (this.inputWritePos + incomingSamples > this.maxBufferSize) {
       this._compact()
+      if (this.inputWritePos + incomingSamples > this.maxBufferSize) {
+        const samplesToDrop =
+          Math.ceil(incomingSamples / this.channels) * this.channels
+        this.inputReadPos += samplesToDrop
+        this._compact()
+      }
     }
 
     for (let i = 0; i < incomingSamples; i++) {
@@ -219,12 +229,6 @@ export class ScratchTransformer extends Transform {
           this.state = null
           this._lastEffectCompleted = true
         }
-      }
-
-      if (Math.abs(this.currentRate) < 0.01 && !this.state) {
-        for (let c = 0; c < this.channels; c++)
-          outI16[f * this.channels + c] = 0
-        continue
       }
 
       const iPos = Math.floor(this.inputReadPos / this.channels) * this.channels

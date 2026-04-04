@@ -81,7 +81,11 @@ export class TapeTransformer extends Transform {
   }
 
   public isActive(): boolean {
-    return this.tape !== null || Math.abs(this.currentRate - 1.0) > 0.001
+    return (
+      this.tape !== null ||
+      Math.abs(this.currentRate - 1.0) > 0.001 ||
+      this.inputWritePos > this.inputReadPos + this.channels
+    )
   }
 
   public checkRampCompleted(): boolean {
@@ -135,7 +139,7 @@ export class TapeTransformer extends Transform {
       if (this.inputWritePos + incomingSamples > this.maxBufferSize) {
         const samplesToDrop =
           Math.ceil(incomingSamples / this.channels) * this.channels
-        this.inputReadPos = Math.max(0, this.inputReadPos - samplesToDrop)
+        this.inputReadPos += samplesToDrop
         this._compact()
       }
     }
@@ -162,8 +166,6 @@ export class TapeTransformer extends Transform {
           this._lastRampCompleted = true
         }
       }
-
-      if (this.currentRate <= 0.01 && !this.tape) break
 
       const iPos = Math.floor(this.inputReadPos / this.channels) * this.channels
       if (iPos + this.channels * 3 >= this.inputWritePos) break

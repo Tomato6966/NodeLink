@@ -217,7 +217,7 @@ export class FlowController extends Transform {
     }
 
     const silence = Buffer.alloc(FRAME_SIZE, 0)
-    let drainLimit = 150
+    let drainLimit = 500
     while (
       (this.scratch.isActive() || this.tape.isActive()) &&
       drainLimit-- > 0

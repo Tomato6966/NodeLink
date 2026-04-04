@@ -1057,7 +1057,12 @@ export class Player {
           // this fixes it by treating as a natural "trackEnd"
           // for example: an audio is 200000ms long, it will only play until 199800ms before triggering a recovery
           const trackLength = this.track.info.length
-          if (trackLength > 0 && position >= trackLength - 2000) {
+          const audioStream = this._getAudioStream()
+          const playbackSpeed =
+            audioStream?.getEffectiveRate?.() ?? this._getTimescaleSpeed()
+          const endThreshold = playbackSpeed < 1.0 ? 5000 : 2000
+
+          if (trackLength > 0 && position >= trackLength - endThreshold) {
             logger(
               'debug',
               'Player',
@@ -3020,6 +3025,25 @@ export class Player {
               ? scratchStyle
               : 'wash'
             stream.scratchTo?.(fadeDuration, style)
+          }
+
+          if (fadeType !== 'volume') {
+            const safetyTimeout = fadeDuration * 2 + 1500
+            const trackId = this.track?.info.identifier
+            setTimeout(() => {
+              if (
+                this.track?.info.identifier === trackId &&
+                !this.isUpdatingTrack &&
+                !this._isStopping
+              ) {
+                logger(
+                  'debug',
+                  'Player',
+                  `Safety stop triggered for guild ${this.guildId} after long fade-out ramp.`
+                )
+                this.connection?.stop(EndReasons.FINISHED)
+              }
+            }, safetyTimeout).unref?.()
           }
         }
         if (timers.trackEnd) {
