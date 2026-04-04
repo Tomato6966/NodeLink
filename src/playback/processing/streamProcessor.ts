@@ -264,7 +264,10 @@ const _isWebmFormat = (type: string): boolean =>
   type.includes('webm') || type.includes('weba')
 
 const _isFlvFormat = (type: string): boolean => type.indexOf('flv') !== -1
-const _tightBuffer = (buf: Buffer): Buffer => Buffer.from(buf)
+const _tightBuffer = (buf: Buffer): Buffer =>
+  buf.byteOffset === 0 && buf.byteLength === buf.buffer.byteLength
+    ? buf
+    : Buffer.from(buf)
 const _toTightArrayBuffer = (buf: Buffer): ArrayBuffer => {
   const backing = buf.buffer
   if (
@@ -1270,6 +1273,7 @@ class AACDecoderStream extends Transform {
   private ringBuffer: RingBufferLike
   private resamplingQuality: string
   private resamplerCreationPromise: Promise<ResamplerLike> | null
+  private static readonly MAX_PENDING_CHUNKS = 200
 
   constructor(options: AACDecoderStreamOptions) {
     super({
@@ -1300,6 +1304,7 @@ class AACDecoderStream extends Transform {
     cb: (error?: Error | null) => void
   ): void {
     this.ringBuffer.dispose()
+    this.pendingChunks.length = 0
     if (this.decoder) this.decoder.free?.()
     if (this.resampler) this.resampler.destroy?.()
     super._destroy(err, cb)
@@ -1429,6 +1434,9 @@ class AACDecoderStream extends Transform {
     callback: TransformCallback
   ): void {
     if (!this.isDecoderReady || this.pendingChunks.length > 0) {
+      if (this.pendingChunks.length >= AACDecoderStream.MAX_PENDING_CHUNKS) {
+        this.pendingChunks.shift()
+      }
       this.pendingChunks.push({ chunk, encoding, callback })
       return
     }

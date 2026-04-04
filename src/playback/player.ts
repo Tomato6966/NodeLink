@@ -333,11 +333,18 @@ export class Player {
       this._onError(err)
     })
     this.connection.on('audioStream', (audioStream: VoiceAudioStream) => {
-      audioStream.on('data', () => {
+      const dataHandler = () => {
         this._lastStreamDataTime = Date.now()
         if (this.isLyricsSubscribed && !this.isPaused && this.track) {
           this._syncLyrics()
         }
+      }
+      audioStream.on('data', dataHandler)
+      audioStream.once('close', () => {
+        audioStream.off('data', dataHandler)
+      })
+      audioStream.once('end', () => {
+        audioStream.off('data', dataHandler)
       })
     })
 

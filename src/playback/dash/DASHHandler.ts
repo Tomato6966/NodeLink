@@ -5,7 +5,7 @@ import type {
 } from '../../typings/playback/dash.types.ts'
 import { logger, makeRequest } from '../../utils.ts'
 
-const PREFETCH_COUNT = 1
+const PREFETCH_COUNT = 4
 const MAX_BUFFERED = 16 * 1024
 
 /**
@@ -185,7 +185,7 @@ export class DASHHandler extends Transform {
         pushIndex++
 
         if (segmentDuration > 0 && pushIndex < totalSegments) {
-          const paceMs = segmentDuration * 1000 * 0.8
+          const paceMs = Math.min(segmentDuration * 1000 * 0.8, 5000)
           await this._sleepOrStop(paceMs)
         }
       }
