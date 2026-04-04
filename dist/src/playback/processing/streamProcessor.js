@@ -8,7 +8,6 @@ import { http1makeRequest, logger } from "../../utils.js";
 import FlvDemuxer from "../demuxers/Flv.js";
 import WebmOpusDemuxer from "../demuxers/WebmOpus.js";
 import { Decoder as OpusDecoder, Encoder as OpusEncoder } from "../opus/Opus.js";
-import { bufferPool } from "../structs/BufferPool.js";
 import { RingBuffer } from "../structs/RingBuffer.js";
 import { FadeTransformer } from "./FadeTransformer.js";
 import { TapeTransformer } from "./TapeTransformer.js";
@@ -817,8 +816,8 @@ class MPEGTSDemuxer extends Transform {
                         this._processAudioPacket(packet, pusi, offset);
                     }
                 }
-                finally {
-                    bufferPool.release(packet);
+                catch {
+                    this._aborted = true;
                 }
             }
             callback();

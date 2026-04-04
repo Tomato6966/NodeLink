@@ -39,19 +39,20 @@ export class RingBuffer {
     /**
      * Writes a chunk of data to the buffer.
      * If the buffer is full, it overwrites the oldest data.
+     * Chunks larger than the buffer size are truncated to fit.
      * @param chunk - The data chunk to write.
      */
     write(chunk) {
         if (!this.buffer)
             return;
-        const bytesToWrite = chunk.length;
+        const bytesToWrite = Math.min(chunk.length, this.size);
         const availableAtEnd = this.size - this.writeOffset;
         if (bytesToWrite <= availableAtEnd) {
-            chunk.copy(this.buffer, this.writeOffset);
+            chunk.copy(this.buffer, this.writeOffset, 0, bytesToWrite);
         }
         else {
             chunk.copy(this.buffer, this.writeOffset, 0, availableAtEnd);
-            chunk.copy(this.buffer, 0, availableAtEnd);
+            chunk.copy(this.buffer, 0, availableAtEnd, bytesToWrite);
         }
         const newLength = this._length + bytesToWrite;
         if (newLength > this.size) {
@@ -74,8 +75,7 @@ export class RingBuffer {
         const bytesToRead = Math.min(Math.max(0, n), this._length);
         if (bytesToRead === 0)
             return null;
-        const acquired = bufferPool.acquire(bytesToRead);
-        const out = acquired.subarray(0, bytesToRead);
+        const out = Buffer.allocUnsafe(bytesToRead);
         const availableAtEnd = this.size - this.readOffset;
         if (bytesToRead <= availableAtEnd) {
             this.buffer.copy(out, 0, this.readOffset, this.readOffset + bytesToRead);
@@ -114,8 +114,7 @@ export class RingBuffer {
         if (bytesToPeek <= availableAtEnd) {
             return this.buffer.subarray(this.readOffset, this.readOffset + bytesToPeek);
         }
-        const acquired = bufferPool.acquire(bytesToPeek);
-        const out = acquired.subarray(0, bytesToPeek);
+        const out = Buffer.allocUnsafe(bytesToPeek);
         this.buffer.copy(out, 0, this.readOffset, this.size);
         this.buffer.copy(out, availableAtEnd, 0, bytesToPeek - availableAtEnd);
         return out;
@@ -135,8 +134,7 @@ export class RingBuffer {
         if (bytesToGet <= availableAtEnd) {
             return this.buffer.subarray(this.readOffset, this.readOffset + bytesToGet);
         }
-        const acquired = bufferPool.acquire(bytesToGet);
-        const out = acquired.subarray(0, bytesToGet);
+        const out = Buffer.allocUnsafe(bytesToGet);
         this.buffer.copy(out, 0, this.readOffset, this.size);
         this.buffer.copy(out, availableAtEnd, 0, bytesToGet - availableAtEnd);
         return out;

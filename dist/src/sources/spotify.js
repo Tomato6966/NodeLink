@@ -573,7 +573,13 @@ export default class SpotifySource {
         if (term && this.recommendationTerm.includes(term))
             return this.getRecommendations(query);
         try {
-            const limit = this.config.playlistLoadLimit || 10;
+            let limit = this.config.playlistLoadLimit || 10;
+            // fixes the error Argument <limit> for field /searchV2 cannot be greater than 1000
+            // this is a config issue from the user side, but if this can be used as a workaround,
+            // we set it to 10 to avoid the error :p.
+            if (limit > 999) {
+                limit = 10;
+            }
             // Priority 1: Internal Search (Rich nodes + Local matching)
             if (this.anonymousToken || this.config.sp_dc) {
                 const data = await this._internalApiRequest(QUERIES.searchDesktop || {
