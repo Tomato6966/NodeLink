@@ -72,17 +72,59 @@ class MonochromeSource {
     }
     /**
      * Performs provider-specific resource initialization.
+     * Runs an initial latency check to score instances.
      * @returns A promise resolving to true if initialized.
      */
     async setup() {
         const apiCount = this.apiInstances.length;
         const streamCount = this.streamingInstances.length;
-        if (apiCount > 0) {
-            logger('info', 'Monochrome', `Source is ready with ${apiCount} API and ${streamCount} streaming instances.`);
-            return true;
+        if (apiCount === 0) {
+            logger('warn', 'Monochrome', 'Source failed to initialize: No instances available.');
+            return false;
         }
-        logger('warn', 'Monochrome', 'Source failed to initialize: No instances available.');
-        return false;
+        logger('info', 'Monochrome', `Initializing latency check for ${apiCount} instances...`);
+        const checkInstance = async (instance) => {
+            const start = Date.now();
+            try {
+                const { statusCode } = await makeRequest(instance.url + '/', {
+                    method: 'GET',
+                    timeout: 3000
+                });
+                const latency = Date.now() - start;
+                if (statusCode === 200 || statusCode === 404 || statusCode === 302) {
+                    // Success (or at least reachable)
+                    if (latency < 500)
+                        instance.score = 100;
+                    else if (latency < 1500)
+                        instance.score = 80;
+                    else if (latency < 3000)
+                        instance.score = 50;
+                    else
+                        instance.score = 20;
+                    logger('debug', 'Monochrome', `Instance ${instance.url} - Latency: ${latency}ms, Initial Score: ${instance.score}`);
+                }
+                else {
+                    instance.score = 0;
+                    instance.lastFailure = Date.now();
+                    logger('debug', 'Monochrome', `Instance ${instance.url} - Error: Status ${statusCode}, Score: 0`);
+                }
+            }
+            catch (e) {
+                instance.score = 0;
+                instance.lastFailure = Date.now();
+                logger('debug', 'Monochrome', `Instance ${instance.url} - Connection Failed, Score: 0`);
+            }
+        };
+        await Promise.allSettled(this.apiInstances.map(checkInstance));
+        // Sync streaming scores if they use the same URLs
+        for (const s of this.streamingInstances) {
+            const api = this.apiInstances.find(a => a.url === s.url);
+            if (api)
+                s.score = api.score;
+        }
+        const reachable = this.apiInstances.filter(i => i.score > 0).length;
+        logger('info', 'Monochrome', `Source is ready with ${apiCount} API (${reachable} reachable) and ${streamCount} streaming instances.`);
+        return true;
     }
     /**
      * Selects the healthiest instance from the pool using a scored random strategy.
@@ -94,14 +136,15 @@ class MonochromeSource {
     getBestInstance(type = 'api', minVersion) {
         const pool = type === 'streaming' ? this.streamingInstances : this.apiInstances;
         const now = Date.now();
-        let candidates = pool.filter((i) => (i.score > 0 || now - i.lastFailure > 30_000) &&
+        let candidates = pool.filter((i) => (i.score > 0 || now - i.lastFailure > 60_000) &&
             (!minVersion || (i.version && i.version >= minVersion)));
         if (candidates.length === 0 && minVersion) {
-            candidates = pool.filter((i) => i.score > 0 || now - i.lastFailure > 30_000);
+            candidates = pool.filter((i) => i.score > 0 || now - i.lastFailure > 60_000);
         }
         const activePool = candidates.length > 0 ? candidates : pool;
         const sorted = activePool.sort((a, b) => b.score - a.score || a.activeRequests - b.activeRequests);
-        const instance = sorted[Math.floor(Math.random() * Math.min(sorted.length, 3))] || pool[0];
+        // Increase randomization factor to 5 to avoid overloading the very best one
+        const instance = sorted[Math.floor(Math.random() * Math.min(sorted.length, 5))] || pool[0];
         if (!instance) {
             throw new Error('No instances available in pool');
         }
@@ -125,6 +168,7 @@ class MonochromeSource {
             instance.activeRequests++;
             try {
                 const { body, error, statusCode } = await makeRequest(url, {
+                    timeout: 5000,
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
                         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
