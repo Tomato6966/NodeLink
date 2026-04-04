@@ -686,11 +686,20 @@ export class Player {
       | null
       | undefined
     const audioStream = conn?.audioStream as
-      | (AudioResource & { destroyed?: boolean })
+      | (AudioResource & {
+          destroyed?: boolean
+          _cleanupListeners?: () => void
+        })
       | undefined
       | null
 
     if (!audioStream) return
+
+    try {
+      audioStream._cleanupListeners?.()
+    } catch {
+      // Ignore cleanup errors
+    }
 
     try {
       audioStream.destroy?.()
@@ -941,30 +950,48 @@ export class Player {
     if (typeof (fetchedStream as { on?: unknown }).on === 'function') {
       const eventStream = fetchedStream as unknown as VoiceAudioStream
       const profilerTap = new PassThrough()
-      profilerTap.on('data', (chunk: Buffer | Uint8Array | string) => {
+      const profilerHandler = (chunk: Buffer | Uint8Array | string) => {
         const size =
           typeof chunk === 'string'
             ? Buffer.byteLength(chunk)
             : Number((chunk as { length?: number })?.length || 0)
         if (size > 0) this.profilerStreamStats.downloadedBytes += size
         this.profilerStreamStats.lastChunkAt = Date.now()
-      })
+      }
+      profilerTap.on('data', profilerHandler)
       streamForResource = (fetchedStream as Readable).pipe(profilerTap)
       ;(profilerTap as unknown as Record<string, unknown>)._sourceStream =
         fetchedStream
 
-      eventStream.on?.('eternalboxJump', (data: unknown) => {
+      const eternalboxHandler = (data: unknown) => {
         this.emitEvent(GatewayEvents.ETERNALBOX_JUMP, {
           track: this.holoTrack || this.track,
           eternalbox: data
         })
-      })
-      eventStream.on?.('icyMetadata', (data: unknown) => {
+      }
+      const icyHandler = (data: unknown) => {
         this.emitEvent(GatewayEvents.STREAM_METADATA, {
           track: this.holoTrack || this.track,
           stream: data
         })
-      })
+      }
+      eventStream.on?.('eternalboxJump', eternalboxHandler)
+      eventStream.on?.('icyMetadata', icyHandler)
+
+      const cleanupListeners = () => {
+        eventStream.off?.('eternalboxJump', eternalboxHandler)
+        eventStream.off?.('icyMetadata', icyHandler)
+        profilerTap.off('data', profilerHandler)
+        profilerTap.destroy()
+      }
+
+      streamForResource.on('close', cleanupListeners)
+      streamForResource.on('error', cleanupListeners)
+      ;(
+        streamForResource as unknown as {
+          _cleanupListeners?: () => void
+        }
+      )._cleanupListeners = cleanupListeners
     }
     const resource = audioResourceFactory(
       this.guildId,
