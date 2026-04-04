@@ -1159,8 +1159,8 @@ class MPEGTSDemuxer extends Transform {
           } else if (this.audioPid && pid === this.audioPid) {
             this._processAudioPacket(packet, pusi, offset)
           }
-        } finally {
-          bufferPool.release(packet)
+        } catch {
+          this._aborted = true
         }
       }
       callback()
