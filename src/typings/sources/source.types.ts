@@ -570,6 +570,8 @@ export interface WorkerNodeLink {
   routePlanner?: RoutePlannerManager
   /** Stats manager instance */
   statsManager?: StatsManager
+  /** Global plugin manager for hook execution. */
+  pluginManager?: import('../../managers/pluginManager.ts').default | null
   /** Catch-all for dynamic properties. */
   [key: string]: unknown
 }

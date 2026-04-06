@@ -75,6 +75,7 @@ interface PlayerManagerNodelinkContext extends PlaybackNodeLink {
     players: number
   }
   workerManager: WorkerManagerLike | null
+  pluginManager: import('./pluginManager.ts').default | null
   extensions?: PlaybackNodeLink['extensions'] & {
     playerInterceptors?: PlayerInterceptor[]
   }
@@ -422,6 +423,13 @@ export default class PlayerManager {
           throw new Error('Player map did not contain the created entry.')
         }
 
+        this.nodelink.pluginManager?.callHook(
+          'onPlayerCreate',
+          guildId,
+          this.sessionId,
+          createResult
+        )
+
         return player
       } catch (error) {
         if (!createSucceeded) {
@@ -465,6 +473,13 @@ export default class PlayerManager {
     this.players.set(playerKey, player)
     this.nodelink.statistics.players += 1
 
+    this.nodelink.pluginManager?.callHook(
+      'onPlayerCreate',
+      guildId,
+      this.sessionId,
+      { created: true }
+    )
+
     return player
   }
 
@@ -500,6 +515,13 @@ export default class PlayerManager {
 
       workerManager.unassignGuild(playerKey)
       this.players.delete(playerKey)
+
+      this.nodelink.pluginManager?.callHook(
+        'onPlayerDestroy',
+        guildId,
+        this.sessionId
+      )
+
       return
     }
 
@@ -509,6 +531,12 @@ export default class PlayerManager {
     this.nodelink.statistics.players = Math.max(
       0,
       this.nodelink.statistics.players - 1
+    )
+
+    this.nodelink.pluginManager?.callHook(
+      'onPlayerDestroy',
+      guildId,
+      this.sessionId
     )
   }
 

@@ -1283,7 +1283,7 @@ async function initialize() {
     await nodelink.credentialManager.load();
     await nodelink.sources.loadFolder();
     await nodelink.statsManager.initialize();
-    await nodelink.pluginManager.load('worker');
+    await nodelink.pluginManager.load('voice-worker');
     lastActivityTime = Date.now();
     logger('info', 'Worker', `Worker process ${process.pid} started and initialized.`);
 }
@@ -1748,6 +1748,7 @@ function enqueueCommand(type, requestId, payload) {
         setImmediate(() => processQueue(queueKey));
 }
 process.on('message', (msg) => {
+    nodelink.pluginManager?.callHook('onIPCMessage', msg);
     if (!msg || typeof msg !== 'object')
         return;
     const message = msg;

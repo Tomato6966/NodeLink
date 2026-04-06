@@ -14,13 +14,37 @@ const require = createRequire(import.meta.url)
  * Execution context kind used by plugin bootstrap hooks.
  * @public
  */
-type PluginContextType = 'master' | 'worker' | string
+export type PluginContextType =
+  | 'master'
+  | 'worker'
+  | 'voice-worker'
+  | 'source-worker'
+  | 'micro-worker'
+  | string
+
+/**
+ * Valid hook names supported by the NodeLink plugin system.
+ * @public
+ */
+export type PluginHookName =
+  | 'onPlayerCreate'
+  | 'onPlayerDestroy'
+  | 'onTrackStart'
+  | 'onTrackEnd'
+  | 'onTrackException'
+  | 'onTrackStuck'
+  | 'onSearch'
+  | 'onResolve'
+  | 'onRESTRequest'
+  | 'onWebSocketMessage'
+  | 'onIPCMessage'
+  | string
 
 /**
  * Plugin definition as declared in NodeLink configuration.
  * @public
  */
-interface PluginDefinition {
+export interface PluginDefinition {
   name: string
   source?: 'local' | 'npm' | string
   path?: string
@@ -31,19 +55,19 @@ interface PluginDefinition {
  * Arbitrary plugin configuration object passed to plugin executors.
  * @public
  */
-type PluginSpecificConfig = Record<string, unknown>
+export type PluginSpecificConfig = Record<string, unknown>
 
 /**
  * Per-plugin configuration map keyed by plugin name.
  * @public
  */
-type PluginConfigMap = Record<string, PluginSpecificConfig | undefined>
+export type PluginConfigMap = Record<string, PluginSpecificConfig | undefined>
 
 /**
  * Metadata resolved for a loaded plugin.
  * @public
  */
-interface PluginMeta {
+export interface PluginMeta {
   name: string
   version: string
   author: string
@@ -54,10 +78,14 @@ interface PluginMeta {
  * Runtime context object passed to plugin entrypoints.
  * @public
  */
-interface PluginExecutionContext {
+export interface PluginExecutionContext {
+  /** The type of process the plugin is running in. */
   type: PluginContextType
-  workerId: number
+  /** Process or thread identifier. */
+  workerId: number | string
+  /** The display name of the plugin. */
   pluginName: string
+  /** Resolved plugin metadata. */
   meta: PluginMeta
 }
 
@@ -65,7 +93,7 @@ interface PluginExecutionContext {
  * Function signature expected from plugin default exports.
  * @public
  */
-type PluginExecutor = (
+export type PluginExecutor = (
   nodelink: PluginManagerContext,
   config: PluginSpecificConfig,
   context: PluginExecutionContext
@@ -75,7 +103,7 @@ type PluginExecutor = (
  * Dynamically imported plugin module contract.
  * @public
  */
-interface PluginModule {
+export interface PluginModule {
   default: PluginExecutor
 }
 
@@ -106,7 +134,7 @@ interface PluginPackageJson {
  * Minimal NodeLink context required by the plugin manager.
  * @public
  */
-type PluginManagerContext = {
+export type PluginManagerContext = {
   options: {
     plugins?: PluginDefinition[]
     pluginConfig?: PluginConfigMap
@@ -115,19 +143,31 @@ type PluginManagerContext = {
 
 /**
  * Loads and executes configured plugins from local paths and npm packages.
+ * Implements a multi-process hook system for cross-cutting concerns.
+ *
  * @example
  * ```ts
  * const plugins = new PluginManager(nodelink)
  * await plugins.load('master')
+ * plugins.registerHook('onTrackStart', (guildId, track) => {
+ *   console.log(`Track started in ${guildId}`)
+ * })
  * ```
  * @public
  */
 export default class PluginManager {
+  /** The parent NodeLink context. */
   public readonly nodelink: PluginManagerContext
+  /** Plugin definitions from configuration. */
   private readonly config: PluginDefinition[]
+  /** Per-plugin configuration map. */
   private readonly pluginConfigs: PluginConfigMap
+  /** Root directory for local plugins. */
   private readonly pluginsDir: string
-  private readonly loadedPlugins: Map<string, LoadedPluginEntry>
+  /** Cache of loaded plugin entries. */
+  public readonly loadedPlugins: Map<string, LoadedPluginEntry>
+  /** Registered plugin hooks. */
+  private readonly hooks: Map<PluginHookName, Array<(...args: any[]) => void>>
 
   /**
    * Creates a new plugin manager instance.
@@ -141,11 +181,12 @@ export default class PluginManager {
     this.pluginConfigs = nodelink.options.pluginConfig ?? {}
     this.pluginsDir = path.join(process.cwd(), 'plugins')
     this.loadedPlugins = new Map()
+    this.hooks = new Map()
   }
 
   /**
    * Loads and executes all configured plugins for the current process context.
-   * @param contextType - Runtime context identifier (e.g. master/worker).
+   * @param contextType - Runtime context identifier (e.g. master/voice-worker).
    */
   public async load(contextType: PluginContextType): Promise<void> {
     logger(
@@ -165,6 +206,71 @@ export default class PluginManager {
     }
 
     logger('info', 'PluginManager', `Plugins processed for ${contextType}.`)
+  }
+
+  /**
+   * Registers a callback for a specific plugin hook.
+   * @param name - The name of the hook.
+   * @param callback - The function to execute when the hook is called.
+   * @public
+   */
+  public registerHook(
+    name: PluginHookName,
+    callback: (...args: any[]) => void
+  ): void {
+    if (!this.hooks.has(name)) {
+      this.hooks.set(name, [])
+    }
+    this.hooks.get(name)?.push(callback)
+  }
+
+  /**
+   * Synchronously executes all callbacks registered for a hook.
+   * @param name - The name of the hook to trigger.
+   * @param args - Arguments to pass to the hook callbacks.
+   * @public
+   */
+  public callHook(name: PluginHookName, ...args: any[]): void {
+    const callbacks = this.hooks.get(name)
+    if (!callbacks) return
+
+    for (const callback of callbacks) {
+      try {
+        callback(...args)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        logger('error', 'PluginManager', `Error in hook '${name}': ${message}`)
+      }
+    }
+  }
+
+  /**
+   * Asynchronously executes all callbacks registered for a hook.
+   * @param name - The name of the hook to trigger.
+   * @param args - Arguments to pass to the hook callbacks.
+   * @public
+   */
+  public async callHookAsync(
+    name: PluginHookName,
+    ...args: any[]
+  ): Promise<void> {
+    const callbacks = this.hooks.get(name)
+    if (!callbacks) return
+
+    await Promise.all(
+      callbacks.map(async (callback) => {
+        try {
+          await callback(...args)
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          logger(
+            'error',
+            'PluginManager',
+            `Error in async hook '${name}': ${message}`
+          )
+        }
+      })
+    )
   }
 
   /**

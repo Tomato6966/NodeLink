@@ -1740,7 +1740,7 @@ async function initialize() {
   await nodelink.credentialManager.load()
   await nodelink.sources.loadFolder()
   await nodelink.statsManager.initialize()
-  await nodelink.pluginManager.load('worker')
+  await nodelink.pluginManager.load('voice-worker')
 
   lastActivityTime = Date.now()
 
@@ -2370,6 +2370,8 @@ function enqueueCommand(
 }
 
 process.on('message', (msg: unknown) => {
+  nodelink.pluginManager?.callHook('onIPCMessage', msg)
+
   if (!msg || typeof msg !== 'object') return
 
   const message = msg as {

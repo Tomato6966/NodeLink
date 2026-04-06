@@ -631,6 +631,13 @@ export class Player {
         }
       })
 
+      this.nodelink.pluginManager?.callHook(
+        'onTrackException',
+        this.guildId,
+        this.track,
+        { message: error.message, severity, cause }
+      )
+
       if (shouldStop) {
         this._emitTrackEnd(EndReasons.LOAD_FAILED)
         this.stop()
@@ -759,6 +766,12 @@ export class Player {
       playingQuality
     })
 
+    this.nodelink.pluginManager?.callHook(
+      'onTrackStart',
+      this.guildId,
+      trackToEmit
+    )
+
     if (trackToEmit?.info?.sourceName === 'eternalbox') {
       const info = trackToEmit.info
       const pluginInfo = (trackToEmit.pluginInfo ?? {}) as {
@@ -808,6 +821,13 @@ export class Player {
       reason: reason,
       ...extra
     })
+
+    this.nodelink.pluginManager?.callHook(
+      'onTrackEnd',
+      this.guildId,
+      trackToEmit,
+      reason
+    )
 
     if (this.audioMixer?.autoCleanup) {
       this.audioMixer.clearLayers('MAIN_ENDED')
@@ -1059,6 +1079,14 @@ export class Player {
               thresholdMs: threshold,
               reason: 'Playback of MP4 track is stuck'
             })
+
+            this.nodelink.pluginManager?.callHook(
+              'onTrackStuck',
+              this.guildId,
+              this.track,
+              threshold,
+              'Playback of MP4 track is stuck'
+            )
             this.stop()
             return false
           }

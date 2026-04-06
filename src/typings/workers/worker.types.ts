@@ -79,7 +79,7 @@ export interface WorkerNodeLink extends Omit<NodeLink, 'extensions'> {
   meanings: MeaningManagerLike | null
   routePlanner: RoutePlannerManagerLike
   connectionManager: ConnectionManagerLike
-  pluginManager: PluginManagerLike
+  pluginManager: import('../../managers/pluginManager.ts').default
   extensions: WorkerExtensions
   registerWorkerInterceptor: (fn: WorkerInterceptor) => void
   registerSource: (name: string, source: SourceInstanceBase) => void
@@ -158,13 +158,6 @@ export type WorkerLyricsManager = LyricsManagerLike & {
 export interface ConnectionManagerLike {
   start: () => void
   stop: () => void
-}
-
-/**
- * Minimal plugin manager interface.
- */
-export interface PluginManagerLike {
-  load: (scope: string) => Promise<void>
 }
 
 /**

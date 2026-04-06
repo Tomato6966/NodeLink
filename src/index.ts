@@ -722,6 +722,13 @@ class NodelinkServer extends EventEmitter {
         clientInfo: ClientInfo,
         oldSessionId: string
       ) => {
+        this.pluginManager?.callHook(
+          'onWebSocketConnect',
+          socket,
+          clientInfo,
+          oldSessionId
+        )
+
         const originalOn = socket.on.bind(socket)
         socket.on = (
           event: string,
@@ -732,19 +739,20 @@ class NodelinkServer extends EventEmitter {
               event,
               async (...args: (string | number | Buffer)[]) => {
                 const data = args[0]
+
+                let parsedData: ParsedWebSocketData
+                try {
+                  const dataStr =
+                    typeof data === 'string'
+                      ? data
+                      : (data as Buffer).toString()
+                  parsedData = JSON.parse(dataStr)
+                } catch {
+                  parsedData = data as string | Buffer
+                }
+
                 const interceptors = this.extensions?.wsInterceptors
                 if (interceptors && Array.isArray(interceptors)) {
-                  let parsedData: ParsedWebSocketData
-                  try {
-                    const dataStr =
-                      typeof data === 'string'
-                        ? data
-                        : (data as Buffer).toString()
-                    parsedData = JSON.parse(dataStr)
-                  } catch {
-                    parsedData = data as string | Buffer
-                  }
-
                   for (const interceptor of interceptors) {
                     const handled = await interceptor(
                       this as INodelinkServer,
@@ -755,10 +763,35 @@ class NodelinkServer extends EventEmitter {
                     if (handled === true) return
                   }
                 }
+
+                this.pluginManager?.callHook(
+                  'onWebSocketMessage',
+                  socket,
+                  parsedData,
+                  (socket as any).guildId
+                )
+
                 listener(...args)
               }
             )
           }
+
+          if (event === 'close') {
+            return originalOn(
+              event,
+              (...args: (string | number | Buffer)[]) => {
+                this.pluginManager?.callHook(
+                  'onWebSocketClose',
+                  socket,
+                  args[0], // code
+                  args[1] // reason
+                )
+
+                listener(...args)
+              }
+            )
+          }
+
           return originalOn(event, listener)
         }
 
@@ -1450,6 +1483,10 @@ class NodelinkServer extends EventEmitter {
 
     this.server = http.createServer(
       (req: http.IncomingMessage, res: http.ServerResponse) => {
+        this.pluginManager?.callHook('onRESTRequest', req, res)
+
+        if (res.writableEnded) return
+
         void getRequestHandler()
           .then((handler) =>
             handler(
@@ -1814,6 +1851,8 @@ class NodelinkServer extends EventEmitter {
         _sessionId: string,
         guildId: string
       ) => {
+        ;(socket as any).guildId = guildId
+
         if (!this.options.voiceReceive?.enabled) {
           try {
             socket.close(1008, 'Voice receive disabled')
@@ -1841,6 +1880,7 @@ class NodelinkServer extends EventEmitter {
         id: string
       ) => {
         let videoId = id
+        ;(socket as any).guildId = id // Tag it with videoId or guildId equivalent
 
         if (/^\d{17,20}$/.test(id)) {
           const player = this.sessions.getPlayer(id)
@@ -2171,6 +2211,8 @@ class NodelinkServer extends EventEmitter {
    * @public
    */
   handleIPCMessage(msg: IPCMessage): void {
+    this.pluginManager?.callHook('onIPCMessage', msg)
+
     if (msg.type === 'playerEvent') {
       const { sessionId, data } = msg.payload
       const session = this.sessions.get(sessionId)

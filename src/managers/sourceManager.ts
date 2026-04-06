@@ -77,6 +77,8 @@ export interface SourcesManagerContext {
   workerManager?: unknown
   /** Opaque specialized source worker manager reference. */
   sourceWorkerManager?: unknown
+  /** Global plugin manager for hook execution. */
+  pluginManager?: import('./pluginManager.ts').default | null
   [key: string]: unknown
 }
 
@@ -360,6 +362,14 @@ export default class SourcesManager implements SourceManagerLike {
       'Sources',
       `Searching on ${name} (${searchType}) for: "${searchQuery}"`
     )
+
+    this.nodelink.pluginManager?.callHook(
+      'onSearch',
+      searchQuery,
+      sourceName,
+      searchType
+    )
+
     return this._instrumentedSourceCall(
       name,
       'search',
@@ -498,6 +508,9 @@ export default class SourcesManager implements SourceManagerLike {
     }
 
     logger('debug', 'Sources', `Resolving with ${sourceName} for: ${url}`)
+
+    this.nodelink.pluginManager?.callHook('onResolve', url, sourceName)
+
     return this._instrumentedSourceCall(sourceName, 'resolve', url)
   }
 

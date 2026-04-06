@@ -541,29 +541,39 @@ class NodelinkServer extends EventEmitter {
             logger('error', 'WebSocket', `WebSocket server error: ${error.message}`);
         });
         this.socket.on('/v4/websocket', (socket, request, clientInfo, oldSessionId) => {
+            this.pluginManager?.callHook('onWebSocketConnect', socket, clientInfo, oldSessionId);
             const originalOn = socket.on.bind(socket);
             socket.on = (event, listener) => {
                 if (event === 'message') {
                     return originalOn(event, async (...args) => {
                         const data = args[0];
+                        let parsedData;
+                        try {
+                            const dataStr = typeof data === 'string'
+                                ? data
+                                : data.toString();
+                            parsedData = JSON.parse(dataStr);
+                        }
+                        catch {
+                            parsedData = data;
+                        }
                         const interceptors = this.extensions?.wsInterceptors;
                         if (interceptors && Array.isArray(interceptors)) {
-                            let parsedData;
-                            try {
-                                const dataStr = typeof data === 'string'
-                                    ? data
-                                    : data.toString();
-                                parsedData = JSON.parse(dataStr);
-                            }
-                            catch {
-                                parsedData = data;
-                            }
                             for (const interceptor of interceptors) {
                                 const handled = await interceptor(this, socket, parsedData, clientInfo);
                                 if (handled === true)
                                     return;
                             }
                         }
+                        this.pluginManager?.callHook('onWebSocketMessage', socket, parsedData, socket.guildId);
+                        listener(...args);
+                    });
+                }
+                if (event === 'close') {
+                    return originalOn(event, (...args) => {
+                        this.pluginManager?.callHook('onWebSocketClose', socket, args[0], // code
+                        args[1] // reason
+                        );
                         listener(...args);
                     });
                 }
@@ -1080,6 +1090,9 @@ class NodelinkServer extends EventEmitter {
             return;
         }
         this.server = http.createServer((req, res) => {
+            this.pluginManager?.callHook('onRESTRequest', req, res);
+            if (res.writableEnded)
+                return;
             void getRequestHandler()
                 .then((handler) => handler(this, req, res))
                 .catch((error) => {
@@ -1261,6 +1274,8 @@ class NodelinkServer extends EventEmitter {
             }
         });
         this.socket?.on('/v4/websocket/voice', (socket, request, _clientInfo, _sessionId, guildId) => {
+            ;
+            socket.guildId = guildId;
             if (!this.options.voiceReceive?.enabled) {
                 try {
                     socket.close(1008, 'Voice receive disabled');
@@ -1273,6 +1288,7 @@ class NodelinkServer extends EventEmitter {
         });
         this.socket?.on('/v4/websocket/youtube/live', (socket, request, _clientInfo, _sessionId, id) => {
             let videoId = id;
+            socket.guildId = id; // Tag it with videoId or guildId equivalent
             if (/^\d{17,20}$/.test(id)) {
                 const player = this.sessions.getPlayer(id);
                 if (player?.track?.info?.sourceName?.includes('youtube')) {
@@ -1515,6 +1531,7 @@ class NodelinkServer extends EventEmitter {
      * @public
      */
     handleIPCMessage(msg) {
+        this.pluginManager?.callHook('onIPCMessage', msg);
         if (msg.type === 'playerEvent') {
             const { sessionId, data } = msg.payload;
             const session = this.sessions.get(sessionId);

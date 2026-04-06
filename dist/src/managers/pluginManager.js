@@ -18,19 +18,31 @@ import { logger } from "../utils.js";
 const require = createRequire(import.meta.url);
 /**
  * Loads and executes configured plugins from local paths and npm packages.
+ * Implements a multi-process hook system for cross-cutting concerns.
+ *
  * @example
  * ```ts
  * const plugins = new PluginManager(nodelink)
  * await plugins.load('master')
+ * plugins.registerHook('onTrackStart', (guildId, track) => {
+ *   console.log(`Track started in ${guildId}`)
+ * })
  * ```
  * @public
  */
 export default class PluginManager {
+    /** The parent NodeLink context. */
     nodelink;
+    /** Plugin definitions from configuration. */
     config;
+    /** Per-plugin configuration map. */
     pluginConfigs;
+    /** Root directory for local plugins. */
     pluginsDir;
+    /** Cache of loaded plugin entries. */
     loadedPlugins;
+    /** Registered plugin hooks. */
+    hooks;
     /**
      * Creates a new plugin manager instance.
      * @param nodelink - NodeLink runtime context.
@@ -43,10 +55,11 @@ export default class PluginManager {
         this.pluginConfigs = nodelink.options.pluginConfig ?? {};
         this.pluginsDir = path.join(process.cwd(), 'plugins');
         this.loadedPlugins = new Map();
+        this.hooks = new Map();
     }
     /**
      * Loads and executes all configured plugins for the current process context.
-     * @param contextType - Runtime context identifier (e.g. master/worker).
+     * @param contextType - Runtime context identifier (e.g. master/voice-worker).
      */
     async load(contextType) {
         logger('info', 'PluginManager', `Initializing plugins in ${contextType} context...`);
@@ -60,6 +73,58 @@ export default class PluginManager {
             await this._loadPlugin(pluginDef, contextType);
         }
         logger('info', 'PluginManager', `Plugins processed for ${contextType}.`);
+    }
+    /**
+     * Registers a callback for a specific plugin hook.
+     * @param name - The name of the hook.
+     * @param callback - The function to execute when the hook is called.
+     * @public
+     */
+    registerHook(name, callback) {
+        if (!this.hooks.has(name)) {
+            this.hooks.set(name, []);
+        }
+        this.hooks.get(name)?.push(callback);
+    }
+    /**
+     * Synchronously executes all callbacks registered for a hook.
+     * @param name - The name of the hook to trigger.
+     * @param args - Arguments to pass to the hook callbacks.
+     * @public
+     */
+    callHook(name, ...args) {
+        const callbacks = this.hooks.get(name);
+        if (!callbacks)
+            return;
+        for (const callback of callbacks) {
+            try {
+                callback(...args);
+            }
+            catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                logger('error', 'PluginManager', `Error in hook '${name}': ${message}`);
+            }
+        }
+    }
+    /**
+     * Asynchronously executes all callbacks registered for a hook.
+     * @param name - The name of the hook to trigger.
+     * @param args - Arguments to pass to the hook callbacks.
+     * @public
+     */
+    async callHookAsync(name, ...args) {
+        const callbacks = this.hooks.get(name);
+        if (!callbacks)
+            return;
+        await Promise.all(callbacks.map(async (callback) => {
+            try {
+                await callback(...args);
+            }
+            catch (err) {
+                const message = err instanceof Error ? err.message : String(err);
+                logger('error', 'PluginManager', `Error in async hook '${name}': ${message}`);
+            }
+        }));
     }
     /**
      * Locates the nearest package.json for a resolved module path.

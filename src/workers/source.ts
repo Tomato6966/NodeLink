@@ -14,6 +14,7 @@ import {
   workerData as rawWorkerData,
   Worker
 } from 'node:worker_threads'
+import type PluginManager from '../managers/pluginManager.ts'
 import type { NodeLink } from '../typings/playback/player.types.ts'
 import type {
   FrameType,
@@ -113,10 +114,18 @@ if (isMainThread) {
 
   utils.initLogger(config)
 
-  const nodelink: Pick<WorkerNodeLink, 'options' | 'logger'> = {
-    options: config,
-    logger: utils.logger
-  }
+  const nodelink: Pick<WorkerNodeLink, 'options' | 'logger' | 'pluginManager'> =
+    {
+      options: config,
+      logger: utils.logger,
+      pluginManager: null as unknown as PluginManager
+    }
+
+  const { default: PluginManagerClass } = await import(
+    '../managers/pluginManager.ts'
+  )
+  nodelink.pluginManager = new PluginManagerClass(nodelink as any)
+  await nodelink.pluginManager.load('source-worker')
 
   const maxThreadCount = Math.max(
     1,
@@ -491,6 +500,8 @@ if (isMainThread) {
    * Handles incoming IPC messages from parent process
    */
   process.on('message', (msg: { type: string; payload?: TaskData }) => {
+    nodelink.pluginManager?.callHook('onIPCMessage', msg)
+
     if (msg.type !== 'sourceTask') return
     if (msg.payload) {
       enqueueHeadQueue(taskQueue, msg.payload)
@@ -555,8 +566,15 @@ if (isMainThread) {
 
   const nodelink: WorkerNodeLink = {
     options: config,
-    logger: utils.logger
+    logger: utils.logger,
+    pluginManager: null as unknown as PluginManager
   } as unknown as WorkerNodeLink
+
+  const { default: PluginManagerClass } = await import(
+    '../managers/pluginManager.ts'
+  )
+  nodelink.pluginManager = new PluginManagerClass(nodelink as any)
+  await nodelink.pluginManager.load('micro-worker')
 
   /**
    * Dynamically imports and initializes all required managers
@@ -1358,6 +1376,8 @@ if (isMainThread) {
    * Handles incoming task messages from parent thread
    */
   ;(parentPort as MessagePort).on('message', async (taskData: TaskData) => {
+    nodelink.pluginManager?.callHook('onIPCMessage', taskData)
+
     const { id, task, payload, socketPath } = taskData
 
     if (task === 'loadStream') {

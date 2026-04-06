@@ -75,8 +75,12 @@ if (isMainThread) {
     utils.initLogger(config);
     const nodelink = {
         options: config,
-        logger: utils.logger
+        logger: utils.logger,
+        pluginManager: null
     };
+    const { default: PluginManagerClass } = await import("../managers/pluginManager.js");
+    nodelink.pluginManager = new PluginManagerClass(nodelink);
+    await nodelink.pluginManager.load('source-worker');
     const maxThreadCount = Math.max(1, specConfig.microWorkers ?? Math.min(2, os.cpus().length));
     const initialThreadCount = 1;
     const TASKS_PER_WORKER = specConfig.tasksPerWorker ?? 32;
@@ -368,6 +372,7 @@ if (isMainThread) {
      * Handles incoming IPC messages from parent process
      */
     process.on('message', (msg) => {
+        nodelink.pluginManager?.callHook('onIPCMessage', msg);
         if (msg.type !== 'sourceTask')
             return;
         if (msg.payload) {
@@ -428,8 +433,12 @@ else {
     utils.initLogger(config);
     const nodelink = {
         options: config,
-        logger: utils.logger
+        logger: utils.logger,
+        pluginManager: null
     };
+    const { default: PluginManagerClass } = await import("../managers/pluginManager.js");
+    nodelink.pluginManager = new PluginManagerClass(nodelink);
+    await nodelink.pluginManager.load('micro-worker');
     /**
      * Dynamically imports and initializes all required managers
      * @internal
@@ -991,6 +1000,7 @@ else {
         }
     };
     parentPort.on('message', async (taskData) => {
+        nodelink.pluginManager?.callHook('onIPCMessage', taskData);
         const { id, task, payload, socketPath } = taskData;
         if (task === 'loadStream') {
             try {
