@@ -217,11 +217,18 @@ export class Player {
             this._onError(err);
         });
         this.connection.on('audioStream', (audioStream) => {
-            audioStream.on('data', () => {
+            const dataHandler = () => {
                 this._lastStreamDataTime = Date.now();
                 if (this.isLyricsSubscribed && !this.isPaused && this.track) {
                     this._syncLyrics();
                 }
+            };
+            audioStream.on('data', dataHandler);
+            audioStream.once('close', () => {
+                audioStream.off('data', dataHandler);
+            });
+            audioStream.once('end', () => {
+                audioStream.off('data', dataHandler);
             });
         });
         if (this.nodelink.voiceRelay?.attach) {
@@ -466,6 +473,12 @@ export class Player {
         if (!audioStream)
             return;
         try {
+            audioStream._cleanupListeners?.();
+        }
+        catch {
+            // Ignore cleanup errors
+        }
+        try {
             audioStream.destroy?.();
         }
         catch (err) {
@@ -647,29 +660,41 @@ export class Player {
         if (typeof fetchedStream.on === 'function') {
             const eventStream = fetchedStream;
             const profilerTap = new PassThrough();
-            profilerTap.on('data', (chunk) => {
+            const profilerHandler = (chunk) => {
                 const size = typeof chunk === 'string'
                     ? Buffer.byteLength(chunk)
                     : Number(chunk?.length || 0);
                 if (size > 0)
                     this.profilerStreamStats.downloadedBytes += size;
                 this.profilerStreamStats.lastChunkAt = Date.now();
-            });
+            };
+            profilerTap.on('data', profilerHandler);
             streamForResource = fetchedStream.pipe(profilerTap);
             profilerTap._sourceStream =
                 fetchedStream;
-            eventStream.on?.('eternalboxJump', (data) => {
+            const eternalboxHandler = (data) => {
                 this.emitEvent(GatewayEvents.ETERNALBOX_JUMP, {
                     track: this.holoTrack || this.track,
                     eternalbox: data
                 });
-            });
-            eventStream.on?.('icyMetadata', (data) => {
+            };
+            const icyHandler = (data) => {
                 this.emitEvent(GatewayEvents.STREAM_METADATA, {
                     track: this.holoTrack || this.track,
                     stream: data
                 });
-            });
+            };
+            eventStream.on?.('eternalboxJump', eternalboxHandler);
+            eventStream.on?.('icyMetadata', icyHandler);
+            const cleanupListeners = () => {
+                eventStream.off?.('eternalboxJump', eternalboxHandler);
+                eventStream.off?.('icyMetadata', icyHandler);
+                profilerTap.off('data', profilerHandler);
+                profilerTap.destroy();
+            };
+            streamForResource.on('close', cleanupListeners);
+            streamForResource.on('error', cleanupListeners);
+            streamForResource._cleanupListeners = cleanupListeners;
         }
         const resource = audioResourceFactory(this.guildId, streamForResource, fetched.type || urlData.format, this.nodelink, this.filters, this.volumePercent / 100, this.audioMixer, false, this.loudnessNormalizer);
         return { stream: resource };

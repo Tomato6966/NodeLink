@@ -1572,6 +1572,32 @@ export default class YouTubeSource {
                 cleanup();
                 return;
             }
+            if (isAborted && stream.writableNeedDrain) {
+                logger('debug', 'YouTube', `Stream is paused/backed up, skipping recovery (cause: ${causeError?.message}). Player will recover on resume.`);
+                return;
+            }
+            if (isAborted && stream.writableNeedDrain) {
+                logger('debug', 'YouTube', `Stream is paused/backed up, waiting for drain before recovery (cause: ${causeError?.message})`);
+                await new Promise((resolve) => {
+                    const onDrain = () => {
+                        stream.off('drain', onDrain);
+                        resolve();
+                    };
+                    stream.once('drain', onDrain);
+                    const timeout = setTimeout(() => {
+                        stream.off('drain', onDrain);
+                        resolve();
+                    }, 60000);
+                    if (typeof timeout.unref === 'function')
+                        timeout.unref();
+                });
+                if (destroyed || cancelSignal.aborted || stream.destroyed)
+                    return;
+                if (stream.writableNeedDrain) {
+                    logger('debug', 'YouTube', 'Stream still backed up after drain wait, deferring recovery until resume');
+                    return;
+                }
+            }
             try {
                 const newUrlData = await this.getTrackUrl(decodedTrack, null, true);
                 if (destroyed || cancelSignal.aborted)

@@ -126,6 +126,19 @@ export interface SpotifyAlbum {
 }
 
 /**
+ * Representation of an item in a Spotify playlist (official API).
+ * @public
+ */
+export interface SpotifyPlaylistItem {
+  /** The track metadata. */
+  track?: SpotifyTrack
+  /** The item metadata (renamed field in recent API). */
+  item?: SpotifyTrack
+  /** Whether the item is a local file. */
+  is_local?: boolean
+}
+
+/**
  * Representation of a playlist in the official Spotify API.
  * @public
  */
@@ -140,11 +153,10 @@ export interface SpotifyPlaylist {
   images: Array<{ url: string }>
   /** External URLs for the playlist. */
   external_urls: { spotify: string }
-  /** Paginated list of track wrappers in the playlist. */
-  tracks: SpotifyPagingObject<{
-    track: SpotifyTrack
-    is_local?: boolean
-  }>
+  /** Paginated list of items in the playlist (API changed from tracks to items). */
+  items?: SpotifyPagingObject<SpotifyPlaylistItem>
+  /** Legacy tracks field. */
+  tracks?: SpotifyPagingObject<SpotifyPlaylistItem>
 }
 
 /**

@@ -967,18 +967,18 @@ export default class SpotifySource {
                 };
             }
         }
-        let nextUrl = `/playlists/${id}?market=${this.market}`;
+        const metaRes = await this._apiRequest(`/playlists/${id}?market=${this.market}`);
+        if (metaRes)
+            name = metaRes.name;
+        let nextUrl = `/playlists/${id}/items?market=${this.market}`;
         while (nextUrl && tracks.length < maxTracks) {
-            const res = await this._apiRequest(nextUrl);
-            if (!res)
+            const itemsRes = await this._apiRequest(nextUrl);
+            if (!itemsRes?.items || itemsRes.items.length === 0)
                 break;
-            if (tracks.length === 0)
-                name = res.name;
-            const items = res.tracks?.items || [];
-            if (items.length === 0)
-                break;
-            for (const it of items) {
-                const node = it.track;
+            for (const it of itemsRes.items) {
+                const node = it.item || it.track;
+                if (!node)
+                    continue;
                 const track = this._isLocalTrack(node, it)
                     ? await this._buildLocalTrack(node)
                     : this._buildTrack(node);
@@ -987,9 +987,7 @@ export default class SpotifySource {
                 if (tracks.length >= maxTracks)
                     break;
             }
-            nextUrl = res.tracks?.next
-                ? res.tracks.next.split('/v1')[1] || null
-                : null;
+            nextUrl = itemsRes.next ? itemsRes.next.split('/v1')[1] || null : null;
         }
         return tracks.length > 0
             ? {
@@ -1034,20 +1032,7 @@ export default class SpotifySource {
                 };
             }
         }
-        const res = await this._apiRequest(`/artists/${id}/top-tracks?market=${this.market}`);
-        return res
-            ? {
-                loadType: 'playlist',
-                data: {
-                    info: { name: 'Top Tracks', selectedTrack: 0 },
-                    tracks: (res.tracks || [])
-                        .filter((t) => t !== null)
-                        .map((t) => this._buildTrack(t))
-                        .filter(Boolean),
-                    pluginInfo: {}
-                }
-            }
-            : { loadType: 'empty', data: {} };
+        return { loadType: 'empty', data: {} };
     }
     /**
      * Resolves a playback URL by delegating to alternative sources.

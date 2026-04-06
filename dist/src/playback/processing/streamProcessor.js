@@ -160,7 +160,9 @@ const _isMp4Format = (type) => type.indexOf('mp4') !== -1 ||
     type.indexOf('quicktime') !== -1;
 const _isWebmFormat = (type) => type.includes('webm') || type.includes('weba');
 const _isFlvFormat = (type) => type.indexOf('flv') !== -1;
-const _tightBuffer = (buf) => Buffer.from(buf);
+const _tightBuffer = (buf) => buf.byteOffset === 0 && buf.byteLength === buf.buffer.byteLength
+    ? buf
+    : Buffer.from(buf);
 const _toTightArrayBuffer = (buf) => {
     const backing = buf.buffer;
     if (backing instanceof ArrayBuffer &&
@@ -909,6 +911,7 @@ class AACDecoderStream extends Transform {
     ringBuffer;
     resamplingQuality;
     resamplerCreationPromise;
+    static MAX_PENDING_CHUNKS = 200;
     constructor(options) {
         super({
             ...options,
@@ -931,6 +934,7 @@ class AACDecoderStream extends Transform {
     }
     _destroy(err, cb) {
         this.ringBuffer.dispose();
+        this.pendingChunks.length = 0;
         if (this.decoder)
             this.decoder.free?.();
         if (this.resampler)
@@ -1045,6 +1049,9 @@ class AACDecoderStream extends Transform {
     }
     _transform(chunk, encoding, callback) {
         if (!this.isDecoderReady || this.pendingChunks.length > 0) {
+            if (this.pendingChunks.length >= AACDecoderStream.MAX_PENDING_CHUNKS) {
+                this.pendingChunks.shift();
+            }
             this.pendingChunks.push({ chunk, encoding, callback });
             return;
         }
