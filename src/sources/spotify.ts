@@ -219,7 +219,6 @@ export default class SpotifySource implements SourceInstance {
     const cm = this.nodelink.credentialManager
     if (!cm) return false
 
-    // Attempt to recover existing tokens from persistence
     this.accessToken = cm.get<string>('spotify_access_token')
     this.anonymousToken = cm.get<string>('spotify_anonymous_token')
     this.mobileToken = cm.get<string>('spotify_mobile_token')
@@ -227,21 +226,16 @@ export default class SpotifySource implements SourceInstance {
     const hasOfficial = !!(this.config.clientId && this.config.clientSecret)
 
     try {
-      // Ensure all possible authentication tiers are initialized
       if (hasOfficial && !this.accessToken) await this._ensureToken('official')
-
-      // Priming anonymous token by default since local generation is now supported standalone
-      if (!this.anonymousToken) await this._ensureToken('anonymous')
-
-      if (this.config.sp_dc && !this.mobileToken)
-        await this._ensureToken('mobile')
+      await this._ensureToken('anonymous')
+      await this._ensureToken('mobile')
 
       const ok = !!(this.accessToken || this.anonymousToken || this.mobileToken)
-      if (!ok && !hasOfficial) {
+      if (!ok) {
         logger(
           'warn',
           'Spotify',
-          'Spotify source is enabled but missing credentials (clientId/Secret, sp_dc, or externalAuthUrl).'
+          'Spotify source enabled but failed to initialize any authentication tier.'
         )
         return false
       }
@@ -275,7 +269,6 @@ export default class SpotifySource implements SourceInstance {
     let token: string | null = null
     let expiry: number | null = null
 
-    // Determine the specific token variables to check
     if (type === 'official') {
       token = this.accessToken
       expiry = this.accessTokenExpiry
@@ -287,12 +280,10 @@ export default class SpotifySource implements SourceInstance {
       expiry = this.mobileTokenExpiry
     }
 
-    // Reuse existing valid token if within safety margin
     if (token && (!expiry || now < expiry - TOKEN_REFRESH_MARGIN_MS)) {
       return true
     }
 
-    // Synchronize concurrent refresh attempts
     const inflight = this.refreshPromises.get(type)
     if (inflight) return inflight
 
@@ -319,7 +310,6 @@ export default class SpotifySource implements SourceInstance {
     if (!cm) return false
 
     try {
-      // Flow 1: Official OAuth2 (client_credentials)
       if (type === 'official') {
         if (!this.config.clientId || !this.config.clientSecret) return false
         const auth = Buffer.from(
@@ -348,32 +338,44 @@ export default class SpotifySource implements SourceInstance {
         }
       }
 
-      // Flow 2: Web Player (anonymous, no cookie)
       if (type === 'anonymous' || type === 'mobile') {
         try {
-          const data = await getLocalToken(null, 'web-player')
+          const spDc = type === 'mobile' ? this.config.sp_dc : null
+          const product = type === 'mobile' ? 'mobile-web-player' : 'web-player'
+          const data = await getLocalToken(spDc, product)
           if (data?.accessToken) {
-            this.anonymousToken = data.accessToken
             const ttl = data.accessTokenExpirationTimestampMs
               ? data.accessTokenExpirationTimestampMs - Date.now()
               : 3600000
-            this.anonymousTokenExpiry = Date.now() + Math.max(ttl, 60000)
-            cm.set(
-              'spotify_anonymous_token',
-              this.anonymousToken,
-              Math.max(ttl, 60000)
-            )
+            const expiry = Date.now() + Math.max(ttl, 60000)
+
+            if (type === 'mobile') {
+              this.mobileToken = data.accessToken
+              this.mobileTokenExpiry = expiry
+              cm.set(
+                'spotify_mobile_token',
+                this.mobileToken,
+                Math.max(ttl, 60000)
+              )
+            } else {
+              this.anonymousToken = data.accessToken
+              this.anonymousTokenExpiry = expiry
+              cm.set(
+                'spotify_anonymous_token',
+                this.anonymousToken,
+                Math.max(ttl, 60000)
+              )
+            }
             return true
           }
         } catch (e) {
           logger(
             'debug',
             'Spotify',
-            `Web-player token request failed: ${e instanceof Error ? e.message : String(e)}`
+            `${type} token request failed: ${e instanceof Error ? e.message : String(e)}`
           )
         }
 
-        // Flow 3: External auth URL fallback
         if (this.config.externalAuthUrl) {
           try {
             const res = await http1makeRequest(this.config.externalAuthUrl, {
@@ -404,44 +406,6 @@ export default class SpotifySource implements SourceInstance {
             )
           }
         }
-
-        // Flow 4: Mobile Web Player (with sp_dc if available)
-        try {
-          const spDc = type === 'mobile' ? this.config.sp_dc : null
-          const data = await getLocalToken(spDc, 'mobile-web-player')
-          if (data?.accessToken) {
-            if (spDc) {
-              this.mobileToken = data.accessToken
-              const ttl = data.accessTokenExpirationTimestampMs
-                ? data.accessTokenExpirationTimestampMs - Date.now()
-                : 3600000
-              this.mobileTokenExpiry = Date.now() + Math.max(ttl, 60000)
-              cm.set(
-                'spotify_mobile_token',
-                this.mobileToken,
-                Math.max(ttl, 60000)
-              )
-            } else {
-              this.anonymousToken = data.accessToken
-              const ttl = data.accessTokenExpirationTimestampMs
-                ? data.accessTokenExpirationTimestampMs - Date.now()
-                : 3600000
-              this.anonymousTokenExpiry = Date.now() + Math.max(ttl, 60000)
-              cm.set(
-                'spotify_anonymous_token',
-                this.anonymousToken,
-                Math.max(ttl, 60000)
-              )
-            }
-            return true
-          }
-        } catch (e) {
-          logger(
-            'debug',
-            'Spotify',
-            `Mobile-web-player token request failed: ${e instanceof Error ? e.message : String(e)}`
-          )
-        }
       }
 
       return false
@@ -469,18 +433,29 @@ export default class SpotifySource implements SourceInstance {
    */
   private async _apiRequest<T>(
     path: string,
-    useInternal = false,
+    tier: SpotifyTokenType = 'official',
     options: Record<string, unknown> = {},
     retry = 0
   ): Promise<T | null> {
-    const type: SpotifyTokenType = useInternal ? 'anonymous' : 'official'
-    // Ensure tier token is valid before request
-    if (!(await this._ensureToken(type)) && !useInternal) {
-      return this._apiRequest<T>(path, true, options, retry)
-    }
+    const ok = await this._ensureToken(tier)
+    const token =
+      tier === 'official'
+        ? this.accessToken
+        : tier === 'anonymous'
+          ? this.anonymousToken
+          : this.mobileToken
 
-    const token = useInternal ? this.anonymousToken : this.accessToken
-    if (!token) return null
+    if (!ok || !token) {
+      const next =
+        tier === 'official'
+          ? 'anonymous'
+          : tier === 'anonymous'
+            ? 'mobile'
+            : null
+      if (next && retry < 3)
+        return this._apiRequest<T>(path, next, options, retry + 1)
+      return null
+    }
 
     const url = path.startsWith('http')
       ? path
@@ -491,9 +466,8 @@ export default class SpotifySource implements SourceInstance {
       ...((options.headers as Record<string, string>) || {})
     }
 
-    if (useInternal) {
+    if (tier !== 'official') {
       Object.assign(headers, {
-        Accept: 'application/json',
         'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
         'App-Platform': 'WebPlayer',
         'Spotify-App-Version': '1.2.87.221.ge160d899',
@@ -504,9 +478,16 @@ export default class SpotifySource implements SourceInstance {
     try {
       const res = await http1makeRequest(url, { ...options, headers })
 
-      // Handle HTTP 429: Retry after parsed backoff
       if (res.statusCode === 429) {
         if (retry >= 3) return null
+        const next =
+          tier === 'official'
+            ? 'anonymous'
+            : tier === 'anonymous'
+              ? 'mobile'
+              : null
+        if (next) return this._apiRequest<T>(path, next, options, retry + 1)
+
         const wait = Number.parseInt(
           (res.headers as Record<string, string> | undefined)?.[
             'retry-after'
@@ -519,21 +500,39 @@ export default class SpotifySource implements SourceInstance {
           `Rate limited on ${path}. Waiting ${wait}s (retry ${retry + 1}/3)...`
         )
         await new Promise((r) => setTimeout(r, wait * 1000))
-        return this._apiRequest<T>(path, useInternal, options, retry + 1)
+        return this._apiRequest<T>(path, tier, options, retry + 1)
       }
 
-      // Handle HTTP 401: Clear cache and trigger immediate refresh retry
-      if (res.statusCode === 401) {
-        if (type === 'official') this.accessTokenExpiry = 0
-        else this.anonymousTokenExpiry = 0
-        if (retry < 2)
-          return this._apiRequest<T>(path, useInternal, options, retry + 1)
+      if (res.statusCode === 401 || res.statusCode === 403) {
+        if (tier === 'official') this.accessTokenExpiry = 0
+        else if (tier === 'anonymous') this.anonymousTokenExpiry = 0
+        else this.mobileTokenExpiry = 0
+
+        const next =
+          tier === 'official'
+            ? 'anonymous'
+            : tier === 'anonymous'
+              ? 'mobile'
+              : null
+        if (next && retry < 3)
+          return this._apiRequest<T>(path, next, options, retry + 1)
+        if (retry < 3)
+          return this._apiRequest<T>(path, tier, options, retry + 1)
       }
 
-      // Error handling and tier fallback
       if (res.statusCode !== 200 && res.statusCode !== 201) {
-        if (retry < 1 && useInternal && !path.includes('pathfinder')) {
-          return this._apiRequest<T>(path, false, options, retry + 1)
+        if (
+          retry < 1 &&
+          !path.includes('pathfinder') &&
+          !path.includes('spclient')
+        ) {
+          const next =
+            tier === 'official'
+              ? 'anonymous'
+              : tier === 'anonymous'
+                ? 'mobile'
+                : null
+          if (next) return this._apiRequest<T>(path, next, options, retry + 1)
         }
         return null
       }
@@ -565,7 +564,7 @@ export default class SpotifySource implements SourceInstance {
   ): Promise<T | null> {
     const res = await this._apiRequest<{ data?: T; errors?: Array<unknown> }>(
       SPOTIFY_INTERNAL_API_URL,
-      true,
+      'anonymous',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json; charset=utf-8' },
@@ -606,7 +605,7 @@ export default class SpotifySource implements SourceInstance {
   ): Promise<SpotifyMetadataResponse | null> {
     const hex = this._base62ToHex(id)
     const url = `${SPOTIFY_CLIENT_API_URL}/metadata/4/track/${hex}?market=from_token`
-    const body = await this._apiRequest<unknown>(url, true, {
+    const body = await this._apiRequest<unknown>(url, 'mobile', {
       responseType: 'buffer'
     })
     if (!body) return null
@@ -615,7 +614,6 @@ export default class SpotifySource implements SourceInstance {
       try {
         return JSON.parse(body.toString()) as SpotifyMetadataResponse
       } catch {
-        // Handle non-standard internal response formats
         const raw = body.toString()
         const isrc = raw.match(/[A-Z0-9]{12}/)
         if (isrc) return { external_id: [{ type: 'isrc', id: isrc[0] }] }
@@ -1178,7 +1176,7 @@ export default class SpotifySource implements SourceInstance {
       }
     }
 
-     const metaRes = await this._apiRequest<{ name: string }>(
+    const metaRes = await this._apiRequest<{ name: string }>(
       `/playlists/${id}?market=${this.market}`
     )
     if (metaRes) name = metaRes.name
