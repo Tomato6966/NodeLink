@@ -2098,20 +2098,7 @@ export default class YouTubeSource {
     additionalData?: TrackUrlAdditionalData
   ): StreamResult {
     const stream = new PassThrough({ highWaterMark: CHUNK_SIZE * 2 })
-    const startTimeMs =
-      typeof additionalData?.startTime === 'number' ? additionalData.startTime : 0
-    const durationMs =
-      typeof decodedTrack.length === 'number' ? decodedTrack.length : 0
-    const requestedBytePosition =
-      startTimeMs > 0 && durationMs > 0
-        ? Math.floor(
-            (contentLength * Math.min(startTimeMs, durationMs)) / durationMs
-          )
-        : 0
-    let position = Math.max(
-      0,
-      Math.min(requestedBytePosition, Math.max(contentLength - 1, 0))
-    )
+    let position = 0
     let errors = 0
     let refreshes = 0
     let currentUrl = url

@@ -1467,6 +1467,9 @@ export class Player {
     this._isSeeking = true
     try {
       const sourceName = this.track.info.sourceName
+      const resolvedSourceName =
+        (this.streamInfo?.newTrack as { info?: { sourceName?: string } } | null)
+          ?.info?.sourceName ?? sourceName
       const unsupportedSources = ['local', 'deezer']
 
       let seekPromise: Promise<boolean>
@@ -1512,7 +1515,8 @@ export class Player {
       const hasSourceLoader = source && typeof source.loadStream === 'function'
       const canNativeSeek =
         !!hasSourceLoader &&
-        (this.streamInfo?.protocol === 'sabr' || sourceName === 'deezer')
+        (this.streamInfo?.protocol === 'sabr' ||
+          (sourceName === 'deezer' && resolvedSourceName === 'deezer'))
 
       if (forceLegacy) {
         seekPromise = this._legacySeek(
@@ -1525,7 +1529,7 @@ export class Player {
           endTime !== undefined ? endTime : this.track.endTime
         )
       } else if (
-        !unsupportedSources.includes(sourceName) &&
+        !unsupportedSources.includes(resolvedSourceName) &&
         this.streamInfo?.url &&
         this.streamInfo.protocol !== 'hls' &&
         this.streamInfo.protocol !== 'dash'
