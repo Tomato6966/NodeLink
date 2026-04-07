@@ -73,6 +73,11 @@ interface PlayerPatchPayload {
   position?: number
 
   /**
+   * Legacy alias used by some clients for `position`.
+   */
+  startTime?: number
+
+  /**
    * Optional playback end time in milliseconds.
    */
   endTime?: number | null
@@ -186,6 +191,11 @@ interface PlayerPatchBodyInput {
    * Candidate seek position.
    */
   position?: number
+
+  /**
+   * Candidate legacy seek position alias.
+   */
+  startTime?: number
 
   /**
    * Candidate playback end time.
@@ -768,7 +778,7 @@ function getPlayerPatchPayload(
     return null
   }
 
-  const position = payload.position
+  const position = payload.position ?? payload.startTime
   if (
     position !== undefined &&
     (typeof position !== 'number' || !Number.isFinite(position) || position < 0)
@@ -843,6 +853,10 @@ function getPlayerPatchPayload(
           ? null
           : undefined,
     position,
+    startTime:
+      typeof payload.startTime === 'number' && Number.isFinite(payload.startTime)
+        ? payload.startTime
+        : undefined,
     endTime:
       typeof endTime === 'number'
         ? endTime
