@@ -584,11 +584,29 @@ export default class SourcesManager implements SourceManagerLike {
         `Source ${track.sourceName} not found or does not support loadStream`
       )
     }
+    const normalizedAdditionalData = {
+      ...(additionalData ?? {})
+    } as Record<string, unknown> & { startTime?: number; position?: number }
+
+    if (
+      typeof normalizedAdditionalData.startTime === 'number' &&
+      typeof normalizedAdditionalData.position !== 'number'
+    ) {
+      normalizedAdditionalData.position = normalizedAdditionalData.startTime
+    }
+
+    if (
+      typeof normalizedAdditionalData.position === 'number' &&
+      typeof normalizedAdditionalData.startTime !== 'number'
+    ) {
+      normalizedAdditionalData.startTime = normalizedAdditionalData.position
+    }
+
     return (await instance.loadStream(
       track,
       url,
       protocol,
-      additionalData
+      normalizedAdditionalData
     )) as TrackStreamResult & { type?: string; exception?: { message: string } }
   }
 

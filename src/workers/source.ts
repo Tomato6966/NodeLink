@@ -1333,7 +1333,8 @@ if (isMainThread) {
       } else {
         const additionalData = {
           ...(urlResult.additionalData || {}),
-          startTime: payload?.position || 0
+          startTime: payload?.position || 0,
+          position: payload?.position || 0
         }
 
         fetched =
